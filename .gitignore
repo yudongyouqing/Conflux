@@ -1,0 +1,14 @@
+node_modules/
+dist/
+data/
+.muiltchat/
+*.log
+*.db
+*.db-wal
+*.db-shm
+.DS_Store
+Thumbs.db
+.env
+.env.local
+*.tsbuildinfo
+data-*-test*/

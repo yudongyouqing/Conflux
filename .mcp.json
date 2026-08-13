@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "muiltchat": {
+      "command": "npx",
+      "args": ["-y", "muiltchat", "mcp"]
+    }
+  }
+}
