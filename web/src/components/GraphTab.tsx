@@ -35,8 +35,10 @@ export function GraphTab({
       data: {
         name: n.name,
         status: n.status,
+        type: n.type,
         context_count: n.context_count,
         pending_inbox: n.pending_inbox,
+        conversation_count: (n as { conversation_count?: number }).conversation_count,
       },
     }));
 

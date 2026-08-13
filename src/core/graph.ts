@@ -2,7 +2,7 @@ import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 import { markStaleSessions } from "./sessions.js";
 
-export type NodeType = "session"; // "agent" added in slice 1
+export type NodeType = "session" | "agent";
 
 export interface GraphNode {
   id: string;
@@ -11,6 +11,8 @@ export interface GraphNode {
   type: NodeType;
   context_count: number;
   pending_inbox: number;
+  conversation_count?: number;
+  description?: string | null;
 }
 
 export interface GraphEdge {
@@ -50,7 +52,9 @@ export function getGraph(
 ): Graph {
   markStaleSessions(db);
   const status = opts.status ?? "active";
-  const where = status === "all" ? "" : `WHERE s.status = ?`;
+  const where = status === "all"
+    ? `WHERE s.id NOT LIKE 'agent-%'`
+    : `WHERE s.status = ? AND s.id NOT LIKE 'agent-%'`;
   const params: string[] = status === "all" ? [] : [status];
 
   const nodes = db
@@ -64,6 +68,23 @@ export function getGraph(
     )
     .all(...params) as (Omit<GraphNode, "type">)[];
 
+  // Also include internal agents as nodes — they are always visible
+  // regardless of session heartbeat status.
+  const agentNodes = db
+    .prepare(
+      `SELECT
+         'agent-' || a.id AS id,
+         a.name,
+         'active' AS status,
+         a.description,
+         (SELECT COUNT(*) FROM context_entries c WHERE c.session_id = 'agent-' || a.id) AS context_count,
+         (SELECT COUNT(*) FROM messages m WHERE m.to_session = 'agent-' || a.id AND m.status = 'pending') AS pending_inbox,
+         (SELECT COUNT(*) FROM conversations cv WHERE cv.agent_id = a.id) AS conversation_count
+       FROM agents a
+       ORDER BY a.updated_at DESC`
+    )
+    .all() as (Omit<GraphNode, "type">)[];
+
   const edges = db
     .prepare(
       `SELECT from_session AS "from", to_session AS "to", weight, last_interact_at
@@ -73,7 +94,10 @@ export function getGraph(
     .all() as GraphEdge[];
 
   return {
-    nodes: nodes.map((n) => ({ ...n, type: "session" as const })),
+    nodes: [
+      ...nodes.map((n) => ({ ...n, type: "session" as const })),
+      ...agentNodes.map((n) => ({ ...n, type: "agent" as const })),
+    ],
     edges,
   };
 }

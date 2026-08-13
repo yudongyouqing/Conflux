@@ -1,5 +1,6 @@
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
+import { registerSession, endSession } from "./sessions.js";
 
 export interface ModelConfig {
   provider: string; // "anthropic" | "openai" | ...
@@ -57,7 +58,16 @@ export function createAgent(db: DB, input: CreateAgentInput): Agent {
       now,
       now
     );
-  return getAgent(db, Number(res.lastInsertRowid))!;
+  const agent = getAgent(db, Number(res.lastInsertRowid))!;
+  // Register as a session so the agent is visible in the graph and can
+  // participate in cross-session communication.
+  registerSession(db, {
+    id: `agent-${agent.id}`,
+    name: agent.name,
+    description: agent.description ?? "Internal agent",
+    project_dir: null,
+  });
+  return agent;
 }
 
 export function getAgent(db: DB, id: number): Agent | null {
@@ -105,6 +115,7 @@ export function updateAgent(db: DB, id: number, input: UpdateAgentInput): Agent 
 }
 
 export function deleteAgent(db: DB, id: number): boolean {
+  endSession(db, `agent-${id}`);
   const res = db.prepare(`DELETE FROM agents WHERE id = ?`).run(id);
   return res.changes > 0;
 }

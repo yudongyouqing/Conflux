@@ -4,9 +4,11 @@ export interface GraphNode {
   id: string;
   name: string;
   status: SessionStatus;
-  type: "session";
+  type: "session" | "agent";
   context_count: number;
   pending_inbox: number;
+  conversation_count?: number;
+  description?: string | null;
 }
 
 export interface GraphEdge {
