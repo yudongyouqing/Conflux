@@ -30,18 +30,18 @@ import { logger } from "../log.js";
 const INSTRUCTIONS = `
 muiltchat: cross-session context + async messaging for AI coding assistants.
 
-Each Claude Code session spawns its own MCP process with its own session_id.
-Sessions share a SQLite file, so you can:
+This session is already auto-registered. Call register_session to update its
+name and description with something meaningful for other sessions to recognize.
+
+You share a SQLite file with other sessions, so you can:
   - publish_context: expose a slice of your context for other sessions to search
   - query_context: FTS-search what other sessions have published
   - ask_session / reply_ask / check_inbox / check_replies: async Q&A between sessions
+  - get_graph: see the session topology (who's online, who talked to whom)
 
-First call in any conversation should be register_session({name, description?}).
-Then call heartbeat implicitly via other tool calls.
-
-After answering a user, if you discovered something the user will likely ask
-other sessions about, proactively publish_context. Before answering a user
-question that might already be answered elsewhere, query_context first.
+After answering a user, if you discovered something worth sharing, proactively
+publish_context. Before answering a question that might already be answered
+elsewhere, query_context first.
 
 All operations are audited. Be concise in published content; prefer structured
 tags for discoverability.
@@ -57,6 +57,17 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
   const db: DB = openDb(config);
   const sessionId = uuidv4();
   const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+
+  // Auto-register immediately so the session is visible in the graph
+  // and available for cross-session communication without waiting for
+  // the LLM to call register_session.
+  const dirName = projectDir.replace(/\\/g, "/").split("/").pop() || "session";
+  registerSession(db, {
+    id: sessionId,
+    name: dirName,
+    description: "Claude Code session (auto-registered)",
+    project_dir: projectDir,
+  });
 
   logger.info({ sessionId, dataDir: config.dataDir, scope: config.scope }, "mcp starting");
 
