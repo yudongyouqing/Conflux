@@ -1,8 +1,13 @@
 import { Command, Option } from "commander";
 import { v4 as uuidv4 } from "uuid";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 
 import { resolveConfig, type Scope, DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT } from "../config.js";
 import { openDb, type DB } from "../core/db.js";
+import { handleHookEvent, readJsonFile } from "../core/live.js";
+import { logger } from "../log.js";
 import {
   registerSession,
   listSessions,
@@ -657,10 +662,147 @@ export function buildCli(): Command {
       console.log(JSON.stringify(res, null, 2));
     });
 
+  // hooks ------------------------------------------------------------
+  const hooks = program.command("hooks").description("Claude Code hook integration (liveness + naming)");
+
+  hooks
+    .command("install")
+    .description("install muiltchat hooks into ~/.claude/settings.json (backs up first)")
+    .action(function (this: Command) {
+      const settingsPath = claudeSettingsPath();
+      const settings = readJsonFile(settingsPath);
+      const hooksCfg = (settings.hooks ?? {}) as Record<string, unknown>;
+
+      try {
+        if (existsSync(settingsPath)) {
+          copyFileSync(settingsPath, `${settingsPath}.muiltchat-bak`);
+        }
+      } catch {
+        // non-fatal
+      }
+
+      const base = hookCommandBase();
+      for (const event of HOOK_EVENTS) {
+        const key = HOOK_SETTINGS_KEYS[event];
+        const entries = Array.isArray(hooksCfg[key])
+          ? (hooksCfg[key] as Record<string, unknown>[])
+          : [];
+        const cleaned = entries
+          .map((e) => {
+            if (Array.isArray(e.hooks)) {
+              e.hooks = (e.hooks as Record<string, unknown>[]).filter(
+                (h) => !(typeof h.command === "string" && h.command.includes("muiltchat hooks dispatch"))
+              );
+            }
+            return e;
+          })
+          .filter((e) => !Array.isArray(e.hooks) || e.hooks.length > 0);
+        cleaned.push({
+          hooks: [{ type: "command", command: `${base} hooks dispatch ${event}` }],
+        });
+        hooksCfg[key] = cleaned;
+      }
+      settings.hooks = hooksCfg;
+      mkdirSync(dirname(settingsPath), { recursive: true });
+      writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf8");
+
+      console.log(
+        `installed hooks for [${HOOK_EVENTS.join(", ")}] -> ${settingsPath}\n` +
+          `entry: ${base}\n` +
+          `new Claude Code sessions will now register themselves (id = conversation id, name = first prompt).`
+      );
+    });
+
+  hooks
+    .command("uninstall")
+    .description("remove muiltchat hooks from ~/.claude/settings.json")
+    .action(function (this: Command) {
+      const settingsPath = claudeSettingsPath();
+      const settings = readJsonFile(settingsPath);
+      const hooksCfg = (settings.hooks ?? {}) as Record<string, unknown>;
+      let removed = 0;
+      for (const event of HOOK_EVENTS) {
+        const key = HOOK_SETTINGS_KEYS[event];
+        if (!Array.isArray(hooksCfg[key])) continue;
+        const entries = (hooksCfg[key] as Record<string, unknown>[]).map((e) => {
+          if (Array.isArray(e.hooks)) {
+            e.hooks = (e.hooks as Record<string, unknown>[]).filter((h) => {
+              const ours =
+                typeof h.command === "string" && h.command.includes("muiltchat hooks dispatch");
+              if (ours) removed++;
+              return !ours;
+            });
+          }
+          return e;
+        });
+        const kept = entries.filter((e) => !Array.isArray(e.hooks) || e.hooks.length > 0);
+        if (kept.length > 0) hooksCfg[key] = kept;
+        else delete hooksCfg[key];
+      }
+      if (Object.keys(hooksCfg).length > 0) settings.hooks = hooksCfg;
+      else delete settings.hooks;
+      writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf8");
+      console.log(`removed ${removed} hook entr${removed === 1 ? "y" : "ies"} from ${settingsPath}`);
+    });
+
+  hooks
+    .command("dispatch <event>")
+    .description("(internal) handle a Claude Code hook event from stdin JSON")
+    .action(async function (this: Command, event: string) {
+      if (!HOOK_EVENTS.includes(event as HookEvent)) {
+        process.stderr.write(`unknown hook event: ${event}\n`);
+        process.exitCode = 1;
+        return;
+      }
+      let payload: Record<string, unknown> = {};
+      try {
+        const chunks: Buffer[] = [];
+        for await (const c of process.stdin) chunks.push(c as Buffer);
+        const raw = Buffer.concat(chunks).toString("utf8");
+        if (raw.trim()) payload = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        // malformed stdin — ignore quietly, hooks must never block a session
+      }
+      try {
+        const db = openDb(resolveConfig("global"));
+        handleHookEvent(db, event as HookEvent, payload as never);
+      } catch (err) {
+        logger.warn({ err: err instanceof Error ? err.message : String(err) }, "hook dispatch failed");
+      }
+      // no stdout: UserPromptSubmit stdout would be injected into model context
+    });
+
   return program;
 }
 
 // --- helpers --------------------------------------------------------
+
+type HookEvent = "session-start" | "prompt" | "stop";
+const HOOK_EVENTS: HookEvent[] = ["session-start", "prompt", "stop"];
+
+/** Our dispatch arg -> the canonical Claude Code settings.json event key. */
+const HOOK_SETTINGS_KEYS: Record<HookEvent, string> = {
+  "session-start": "SessionStart",
+  prompt: "UserPromptSubmit",
+  stop: "Stop",
+};
+
+function claudeSettingsPath(): string {
+  const dir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
+  return join(dir, "settings.json");
+}
+
+/**
+ * Absolute command prefix the hooks will invoke. Prefers the built dist
+ * output (works from any cwd, no tsx needed); falls back to whatever
+ * entrypoint is currently running.
+ */
+function hookCommandBase(): string {
+  const argv1 = resolve(process.argv[1]);
+  const asDist = argv1.replace(/src([\\/])index\.ts$/, "dist$1index.js");
+  const entry = asDist.endsWith(".js") && existsSync(asDist) ? asDist : argv1;
+  return entry.endsWith(".js") ? `node "${entry}"` : `npx tsx "${entry}"`;
+}
 
 function normaliseScope(s: string | undefined): Scope {
   if (s === "project") return "project";
