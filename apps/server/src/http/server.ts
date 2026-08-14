@@ -47,7 +47,7 @@ import {
   getTurns,
   deleteConversation,
 } from "../core/conversations.js";
-import { hasApiKey } from "../core/llm.js";
+import { hasApiKey, providerRegistry } from "../core/providers.js";
 import { runAgentChat } from "../core/agent-runner.js";
 import { logAudit, queryAudit } from "../core/audit.js";
 import { logger } from "../log.js";
@@ -493,8 +493,10 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
     if (!agent) return reply.code(404).send({ error: "agent not found" });
 
     if (!hasApiKey(agent.model_config.provider)) {
+      const entry = providerRegistry[agent.model_config.provider];
+      const envVar = entry?.envVar ?? `${agent.model_config.provider.toUpperCase()}_API_KEY`;
       return reply.code(503).send({
-        error: `${agent.model_config.provider} API key not configured. Set ANTHROPIC_API_KEY environment variable before starting the server.`,
+        error: `${agent.model_config.provider} API key not configured. Set ${envVar} environment variable before starting the server.`,
       });
     }
 
@@ -601,14 +603,13 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
     }
   });
 
-  // GET /settings — check API key status
+  // GET /settings — check API key status (derived from the provider registry)
   app.get("/settings", {}, async (_req, reply) => {
-    return reply.send({
-      providers: {
-        anthropic: { configured: hasApiKey("anthropic") },
-        openai: { configured: hasApiKey("openai") },
-      },
-    });
+    const providers: Record<string, { configured: boolean }> = {};
+    for (const [name, entry] of Object.entries(providerRegistry)) {
+      providers[name] = { configured: entry.hasKey() };
+    }
+    return reply.send({ providers });
   });
 
   // GET /graph — return nodes (sessions) + edges (communication links)

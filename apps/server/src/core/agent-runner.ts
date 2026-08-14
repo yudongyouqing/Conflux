@@ -1,12 +1,13 @@
-import Anthropic from "@anthropic-ai/sdk";
+import type { ModelMessage, ToolSet } from "ai" with { "resolution-mode": "import" };
+import { z } from "zod";
 import type { DB } from "./db.js";
-import type { Agent } from "./agents.js";
-import { registerSession } from "./sessions.js";
-import { listSessions } from "./sessions.js";
+import type { Agent } from "@muiltchat/shared";
+import { registerSession, listSessions } from "./sessions.js";
 import { queryContext } from "./search.js";
 import { askSession, checkInbox, replyAsk } from "./messages.js";
 import { publishContext } from "./context.js";
 import { recordEdge } from "./graph.js";
+import { resolveModel } from "./providers.js";
 import { logger } from "../log.js";
 
 export type AgentStreamEvent =
@@ -15,12 +16,16 @@ export type AgentStreamEvent =
   | { type: "tool_result"; name: string; result: unknown };
 
 /**
- * Run an agent chat with a tool-use loop. The agent can call cross-session
- * tools (query_context, ask_session, etc.) to interact with external sessions.
+ * Run an agent chat with a tool-use loop, driven by the Vercel AI SDK.
+ * The agent can call cross-session tools (query_context, ask_session, ...)
+ * to interact with external sessions; the SDK handles the multi-step loop
+ * (stopWhen: stepCountIs(10)).
  *
  * Yields stream events: text tokens, tool_use, tool_result.
- * Terminates when the LLM stops calling tools (stop_reason: end_turn) or
- * max iterations is reached.
+ * The SSE event protocol consumed by the frontend is unchanged.
+ *
+ * The `ai` package is ESM-only, so its values are loaded via dynamic
+ * import() (Node caches the module after the first chat).
  */
 export async function* runAgentChat(
   db: DB,
@@ -37,17 +42,7 @@ export async function* runAgentChat(
     project_dir: null,
   });
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY not set");
-  const client = new Anthropic({ apiKey });
-
-  const tools = defineTools();
-
-  // Build initial messages from conversation history
-  const messages: Anthropic.MessageParam[] = history.map((h) => ({
-    role: h.role,
-    content: h.content,
-  }));
+  const config = agent.model_config;
 
   const systemPrompt =
     agent.system_prompt +
@@ -56,70 +51,58 @@ export async function* runAgentChat(
     `Use them proactively when the user's question involves information that other sessions might have. ` +
     `After using tools, summarize the findings for the user. Be concise.`;
 
-  const maxTokens = agent.model_config.max_tokens ?? 4096;
-  const maxIterations = 10;
+  logger.debug(
+    { agentId: agent.id, provider: config.provider, model: config.model },
+    "agent chat starting"
+  );
 
-  for (let iteration = 0; iteration < maxIterations; iteration++) {
-    logger.debug(
-      { agentId: agent.id, iteration, messageCount: messages.length },
-      "agent tool-use loop iteration"
-    );
+  const { streamText, stepCountIs } = await import("ai");
+  const [model, tools] = await Promise.all([
+    resolveModel(config),
+    defineTools(db, agentSessionId),
+  ]);
 
-    const stream = client.messages.stream({
-      model: agent.model_config.model,
-      max_tokens: maxTokens,
-      system: systemPrompt,
-      messages,
-      tools,
-    });
+  const result = streamText({
+    model,
+    instructions: systemPrompt,
+    // {role, content: string} is a valid ModelMessage at runtime; the union
+    // type is just too wide for direct structural assignment.
+    messages: history as ModelMessage[],
+    tools,
+    stopWhen: stepCountIs(10),
+    maxOutputTokens: config.max_tokens ?? 4096,
+    temperature: config.temperature,
+  });
 
-    // Yield text tokens as they arrive
-    for await (const event of stream) {
-      if (
-        event.type === "content_block_delta" &&
-        event.delta.type === "text_delta"
-      ) {
-        yield { type: "text", content: event.delta.text };
-      }
+  for await (const part of result.fullStream) {
+    switch (part.type) {
+      case "text-delta":
+        yield { type: "text", content: part.text };
+        break;
+      case "tool-call":
+        yield {
+          type: "tool_use",
+          name: part.toolName,
+          input: (part.input ?? {}) as Record<string, unknown>,
+        };
+        break;
+      case "tool-result":
+        yield { type: "tool_result", name: part.toolName, result: part.output };
+        break;
+      case "tool-error":
+        // execute() itself threw (not a domain error); surface it as a
+        // tool_result so the frontend still renders the step.
+        yield {
+          type: "tool_result",
+          name: part.toolName,
+          result: {
+            error: part.error instanceof Error ? part.error.message : String(part.error),
+          },
+        };
+        break;
+      case "error":
+        throw part.error instanceof Error ? part.error : new Error(String(part.error));
     }
-
-    const finalMessage = await stream.finalMessage();
-
-    // Append full assistant response (preserves tool_use blocks for the API)
-    messages.push({ role: "assistant", content: finalMessage.content });
-
-    if (finalMessage.stop_reason !== "tool_use") {
-      // Done — no more tool calls
-      break;
-    }
-
-    // Execute tool calls
-    const toolUseBlocks = finalMessage.content.filter(
-      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
-    );
-
-    const toolResults: Anthropic.ToolResultBlockParam[] = [];
-
-    for (const toolUse of toolUseBlocks) {
-      yield {
-        type: "tool_use",
-        name: toolUse.name,
-        input: (toolUse.input as Record<string, unknown>) ?? {},
-      };
-
-      const result = executeTool(db, agentSessionId, toolUse.name, toolUse.input);
-
-      yield { type: "tool_result", name: toolUse.name, result };
-
-      toolResults.push({
-        type: "tool_result",
-        tool_use_id: toolUse.id,
-        content: JSON.stringify(result),
-      });
-    }
-
-    // Feed tool results back for the next iteration
-    messages.push({ role: "user", content: toolResults });
   }
 
   // Record edge from agent session to "web-ui" for graph visualization
@@ -128,153 +111,101 @@ export async function* runAgentChat(
 
 // ---- Tool definitions ----
 
-function defineTools(): Anthropic.Tool[] {
-  return [
-    {
-      name: "list_sessions",
-      description:
-        "List active external sessions (AI coding assistants like Claude Code). Use to discover who you can communicate with.",
-      input_schema: {
-        type: "object" as const,
-        properties: {},
-      },
-    },
-    {
-      name: "query_context",
-      description:
-        "Full-text search across all sessions' published context (decisions, code patterns, findings). Use to find information other sessions have shared.",
-      input_schema: {
-        type: "object" as const,
-        properties: {
-          query: { type: "string", description: "FTS search query" },
-          session_id: {
-            type: "string",
-            description: "Restrict to a specific session",
-          },
-          tags: {
-            type: "array",
-            items: { type: "string" },
-            description: "Filter by tags",
-          },
-          limit: { type: "number", description: "Max results (default 20)" },
-        },
-      },
-    },
-    {
-      name: "ask_session",
-      description:
-        "Ask another session a question asynchronously. They will see it in their inbox and may reply later.",
-      input_schema: {
-        type: "object" as const,
-        required: ["to_session", "question"],
-        properties: {
-          to_session: { type: "string", description: "Target session ID" },
-          question: { type: "string", description: "The question" },
-        },
-      },
-    },
-    {
-      name: "check_inbox",
-      description:
-        "Check if other sessions have asked you questions that are pending a reply.",
-      input_schema: {
-        type: "object" as const,
-        properties: {},
-      },
-    },
-    {
-      name: "reply_ask",
-      description: "Reply to a question from another session.",
-      input_schema: {
-        type: "object" as const,
-        required: ["message_id", "reply"],
-        properties: {
-          message_id: { type: "number", description: "The message ID to reply to" },
-          reply: { type: "string", description: "Your reply" },
-        },
-      },
-    },
-    {
-      name: "publish_context",
-      description:
-        "Publish a piece of context (finding, decision, pattern) for other sessions to discover via search.",
-      input_schema: {
-        type: "object" as const,
-        required: ["title", "content"],
-        properties: {
-          title: { type: "string", description: "Short title" },
-          content: { type: "string", description: "The context body" },
-          tags: {
-            type: "array",
-            items: { type: "string" },
-            description: "Optional tags",
-          },
-        },
-      },
-    },
-  ];
-}
-
-// ---- Tool execution ----
-
-function executeTool(
-  db: DB,
-  sessionId: string,
-  name: string,
-  input: unknown
-): unknown {
-  const args = (input ?? {}) as Record<string, unknown>;
+/**
+ * Wrap a tool body so execution errors become {error} results instead of
+ * crashing the stream — same semantics as the previous hand-rolled loop.
+ */
+function safe(fn: () => unknown): unknown {
   try {
-    switch (name) {
-      case "list_sessions":
-        return listSessions(db, { status: "active" });
-
-      case "query_context":
-        return queryContext(db, {
-          query: args.query as string | undefined,
-          session_id: args.session_id as string | undefined,
-          tags: args.tags as string[] | undefined,
-          limit: (args.limit as number) ?? 20,
-        });
-
-      case "ask_session": {
-        const msg = askSession(db, {
-          from_session: sessionId,
-          to_session: args.to_session as string,
-          question: args.question as string,
-        });
-        return { message_id: msg.id, status: "sent" };
-      }
-
-      case "check_inbox":
-        return checkInbox(db, sessionId);
-
-      case "reply_ask": {
-        const msg = replyAsk(
-          db,
-          args.message_id as number,
-          sessionId,
-          args.reply as string
-        );
-        return { message_id: msg.id, status: "replied" };
-      }
-
-      case "publish_context": {
-        const entry = publishContext(db, {
-          session_id: sessionId,
-          title: args.title as string,
-          content: args.content as string,
-          tags: (args.tags as string[]) ?? null,
-        });
-        return { entry_id: entry.id, published: true };
-      }
-
-      default:
-        return { error: `unknown tool: ${name}` };
-    }
+    return fn();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    logger.warn({ toolName: name, err: msg }, "tool execution error");
+    logger.warn({ err: msg }, "tool execution error");
     return { error: msg };
   }
+}
+
+async function defineTools(db: DB, sessionId: string): Promise<ToolSet> {
+  const { tool } = await import("ai");
+  return {
+    list_sessions: tool({
+      description:
+        "List active external sessions (AI coding assistants like Claude Code). Use to discover who you can communicate with.",
+      inputSchema: z.object({}),
+      execute: async () => safe(() => listSessions(db, { status: "active" })),
+    }),
+    query_context: tool({
+      description:
+        "Full-text search across all sessions' published context (decisions, code patterns, findings). Use to find information other sessions have shared.",
+      inputSchema: z.object({
+        query: z.string().optional().describe("FTS search query"),
+        session_id: z.string().optional().describe("Restrict to a specific session"),
+        tags: z.array(z.string()).optional().describe("Filter by tags"),
+        limit: z.number().optional().describe("Max results (default 20)"),
+      }),
+      execute: async ({ query, session_id, tags, limit }) =>
+        safe(() =>
+          queryContext(db, {
+            query,
+            session_id,
+            tags,
+            limit: limit ?? 20,
+          })
+        ),
+    }),
+    ask_session: tool({
+      description:
+        "Ask another session a question asynchronously. They will see it in their inbox and may reply later.",
+      inputSchema: z.object({
+        to_session: z.string().describe("Target session ID"),
+        question: z.string().describe("The question"),
+      }),
+      execute: async ({ to_session, question }) =>
+        safe(() => {
+          const msg = askSession(db, {
+            from_session: sessionId,
+            to_session,
+            question,
+          });
+          return { message_id: msg.id, status: "sent" };
+        }),
+    }),
+    check_inbox: tool({
+      description:
+        "Check if other sessions have asked you questions that are pending a reply.",
+      inputSchema: z.object({}),
+      execute: async () => safe(() => checkInbox(db, sessionId)),
+    }),
+    reply_ask: tool({
+      description: "Reply to a question from another session.",
+      inputSchema: z.object({
+        message_id: z.number().describe("The message ID to reply to"),
+        reply: z.string().describe("Your reply"),
+      }),
+      execute: async ({ message_id, reply }) =>
+        safe(() => {
+          const msg = replyAsk(db, message_id, sessionId, reply);
+          return { message_id: msg.id, status: "replied" };
+        }),
+    }),
+    publish_context: tool({
+      description:
+        "Publish a piece of context (finding, decision, pattern) for other sessions to discover via search.",
+      inputSchema: z.object({
+        title: z.string().describe("Short title"),
+        content: z.string().describe("The context body"),
+        tags: z.array(z.string()).optional().describe("Optional tags"),
+      }),
+      execute: async ({ title, content, tags }) =>
+        safe(() => {
+          const entry = publishContext(db, {
+            session_id: sessionId,
+            title,
+            content,
+            tags: tags ?? null,
+          });
+          return { entry_id: entry.id, published: true };
+        }),
+    }),
+  };
 }
