@@ -64,6 +64,8 @@ export interface GraphNode {
   pending_inbox: number;
   conversation_count?: number;
   description?: string | null;
+  /** ISO timestamp of the last heartbeat (external sessions only). */
+  last_heartbeat_at?: string;
 }
 
 export interface GraphEdge {

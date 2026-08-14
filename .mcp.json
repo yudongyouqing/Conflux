@@ -2,7 +2,7 @@
   "mcpServers": {
     "muiltchat": {
       "command": "npx",
-      "args": ["-y", "muiltchat", "mcp"]
+      "args": ["tsx", "apps/server/src/index.ts", "mcp"]
     }
   }
 }
