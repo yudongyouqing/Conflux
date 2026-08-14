@@ -1,8 +1,10 @@
-import { useMemo, useCallback } from "react";
+import { useEffect, useCallback } from "react";
 import {
   ReactFlow,
   Background,
   Controls,
+  useNodesState,
+  useEdgesState,
   type Node,
   type Edge,
   type NodeMouseHandler,
@@ -25,8 +27,14 @@ export function GraphTab({
 }: GraphTabProps) {
   const { data, isLoading, error } = useGraph();
 
-  const { nodes, edges } = useMemo(() => {
-    if (!data) return { nodes: [] as Node[], edges: [] as Edge[] };
+  // Interactive state — required for node dragging in React Flow v12.
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [edges, setEdges] = useEdgesState<Edge>([]);
+
+  // Sync polled data into state. Node positions the user dragged to are
+  // preserved across polls; only data (name/status/counts) refreshes.
+  useEffect(() => {
+    if (!data) return;
 
     const rawNodes: Node<SessionNodeData>[] = data.nodes.map((n) => ({
       id: n.id,
@@ -51,17 +59,18 @@ export function GraphTab({
       style: { strokeWidth: Math.min(1 + e.weight, 5), stroke: "#94a3b8" },
     }));
 
-    return layoutGraph(rawNodes, rawEdges);
-  }, [data]);
+    const { nodes: layouted } = layoutGraph(rawNodes, rawEdges);
 
-  const nodesWithSelection = useMemo(
-    () =>
-      nodes.map((n) => ({
+    setNodes((prev) => {
+      const prevPos = new Map(prev.map((n) => [n.id, n.position]));
+      return layouted.map((n) => ({
         ...n,
+        position: prevPos.get(n.id) ?? n.position,
         selected: n.id === selectedSessionId,
-      })),
-    [nodes, selectedSessionId]
-  );
+      }));
+    });
+    setEdges(rawEdges);
+  }, [data, selectedSessionId, setNodes, setEdges]);
 
   const onNodeClick: NodeMouseHandler = useCallback(
     (_, node) => {
@@ -98,10 +107,16 @@ export function GraphTab({
 
   return (
     <ReactFlow
-      nodes={nodesWithSelection}
+      nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
+      onNodesChange={onNodesChange}
       onNodeClick={onNodeClick}
+      nodesConnectable={false}
+      snapToGrid
+      snapGrid={[20, 20]}
+      minZoom={0.2}
+      maxZoom={2}
       fitView
       fitViewOptions={{ padding: 0.2 }}
       proOptions={{ hideAttribution: true }}
