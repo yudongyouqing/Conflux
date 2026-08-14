@@ -113,8 +113,6 @@ export function GraphTab({
       onNodesChange={onNodesChange}
       onNodeClick={onNodeClick}
       nodesConnectable={false}
-      snapToGrid
-      snapGrid={[20, 20]}
       minZoom={0.2}
       maxZoom={2}
       fitView

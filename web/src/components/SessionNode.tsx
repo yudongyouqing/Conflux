@@ -25,17 +25,21 @@ const STATUS_DOT: Record<string, string> = {
 
 export type SessionNodeType = Node<SessionNodeData>;
 
-export function SessionNode({ data, selected }: NodeProps) {
+export function SessionNode({ data, selected, dragging }: NodeProps) {
   const d = data as SessionNodeData;
   const isAgent = d.type === "agent";
 
   return (
     <div
-      className={`px-3 py-2 rounded-xl border shadow-sm min-w-[120px] transition-shadow ${
+      className={`px-3 py-2 rounded-xl border min-w-[120px] transition-all duration-150 cursor-grab active:cursor-grabbing ${
+        dragging
+          ? "shadow-xl scale-[1.03] ring-2 ring-blue-500/40"
+          : selected
+            ? "shadow-md ring-2 ring-blue-500/60 ring-offset-1 ring-offset-gray-50"
+            : "shadow-sm hover:shadow-md"
+      } ${
         isAgent ? "bg-indigo-50 border-indigo-300" : "bg-white border-gray-200"
-      } ${STATUS_BORDER[d.status] ?? "border-gray-200"} ${
-        selected ? "ring-2 ring-blue-500/60 ring-offset-1 ring-offset-gray-50" : ""
-      }`}
+      } ${STATUS_BORDER[d.status] ?? "border-gray-200"}`}
     >
       <Handle
         type="target"

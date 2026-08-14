@@ -19,6 +19,14 @@ body {
 /* React Flow light theme overrides */
 .react-flow__node {
   font-size: 12px;
+  cursor: grab;
+}
+.react-flow__node.dragging {
+  cursor: grabbing;
+}
+/* Kill transition on drag so nodes track the cursor 1:1 (Dify-like) */
+.react-flow__node.draggable.dragging {
+  transition: none;
 }
 .react-flow__handle {
   border: none !important;
