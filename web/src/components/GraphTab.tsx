@@ -48,13 +48,12 @@ export function GraphTab({
       target: e.to,
       animated: true,
       label: e.weight > 1 ? String(e.weight) : "",
-      style: { strokeWidth: Math.min(1 + e.weight, 5) },
+      style: { strokeWidth: Math.min(1 + e.weight, 5), stroke: "#94a3b8" },
     }));
 
     return layoutGraph(rawNodes, rawEdges);
   }, [data]);
 
-  // Apply selection highlight without re-running layout
   const nodesWithSelection = useMemo(
     () =>
       nodes.map((n) => ({
@@ -73,25 +72,25 @@ export function GraphTab({
 
   if (isLoading)
     return (
-      <div className="flex items-center justify-center h-full text-slate-500 text-sm">
+      <div className="flex items-center justify-center h-full text-gray-400 text-sm">
         加载图中...
       </div>
     );
 
   if (error)
     return (
-      <div className="flex items-center justify-center h-full text-red-400 text-sm">
+      <div className="flex items-center justify-center h-full text-red-500 text-sm">
         连接失败: {(error as Error).message}
       </div>
     );
 
   if (nodes.length === 0)
     return (
-      <div className="flex items-center justify-center h-full text-slate-500 text-sm text-center px-8">
+      <div className="flex items-center justify-center h-full text-gray-400 text-sm text-center px-8">
         暂无会话。
         <br />
         用 CLI 注册一个会话:
-        <code className="text-slate-400 ml-1">
+        <code className="text-gray-500 ml-1 bg-gray-100 px-1 rounded">
           muiltchat sessions register --name "test"
         </code>
       </div>
@@ -106,10 +105,10 @@ export function GraphTab({
       fitView
       fitViewOptions={{ padding: 0.2 }}
       proOptions={{ hideAttribution: true }}
-      className="bg-slate-900"
+      className="bg-gray-50"
     >
-      <Background color="#1e293b" gap={20} />
-      <Controls className="!bg-slate-800 !border-slate-600 [&_button]:!bg-slate-800 [&_button]:!border-slate-600 [&_svg]:!fill-slate-400" />
+      <Background color="#d0d5dd" gap={20} />
+      <Controls className="!bg-white !border !border-gray-200 !rounded-lg !shadow-sm [&_button]:!bg-white [&_button]:!border-gray-200 [&_button]:!text-gray-600 [&_button:hover]:!bg-gray-50" />
     </ReactFlow>
   );
 }

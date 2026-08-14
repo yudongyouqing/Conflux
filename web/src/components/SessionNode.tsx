@@ -12,13 +12,13 @@ export interface SessionNodeData {
 }
 
 const STATUS_BORDER: Record<string, string> = {
-  active: "border-green-500",
-  stale: "border-gray-500",
-  ended: "border-red-500",
+  active: "border-emerald-300",
+  stale: "border-gray-300",
+  ended: "border-red-300",
 };
 
 const STATUS_DOT: Record<string, string> = {
-  active: "bg-green-500",
+  active: "bg-emerald-500",
   stale: "bg-gray-400",
   ended: "bg-red-500",
 };
@@ -31,44 +31,46 @@ export function SessionNode({ data, selected }: NodeProps) {
 
   return (
     <div
-      className={`px-3 py-2 rounded-lg border-2 shadow-lg min-w-[120px] transition-shadow ${
-        isAgent ? "bg-indigo-950/60 border-indigo-500" : "bg-slate-800"
-      } ${STATUS_BORDER[d.status] ?? "border-slate-600"} ${
-        selected ? "ring-2 ring-blue-500 ring-offset-0" : ""
+      className={`px-3 py-2 rounded-xl border shadow-sm min-w-[120px] transition-shadow ${
+        isAgent ? "bg-indigo-50 border-indigo-300" : "bg-white border-gray-200"
+      } ${STATUS_BORDER[d.status] ?? "border-gray-200"} ${
+        selected ? "ring-2 ring-blue-500/60 ring-offset-1 ring-offset-gray-50" : ""
       }`}
     >
       <Handle
         type="target"
         position={Position.Left}
-        className="!w-2 !h-2 !bg-slate-500 !border-none"
+        className="!w-2 !h-2 !bg-gray-400"
       />
       <div className="flex items-center gap-2">
         {isAgent ? (
-          <Bot size={14} className="text-indigo-400 flex-shrink-0" />
+          <div className="w-5 h-5 rounded-md bg-indigo-600 flex items-center justify-center flex-shrink-0">
+            <Bot size={12} className="text-white" />
+          </div>
         ) : (
           <span
             className={`w-2 h-2 rounded-full flex-shrink-0 ${
-              STATUS_DOT[d.status] ?? "bg-gray-500"
+              STATUS_DOT[d.status] ?? "bg-gray-400"
             }`}
           />
         )}
-        <span className="text-white text-xs font-medium truncate max-w-[100px]">
+        <span className="text-gray-900 text-xs font-medium truncate max-w-[100px]">
           {d.name}
         </span>
       </div>
-      <div className="flex items-center gap-3 mt-1 text-[10px] text-slate-400">
+      <div className="flex items-center gap-3 mt-1 text-[10px] text-gray-500">
         {d.context_count > 0 && (
           <span className="flex items-center gap-0.5">
             <FileText size={10} /> {d.context_count}
           </span>
         )}
         {d.pending_inbox > 0 && (
-          <span className="flex items-center gap-0.5 text-amber-400">
+          <span className="flex items-center gap-0.5 text-amber-600">
             <Inbox size={10} /> {d.pending_inbox}
           </span>
         )}
         {isAgent && (d.conversation_count ?? 0) > 0 && (
-          <span className="flex items-center gap-0.5 text-indigo-400">
+          <span className="flex items-center gap-0.5 text-indigo-600">
             <MessageSquare size={10} /> {d.conversation_count}
           </span>
         )}
@@ -76,7 +78,7 @@ export function SessionNode({ data, selected }: NodeProps) {
       <Handle
         type="source"
         position={Position.Right}
-        className="!w-2 !h-2 !bg-slate-500 !border-none"
+        className="!w-2 !h-2 !bg-gray-400"
       />
     </div>
   );

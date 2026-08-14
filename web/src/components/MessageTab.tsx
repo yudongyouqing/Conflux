@@ -38,12 +38,12 @@ export function MessageTab({
   );
 
   return (
-    <div className="flex flex-col h-full bg-slate-900">
-      <div className="flex items-center gap-2 p-3 border-b border-slate-700">
+    <div className="flex flex-col h-full bg-gray-100">
+      <div className="flex items-center gap-2 p-3 bg-white border-b border-gray-200">
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="bg-slate-800 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 outline-none"
+          className="bg-white text-gray-700 text-xs rounded-lg px-2.5 py-1.5 border border-gray-200 outline-none focus:border-blue-500"
         >
           <option value="all">全部状态</option>
           <option value="pending">待回复</option>
@@ -55,17 +55,17 @@ export function MessageTab({
           placeholder="搜索消息内容..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="flex-1 bg-slate-800 text-slate-200 text-xs rounded px-2 py-1.5 border border-slate-600 placeholder-slate-500 outline-none focus:border-slate-500"
+          className="flex-1 bg-white text-gray-800 text-xs rounded-lg px-2.5 py-1.5 border border-gray-200 placeholder-gray-400 outline-none focus:border-blue-500"
         />
       </div>
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+      <div className="flex-1 overflow-y-auto p-4 space-y-2">
         {isLoading && (
-          <div className="text-slate-500 text-sm text-center mt-8">
+          <div className="text-gray-400 text-sm text-center mt-8">
             加载中...
           </div>
         )}
         {!isLoading && filtered.length === 0 && (
-          <div className="text-slate-600 text-sm text-center mt-8">
+          <div className="text-gray-400 text-sm text-center mt-8">
             {search ? "无匹配消息" : "暂无消息"}
           </div>
         )}

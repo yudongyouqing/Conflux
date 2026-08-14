@@ -2,9 +2,9 @@ import { ArrowRight } from "lucide-react";
 import type { Message } from "../types";
 
 const STATUS_COLORS: Record<string, string> = {
-  pending: "bg-amber-500/20 text-amber-400",
-  replied: "bg-green-500/20 text-green-400",
-  read: "bg-blue-500/20 text-blue-400",
+  pending: "bg-amber-50 text-amber-700 border border-amber-200",
+  replied: "bg-emerald-50 text-emerald-700 border border-emerald-200",
+  read: "bg-blue-50 text-blue-700 border border-blue-200",
 };
 
 interface MessageCardProps {
@@ -25,31 +25,31 @@ export function MessageCard({
   return (
     <div
       onClick={onClick}
-      className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+      className={`p-3 rounded-xl border cursor-pointer transition-all ${
         selected
-          ? "border-blue-500 bg-slate-700/50"
-          : "border-slate-700 bg-slate-800/50 hover:bg-slate-700/30"
+          ? "border-blue-500 bg-blue-50/50 shadow-sm"
+          : "border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm"
       }`}
     >
       <div className="flex items-center gap-2 text-xs mb-1">
-        <span className="text-slate-300 font-medium">
+        <span className="text-gray-700 font-medium">
           {fromName ?? msg.from_session.slice(0, 8)}
         </span>
-        <ArrowRight size={12} className="text-slate-500" />
-        <span className="text-slate-300 font-medium">
+        <ArrowRight size={12} className="text-gray-400" />
+        <span className="text-gray-700 font-medium">
           {toName ?? msg.to_session.slice(0, 8)}
         </span>
         <span
-          className={`ml-auto px-1.5 py-0.5 rounded text-[10px] font-medium ${
-            STATUS_COLORS[msg.status] ?? "bg-slate-700 text-slate-400"
+          className={`ml-auto px-1.5 py-0.5 rounded-md text-[10px] font-medium ${
+            STATUS_COLORS[msg.status] ?? "bg-gray-100 text-gray-500 border border-gray-200"
           }`}
         >
           {msg.status}
         </span>
       </div>
-      <div className="text-sm text-slate-200 truncate">{msg.question}</div>
+      <div className="text-sm text-gray-800 truncate">{msg.question}</div>
       {msg.reply && (
-        <div className="text-xs text-slate-400 truncate mt-1">
+        <div className="text-xs text-gray-500 truncate mt-1">
           ↳ {msg.reply}
         </div>
       )}

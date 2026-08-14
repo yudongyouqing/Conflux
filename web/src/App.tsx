@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from "react";
-import { Header, type TabId } from "./components/Header";
+import { Sidebar, type TabId } from "./components/Sidebar";
 import { GraphTab } from "./components/GraphTab";
 import { MessageTab } from "./components/MessageTab";
 import { AgentTab } from "./components/AgentTab";
@@ -43,8 +43,8 @@ export default function App() {
   }, []);
 
   return (
-    <div className="flex flex-col h-full bg-slate-900 text-slate-200">
-      <Header activeTab={tab} onTabChange={setTab} />
+    <div className="flex h-full bg-gray-100">
+      <Sidebar activeTab={tab} onTabChange={setTab} />
       <div className="flex flex-1 overflow-hidden">
         <main className="flex-1 overflow-hidden">
           {tab === "graph" && (
@@ -61,7 +61,7 @@ export default function App() {
           )}
           {tab === "agents" && <AgentTab />}
         </main>
-        <aside className="w-80 border-l border-slate-700 bg-slate-900 overflow-hidden flex-shrink-0">
+        <aside className="w-80 border-l border-gray-200 bg-white overflow-hidden flex-shrink-0">
           <DetailPanel
             session={selectedSession}
             message={selectedMessage}

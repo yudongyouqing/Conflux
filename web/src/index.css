@@ -10,11 +10,16 @@ body,
 }
 
 body {
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
+  background: #f2f4f7;
+  color: #101828;
 }
 
-/* React Flow overrides */
+/* React Flow light theme overrides */
 .react-flow__node {
   font-size: 12px;
+}
+.react-flow__handle {
+  border: none !important;
 }

@@ -46,7 +46,6 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
       agent.id,
       message,
       conversationId,
-      // onToken
       (token) => {
         receivedAny = true;
         setMessages((prev) => {
@@ -58,7 +57,6 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
         });
         scrollToBottom();
       },
-      // onDone
       (data) => {
         setConversationId(data.conversation_id);
         setMessages((prev) =>
@@ -69,7 +67,6 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
           )
         );
       },
-      // onError
       (msg) => {
         setError(msg);
         setMessages((prev) => {
@@ -82,12 +79,10 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
           );
         });
       },
-      // onToolUse
       (name, toolInput) => {
         setMessages((prev) => [...prev, { kind: "tool", name, input: toolInput, loading: true }]);
         scrollToBottom();
       },
-      // onToolResult
       (name, result) => {
         setMessages((prev) => {
           const idx = [...prev].reverse().findIndex(
@@ -117,47 +112,51 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-900">
+    <div className="flex flex-col h-full bg-gray-100">
       {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-2 border-b border-slate-700 flex-shrink-0">
+      <div className="flex items-center gap-3 px-4 h-14 bg-white border-b border-gray-200 flex-shrink-0">
         <button
           onClick={onBack}
-          className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-200 transition-colors"
+          className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-800 transition-colors"
         >
           <ArrowLeft size={14} /> 返回
         </button>
-        <div className="flex items-center gap-2">
-          <Bot size={16} className="text-blue-400" />
-          <span className="text-sm text-slate-200 font-medium">{agent.name}</span>
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center">
+            <Bot size={14} className="text-white" />
+          </div>
+          <span className="text-sm text-gray-900 font-medium">{agent.name}</span>
         </div>
-        <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-slate-700 text-slate-400">
+        <span className="ml-auto text-[10px] px-2 py-1 rounded-md bg-gray-100 text-gray-600 border border-gray-200">
           {agent.model_config.provider}/{agent.model_config.model}
         </span>
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-        {messages.length === 0 && !error && (
-          <div className="text-center text-slate-600 text-sm mt-8">
-            向 {agent.name} 发送一条消息开始对话
-          </div>
-        )}
-        {messages.map((msg, i) => {
-          if (msg.kind === "tool") {
-            return <ToolCard key={i} name={msg.name} input={msg.input} result={msg.result} loading={msg.loading} />;
-          }
-          return <MessageBubble key={i} role={msg.role} content={msg.content} streaming={msg.streaming} />;
-        })}
-        {error && (
-          <div className="text-xs text-red-400 bg-red-950/30 border border-red-800/40 rounded p-2">
-            {error}
-          </div>
-        )}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
+        <div className="max-w-2xl mx-auto space-y-4">
+          {messages.length === 0 && !error && (
+            <div className="text-center text-gray-400 text-sm mt-12">
+              向 {agent.name} 发送一条消息开始对话
+            </div>
+          )}
+          {messages.map((msg, i) => {
+            if (msg.kind === "tool") {
+              return <ToolCard key={i} name={msg.name} input={msg.input} result={msg.result} loading={msg.loading} />;
+            }
+            return <MessageBubble key={i} role={msg.role} content={msg.content} streaming={msg.streaming} />;
+          })}
+          {error && (
+            <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl p-3">
+              {error}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Input */}
-      <div className="p-3 border-t border-slate-700 flex-shrink-0">
-        <div className="flex items-end gap-2">
+      <div className="p-4 bg-white border-t border-gray-200 flex-shrink-0">
+        <div className="max-w-2xl mx-auto flex items-end gap-2">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -165,13 +164,13 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
             placeholder={isStreaming ? "等待回复..." : `跟 ${agent.name} 聊天...`}
             disabled={isStreaming}
             rows={1}
-            className="flex-1 bg-slate-800 text-slate-200 text-sm rounded-lg px-3 py-2 border border-slate-600 placeholder-slate-500 outline-none focus:border-blue-500 resize-none disabled:opacity-50"
-            style={{ minHeight: "38px", maxHeight: "120px" }}
+            className="flex-1 bg-white text-gray-800 text-sm rounded-xl px-4 py-2.5 border border-gray-200 placeholder-gray-400 outline-none focus:border-blue-500 resize-none disabled:bg-gray-50 disabled:opacity-60 shadow-sm"
+            style={{ minHeight: "42px", maxHeight: "120px" }}
           />
           <button
             onClick={handleSend}
             disabled={!input.trim() || isStreaming}
-            className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white transition-colors flex-shrink-0"
+            className="flex items-center justify-center w-10 h-10 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-gray-200 disabled:text-gray-400 text-white transition-colors flex-shrink-0 shadow-sm"
           >
             <Send size={16} />
           </button>
@@ -194,30 +193,32 @@ function MessageBubble({
 
   if (!content && streaming) {
     return (
-      <div className={`flex gap-2 ${isUser ? "flex-row-reverse" : ""}`}>
-        <div className={`flex-shrink-0 w-6 h-6 rounded flex items-center justify-center ${isUser ? "bg-blue-600" : "bg-slate-700"}`}>
-          {isUser ? <User size={12} className="text-white" /> : <Bot size={12} className="text-blue-300" />}
+      <div className={`flex gap-2.5 ${isUser ? "flex-row-reverse" : ""}`}>
+        <div className={`flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center ${isUser ? "bg-blue-600" : "bg-gray-200"}`}>
+          {isUser ? <User size={13} className="text-white" /> : <Bot size={13} className="text-gray-600" />}
         </div>
-        <div className="px-3 py-2 rounded-lg bg-slate-800">
-          <Loader2 size={14} className="text-slate-500 animate-spin" />
+        <div className="px-4 py-2.5 rounded-xl bg-white border border-gray-200 shadow-sm">
+          <Loader2 size={14} className="text-gray-400 animate-spin" />
         </div>
       </div>
     );
   }
 
   return (
-    <div className={`flex gap-2 ${isUser ? "flex-row-reverse" : ""}`}>
-      <div className={`flex-shrink-0 w-6 h-6 rounded flex items-center justify-center ${isUser ? "bg-blue-600" : "bg-slate-700"}`}>
-        {isUser ? <User size={12} className="text-white" /> : <Bot size={12} className="text-blue-300" />}
+    <div className={`flex gap-2.5 ${isUser ? "flex-row-reverse" : ""}`}>
+      <div className={`flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center ${isUser ? "bg-blue-600" : "bg-gray-200"}`}>
+        {isUser ? <User size={13} className="text-white" /> : <Bot size={13} className="text-gray-600" />}
       </div>
       <div
-        className={`max-w-[75%] px-3 py-2 rounded-lg text-sm whitespace-pre-wrap ${
-          isUser ? "bg-blue-600/20 text-blue-100" : "bg-slate-800 text-slate-200"
+        className={`max-w-[75%] px-4 py-2.5 rounded-xl text-sm whitespace-pre-wrap shadow-sm ${
+          isUser
+            ? "bg-blue-600 text-white"
+            : "bg-white text-gray-800 border border-gray-200"
         }`}
       >
         {content}
         {streaming && (
-          <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-slate-400 animate-pulse align-text-bottom" />
+          <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-gray-400 animate-pulse align-text-bottom" />
         )}
       </div>
     </div>
@@ -245,13 +246,13 @@ function ToolCard({
     : null;
 
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/30 border border-slate-700/50 text-xs mx-8">
-      <Wrench size={11} className="text-amber-400 flex-shrink-0" />
-      <span className="text-slate-300 font-mono font-medium">{name}</span>
-      <span className="text-slate-600 truncate">{inputStr.length > 80 ? inputStr.slice(0, 80) + "..." : inputStr}</span>
-      {loading && <Loader2 size={10} className="animate-spin text-slate-500 flex-shrink-0" />}
+    <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-amber-50/60 border border-amber-200/60 text-xs mx-10">
+      <Wrench size={11} className="text-amber-600 flex-shrink-0" />
+      <span className="text-gray-700 font-mono font-medium">{name}</span>
+      <span className="text-gray-400 truncate">{inputStr.length > 80 ? inputStr.slice(0, 80) + "..." : inputStr}</span>
+      {loading && <Loader2 size={10} className="animate-spin text-gray-400 flex-shrink-0" />}
       {!loading && resultSummary && (
-        <span className="text-green-400/70 flex-shrink-0">{resultSummary}</span>
+        <span className="text-emerald-600 flex-shrink-0">{resultSummary}</span>
       )}
     </div>
   );

@@ -18,49 +18,51 @@ export function DetailPanel({
 
   if (session) {
     return (
-      <div className="p-4 space-y-4 overflow-y-auto h-full">
+      <div className="p-5 space-y-5 overflow-y-auto h-full">
         <div>
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1.5">
             <StatusDot status={session.status} />
-            <h2 className="text-white font-semibold text-sm">{session.name}</h2>
+            <h2 className="text-gray-900 font-semibold text-[15px]">{session.name}</h2>
           </div>
-          <div className="text-[10px] text-slate-600 font-mono break-all">
+          <div className="text-[10px] text-gray-400 font-mono break-all">
             {session.id}
           </div>
         </div>
 
-        <div className="flex gap-4 text-xs">
+        <div className="flex gap-5 text-xs">
           <div>
-            <span className="text-slate-500">上下文</span>
-            <span className="text-slate-200 ml-1.5">{session.context_count}</span>
+            <span className="text-gray-400">上下文</span>
+            <div className="text-gray-800 font-medium mt-0.5">{session.context_count}</div>
           </div>
           <div>
-            <span className="text-slate-500">待处理</span>
-            <span className="text-amber-400 ml-1.5">{session.pending_inbox}</span>
+            <span className="text-gray-400">待处理</span>
+            <div className="text-amber-600 font-medium mt-0.5">{session.pending_inbox}</div>
           </div>
           <div>
-            <span className="text-slate-500">状态</span>
-            <span className="text-slate-300 ml-1.5">{session.status}</span>
+            <span className="text-gray-400">类型</span>
+            <div className="text-gray-800 font-medium mt-0.5">
+              {session.type === "agent" ? "Agent" : "会话"}
+            </div>
           </div>
         </div>
 
         <div>
-          <h3 className="text-xs text-slate-400 font-medium mb-2 flex items-center gap-1">
+          <h3 className="text-xs text-gray-500 font-medium mb-2 flex items-center gap-1">
             <FileText size={12} /> 已发布上下文
           </h3>
           {!contextEntries || contextEntries.entries.length === 0 ? (
-            <p className="text-xs text-slate-600">无</p>
+            <p className="text-xs text-gray-400">无</p>
           ) : (
             <div className="space-y-2">
               {contextEntries.entries.map((e) => (
                 <div
                   key={e.id}
-                  className="p-2 rounded bg-slate-800/50 border border-slate-700"
+                  className="p-3 rounded-xl bg-gray-50 border border-gray-200"
                 >
-                  <div className="text-xs text-slate-300 font-medium">
+                  <div className="text-xs text-gray-800 font-medium">
                     {e.title}
                   </div>
-                  <div className="text-[11px] text-slate-500 mt-1 line-clamp-3">
+                  <div className="text-[11px] text-gray-500 mt-1 line-clamp-3">
                     {e.content}
                   </div>
                   {e.tags && e.tags.length > 0 && (
@@ -68,7 +70,7 @@ export function DetailPanel({
                       {e.tags.map((t) => (
                         <span
                           key={t}
-                          className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700 text-slate-400"
+                          className="text-[10px] px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-600 border border-blue-100"
                         >
                           {t}
                         </span>
@@ -86,24 +88,24 @@ export function DetailPanel({
 
   if (message) {
     return (
-      <div className="p-4 space-y-3 overflow-y-auto h-full">
+      <div className="p-5 space-y-4 overflow-y-auto h-full">
         <div className="flex items-center gap-2 text-xs">
-          <span className="text-slate-300 font-medium">
+          <span className="text-gray-700 font-medium">
             {sessionNameLookup(message.from_session) ??
               message.from_session.slice(0, 8)}
           </span>
-          <ArrowRight size={12} className="text-slate-600" />
-          <span className="text-slate-300 font-medium">
+          <ArrowRight size={12} className="text-gray-400" />
+          <span className="text-gray-700 font-medium">
             {sessionNameLookup(message.to_session) ??
               message.to_session.slice(0, 8)}
           </span>
           <span
-            className={`ml-auto px-1.5 py-0.5 rounded text-[10px] font-medium ${
+            className={`ml-auto px-1.5 py-0.5 rounded-md text-[10px] font-medium ${
               message.status === "pending"
-                ? "bg-amber-500/20 text-amber-400"
+                ? "bg-amber-50 text-amber-700 border border-amber-200"
                 : message.status === "replied"
-                  ? "bg-green-500/20 text-green-400"
-                  : "bg-blue-500/20 text-blue-400"
+                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                  : "bg-blue-50 text-blue-700 border border-blue-200"
             }`}
           >
             {message.status}
@@ -111,22 +113,22 @@ export function DetailPanel({
         </div>
 
         <div>
-          <div className="text-[10px] text-slate-500 mb-1 flex items-center gap-1">
+          <div className="text-[10px] text-gray-400 mb-1.5 flex items-center gap-1">
             <Clock size={10} /> {new Date(message.created_at).toLocaleString()}
           </div>
-          <div className="text-sm text-slate-200 whitespace-pre-wrap bg-slate-800/50 p-3 rounded border border-slate-700">
+          <div className="text-sm text-gray-800 whitespace-pre-wrap bg-gray-50 p-3 rounded-xl border border-gray-200">
             {message.question}
           </div>
         </div>
 
         {message.reply && (
           <div>
-            <div className="text-[10px] text-slate-500 mb-1">
+            <div className="text-[10px] text-gray-400 mb-1.5">
               回复
               {message.replied_at &&
                 ` · ${new Date(message.replied_at).toLocaleString()}`}
             </div>
-            <div className="text-sm text-green-300/90 whitespace-pre-wrap bg-green-950/20 p-3 rounded border border-green-800/40">
+            <div className="text-sm text-emerald-800 whitespace-pre-wrap bg-emerald-50 p-3 rounded-xl border border-emerald-200">
               {message.reply}
             </div>
           </div>
@@ -136,7 +138,7 @@ export function DetailPanel({
   }
 
   return (
-    <div className="flex items-center justify-center h-full text-slate-600 text-sm text-center px-4">
+    <div className="flex items-center justify-center h-full text-gray-400 text-sm text-center px-6">
       点击图节点或消息条目查看详情
     </div>
   );
