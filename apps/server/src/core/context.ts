@@ -1,15 +1,8 @@
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
+import type { ContextEntry } from "@muiltchat/shared";
 
-export interface ContextEntry {
-  id: number;
-  session_id: string;
-  title: string;
-  content: string;
-  tags: string[] | null;
-  created_at: string;
-  updated_at: string;
-}
+export type { ContextEntry };
 
 export interface PublishInput {
   session_id: string;

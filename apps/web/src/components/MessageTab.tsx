@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useMessages, useGraph } from "../hooks";
 import { MessageCard } from "./MessageCard";
-import type { Message } from "../types";
+import type { Message } from "@muiltchat/shared";
 
 interface MessageTabProps {
   onSelectMessage: (msg: Message | null) => void;

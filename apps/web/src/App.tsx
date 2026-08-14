@@ -5,7 +5,7 @@ import { MessageTab } from "./components/MessageTab";
 import { AgentTab } from "./components/AgentTab";
 import { DetailPanel } from "./components/DetailPanel";
 import { useGraph } from "./hooks";
-import type { Message, GraphNode } from "./types";
+import type { Message, GraphNode } from "@muiltchat/shared";
 
 export default function App() {
   const [tab, setTab] = useState<TabId>("graph");

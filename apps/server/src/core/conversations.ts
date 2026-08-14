@@ -1,22 +1,8 @@
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
+import type { Conversation, Turn } from "@muiltchat/shared";
 
-export interface Conversation {
-  id: number;
-  agent_id: number;
-  initiated_by: string | null;
-  title: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface Turn {
-  id: number;
-  conversation_id: number;
-  role: "user" | "assistant" | "system";
-  content: string;
-  created_at: string;
-}
+export type { Conversation, Turn };
 
 export function createConversation(
   db: DB,

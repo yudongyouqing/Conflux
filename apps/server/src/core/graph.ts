@@ -1,31 +1,9 @@
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 import { markStaleSessions } from "./sessions.js";
+import type { Graph, GraphEdge, GraphNode, NodeType } from "@muiltchat/shared";
 
-export type NodeType = "session" | "agent";
-
-export interface GraphNode {
-  id: string;
-  name: string;
-  status: string;
-  type: NodeType;
-  context_count: number;
-  pending_inbox: number;
-  conversation_count?: number;
-  description?: string | null;
-}
-
-export interface GraphEdge {
-  from: string;
-  to: string;
-  weight: number;
-  last_interact_at: string;
-}
-
-export interface Graph {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-}
+export type { Graph, GraphEdge, GraphNode, NodeType };
 
 /**
  * Upsert a directed edge: increment weight if it exists, create otherwise.

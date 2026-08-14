@@ -1,19 +1,9 @@
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 import { recordEdge } from "./graph.js";
+import type { Message, MessageStatus } from "@muiltchat/shared";
 
-export type MessageStatus = "pending" | "replied" | "read";
-
-export interface Message {
-  id: number;
-  from_session: string;
-  to_session: string;
-  question: string;
-  reply: string | null;
-  status: MessageStatus;
-  created_at: string;
-  replied_at: string | null;
-}
+export type { Message, MessageStatus };
 
 interface MessageRow {
   id: number;

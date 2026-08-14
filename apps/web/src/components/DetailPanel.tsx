@@ -1,5 +1,5 @@
 import { useSessionContext } from "../hooks";
-import type { Message, GraphNode } from "../types";
+import type { Message, GraphNode } from "@muiltchat/shared";
 import { StatusDot } from "./StatusDot";
 import { FileText, Clock, ArrowRight } from "lucide-react";
 

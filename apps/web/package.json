@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@muiltchat/shared": "*",
     "@tanstack/react-query": "^5.51.0",
     "@xyflow/react": "^12.3.0",
     "lucide-react": "^0.417.0",

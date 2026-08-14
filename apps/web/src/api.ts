@@ -1,4 +1,4 @@
-import type { Graph, Message, MessageStatus, Session, ContextEntry, Agent, ModelConfig, Conversation, Turn } from "./types";
+import type { Graph, Message, MessageStatus, SessionSummary, ContextEntry, Agent, ModelConfig, Conversation, Turn } from "@muiltchat/shared";
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path);
@@ -54,7 +54,7 @@ export const api = {
   },
 
   getSessions: (status = "all") =>
-    get<{ sessions: Session[] }>(`/sessions?status=${encodeURIComponent(status)}`),
+    get<{ sessions: SessionSummary[] }>(`/sessions?status=${encodeURIComponent(status)}`),
 
   getContext: (params?: { query?: string; session_id?: string; limit?: number }) => {
     const qs = new URLSearchParams();
