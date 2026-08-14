@@ -1,5 +1,5 @@
 import { ArrowRight } from "lucide-react";
-import type { Message } from "../types";
+import type { Message } from "@muiltchat/shared";
 
 const STATUS_COLORS: Record<string, string> = {
   pending: "bg-amber-50 text-amber-700 border border-amber-200",

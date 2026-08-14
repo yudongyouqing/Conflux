@@ -1,22 +1,9 @@
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 import { STALE_AFTER_MS } from "../config.js";
+import type { Session, SessionSummary } from "@muiltchat/shared";
 
-export interface Session {
-  id: string;
-  name: string;
-  description: string | null;
-  project_dir: string | null;
-  status: "active" | "stale" | "ended";
-  created_at: string;
-  last_heartbeat_at: string;
-  metadata: string | null;
-}
-
-export interface SessionSummary extends Session {
-  context_count: number;
-  pending_inbox: number;
-}
+export type { Session, SessionSummary };
 
 export interface RegisterInput {
   id: string;

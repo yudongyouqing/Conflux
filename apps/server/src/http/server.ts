@@ -86,8 +86,10 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   // CORS — allow the Vite dev server (and any local client) to call the API.
   await app.register(cors, { origin: true });
 
-  // Serve the built frontend (web/dist/) if it exists.
-  const webDist = resolve(__dirname, "../../web/dist");
+  // Serve the built frontend (apps/web/dist/) if it exists.
+  // __dirname is apps/server/{src,dist}/http — four levels up reaches the repo
+  // root, then into apps/web/dist.
+  const webDist = resolve(__dirname, "../../../../apps/web/dist");
   if (existsSync(webDist)) {
     await app.register(fastifyStatic, {
       root: webDist,

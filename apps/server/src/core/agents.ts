@@ -1,23 +1,9 @@
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 import { registerSession, endSession } from "./sessions.js";
+import type { Agent, ModelConfig } from "@muiltchat/shared";
 
-export interface ModelConfig {
-  provider: string; // "anthropic" | "openai" | ...
-  model: string; // e.g. "claude-sonnet-4-20250514"
-  temperature?: number;
-  max_tokens?: number;
-}
-
-export interface Agent {
-  id: number;
-  name: string;
-  system_prompt: string;
-  model_config: ModelConfig;
-  description: string | null;
-  created_at: string;
-  updated_at: string;
-}
+export type { Agent, ModelConfig };
 
 interface AgentRow {
   id: number;

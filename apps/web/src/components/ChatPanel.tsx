@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 import { ArrowLeft, Send, Bot, User, Wrench, Loader2 } from "lucide-react";
 import { api } from "../api";
-import type { Agent } from "../types";
+import type { Agent } from "@muiltchat/shared";
 
 interface ChatPanelProps {
   agent: Agent;
