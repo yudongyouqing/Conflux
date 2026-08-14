@@ -37,7 +37,7 @@ export function getGraph(
 
   const nodes = db
     .prepare(
-      `SELECT s.id, s.name, s.status,
+      `SELECT s.id, s.name, s.status, s.last_heartbeat_at,
          (SELECT COUNT(*) FROM context_entries c WHERE c.session_id = s.id) AS context_count,
          (SELECT COUNT(*) FROM messages m WHERE m.to_session = s.id AND m.status = 'pending') AS pending_inbox
        FROM sessions s

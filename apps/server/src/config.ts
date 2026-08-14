@@ -80,8 +80,8 @@ function finalize(dataDir: string, scope: Scope): Config {
 export const DEFAULT_HTTP_HOST = "127.0.0.1";
 export const DEFAULT_HTTP_PORT = 9527;
 
-/** Heartbeat staleness threshold in ms (5 minutes). */
-export const STALE_AFTER_MS = 5 * 60 * 1000;
+/** Heartbeat staleness threshold in ms (2 minutes; MCP processes beat every 30s). */
+export const STALE_AFTER_MS = 2 * 60 * 1000;
 
 /** Default list/query limits. */
 export const DEFAULT_LIMIT = 50;

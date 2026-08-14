@@ -71,6 +71,18 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
 
   logger.info({ sessionId, dataDir: config.dataDir, scope: config.scope }, "mcp starting");
 
+  // Keep this session marked active for as long as the MCP process lives,
+  // even when no tool calls happen. Process exit stops the heartbeat and the
+  // session goes stale after STALE_AFTER_MS (4 missed 30s beats).
+  const beat = setInterval(() => {
+    try {
+      heartbeat(db, sessionId);
+    } catch {
+      // transient sqlite lock contention — next tick retries
+    }
+  }, 30_000);
+  beat.unref();
+
   const server = new McpServer(
     {
       name: "muiltchat",

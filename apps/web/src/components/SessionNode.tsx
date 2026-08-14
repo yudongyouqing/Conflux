@@ -8,6 +8,7 @@ export interface SessionNodeData {
   context_count: number;
   pending_inbox: number;
   conversation_count?: number;
+  last_heartbeat_at?: string;
   [key: string]: unknown;
 }
 
@@ -28,6 +29,19 @@ export type SessionNodeType = Node<SessionNodeData>;
 export function SessionNode({ data, selected, dragging }: NodeProps) {
   const d = data as SessionNodeData;
   const isAgent = d.type === "agent";
+
+  // Seconds since the last heartbeat — drives the "live" feel on the graph.
+  const ageSec = d.last_heartbeat_at
+    ? Math.max(0, Math.round((Date.now() - new Date(d.last_heartbeat_at).getTime()) / 1000))
+    : null;
+  const ageLabel =
+    ageSec === null
+      ? null
+      : ageSec < 60
+        ? `${ageSec}s`
+        : ageSec < 3600
+          ? `${Math.floor(ageSec / 60)}m`
+          : `${Math.floor(ageSec / 3600)}h`;
 
   return (
     <div
@@ -66,6 +80,16 @@ export function SessionNode({ data, selected, dragging }: NodeProps) {
         {d.context_count > 0 && (
           <span className="flex items-center gap-0.5">
             <FileText size={10} /> {d.context_count}
+          </span>
+        )}
+        {d.status === "active" && ageLabel && (
+          <span
+            className={`flex items-center gap-0.5 ${
+              (ageSec ?? 0) < 60 ? "text-emerald-500" : "text-gray-400"
+            }`}
+            title={`最后心跳 ${ageLabel} 前`}
+          >
+            {(ageSec ?? 0) < 60 ? "●" : "○"} {ageLabel}
           </span>
         )}
         {d.pending_inbox > 0 && (
