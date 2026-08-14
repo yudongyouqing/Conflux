@@ -25,6 +25,7 @@ import {
 } from "../core/messages.js";
 import { getGraph } from "../core/graph.js";
 import { logAudit } from "../core/audit.js";
+import { getClaudePid, findSessionByClaudePid, deleteUnreferencedSession } from "../core/live.js";
 import { logger } from "../log.js";
 
 const INSTRUCTIONS = `
@@ -55,7 +56,7 @@ export interface McpServerOptions {
 export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
   const config = resolveConfig(opts.scope ?? "global", opts.overrideDataDir);
   const db: DB = openDb(config);
-  const sessionId = uuidv4();
+  let sessionId = uuidv4();
   const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
   // Auto-register immediately so the session is visible in the graph
@@ -71,11 +72,32 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
 
   logger.info({ sessionId, dataDir: config.dataDir, scope: config.scope }, "mcp starting");
 
+  // If the Claude Code hooks integration registered a session for this same
+  // Claude Code process (matched by pid), adopt it: our tools then act as
+  // that conversation-id-keyed session, and the temp uuid node is removed.
+  // Best-effort — without hooks installed we keep the temp node.
+  let adopted = false;
+  const tryAdopt = () => {
+    if (adopted) return;
+    const pid = getClaudePid();
+    if (pid === null) return;
+    const target = findSessionByClaudePid(db, pid);
+    if (!target) return; // hook hasn't fired yet — retry on the next tick
+    adopted = true;
+    if (target.id === sessionId) return;
+    const oldId = sessionId;
+    sessionId = target.id;
+    deleteUnreferencedSession(db, oldId);
+    logger.info({ claudePid: pid, sessionId, oldId }, "mcp adopted hook-registered session");
+  };
+  tryAdopt();
+
   // Keep this session marked active for as long as the MCP process lives,
   // even when no tool calls happen. Process exit stops the heartbeat and the
   // session goes stale after STALE_AFTER_MS (4 missed 30s beats).
   const beat = setInterval(() => {
     try {
+      tryAdopt();
       heartbeat(db, sessionId);
     } catch {
       // transient sqlite lock contention — next tick retries
