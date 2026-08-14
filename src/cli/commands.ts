@@ -30,16 +30,17 @@ import {
   type ModelConfig,
 } from "../core/agents.js";
 import { logAudit, queryAudit } from "../core/audit.js";
-import { logger } from "../log.js";
 
 /**
  * Build the CLI command tree.
  *
  * Each leaf command runs against either:
- *   - a local SQLite file (default), OR
- *   - a remote HTTP server (when --http is passed)
+ *   - a local SQLite file (default): the action's local() closure calls the
+ *     core function directly — no HTTP routing is involved
+ *   - a remote HTTP server (when --http is passed): runOp falls back to fetch()
  *
- * In remote mode we issue simple fetch() calls to the HTTP API.
+ * Adding a new endpoint no longer requires touching two places: the core
+ * function lives in the local() closure, and only --http mode needs the path.
  */
 export function buildCli(): Command {
   const program = new Command();
@@ -62,11 +63,13 @@ export function buildCli(): Command {
   program
     .command("mcp")
     .description("run the stdio MCP server (Claude Code spawns this)")
-    .action(async () => {
+    .action(async function (this: Command) {
       const { runMcpServer } = await import("../mcp/server.js");
-      const opts = program.opts();
-      const scope = normaliseScope(opts.scope);
-      await runMcpServer({ scope, overrideDataDir: opts.dataDir });
+      const o = this.optsWithGlobals();
+      await runMcpServer({
+        scope: normaliseScope(o.scope),
+        overrideDataDir: o.dataDir,
+      });
     });
 
   // serve -----------------------------------------------------------
@@ -75,16 +78,14 @@ export function buildCli(): Command {
     .description("run the HTTP server")
     .option("--host <host>", "bind host", DEFAULT_HTTP_HOST)
     .option("--port <port>", "bind port", String(DEFAULT_HTTP_PORT))
-    .action(async () => {
+    .action(async function (this: Command) {
       const { startHttpServer } = await import("../http/server.js");
-      const opts = program.opts();
-      const serveOpts = program.commands.find((c) => c.name() === "serve")!.opts();
-      const scope = normaliseScope(opts.scope);
+      const o = this.optsWithGlobals();
       await startHttpServer({
-        host: serveOpts.host,
-        port: Number(serveOpts.port),
-        scope,
-        overrideDataDir: opts.dataDir,
+        host: o.host,
+        port: Number(o.port),
+        scope: normaliseScope(o.scope),
+        overrideDataDir: o.dataDir,
       });
     });
 
@@ -92,10 +93,9 @@ export function buildCli(): Command {
   program
     .command("path")
     .description("print the resolved data directory and db file")
-    .action(() => {
-      const opts = program.opts();
-      const scope = normaliseScope(opts.scope);
-      const cfg = resolveConfig(scope, opts.dataDir);
+    .action(function (this: Command) {
+      const o = this.optsWithGlobals();
+      const cfg = resolveConfig(normaliseScope(o.scope), o.dataDir);
       console.log(JSON.stringify(cfg, null, 2));
     });
 
@@ -104,13 +104,14 @@ export function buildCli(): Command {
     .command("graph")
     .description("show the session graph (nodes + edges)")
     .option("--status <status>", '"active" | "stale" | "ended" | "all"', "active")
-    .action(async () => {
-      const graphCmd = program.commands.find((c) => c.name() === "graph")!;
-      const localOpts = graphCmd.opts();
-      const res = await run(
+    .action(async function (this: Command) {
+      const o = this.optsWithGlobals();
+      const status = o.status ?? "active";
+      const res = await runOp(
         program,
+        () => getGraph(openDbFrom(o), { status }),
         "GET",
-        `/graph?status=${encodeURIComponent(localOpts.status ?? "active")}`
+        `/graph?status=${encodeURIComponent(status)}`
       );
       console.log(JSON.stringify(res, null, 2));
     });
@@ -122,10 +123,15 @@ export function buildCli(): Command {
     .command("list")
     .description("list registered sessions")
     .option("--status <status>", '"active" | "stale" | "ended" | "all"', "active")
-    .action(async () => {
-      const opts = sessions.opts();
-      const localOpts = program.commands.find((c) => c.name() === "sessions")!.commands.find((c) => c.name() === "list")!.opts();
-      const res = await run(program, "GET", `/sessions?status=${encodeURIComponent(localOpts.status ?? "active")}`);
+    .action(async function (this: Command) {
+      const o = this.optsWithGlobals();
+      const status = o.status ?? "active";
+      const res = await runOp(
+        program,
+        () => ({ sessions: listSessions(openDbFrom(o), { status }) }),
+        "GET",
+        `/sessions?status=${encodeURIComponent(status)}`
+      );
       console.log(JSON.stringify(res, null, 2));
     });
 
@@ -134,12 +140,32 @@ export function buildCli(): Command {
     .description("register a session")
     .requiredOption("--name <name>")
     .option("--desc <description>")
-    .action(async () => {
-      const localOpts = sessions.commands.find((c) => c.name() === "register")!.opts();
-      const res = await run(program, "POST", `/sessions/register`, {
-        name: localOpts.name,
-        description: localOpts.desc,
-      });
+    .action(async function (this: Command) {
+      const o = this.optsWithGlobals();
+      const res = await runOp(
+        program,
+        () => {
+          const db = openDbFrom(o);
+          const sid = resolveCliSessionId(db);
+          const session = registerSession(db, {
+            id: sid,
+            name: o.name,
+            description: o.desc ?? null,
+            project_dir: process.env.CLAUDE_PROJECT_DIR || process.cwd(),
+          });
+          logAudit(db, {
+            caller_session: sid,
+            interface: "cli",
+            action: "register_session",
+            args: { name: o.name, description: o.desc },
+            result: { session_id: sid },
+          });
+          return { session_id: sid, session };
+        },
+        "POST",
+        "/sessions/register",
+        { name: o.name, description: o.desc }
+      );
       console.log(JSON.stringify(res, null, 2));
     });
 
@@ -147,18 +173,24 @@ export function buildCli(): Command {
     .command("end")
     .description("mark a session as ended")
     .requiredOption("--id <id>")
-    .action(async () => {
-      const localOpts = sessions.commands.find((c) => c.name() === "end")!.opts();
-      await runLocalOrRemote(
-        program,
-        () => {
-          const db = openDbForCli(program);
-          endSession(db, localOpts.id);
-          logAudit(db, { caller_session: localOpts.id, interface: "cli", action: "end_session", args: { id: localOpts.id }, result: { ok: true } });
-          return { ok: true };
-        },
-        async () => ({ ok: true }) // no dedicated endpoint; sessions naturally go stale
-      ).then((r) => console.log(JSON.stringify(r, null, 2)));
+    .action(function (this: Command) {
+      const o = this.optsWithGlobals();
+      // No dedicated HTTP endpoint exists; remote sessions naturally go stale.
+      const res = o.http
+        ? { ok: true }
+        : (() => {
+            const db = openDbFrom(o);
+            endSession(db, o.id);
+            logAudit(db, {
+              caller_session: o.id,
+              interface: "cli",
+              action: "end_session",
+              args: { id: o.id },
+              result: { ok: true },
+            });
+            return { ok: true };
+          })();
+      console.log(JSON.stringify(res, null, 2));
     });
 
   // context ---------------------------------------------------------
@@ -170,39 +202,138 @@ export function buildCli(): Command {
     .requiredOption("--title <title>")
     .requiredOption("--content <content>")
     .option("--tags <tags>", "comma-separated tags")
-    .action(async () => {
-      const localOpts = context.commands.find((c) => c.name() === "publish")!.opts();
-      const tags = localOpts.tags ? String(localOpts.tags).split(",").map((s: string) => s.trim()).filter(Boolean) : undefined;
-      const res = await run(program, "POST", `/context`, {
-        title: localOpts.title,
-        content: localOpts.content,
-        tags,
-      });
+    .action(async function (this: Command) {
+      const o = this.optsWithGlobals();
+      const tags = parseTags(o.tags);
+      const res = await runOp(
+        program,
+        () => {
+          const db = openDbFrom(o);
+          const sid = resolveCliSessionId(db);
+          const entry = publishContext(db, {
+            session_id: sid,
+            title: o.title,
+            content: o.content,
+            tags: tags ?? null,
+          });
+          logAudit(db, {
+            caller_session: sid,
+            interface: "cli",
+            action: "publish_context",
+            args: { title: o.title, tags },
+            result: { entry_id: entry.id },
+          });
+          return { entry };
+        },
+        "POST",
+        "/context",
+        { title: o.title, content: o.content, tags }
+      );
       console.log(JSON.stringify(res, null, 2));
     });
 
   context
     .command("list-mine")
     .description("list my session's published context")
-    .action(async () => {
-      const res = await run(program, "GET", `/context/mine`);
+    .action(async function (this: Command) {
+      const o = this.optsWithGlobals();
+      const res = await runOp(
+        program,
+        () => {
+          const db = openDbFrom(o);
+          const sid = resolveCliSessionId(db);
+          const entries = listMyContext(db, sid);
+          logAudit(db, {
+            caller_session: sid,
+            interface: "cli",
+            action: "list_my_context",
+            args: {},
+            result: { count: entries.length },
+          });
+          return { entries };
+        },
+        "GET",
+        "/context/mine"
+      );
       console.log(JSON.stringify(res, null, 2));
     });
 
   context
     .command("query")
+    .description("full-text search across published context")
     .argument("[query]", "FTS query")
     .option("--session <id>", "restrict to a session")
     .option("--tags <tags>", "comma-separated tags")
     .option("--limit <n>", "max results", "50")
-    .action(async (query: string | undefined) => {
-      const localOpts = context.commands.find((c) => c.name() === "query")!.opts();
+    .action(async function (this: Command, query: string | undefined) {
+      const o = this.optsWithGlobals();
+      const tags = parseTags(o.tags);
+      const args = {
+        query,
+        session_id: o.session,
+        tags,
+        limit: o.limit ? Number(o.limit) : undefined,
+      };
       const qs = new URLSearchParams();
       if (query) qs.set("query", query);
-      if (localOpts.session) qs.set("session_id", localOpts.session);
-      if (localOpts.tags) qs.set("tags", localOpts.tags);
-      if (localOpts.limit) qs.set("limit", String(localOpts.limit));
-      const res = await run(program, "GET", `/context/query?${qs.toString()}`);
+      if (o.session) qs.set("session_id", o.session);
+      if (o.tags) qs.set("tags", o.tags);
+      if (o.limit) qs.set("limit", String(o.limit));
+      const res = await runOp(
+        program,
+        () => {
+          const db = openDbFrom(o);
+          const sid = resolveCliSessionId(db);
+          const entries = queryContext(db, args);
+          logAudit(db, {
+            caller_session: sid,
+            interface: "cli",
+            action: "query_context",
+            args,
+            result: { count: entries.length },
+          });
+          return { entries };
+        },
+        "GET",
+        `/context/query?${qs.toString()}`
+      );
+      console.log(JSON.stringify(res, null, 2));
+    });
+
+  context
+    .command("update")
+    .description("update one of your context entries")
+    .requiredOption("--id <id>")
+    .option("--title <title>")
+    .option("--content <content>")
+    .option("--tags <tags>", "comma-separated tags")
+    .action(async function (this: Command) {
+      const o = this.optsWithGlobals();
+      const id = Number(o.id);
+      const tags = parseTags(o.tags);
+      const patch: { title?: string; content?: string; tags?: string[] } = {};
+      if (o.title !== undefined) patch.title = o.title;
+      if (o.content !== undefined) patch.content = o.content;
+      if (tags !== undefined) patch.tags = tags;
+      const res = await runOp(
+        program,
+        () => {
+          const db = openDbFrom(o);
+          const sid = resolveCliSessionId(db);
+          const entry = updateContext(db, id, sid, patch);
+          logAudit(db, {
+            caller_session: sid,
+            interface: "cli",
+            action: "update_context",
+            args: { id, ...patch },
+            result: entry ? { id: entry.id } : null,
+          });
+          return { entry: entry ?? null };
+        },
+        "PUT",
+        `/context/${id}`,
+        patch
+      );
       console.log(JSON.stringify(res, null, 2));
     });
 
@@ -210,9 +341,27 @@ export function buildCli(): Command {
     .command("delete")
     .description("delete one of your context entries")
     .requiredOption("--id <id>")
-    .action(async () => {
-      const localOpts = context.commands.find((c) => c.name() === "delete")!.opts();
-      const res = await run(program, "DELETE", `/context/${localOpts.id}`);
+    .action(async function (this: Command) {
+      const o = this.optsWithGlobals();
+      const id = Number(o.id);
+      const res = await runOp(
+        program,
+        () => {
+          const db = openDbFrom(o);
+          const sid = resolveCliSessionId(db);
+          const ok = deleteContext(db, id, sid);
+          logAudit(db, {
+            caller_session: sid,
+            interface: "cli",
+            action: "delete_context",
+            args: { id },
+            result: { ok },
+          });
+          return { deleted: ok };
+        },
+        "DELETE",
+        `/context/${id}`
+      );
       console.log(JSON.stringify(res, null, 2));
     });
 
@@ -229,28 +378,69 @@ export function buildCli(): Command {
     .option("--desc <description>")
     .option("--temperature <n>", "sampling temperature", parseFloat)
     .option("--max-tokens <n>", "max output tokens", parseInt)
-    .action(async () => {
-      const localOpts = agents.commands.find((c) => c.name() === "create")!.opts();
+    .action(async function (this: Command) {
+      const o = this.optsWithGlobals();
       const modelConfig: ModelConfig = {
-        provider: localOpts.provider,
-        model: localOpts.model,
+        provider: o.provider,
+        model: o.model,
       };
-      if (localOpts.temperature !== undefined) modelConfig.temperature = localOpts.temperature;
-      if (localOpts.maxTokens !== undefined) modelConfig.max_tokens = localOpts.maxTokens;
-      const res = await run(program, "POST", `/agents`, {
-        name: localOpts.name,
-        system_prompt: localOpts.prompt,
-        model_config: modelConfig,
-        description: localOpts.desc,
-      });
+      if (o.temperature !== undefined) modelConfig.temperature = o.temperature;
+      if (o.maxTokens !== undefined) modelConfig.max_tokens = o.maxTokens;
+      const res = await runOp(
+        program,
+        () => {
+          const db = openDbFrom(o);
+          const sid = resolveCliSessionId(db);
+          const agent = createAgent(db, {
+            name: o.name,
+            system_prompt: o.prompt,
+            model_config: modelConfig,
+            description: o.desc ?? null,
+          });
+          logAudit(db, {
+            caller_session: sid,
+            interface: "cli",
+            action: "create_agent",
+            args: { name: o.name, provider: o.provider, model: o.model },
+            result: { id: agent.id },
+          });
+          return { agent };
+        },
+        "POST",
+        "/agents",
+        {
+          name: o.name,
+          system_prompt: o.prompt,
+          model_config: modelConfig,
+          description: o.desc,
+        }
+      );
       console.log(JSON.stringify(res, null, 2));
     });
 
   agents
     .command("list")
     .description("list all agents")
-    .action(async () => {
-      const res = await run(program, "GET", `/agents`);
+    .action(async function (this: Command) {
+      const o = this.optsWithGlobals();
+      const res = await runOp(
+        program,
+        () => {
+          const db = openDbFrom(o);
+          const sid = resolveCliSessionId(db);
+          const agentList = listAgents(db);
+          logAudit(db, {
+            caller_session: sid,
+            interface: "cli",
+            action: "list_agents",
+            args: {},
+            result: { count: agentList.length },
+          });
+          return { agents: agentList };
+        },
+        "GET",
+        "/agents"
+      );
       console.log(JSON.stringify(res, null, 2));
     });
 
@@ -258,9 +448,27 @@ export function buildCli(): Command {
     .command("delete")
     .description("delete an agent")
     .requiredOption("--id <id>")
-    .action(async () => {
-      const localOpts = agents.commands.find((c) => c.name() === "delete")!.opts();
-      const res = await run(program, "DELETE", `/agents/${localOpts.id}`);
+    .action(async function (this: Command) {
+      const o = this.optsWithGlobals();
+      const id = Number(o.id);
+      const res = await runOp(
+        program,
+        () => {
+          const db = openDbFrom(o);
+          const sid = resolveCliSessionId(db);
+          const ok = deleteAgent(db, id);
+          logAudit(db, {
+            caller_session: sid,
+            interface: "cli",
+            action: "delete_agent",
+            args: { id },
+            result: { ok },
+          });
+          return { deleted: ok };
+        },
+        "DELETE",
+        `/agents/${id}`
+      );
       console.log(JSON.stringify(res, null, 2));
     });
 
@@ -272,20 +480,57 @@ export function buildCli(): Command {
     .description("ask another session a question")
     .requiredOption("--to <session>")
     .argument("<question>")
-    .action(async (question: string) => {
-      const localOpts = msg.commands.find((c) => c.name() === "ask")!.opts();
-      const res = await run(program, "POST", `/messages/ask`, {
-        to_session: localOpts.to,
-        question,
-      });
+    .action(async function (this: Command, question: string) {
+      const o = this.optsWithGlobals();
+      const res = await runOp(
+        program,
+        () => {
+          const db = openDbFrom(o);
+          const sid = resolveCliSessionId(db);
+          const m = askSession(db, {
+            from_session: sid,
+            to_session: o.to,
+            question,
+          });
+          logAudit(db, {
+            caller_session: sid,
+            interface: "cli",
+            action: "ask_session",
+            args: { to_session: o.to },
+            result: { message_id: m.id },
+          });
+          return { message: m };
+        },
+        "POST",
+        "/messages/ask",
+        { to_session: o.to, question }
+      );
       console.log(JSON.stringify(res, null, 2));
     });
 
   msg
     .command("inbox")
     .description("check questions addressed to your session")
-    .action(async () => {
-      const res = await run(program, "GET", `/messages/inbox`);
+    .action(async function (this: Command) {
+      const o = this.optsWithGlobals();
+      const res = await runOp(
+        program,
+        () => {
+          const db = openDbFrom(o);
+          const sid = resolveCliSessionId(db);
+          const inbox = checkInbox(db, sid);
+          logAudit(db, {
+            caller_session: sid,
+            interface: "cli",
+            action: "check_inbox",
+            args: {},
+            result: { count: inbox.length },
+          });
+          return { inbox };
+        },
+        "GET",
+        "/messages/inbox"
+      );
       console.log(JSON.stringify(res, null, 2));
     });
 
@@ -294,9 +539,28 @@ export function buildCli(): Command {
     .description("reply to a question")
     .requiredOption("--id <id>")
     .argument("<reply>")
-    .action(async (reply: string) => {
-      const localOpts = msg.commands.find((c) => c.name() === "reply")!.opts();
-      const res = await run(program, "POST", `/messages/${localOpts.id}/reply`, { reply });
+    .action(async function (this: Command, reply: string) {
+      const o = this.optsWithGlobals();
+      const id = Number(o.id);
+      const res = await runOp(
+        program,
+        () => {
+          const db = openDbFrom(o);
+          const sid = resolveCliSessionId(db);
+          const m = replyAsk(db, id, sid, reply);
+          logAudit(db, {
+            caller_session: sid,
+            interface: "cli",
+            action: "reply_ask",
+            args: { id },
+            result: { message_id: m.id },
+          });
+          return { message: m };
+        },
+        "POST",
+        `/messages/${id}/reply`,
+        { reply }
+      );
       console.log(JSON.stringify(res, null, 2));
     });
 
@@ -304,10 +568,27 @@ export function buildCli(): Command {
     .command("replies")
     .description("check replies to your questions")
     .option("--since <iso>", "only replies after this ISO timestamp")
-    .action(async () => {
-      const localOpts = msg.commands.find((c) => c.name() === "replies")!.opts();
-      const qs = localOpts.since ? `?since=${encodeURIComponent(localOpts.since)}` : "";
-      const res = await run(program, "GET", `/messages/replies${qs}`);
+    .action(async function (this: Command) {
+      const o = this.optsWithGlobals();
+      const qs = o.since ? `?since=${encodeURIComponent(o.since)}` : "";
+      const res = await runOp(
+        program,
+        () => {
+          const db = openDbFrom(o);
+          const sid = resolveCliSessionId(db);
+          const replies = checkReplies(db, sid, o.since);
+          logAudit(db, {
+            caller_session: sid,
+            interface: "cli",
+            action: "check_replies",
+            args: { since: o.since },
+            result: { count: replies.length },
+          });
+          return { replies };
+        },
+        "GET",
+        `/messages/replies${qs}`
+      );
       console.log(JSON.stringify(res, null, 2));
     });
 
@@ -319,15 +600,27 @@ export function buildCli(): Command {
     .option("--status <status>", '"pending" | "replied" | "read" | "all"')
     .option("--since <iso>", "only messages after this ISO timestamp")
     .option("--limit <n>", "max results", "50")
-    .action(async () => {
-      const localOpts = msg.commands.find((c) => c.name() === "list")!.opts();
+    .action(async function (this: Command) {
+      const o = this.optsWithGlobals();
+      const args = {
+        from_session: o.from,
+        to_session: o.to,
+        status: o.status,
+        since: o.since,
+        limit: o.limit ? Number(o.limit) : undefined,
+      };
       const qs = new URLSearchParams();
-      if (localOpts.from) qs.set("from", localOpts.from);
-      if (localOpts.to) qs.set("to", localOpts.to);
-      if (localOpts.status) qs.set("status", localOpts.status);
-      if (localOpts.since) qs.set("since", localOpts.since);
-      if (localOpts.limit) qs.set("limit", String(localOpts.limit));
-      const res = await run(program, "GET", `/messages?${qs.toString()}`);
+      if (o.from) qs.set("from", o.from);
+      if (o.to) qs.set("to", o.to);
+      if (o.status) qs.set("status", o.status);
+      if (o.since) qs.set("since", o.since);
+      if (o.limit) qs.set("limit", String(o.limit));
+      const res = await runOp(
+        program,
+        () => ({ messages: listMessages(openDbFrom(o), args) }),
+        "GET",
+        `/messages?${qs.toString()}`
+      );
       console.log(JSON.stringify(res, null, 2));
     });
 
@@ -341,15 +634,26 @@ export function buildCli(): Command {
       new Option("--interface <iface>").choices(["mcp", "http", "cli"])
     )
     .option("--limit <n>", "max results", "50")
-    .action(async () => {
-      const auditCmd = program.commands.find((c) => c.name() === "audit")!;
-      const localOpts = auditCmd.opts();
+    .action(async function (this: Command) {
+      const o = this.optsWithGlobals();
       const qs = new URLSearchParams();
-      if (localOpts.session) qs.set("session", localOpts.session);
-      if (localOpts.action) qs.set("action", localOpts.action);
-      if (localOpts.interface) qs.set("interface", localOpts.interface);
-      if (localOpts.limit) qs.set("limit", String(localOpts.limit));
-      const res = await run(program, "GET", `/audit?${qs.toString()}`);
+      if (o.session) qs.set("session", o.session);
+      if (o.action) qs.set("action", o.action);
+      if (o.interface) qs.set("interface", o.interface);
+      if (o.limit) qs.set("limit", String(o.limit));
+      const res = await runOp(
+        program,
+        () => ({
+          entries: queryAudit(openDbFrom(o), {
+            session: o.session,
+            action: o.action,
+            iface: o.interface,
+            limit: o.limit ? Number(o.limit) : undefined,
+          }),
+        }),
+        "GET",
+        `/audit?${qs.toString()}`
+      );
       console.log(JSON.stringify(res, null, 2));
     });
 
@@ -364,165 +668,43 @@ function normaliseScope(s: string | undefined): Scope {
   return "global"; // "auto" + anything else falls back to global resolution
 }
 
-function openDbForCli(program: Command): DB {
-  const opts = program.opts();
-  const scope = normaliseScope(opts.scope);
-  const cfg = resolveConfig(scope, opts.dataDir);
+/** Options available on every command via optsWithGlobals(). */
+interface CliOpts {
+  dataDir?: string;
+  scope?: string;
+  http?: string;
+  logLevel?: string;
+}
+
+function openDbFrom(o: CliOpts): DB {
+  const cfg = resolveConfig(normaliseScope(o.scope), o.dataDir);
   return openDb(cfg);
 }
 
 /**
- * Run a command in either remote (HTTP) or local (SQLite) mode.
- * HTTP is used when --http is provided; otherwise local.
+ * Execute one CLI operation in local or remote mode.
  *
- * The CLI session id resolves from MUILTCHAT_SESSION_ID env var (default:
- * a fresh UUID printed to stderr so the user can set it for subsequent calls).
+ * - `--http` passed: fetch() against the remote HTTP server (path is only
+ *   used in this branch).
+ * - otherwise: invoke the `local()` closure, which calls the core function
+ *   directly and logs its own audit entry. No route mirroring involved.
  */
-async function run(
+async function runOp(
   program: Command,
+  local: () => unknown,
   method: string,
   path: string,
   body?: unknown
 ): Promise<unknown> {
   const opts = program.opts();
-  if (opts.logLevel) (await import("../log.js")).setLogLevel(opts.logLevel);
-
+  if (opts.logLevel) {
+    const { setLogLevel } = await import("../log.js");
+    setLogLevel(opts.logLevel);
+  }
   if (opts.http) {
     return remote(opts.http, method, path, body);
   }
-
-  return runLocal(program, method, path, body);
-}
-
-async function runLocal(
-  program: Command,
-  method: string,
-  path: string,
-  body?: unknown
-): Promise<unknown> {
-  const db = openDbForCli(program);
-  const sid = resolveCliSessionId(db);
-  logger.debug({ sid, method, path }, "cli local");
-
-  // Minimal router matching the HTTP surface.
-  if (method === "GET" && path.startsWith("/sessions")) {
-    const status = parseQs(path).get("status") ?? "active";
-    return { sessions: listSessions(db, { status: status as never }) };
-  }
-  if (method === "POST" && path === "/sessions/register") {
-    const b = body as { name: string; description?: string };
-    const session = registerSession(db, {
-      id: sid,
-      name: b.name,
-      description: b.description ?? null,
-      project_dir: process.env.CLAUDE_PROJECT_DIR || process.cwd(),
-    });
-    logAudit(db, { caller_session: sid, interface: "cli", action: "register_session", args: b as Record<string, unknown>, result: { session_id: sid } });
-    return { session_id: sid, session };
-  }
-  if (method === "GET" && path === "/context/mine") {
-    const entries = listMyContext(db, sid);
-    logAudit(db, { caller_session: sid, interface: "cli", action: "list_my_context", args: {}, result: { count: entries.length } });
-    return { entries };
-  }
-  if (method === "GET" && path.startsWith("/context/query")) {
-    const qs = parseQs(path);
-    const entries = queryContext(db, {
-      query: qs.get("query") ?? undefined,
-      session_id: qs.get("session_id") ?? undefined,
-      tags: qs.get("tags") ? qs.get("tags")!.split(",") : undefined,
-      limit: qs.get("limit") ? Number(qs.get("limit")) : undefined,
-    });
-    logAudit(db, { caller_session: sid, interface: "cli", action: "query_context", args: Object.fromEntries(qs), result: { count: entries.length } });
-    return { entries };
-  }
-  if (method === "POST" && path === "/context") {
-    const b = body as { title: string; content: string; tags?: string[] };
-    const entry = publishContext(db, { session_id: sid, title: b.title, content: b.content, tags: b.tags ?? null });
-    logAudit(db, { caller_session: sid, interface: "cli", action: "publish_context", args: { title: b.title, tags: b.tags }, result: { entry_id: entry.id } });
-    return { entry };
-  }
-  if (method === "DELETE" && path.startsWith("/context/")) {
-    const id = Number(path.split("/")[2]);
-    const ok = deleteContext(db, id, sid);
-    logAudit(db, { caller_session: sid, interface: "cli", action: "delete_context", args: { id }, result: { ok } });
-    return { deleted: ok };
-  }
-  if (method === "POST" && path === "/messages/ask") {
-    const b = body as { to_session: string; question: string };
-    const m = askSession(db, { from_session: sid, to_session: b.to_session, question: b.question });
-    logAudit(db, { caller_session: sid, interface: "cli", action: "ask_session", args: { to_session: b.to_session }, result: { message_id: m.id } });
-    return { message: m };
-  }
-  if (method === "GET" && path === "/messages/inbox") {
-    const inbox = checkInbox(db, sid);
-    logAudit(db, { caller_session: sid, interface: "cli", action: "check_inbox", args: {}, result: { count: inbox.length } });
-    return { inbox };
-  }
-  if (method === "POST" && path.includes("/reply")) {
-    const id = Number(path.split("/")[2]);
-    const b = body as { reply: string };
-    const m = replyAsk(db, id, sid, b.reply);
-    logAudit(db, { caller_session: sid, interface: "cli", action: "reply_ask", args: { id }, result: { message_id: m.id } });
-    return { message: m };
-  }
-  if (method === "GET" && path.startsWith("/messages/replies")) {
-    const qs = parseQs(path);
-    const replies = checkReplies(db, sid, qs.get("since") ?? undefined);
-    logAudit(db, { caller_session: sid, interface: "cli", action: "check_replies", args: { since: qs.get("since") }, result: { count: replies.length } });
-    return { replies };
-  }
-  if (method === "GET" && path === "/agents") {
-    const agentList = listAgents(db);
-    logAudit(db, { caller_session: sid, interface: "cli", action: "list_agents", args: {}, result: { count: agentList.length } });
-    return { agents: agentList };
-  }
-  if (method === "POST" && path === "/agents") {
-    const b = body as { name: string; system_prompt: string; model_config: ModelConfig; description?: string };
-    const agent = createAgent(db, {
-      name: b.name,
-      system_prompt: b.system_prompt,
-      model_config: b.model_config,
-      description: b.description ?? null,
-    });
-    logAudit(db, { caller_session: sid, interface: "cli", action: "create_agent", args: { name: b.name, provider: b.model_config.provider, model: b.model_config.model }, result: { id: agent.id } });
-    return { agent };
-  }
-  if (method === "DELETE" && path.startsWith("/agents/")) {
-    const id = Number(path.split("/")[2]);
-    const ok = deleteAgent(db, id);
-    logAudit(db, { caller_session: sid, interface: "cli", action: "delete_agent", args: { id }, result: { ok } });
-    return { deleted: ok };
-  }
-  if (method === "GET" && path.startsWith("/graph")) {
-    const qs = parseQs(path);
-    const status = (qs.get("status") ?? "active") as "active" | "stale" | "ended" | "all";
-    const graph = getGraph(db, { status });
-    return graph;
-  }
-  if (method === "GET" && path.startsWith("/messages?")) {
-    const qs = parseQs(path);
-    const messages = listMessages(db, {
-      from_session: qs.get("from") ?? undefined,
-      to_session: qs.get("to") ?? undefined,
-      status: (qs.get("status") as never) ?? undefined,
-      since: qs.get("since") ?? undefined,
-      limit: qs.get("limit") ? Number(qs.get("limit")) : undefined,
-    });
-    return { messages };
-  }
-  if (method === "GET" && path.startsWith("/audit")) {
-    const qs = parseQs(path);
-    return {
-      entries: queryAudit(db, {
-        session: qs.get("session") ?? undefined,
-        action: qs.get("action") ?? undefined,
-        iface: (qs.get("interface") as "mcp" | "http" | "cli" | undefined) ?? undefined,
-        limit: qs.get("limit") ? Number(qs.get("limit")) : undefined,
-      }),
-    };
-  }
-  throw new Error(`unsupported local route: ${method} ${path}`);
+  return local();
 }
 
 async function remote(
@@ -554,19 +736,13 @@ async function remote(
   return json;
 }
 
-async function runLocalOrRemote(
-  program: Command,
-  local: () => unknown,
-  remoteFn: () => Promise<unknown>
-): Promise<unknown> {
-  const opts = program.opts();
-  if (opts.http) return remoteFn();
-  return local();
-}
-
-function parseQs(pathWithQs: string): URLSearchParams {
-  const qIdx = pathWithQs.indexOf("?");
-  return new URLSearchParams(qIdx >= 0 ? pathWithQs.slice(qIdx + 1) : "");
+function parseTags(raw: string | undefined): string[] | undefined {
+  return raw
+    ? String(raw)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : undefined;
 }
 
 /**
