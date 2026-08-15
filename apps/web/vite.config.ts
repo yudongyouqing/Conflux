@@ -18,6 +18,7 @@ export default defineConfig({
       "/audit": API_TARGET,
       "/healthz": API_TARGET,
       "/docs": API_TARGET,
+      "/web": API_TARGET,
     },
   },
 });

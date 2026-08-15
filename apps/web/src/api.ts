@@ -56,6 +56,12 @@ export const api = {
   getSessions: (status = "all") =>
     get<{ sessions: SessionSummary[] }>(`/sessions?status=${encodeURIComponent(status)}`),
 
+  getPeerMessages: (peer: string) =>
+    get<{ messages: Message[] }>(`/web/peer-messages?peer=${encodeURIComponent(peer)}`),
+
+  webAsk: (body: { to_session: string; question: string }) =>
+    post<{ message: Message }>("/web/ask", body),
+
   getContext: (params?: { query?: string; session_id?: string; limit?: number }) => {
     const qs = new URLSearchParams();
     if (params?.query) qs.set("query", params.query);

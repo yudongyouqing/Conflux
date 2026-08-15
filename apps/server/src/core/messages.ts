@@ -110,6 +110,21 @@ export function checkReplies(
  * Global message query with optional filters. Used by the frontend message-flow
  * viewer. Unlike checkInbox/checkReplies, this does NOT mutate status.
  */
+/**
+ * Two-way message flow between two sessions (web console ↔ peer), oldest
+ * first — used by the web Drawer conversation view.
+ */
+export function listPeerMessages(db: DB, a: string, b: string, limit = 200): Message[] {
+  const rows = db
+    .prepare(
+      `SELECT * FROM messages
+       WHERE (from_session = ? AND to_session = ?) OR (from_session = ? AND to_session = ?)
+       ORDER BY id DESC LIMIT ?`
+    )
+    .all(a, b, b, a, Math.min(Math.max(limit, 1), 500)) as MessageRow[];
+  return rows.map(toMsg).reverse();
+}
+
 export function listMessages(
   db: DB,
   opts: {

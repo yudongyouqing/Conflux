@@ -112,6 +112,17 @@ describe("handleHookEvent title sync", () => {
     assert.equal(getSession(db, sid)!.name, "second line");
     disposeHome(home);
   });
+
+  it("prompt events refresh the description (what the session is doing)", () => {
+    const home = fakeHome();
+    const sid = "dddddddd-eeee-ffff-0000-111111111111";
+    handleHookEvent(db, "prompt", { session_id: sid, cwd: "C:\\work\\d", prompt: "first task" }, join(home));
+    handleHookEvent(db, "prompt", { session_id: sid, cwd: "C:\\work\\d", prompt: "now doing something else" }, join(home));
+    const s = getSession(db, sid)!;
+    assert.equal(s.name, "first task"); // name stable after first prompt
+    assert.equal(s.description, "now doing something else"); // description tracks latest
+    disposeHome(home);
+  });
 });
 
 describe("deleteUnreferencedSession", () => {

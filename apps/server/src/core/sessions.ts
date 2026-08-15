@@ -47,6 +47,11 @@ export function renameSession(db: DB, id: string, name: string): void {
   db.prepare(`UPDATE sessions SET name = ? WHERE id = ?`).run(name, id);
 }
 
+/** Update the short "what is this session doing" blurb (prompt excerpt). */
+export function setSessionDescription(db: DB, id: string, description: string): void {
+  db.prepare(`UPDATE sessions SET description = ? WHERE id = ?`).run(description, id);
+}
+
 /**
  * Lazily mark sessions stale if their last heartbeat is older than STALE_AFTER_MS.
  * Cheap: one UPDATE per call. Called from list_sessions / query_context.
@@ -65,7 +70,11 @@ export function listSessions(
 ): SessionSummary[] {
   markStaleSessions(db);
   const status = opts.status ?? "active";
-  const where = status === "all" ? "" : `WHERE s.status = ?`;
+  // MCP placeholder (temp) nodes are UUID noise — hidden from every listing.
+  const where =
+    status === "all"
+      ? `WHERE COALESCE(s.metadata, '') NOT LIKE '%"temp":true%'`
+      : `WHERE s.status = ? AND COALESCE(s.metadata, '') NOT LIKE '%"temp":true%'`;
   const params: string[] = status === "all" ? [] : [status];
   const rows = db
     .prepare(

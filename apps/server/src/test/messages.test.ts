@@ -8,6 +8,7 @@ import {
   checkInbox,
   checkReplies,
   listMessages,
+  listPeerMessages,
 } from "../core/messages.js";
 import { recordEdge, getGraph } from "../core/graph.js";
 import { registerSession } from "../core/sessions.js";
@@ -16,6 +17,21 @@ const { db, cleanup } = makeDb();
 after(cleanup);
 registerSession(db, { id: "a", name: "a" });
 registerSession(db, { id: "b", name: "b" });
+registerSession(db, { id: "peer-x", name: "x" });
+registerSession(db, { id: "peer-y", name: "y" });
+
+test("listPeerMessages returns both directions, oldest first", () => {
+  askSession(db, { from_session: "peer-x", to_session: "peer-y", question: "out 1" });
+  askSession(db, { from_session: "peer-y", to_session: "peer-x", question: "in 1" });
+  askSession(db, { from_session: "peer-x", to_session: "peer-y", question: "out 2" });
+
+  // only the peer pair's flow comes back (a↔b traffic from other tests is excluded)
+  const flow = listPeerMessages(db, "peer-x", "peer-y");
+  assert.deepEqual(
+    flow.map((m) => m.question),
+    ["out 1", "in 1", "out 2"]
+  );
+});
 
 test("askSession creates pending message", () => {
   const m = askSession(db, { from_session: "a", to_session: "b", question: "schema?" });

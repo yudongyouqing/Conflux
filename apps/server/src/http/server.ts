@@ -29,6 +29,7 @@ import {
   checkReplies,
   getMessage,
   listMessages,
+  listPeerMessages,
 } from "../core/messages.js";
 import { getGraph } from "../core/graph.js";
 import {
@@ -64,6 +65,24 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   const db: DB = openDb(config);
   const host = opts.host ?? DEFAULT_HTTP_HOST;
   const port = opts.port ?? DEFAULT_HTTP_PORT;
+
+  // ---- Web console identity ----
+  // The browser UI acts as one fixed pseudo-session, so Drawer-originated
+  // asks have a stable FK target and appear in the graph as a single node.
+  const WEB_CONSOLE_ID = "web-console";
+  registerSession(db, {
+    id: WEB_CONSOLE_ID,
+    name: "Web 控制台",
+    description: "浏览器界面身份(从会话详情抽屉发起的对话)",
+  });
+  const consoleBeat = setInterval(() => {
+    try {
+      heartbeat(db, WEB_CONSOLE_ID);
+    } catch {
+      // transient sqlite lock — next tick retries
+    }
+  }, 30_000);
+  consoleBeat.unref();
 
   const app = Fastify({
     logger: false, // we use our own pino sink writing to stderr
@@ -620,6 +639,51 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
       return reply.send(graph);
     } catch (err) {
       return sendError(reply, err);
+    }
+  });
+
+  // GET /web/peer-messages?peer=<id> — two-way flow between the web console and a session
+  app.get<{ Querystring: { peer?: string } }>("/web/peer-messages", {}, async (req, reply) => {
+    const peer = req.query.peer;
+    if (!peer) return reply.code(400).send({ error: "missing peer query param" });
+    try {
+      const messages = listPeerMessages(db, WEB_CONSOLE_ID, peer);
+      return reply.send({ messages });
+    } catch (err) {
+      return sendError(reply, err, WEB_CONSOLE_ID, "web_peer_messages");
+    }
+  });
+
+  // POST /web/ask — ask a session from the web console (Drawer input box)
+  app.post<{ Body: { to_session: string; question: string } }>("/web/ask", {
+    schema: {
+      body: {
+        type: "object",
+        required: ["to_session", "question"],
+        properties: {
+          to_session: { type: "string" },
+          question: { type: "string", maxLength: 20000 },
+        },
+      },
+    },
+  }, async (req, reply) => {
+    try {
+      heartbeat(db, WEB_CONSOLE_ID);
+      const msg = askSession(db, {
+        from_session: WEB_CONSOLE_ID,
+        to_session: req.body.to_session,
+        question: req.body.question,
+      });
+      logAudit(db, {
+        caller_session: WEB_CONSOLE_ID,
+        interface: "http",
+        action: "web_ask",
+        args: { to_session: req.body.to_session },
+        result: { message_id: msg.id },
+      });
+      return reply.send({ message: msg });
+    } catch (err) {
+      return sendError(reply, err, WEB_CONSOLE_ID, "web_ask");
     }
   });
 
