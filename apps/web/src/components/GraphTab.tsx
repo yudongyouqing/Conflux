@@ -151,11 +151,16 @@ export function GraphTab({
       };
 
       if (clusterExpanded) {
+        // Children are real React Flow children (parentId + extent: "parent"):
+        // dragging the cluster container carries them along natively, and
+        // individual children can still be re-arranged inside the container.
         const children = offline.map((n, i) => {
           const node = toSessionNode(n);
+          node.parentId = CLUSTER_ID;
+          node.extent = "parent";
           node.position = {
-            x: clusterPos.x + GRID_PAD_X + (i % cols) * CELL_W,
-            y: clusterPos.y + GRID_PAD_TOP + Math.floor(i / cols) * CELL_H,
+            x: GRID_PAD_X + (i % cols) * CELL_W,
+            y: GRID_PAD_TOP + Math.floor(i / cols) * CELL_H,
           };
           node.zIndex = 0;
           return node;
