@@ -8,6 +8,7 @@ import {
   setSessionDescription,
   getSession,
   heartbeat,
+  pruneAbandonedSessions,
   type Session,
 } from "./sessions.js";
 
@@ -223,6 +224,11 @@ export function handleHookEvent(
       project_dir: payload.cwd ?? existing?.project_dir ?? null,
       metadata: { source: "claude-hook", ...meta, claude_pid: claudePid },
     });
+    // This process previously ran another conversation id that was abandoned
+    // by /resume or /clear before receiving any prompt — reap it now.
+    if (claudePid !== null) {
+      pruneAbandonedSessions(db, { claudePid, keepId: id });
+    }
     return;
   }
 

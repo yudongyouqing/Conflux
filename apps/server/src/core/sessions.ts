@@ -92,3 +92,66 @@ export function listSessions(
 export function endSession(db: DB, id: string): void {
   db.prepare(`UPDATE sessions SET status = 'ended' WHERE id = ?`).run(id);
 }
+
+// ---- zero-turn session reaping ---------------------------------------------
+
+/**
+ * Claude Code assigns a fresh conversation id on every start / /resume /
+ * /clear and fires SessionStart for it — so opening a terminal and immediately
+ * /resume-ing away leaves a row that never received a single prompt. Those
+ * rows (and MCP temp placeholders whose process died) are pure noise.
+ *
+ * A session is a zero-turn zombie iff ALL of:
+ *   - never named: no `named:true` metadata (set on the first prompt event)
+ *   - still on a default placeholder description, or an MCP temp node
+ *   - nothing references it: no messages, no graph edges, no context entries
+ *
+ * Deleting them is lossless: if the conversation is ever resumed or asked,
+ * the SessionStart hook recreates the row. Two sweep modes:
+ *   - global (default): only rows already marked stale
+ *   - { claudePid }: the same-process predecessors of the session currently
+ *     being registered — the open-then-/resume case, cleaned up instantly
+ *     (no stale wait needed: one process runs one conversation at a time).
+ */
+export function pruneAbandonedSessions(
+  db: DB,
+  opts: { claudePid?: number; keepId?: string } = {}
+): number {
+  const candidates = db
+    .prepare(
+      `SELECT id, status, metadata FROM sessions
+       WHERE COALESCE(metadata, '') NOT LIKE '%"named":true%'
+         AND (
+           description IN ('Claude Code session (hook)', 'Claude Code session (auto-registered)')
+           OR COALESCE(metadata, '') LIKE '%"temp":true%'
+         )`
+    )
+    .all() as { id: string; status: string; metadata: string | null }[];
+
+  let deleted = 0;
+  for (const row of candidates) {
+    if (row.id === "web-console" || row.id === opts.keepId) continue;
+    if (opts.claudePid !== undefined) {
+      let meta: Record<string, unknown> = {};
+      try {
+        meta = row.metadata ? (JSON.parse(row.metadata) as Record<string, unknown>) : {};
+      } catch {
+        // malformed metadata — treat as no pid, skip in pid mode
+      }
+      if (meta.claude_pid !== opts.claudePid) continue;
+    } else if (row.status !== "stale") {
+      continue;
+    }
+    // references re-checked at delete time (guarded, races lose harmlessly)
+    const res = db
+      .prepare(
+        `DELETE FROM sessions WHERE id = ?
+         AND (SELECT COUNT(*) FROM messages WHERE from_session = ? OR to_session = ?) = 0
+         AND (SELECT COUNT(*) FROM edges WHERE from_session = ? OR to_session = ?) = 0
+         AND (SELECT COUNT(*) FROM context_entries WHERE session_id = ?) = 0`
+      )
+      .run(row.id, row.id, row.id, row.id, row.id, row.id);
+    deleted += res.changes;
+  }
+  return deleted;
+}
