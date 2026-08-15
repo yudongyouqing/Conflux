@@ -1,165 +1,109 @@
 # muiltchat
 
-> Cross-session context query and async messaging for AI coding assistants.
+> Cross-session context sharing, async messaging and agent orchestration for AI coding assistants.
 
 AI coding assistants like Claude Code run each session in its own process with
-isolated context. Session A cannot see what session B is doing, and the only
-way to "share" between them is to copy-paste by hand.
+isolated context. Session A cannot see what session B is doing; the only way to
+share is copy-paste by hand. **muiltchat** fixes that — and goes further: you
+can also define internal agents that chat with you and reach out to other
+sessions on their own.
 
-**muiltchat** fixes that. Each session keeps its own context but exposes two
-capabilities to other sessions:
-
-- **query** — search and read context entries another session has published
+- **query** — search context entries another session has published
 - **ask** — fire an async question at another session; it replies later
+- **agents** — create internal agents (system prompt + model), chat with them
+  in the web UI, and let them use cross-session tools autonomously
+- **graph** — see every session and agent as a node, edges = who talked to whom
 
-Zero ops: every session writes to the same SQLite file in WAL mode. No
-database server, no message queue, no broker. Just `npx`.
+Zero ops: everything lives in one SQLite file (WAL mode). No database server,
+no message queue, no broker.
+
+## Repository layout
+
+```
+apps/server          Node.js + TypeScript backend (Fastify HTTP + MCP + CLI)
+apps/web             React 18 + Vite + React Flow dashboard (Dify-style)
+packages/shared      TypeScript types shared by server and web
+```
 
 ## Quick start
 
 ```bash
-# 1. Add muiltchat to your Claude Code project (or home dir)
-cat > .mcp.json <<'EOF'
+git clone <this-repo> muiltchat && cd muiltchat
+npm run setup        # installs all workspaces
+npm run dev:all      # backend (:9527) + web dev server (:5173) concurrently
+```
+
+Open http://localhost:5173 — you get the session graph, message flow and the
+Agents tab. Production mode: `npm start` builds everything and serves the UI
+from the API port (http://localhost:9527).
+
+### Claude Code integration (MCP)
+
+Add to your project's `.mcp.json`:
+
+```json
 {
   "mcpServers": {
     "muiltchat": {
       "command": "npx",
-      "args": ["-y", "muiltchat", "mcp"]
+      "args": ["tsx", "<repo>/apps/server/src/index.ts", "mcp"]
     }
   }
 }
-EOF
-
-# 2. Open two Claude Code sessions in the same project.
-#    In session A: "register yourself and publish what you're working on."
-#    In session B: "search what session A published."
 ```
 
-You can also run muiltchat in HTTP mode for non-MCP clients:
+Each Claude Code session spawns its own MCP process, auto-registers as a node
+in the graph, and gains these tools: `publish_context`, `query_context`,
+`ask_session`, `reply_ask`, `check_inbox`, `check_replies`, `get_graph`.
+
+### Claude Code hooks (session identity + liveness)
+
+MCP alone cannot see the conversation id. Optional hooks close the gap:
 
 ```bash
-npx muiltchat serve --port 9527
-# Then any HTTP client can talk to http://localhost:9527
-# API docs at http://localhost:9527/docs
+npm run mcp -- hooks install    # merges SessionStart/UserPromptSubmit/Stop
+                                # into ~/.claude/settings.json (backup first)
 ```
 
-## Three equivalent front-ends
+With hooks installed: resuming a conversation reactivates the same graph node,
+the first user prompt becomes the node name, and sessions heartbeat every 30s
+so idle-but-open sessions stay alive (offline ones cluster into one node).
 
-Every operation is reachable from MCP, HTTP, and the CLI. All three write to
-the same audit log, so you can verify what happened.
+## Internal agents + chat
 
-| Operation | MCP tool | HTTP | CLI |
-|---|---|---|---|
-| Register a session | `register_session` | `POST /sessions/register` | `muiltchat sessions register` |
-| List sessions | `list_sessions` | `GET /sessions` | `muiltchat sessions list` |
-| Publish context | `publish_context` | `POST /context` | `muiltchat context publish` |
-| Update context | `update_context` | `PUT /context/:id` | (via HTTP/SQLite) |
-| Delete context | `delete_context` | `DELETE /context/:id` | `muiltchat context delete` |
-| List my context | `list_my_context` | `GET /context/mine` | `muiltchat context list-mine` |
-| FTS query | `query_context` | `GET /context/query` | `muiltchat context query` |
-| Ask a session | `ask_session` | `POST /messages/ask` | `muiltchat msg ask` |
-| Check inbox | `check_inbox` | `GET /messages/inbox` | `muiltchat msg inbox` |
-| Reply | `reply_ask` | `POST /messages/:id/reply` | `muiltchat msg reply` |
-| Check replies | `check_replies` | `GET /messages/replies` | `muiltchat msg replies` |
-| Audit log | — | `GET /audit` | `muiltchat audit` |
+1. Agents tab → create an agent (name, system prompt, provider, model)
+2. Click 对话 and chat — responses stream token by token
+3. The agent can call cross-session tools on its own: `list_sessions`,
+   `query_context`, `ask_session`, `check_inbox`, `reply_ask`,
+   `publish_context`. Tool calls render inline in the chat.
 
-## Data directory
+Providers via the [Vercel AI SDK](https://ai-sdk.dev): `anthropic`, `openai`.
+Set `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` before starting the server;
+`GET /settings` reports which are configured.
 
-The data directory contains a single `data.db` SQLite file (plus its WAL/SHM
-siblings). muiltchat resolves it in this order:
+## Three equivalent interfaces (white-box by design)
 
-1. `MUILTCHAT_HOME` env var (always wins if set & non-empty)
-2. `$CLAUDE_PROJECT_DIR/.muiltchat/` — when scope is `project` or this dir already exists
-3. `~/.muiltchat/` (global default)
+Every capability is reachable three ways, all audited to `audit_log`:
 
-```bash
-muiltchat path                       # prints the resolved data dir
-muiltchat --scope project path       # forces project scope
-muiltchat --data-dir ./custom-db path
-```
-
-Inspect the database with any SQLite client:
-
-```bash
-sqlite3 "$(muiltchat path | jq -r .dbPath)" "SELECT * FROM audit_log ORDER BY id DESC LIMIT 20"
-```
-
-## CLI
-
-```bash
-muiltchat mcp                                       # stdio MCP server
-muiltchat serve [--port 9527] [--host 127.0.0.1]    # HTTP server
-muiltchat sessions list [--status active]
-muiltchat sessions register --name "..." [--desc "..."]
-muiltchat context publish --title "..." --content "..." [--tags a,b]
-muiltchat context query [--session ID] [--tags a,b] [QUERY]
-muiltchat context list-mine
-muiltchat context delete --id N
-muiltchat msg ask --to SESSION "question"
-muiltchat msg inbox
-muiltchat msg reply --id N "reply"
-muiltchat msg replies
-muiltchat audit [--session ID] [--action NAME] [--interface mcp|http|cli] [--limit 50]
-muiltchat path
-```
-
-The CLI talks to either:
-
-- the local SQLite file (default), or
-- a remote HTTP server, when you pass `--http http://localhost:9527`
-
-A fresh CLI session auto-registers itself as `cli-<user>` and prints its
-`MUILTCHAT_SESSION_ID` to stderr. Set that env var to reuse the same identity
-across commands.
-
-## How staleness works
-
-Each MCP/HTTP tool call updates `last_heartbeat_at`. Sessions whose last
-heartbeat is older than 5 minutes are lazily marked `stale` by the next
-`list_sessions`/`query_context` call. There is no native process-exit hook —
-that's why we use heartbeat. If you want to end a session explicitly, set its
-status to `ended` via the CLI.
-
-## Multi-process safety
-
-muiltchat opens SQLite in WAL mode with:
-
-- `busy_timeout = 10000` — wait up to 10s if another writer holds the lock
-- `synchronous = NORMAL` — safe under WAL, fast
-- `foreign_keys = ON`
-
-Each process keeps its own connection. Reads are concurrent; writes are
-serialized by SQLite's database-level write lock. Long-running HTTP servers
-run a 30s checkpoint monitor that triggers `wal_checkpoint(TRUNCATE)` if the
-WAL exceeds 64MB.
-
-## Environment variables
-
-| Variable | Purpose |
+| Interface | Entry |
 |---|---|
-| `MUILTCHAT_HOME` | Override data directory |
-| `MUILTCHAT_SESSION_ID` | Pin a CLI session id |
-| `MUILTCHAT_LOG_LEVEL` | pino level: `trace`/`debug`/`info`/`warn`/`error` |
-| `MUILTCHAT_LOG_FILE` | Redirect logs to a file (default: stderr) |
-| `CLAUDE_PROJECT_DIR` | Used by MCP runtime to find the project root |
+| MCP | `muiltchat mcp` (Claude Code spawns per session) |
+| HTTP REST | `muiltchat serve` — OpenAPI docs at `/docs` |
+| CLI | `muiltchat sessions / context / msg / agents / graph / hooks / audit` |
 
-## Troubleshooting
+The database is a plain SQLite file — open it with any client
+(`muiltchat path` prints the location). `muiltchat audit` replays every call.
 
-- **`SQLITE_BUSY` errors**: another process is mid-write; muiltchat waits 10s
-  by default. If you still hit it, raise `busy_timeout` or reduce write frequency.
-- **MCP server not connecting**: check stderr — muiltchat logs there. Never
-  logs to stdout. Set `MUILTCHAT_LOG_LEVEL=debug` for verbose output.
-- **Sessions stuck as `active`**: heartbeat timeout is 5 minutes. Force
-  `ended` with the CLI if needed.
-- **WAL file growing**: only long-running HTTP servers worry about this; the
-  30s checkpoint monitor handles it. For MCP/CLI, processes exit and SQLite
-  checkpoints naturally.
+## Development
 
-## Roadmap
+```bash
+npm run build                 # shared → server → web
+npm test -w apps/server       # core regression suite (node:test, 37 tests)
+npm run dev:all               # both dev servers
+```
 
-- v1.0 — MCP, HTTP, CLI, FTS search (this release)
-- v1.1 — semantic vector search via `sqlite-vec` (still single-file)
-- Future — namespaces / ACLs, optional web UI
+Stack: Fastify 5 · better-sqlite3 (WAL) · MCP SDK · AI SDK 7 · React 18 ·
+Vite · React Flow · Tailwind · TanStack Query.
 
 ## License
 
