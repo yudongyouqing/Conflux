@@ -16,6 +16,7 @@
     "dev": "tsx src/index.ts",
     "mcp": "tsx src/index.ts mcp",
     "serve": "tsx src/index.ts serve",
+    "test": "node --import tsx --test \"src/test/*.test.ts\"",
     "prepublishOnly": "npm run build"
   },
   "engines": {
