@@ -53,6 +53,13 @@ import {
 import { hasApiKey, providerRegistry } from "../core/providers.js";
 import { runAgentChat } from "../core/agent-runner.js";
 import { logAudit, queryAudit } from "../core/audit.js";
+import {
+  RUNTIMES,
+  createRuntimeAgent,
+  deleteRuntimeAgent,
+  listRuntimeAgents,
+  startRuntimeAgent,
+} from "../core/runtime-agents.js";
 import { logger } from "../log.js";
 
 export interface HttpServerOptions {
@@ -672,6 +679,91 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
     }
   });
 
+  // GET /messages/peers?a=<id>&b=<id> — two-way flow between any two sessions
+  // (graph edge click → message stream)
+  app.get<{ Querystring: { a?: string; b?: string } }>("/messages/peers", {}, async (req, reply) => {
+    const { a, b } = req.query;
+    if (!a || !b) return reply.code(400).send({ error: "missing a/b query params" });
+    try {
+      const messages = listPeerMessages(db, a, b);
+      return reply.send({ messages });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // ---- runtime agents (user-defined CLI agent presets: Claude Code / Codex) ----
+
+  // GET /runtimes — catalog (supported CLIs) + configured presets
+  app.get("/runtimes", {}, async (_req, reply) => {
+    try {
+      return reply.send({
+        runtimes: RUNTIMES,
+        agents: listRuntimeAgents(db),
+      });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.post<{ Body: RuntimeAgentBody }>("/runtimes", {
+    schema: {
+      body: {
+        type: "object",
+        required: ["name", "runtime"],
+        properties: {
+          name: { type: "string", maxLength: 100 },
+          runtime: { type: "string", enum: ["claude", "codex"] },
+          workdir: { type: "string", maxLength: 1000 },
+          model: { type: "string", maxLength: 200 },
+          base_url: { type: "string", maxLength: 1000 },
+          api_key: { type: "string", maxLength: 500 },
+          extra_env: { type: "string", maxLength: 10000 },
+          instructions: { type: "string", maxLength: 20000 },
+        },
+      },
+    },
+  }, async (req, reply) => {
+    try {
+      const agent = createRuntimeAgent(db, req.body);
+      logAudit(db, {
+        interface: "http",
+        action: "create_runtime_agent",
+        args: { id: agent.id, runtime: agent.runtime },
+      });
+      return reply.code(201).send({ agent });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.delete<{ Params: { id: string } }>("/runtimes/:id", {}, async (req, reply) => {
+    try {
+      const ok = deleteRuntimeAgent(db, Number(req.params.id));
+      if (!ok) return reply.code(404).send({ error: "runtime agent not found" });
+      logAudit(db, { interface: "http", action: "delete_runtime_agent", args: { id: req.params.id } });
+      return reply.send({ ok: true });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // POST /runtimes/:id/start — launch the preset in a new terminal window
+  app.post<{ Params: { id: string } }>("/runtimes/:id/start", {}, async (req, reply) => {
+    try {
+      const result = startRuntimeAgent(db, Number(req.params.id));
+      logAudit(db, {
+        interface: "http",
+        action: "start_runtime_agent",
+        args: { id: req.params.id },
+        result,
+      });
+      return reply.send(result);
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   // POST /web/ask — ask a session from the web console (Drawer input box)
   app.post<{ Body: { to_session: string; question: string } }>("/web/ask", {
     schema: {
@@ -763,6 +855,16 @@ interface UpdateContextBody {
 interface AskBody {
   to_session: string;
   question: string;
+}
+interface RuntimeAgentBody {
+  name: string;
+  runtime: string;
+  workdir?: string;
+  model?: string;
+  base_url?: string;
+  api_key?: string;
+  extra_env?: string;
+  instructions?: string;
 }
 interface ReplyBody {
   reply: string;

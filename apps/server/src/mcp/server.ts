@@ -63,13 +63,25 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
   // and available for cross-session communication without waiting for
   // the LLM to call register_session. metadata.temp marks this as a
   // placeholder node — the graph hides unadopted temps to cut noise.
+  // A session spawned from a runtime-agent preset carries the preset id in
+  // its env (set by startRuntimeAgent) — stamp it into metadata.
   const dirName = projectDir.replace(/\\/g, "/").split("/").pop() || "session";
+  const agentTag = (() => {
+    const aid = process.env.MUILTCHAT_AGENT_ID;
+    if (!aid || Number.isNaN(Number(aid))) return {};
+    return {
+      agent_id: Number(aid),
+      ...(process.env.MUILTCHAT_AGENT_RUNTIME
+        ? { runtime: process.env.MUILTCHAT_AGENT_RUNTIME }
+        : {}),
+    };
+  })();
   registerSession(db, {
     id: sessionId,
     name: dirName,
     description: "Claude Code session (auto-registered)",
     project_dir: projectDir,
-    metadata: { temp: true },
+    metadata: { temp: true, ...agentTag },
   });
 
   logger.info({ sessionId, dataDir: config.dataDir, scope: config.scope }, "mcp starting");

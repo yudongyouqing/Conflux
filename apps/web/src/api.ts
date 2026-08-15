@@ -1,4 +1,4 @@
-import type { Graph, Message, MessageStatus, SessionSummary, ContextEntry, Agent, ModelConfig, Conversation, Turn } from "@muiltchat/shared";
+import type { Graph, Message, MessageStatus, SessionSummary, ContextEntry, Agent, ModelConfig, Conversation, Turn, RuntimeAgent, RuntimeId } from "@muiltchat/shared";
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path);
@@ -58,6 +58,32 @@ export const api = {
 
   getPeerMessages: (peer: string) =>
     get<{ messages: Message[] }>(`/web/peer-messages?peer=${encodeURIComponent(peer)}`),
+
+  getPeerFlow: (a: string, b: string) =>
+    get<{ messages: Message[] }>(
+      `/messages/peers?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`
+    ),
+
+  getRuntimes: () =>
+    get<{
+      runtimes: Record<string, { label: string; executable: string; executableEnv: string }>;
+      agents: RuntimeAgent[];
+    }>("/runtimes"),
+
+  createRuntimeAgent: (body: {
+    name: string;
+    runtime: RuntimeId;
+    workdir?: string;
+    model?: string;
+    base_url?: string;
+    api_key?: string;
+    extra_env?: string;
+    instructions?: string;
+  }) => post<{ agent: RuntimeAgent }>("/runtimes", body),
+
+  deleteRuntimeAgent: (id: number) => del<{ ok: boolean }>(`/runtimes/${id}`),
+
+  startRuntimeAgent: (id: number) => post<{ started: boolean }>(`/runtimes/${id}/start`, {}),
 
   webAsk: (body: { to_session: string; question: string }) =>
     post<{ message: Message }>("/web/ask", body),

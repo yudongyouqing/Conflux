@@ -6,7 +6,7 @@ import { logger } from "../log.js";
 
 export type DB = Database.Database;
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 // Track the checkpoint timer in a module-scoped variable (avoids touching the
 // globalThis type signature).
@@ -126,6 +126,24 @@ CREATE TABLE IF NOT EXISTS turns (
 );
 
 CREATE INDEX IF NOT EXISTS idx_turns_conv ON turns(conversation_id);
+
+-- User-configured runtime agents: presets for spawning real CLI agents
+-- (Claude Code / Codex) with a fixed working directory and API channel.
+-- api_key is stored locally (single-user local tool). extra_env is a JSON
+-- object string of additional environment variables for the spawned process.
+CREATE TABLE IF NOT EXISTS runtime_agents (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  runtime TEXT NOT NULL,
+  workdir TEXT,
+  model TEXT,
+  base_url TEXT,
+  api_key TEXT,
+  extra_env TEXT,
+  instructions TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

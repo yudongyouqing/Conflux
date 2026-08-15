@@ -19,6 +19,7 @@ export default defineConfig({
       "/healthz": API_TARGET,
       "/docs": API_TARGET,
       "/web": API_TARGET,
+      "/runtimes": API_TARGET,
     },
   },
 });

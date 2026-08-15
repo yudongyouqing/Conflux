@@ -105,6 +105,8 @@ export function endSession(db: DB, id: string): void {
  *   - never named: no `named:true` metadata (set on the first prompt event)
  *   - still on a default placeholder description, or an MCP temp node
  *   - nothing references it: no messages, no graph edges, no context entries
+ *   - NOT a runtime-agent session (agent_id tag): those get their identity
+ *     from a user-defined preset and may legitimately idle at the prompt
  *
  * Deleting them is lossless: if the conversation is ever resumed or asked,
  * the SessionStart hook recreates the row. Two sweep modes:
@@ -121,6 +123,7 @@ export function pruneAbandonedSessions(
     .prepare(
       `SELECT id, status, metadata FROM sessions
        WHERE COALESCE(metadata, '') NOT LIKE '%"named":true%'
+         AND COALESCE(metadata, '') NOT LIKE '%"agent_id":%'
          AND (
            description IN ('Claude Code session (hook)', 'Claude Code session (auto-registered)')
            OR COALESCE(metadata, '') LIKE '%"temp":true%'

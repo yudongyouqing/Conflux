@@ -48,6 +48,16 @@ export function usePeerMessages(peer: string | null) {
   });
 }
 
+/** Two-way message flow between any two sessions (graph edge click). */
+export function usePeerFlow(a: string | null, b: string | null) {
+  return useQuery({
+    queryKey: ["peer-flow", a, b],
+    queryFn: () => api.getPeerFlow(a!, b!),
+    enabled: !!a && !!b,
+    refetchInterval: 5000,
+  });
+}
+
 /** Send a question to a session as the web console. */
 export function useWebAsk() {
   const qc = useQueryClient();
@@ -81,5 +91,37 @@ export function useDeleteAgent() {
   return useMutation({
     mutationFn: api.deleteAgent,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["agents"] }),
+  });
+}
+
+// ---- runtime agents (CLI presets: Claude Code / Codex) ----
+
+export function useRuntimes() {
+  return useQuery({
+    queryKey: ["runtimes"],
+    queryFn: () => api.getRuntimes(),
+    refetchInterval: 10000,
+  });
+}
+
+export function useCreateRuntimeAgent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.createRuntimeAgent,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["runtimes"] }),
+  });
+}
+
+export function useDeleteRuntimeAgent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.deleteRuntimeAgent,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["runtimes"] }),
+  });
+}
+
+export function useStartRuntimeAgent() {
+  return useMutation({
+    mutationFn: api.startRuntimeAgent,
   });
 }

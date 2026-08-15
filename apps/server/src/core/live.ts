@@ -198,6 +198,17 @@ export function handleHookEvent(
   const id = payload.session_id;
   const existing = getSession(db, id);
   const meta = existing ? parseMeta(existing) : {};
+  // Sessions spawned from a runtime-agent preset carry the definition id in
+  // their env (set by startRuntimeAgent); stamp it into metadata so the graph
+  // can link the node back to its preset.
+  const agentTag = (() => {
+    const aid = process.env.MUILTCHAT_AGENT_ID;
+    if (!aid || Number.isNaN(Number(aid))) return {};
+    return {
+      agent_id: Number(aid),
+      ...(process.env.MUILTCHAT_AGENT_RUNTIME ? { runtime: process.env.MUILTCHAT_AGENT_RUNTIME } : {}),
+    };
+  })();
 
   if (event === "stop") {
     if (existing) {
@@ -222,7 +233,7 @@ export function handleHookEvent(
           : basename(payload.cwd || "") || "claude"),
       description: meta.named && existing ? existing.description : "Claude Code session (hook)",
       project_dir: payload.cwd ?? existing?.project_dir ?? null,
-      metadata: { source: "claude-hook", ...meta, claude_pid: claudePid },
+      metadata: { source: "claude-hook", ...meta, ...agentTag, claude_pid: claudePid },
     });
     // This process previously ran another conversation id that was abandoned
     // by /resume or /clear before receiving any prompt — reap it now.
@@ -246,7 +257,7 @@ export function handleHookEvent(
     name: title ?? excerpt ?? (existing?.name ?? "claude"),
     description: excerpt ?? (existing?.description ?? "Claude Code session (hook)"),
     project_dir: payload.cwd ?? existing?.project_dir ?? null,
-    metadata: { source: "claude-hook", ...meta, named: true },
+    metadata: { source: "claude-hook", ...meta, ...agentTag, named: true },
   });
 }
 

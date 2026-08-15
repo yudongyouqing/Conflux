@@ -55,6 +55,28 @@ export interface Agent {
   updated_at: string;
 }
 
+export type RuntimeId = "claude" | "codex";
+
+/**
+ * User-configured runtime agent: a preset for spawning a real CLI agent
+ * (Claude Code / Codex) with a fixed working directory and API channel.
+ * AgentRecall-inspired: runtime + channel (API config) + instructions.
+ */
+export interface RuntimeAgent {
+  id: number;
+  name: string;
+  runtime: RuntimeId;
+  workdir: string | null;
+  model: string | null;
+  base_url: string | null;
+  api_key: string | null;
+  /** JSON object string of extra environment variables. */
+  extra_env: string | null;
+  instructions: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface GraphNode {
   id: string;
   name: string;
@@ -68,6 +90,10 @@ export interface GraphNode {
   project_dir?: string | null;
   /** ISO timestamp of the last heartbeat (external sessions only). */
   last_heartbeat_at?: string;
+  /** Runtime-agent definition this session was spawned from (if any). */
+  agent_id?: number | null;
+  /** CLI runtime identifier, e.g. "claude" | "codex" (runtime-agent sessions). */
+  runtime?: string | null;
 }
 
 export interface GraphEdge {
@@ -75,6 +101,8 @@ export interface GraphEdge {
   to: string;
   weight: number;
   last_interact_at: string;
+  /** Latest question exchanged over this channel (either direction), if any. */
+  last_message?: string | null;
 }
 
 export interface Graph {

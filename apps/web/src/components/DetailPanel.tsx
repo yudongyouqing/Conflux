@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { useSessionContext, usePeerMessages, useWebAsk } from "../hooks";
+import { useSessionContext, usePeerMessages, useWebAsk, usePeerFlow } from "../hooks";
 import type { Message, GraphNode } from "@muiltchat/shared";
 import { StatusDot } from "./StatusDot";
-import { FileText, Clock, ArrowRight, FolderOpen, Send, Loader2 } from "lucide-react";
+import { FileText, Clock, ArrowRight, FolderOpen, Send, Loader2, ArrowLeftRight } from "lucide-react";
 
 const WEB_CONSOLE_ID = "web-console";
 const DEFAULT_DESC = "Claude Code session (hook)";
@@ -10,18 +10,30 @@ const DEFAULT_DESC = "Claude Code session (hook)";
 interface DetailPanelProps {
   session: GraphNode | null;
   message: Message | null;
+  edge: { from: string; to: string } | null;
   sessionNameLookup: (id: string) => string | undefined;
 }
 
 export function DetailPanel({
   session,
   message,
+  edge,
   sessionNameLookup,
 }: DetailPanelProps) {
   const { data: contextEntries } = useSessionContext(session?.id ?? null);
 
   if (session) {
     return <SessionDetail session={session} contextEntries={contextEntries} />;
+  }
+
+  if (edge) {
+    return (
+      <EdgeFlowView
+        from={edge.from}
+        to={edge.to}
+        sessionNameLookup={sessionNameLookup}
+      />
+    );
   }
 
   if (message) {
@@ -76,6 +88,77 @@ export function DetailPanel({
   return (
     <div className="flex items-center justify-center h-full text-gray-400 text-sm text-center px-6">
       点击图节点或消息条目查看详情
+    </div>
+  );
+}
+
+/**
+ * Edge branch: the two-way message flow carried by a graph edge.
+ * Outgoing (from → to) bubbles right; incoming left; pending highlighted.
+ */
+function EdgeFlowView({
+  from,
+  to,
+  sessionNameLookup,
+}: {
+  from: string;
+  to: string;
+  sessionNameLookup: (id: string) => string | undefined;
+}) {
+  const { data } = usePeerFlow(from, to);
+  const messages = data?.messages ?? [];
+  const nameOf = (id: string) => sessionNameLookup(id) ?? id.slice(0, 8);
+
+  return (
+    <div className="p-5 space-y-4 overflow-y-auto h-full">
+      <div>
+        <h2 className="text-gray-900 font-semibold text-[15px] flex items-center gap-1.5">
+          <ArrowLeftRight size={14} className="text-gray-400" />
+          对话流
+        </h2>
+        <div className="text-xs text-gray-600 mt-1 flex items-center gap-1.5 flex-wrap">
+          <span className="font-medium">{nameOf(from)}</span>
+          <ArrowRight size={11} className="text-gray-400" />
+          <span className="font-medium">{nameOf(to)}</span>
+          <span className="text-gray-400">· {messages.length} 条</span>
+        </div>
+      </div>
+
+      {messages.length === 0 ? (
+        <p className="text-xs text-gray-400">这对会话之间还没有消息。</p>
+      ) : (
+        <div className="space-y-3">
+          {messages.map((m) => {
+            const outgoing = m.from_session === from;
+            return (
+              <div
+                key={m.id}
+                className={`flex flex-col ${outgoing ? "items-end" : "items-start"}`}
+              >
+                <div className="text-[10px] text-gray-400 mb-0.5">
+                  {nameOf(m.from_session)} · {new Date(m.created_at).toLocaleString()}
+                </div>
+                <div
+                  className={`text-sm whitespace-pre-wrap p-2.5 rounded-xl border max-w-[95%] ${
+                    outgoing
+                      ? "bg-blue-50 border-blue-200 text-gray-800"
+                      : "bg-gray-50 border-gray-200 text-gray-800"
+                  }`}
+                >
+                  {m.question}
+                </div>
+                {m.status === "pending" ? (
+                  <div className="text-[10px] text-amber-600 mt-0.5">等待回复…</div>
+                ) : m.reply ? (
+                  <div className="text-sm whitespace-pre-wrap p-2.5 rounded-xl border bg-emerald-50 border-emerald-200 text-emerald-800 max-w-[95%] mt-1">
+                    ↩ {m.reply}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
