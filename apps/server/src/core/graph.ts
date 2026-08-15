@@ -39,14 +39,42 @@ export function getGraph(
 
   const nodes = db
     .prepare(
-      `SELECT s.id, s.name, s.description, s.project_dir, s.status, s.last_heartbeat_at,
+      `SELECT s.id, s.name, s.description, s.project_dir, s.status, s.last_heartbeat_at, s.metadata,
          (SELECT COUNT(*) FROM context_entries c WHERE c.session_id = s.id) AS context_count,
          (SELECT COUNT(*) FROM messages m WHERE m.to_session = s.id AND m.status = 'pending') AS pending_inbox
        FROM sessions s
        ${where}
        ORDER BY s.last_heartbeat_at DESC`
     )
-    .all(...params) as (Omit<GraphNode, "type">)[];
+    .all(...params) as (Omit<GraphNode, "type" | "agent_id" | "runtime"> & {
+      metadata: string | null;
+    })[];
+
+  // Annotate sessions spawned from a runtime-agent preset (metadata carries
+  // {agent_id, runtime} — written by hooks/MCP from MUILTCHAT_AGENT_ID).
+  // Preset-spawned sessions display the preset name — their identity comes
+  // from the user's definition, not from the cwd basename.
+  const presetNames = new Map<number, string>(
+    (db.prepare(`SELECT id, name FROM runtime_agents`).all() as { id: number; name: string }[]).map(
+      (r) => [r.id, r.name]
+    )
+  );
+  const annotate = (n: (typeof nodes)[number]) => {
+    let agentId: number | null = null;
+    let runtime: string | null = null;
+    try {
+      const meta = n.metadata ? (JSON.parse(n.metadata) as Record<string, unknown>) : null;
+      if (meta && typeof meta.agent_id === "number") {
+        agentId = meta.agent_id;
+        runtime = typeof meta.runtime === "string" ? meta.runtime : null;
+      }
+    } catch {
+      // malformed metadata — leave unannotated
+    }
+    const { metadata, ...rest } = n;
+    const name = agentId !== null ? presetNames.get(agentId) ?? n.name : n.name;
+    return { ...rest, name, agent_id: agentId, runtime };
+  };
 
   // Also include internal agents as nodes — they are always visible
   // regardless of session heartbeat status.
@@ -67,16 +95,20 @@ export function getGraph(
 
   const edges = db
     .prepare(
-      `SELECT from_session AS "from", to_session AS "to", weight, last_interact_at
-       FROM edges
-       ORDER BY weight DESC, last_interact_at DESC`
+      `SELECT e.from_session AS "from", e.to_session AS "to", e.weight, e.last_interact_at,
+         (SELECT m.question FROM messages m
+          WHERE (m.from_session = e.from_session AND m.to_session = e.to_session)
+             OR (m.from_session = e.to_session AND m.to_session = e.from_session)
+          ORDER BY m.id DESC LIMIT 1) AS last_message
+       FROM edges e
+       ORDER BY e.weight DESC, e.last_interact_at DESC`
     )
     .all() as GraphEdge[];
 
   return {
     nodes: [
-      ...nodes.map((n) => ({ ...n, type: "session" as const })),
-      ...agentNodes.map((n) => ({ ...n, type: "agent" as const })),
+      ...nodes.map((n) => ({ ...annotate(n), type: "session" as const })),
+      ...agentNodes.map((n) => ({ ...n, agent_id: null, runtime: null, type: "agent" as const })),
     ],
     edges,
   };

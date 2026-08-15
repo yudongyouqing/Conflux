@@ -11,6 +11,7 @@ export interface SessionNodeData {
   last_heartbeat_at?: string;
   description?: string | null;
   project_dir?: string | null;
+  runtime?: string | null;
   [key: string]: unknown;
 }
 
@@ -77,6 +78,14 @@ export function SessionNode({ data, selected, dragging }: NodeProps) {
         <span className="text-gray-900 text-xs font-medium truncate max-w-[100px]">
           {d.name}
         </span>
+        {d.runtime && (
+          <span
+            className="text-[9px] px-1 py-px rounded bg-cyan-50 text-cyan-700 border border-cyan-200 font-medium flex-shrink-0"
+            title={`运行时 agent (${d.runtime})`}
+          >
+            {d.runtime}
+          </span>
+        )}
       </div>
       {d.description && d.description !== "Claude Code session (hook)" && (
         <div

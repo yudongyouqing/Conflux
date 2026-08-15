@@ -107,6 +107,19 @@ test("pruneAbandonedSessions keeps active zombies in global mode (stale gate)", 
   assert.ok(getSession(db, "fresh-zombie"), "active zero-turn row waits for stale TTL");
 });
 
+test("pruneAbandonedSessions never deletes runtime-agent sessions (they idle by design)", () => {
+  registerSession(db, {
+    id: "spawned-agent",
+    name: "muiltchat",
+    description: "Claude Code session (hook)",
+    metadata: { source: "claude-hook", agent_id: 2, runtime: "claude" },
+  });
+  ageOut("spawned-agent");
+  assert.equal(getSession(db, "spawned-agent")!.status, "stale");
+  pruneAbandonedSessions(db);
+  assert.ok(getSession(db, "spawned-agent"), "agent-tagged zero-turn session survives the sweep");
+});
+
 test("pruneAbandonedSessions claudePid mode reaps the /resume-away predecessor instantly", () => {
   registerSession(db, {
     id: "abandoned-id",

@@ -1,7 +1,7 @@
-import { Network, MessageSquare, Bot, Boxes, ListTree } from "lucide-react";
+import { Network, MessageSquare, Bot, Boxes, ListTree, Terminal } from "lucide-react";
 import { useDaemonHealth } from "../hooks";
 
-export type TabId = "graph" | "sessions" | "messages" | "agents";
+export type TabId = "graph" | "sessions" | "messages" | "agents" | "runtimes";
 
 interface SidebarProps {
   activeTab: TabId;
@@ -17,6 +17,7 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
     { id: "sessions" as const, icon: ListTree, label: "会话" },
     { id: "messages" as const, icon: MessageSquare, label: "消息流" },
     { id: "agents" as const, icon: Bot, label: "Agents" },
+    { id: "runtimes" as const, icon: Terminal, label: "运行时" },
   ];
 
   return (
