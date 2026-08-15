@@ -42,6 +42,11 @@ export function heartbeat(db: DB, id: string): void {
   );
 }
 
+/** Update just the display name (used to sync /rename titles). */
+export function renameSession(db: DB, id: string, name: string): void {
+  db.prepare(`UPDATE sessions SET name = ? WHERE id = ?`).run(name, id);
+}
+
 /**
  * Lazily mark sessions stale if their last heartbeat is older than STALE_AFTER_MS.
  * Cheap: one UPDATE per call. Called from list_sessions / query_context.

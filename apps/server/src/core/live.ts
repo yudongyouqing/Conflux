@@ -1,8 +1,8 @@
 import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { DB } from "./db.js";
-import { registerSession, getSession, heartbeat, type Session } from "./sessions.js";
+import { registerSession, renameSession, getSession, heartbeat, type Session } from "./sessions.js";
 
 /**
  * Hook-driven liveness + identity for Claude Code sessions.
@@ -118,6 +118,64 @@ export function promptExcerpt(prompt: string | undefined): string | null {
   return first.length > 0 ? first : null;
 }
 
+// ---- custom title (/rename) -----------------------------------------------
+
+/** Munge a project dir the way Claude Code does: non-alphanumerics → '-'. */
+function mungeProjectDir(cwd: string): string {
+  return cwd.replace(/[^a-zA-Z0-9]/g, "-");
+}
+
+/**
+ * Read the latest /rename title from the session transcript. Claude Code
+ * appends `{"type":"custom-title","customTitle":...}` to the jsonl when the
+ * user runs /rename. The entry can sit anywhere in the file (renames happen
+ * early, transcripts grow large), so we read it whole and scan backwards.
+ * Hooks fire once per turn — a multi-MB read (~10ms) is fine there.
+ */
+export function readCustomTitle(
+  sessionId: string,
+  cwd?: string | null,
+  claudeHome?: string
+): string | null {
+  const home = claudeHome ?? join(process.env.USERPROFILE || process.env.HOME || ".", ".claude");
+  const projectsDir = join(home, "projects");
+  const candidates: string[] = [];
+  if (cwd) {
+    const p = join(projectsDir, mungeProjectDir(cwd), `${sessionId}.jsonl`);
+    if (existsSync(p)) candidates.push(p);
+  }
+  try {
+    // fallback: the transcript lives in whatever project dir the session
+    // started in, which may differ from the hook's cwd
+    for (const dir of readdirSync(projectsDir)) {
+      const p = join(projectsDir, dir, `${sessionId}.jsonl`);
+      if (existsSync(p) && !candidates.includes(p)) candidates.push(p);
+    }
+  } catch {
+    // projects dir missing — nothing to read
+  }
+  for (const p of candidates) {
+    try {
+      const lines = readFileSync(p, "utf8").split("\n");
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const line = lines[i].trim();
+        if (!line.includes('"custom-title"')) continue;
+        try {
+          const j = JSON.parse(line) as { type?: string; customTitle?: unknown };
+          if (j.type === "custom-title" && typeof j.customTitle === "string" && j.customTitle.trim()) {
+            return j.customTitle.replace(/\s+/g, " ").trim().slice(0, 64);
+          }
+        } catch {
+          // malformed line — keep scanning
+        }
+      }
+    } catch {
+      // unreadable candidate — try the next
+    }
+  }
+  return null;
+}
+
 /**
  * Handle one hook event. The muiltchat session id equals the Claude Code
  * conversation id, so a resumed conversation reactivates its own node.
@@ -125,7 +183,8 @@ export function promptExcerpt(prompt: string | undefined): string | null {
 export function handleHookEvent(
   db: DB,
   event: "session-start" | "prompt" | "stop",
-  payload: HookPayload
+  payload: HookPayload,
+  claudeHome?: string
 ): void {
   if (!payload.session_id) return;
   const id = payload.session_id;
@@ -133,17 +192,26 @@ export function handleHookEvent(
   const meta = existing ? parseMeta(existing) : {};
 
   if (event === "stop") {
-    if (existing) heartbeat(db, id);
+    if (existing) {
+      const title = readCustomTitle(id, payload.cwd ?? existing.project_dir, claudeHome);
+      if (title && title !== existing.name) renameSession(db, id, title);
+      heartbeat(db, id);
+    }
     return;
   }
 
   if (event === "session-start") {
-    // Keep a prompt-derived name across resumes; only pay the ancestor
-    // walk once per conversation (the pid never changes for this id).
+    // A /rename'd title survives resumes; otherwise keep a prompt-derived
+    // name, and only pay the ancestor walk once per conversation.
+    const title = readCustomTitle(id, payload.cwd, claudeHome);
     const claudePid = typeof meta.claude_pid === "number" ? meta.claude_pid : getClaudePid();
     registerSession(db, {
       id,
-      name: typeof meta.named === "boolean" && meta.named && existing ? existing.name : basename(payload.cwd || "") || "claude",
+      name:
+        title ??
+        (typeof meta.named === "boolean" && meta.named && existing
+          ? existing.name
+          : basename(payload.cwd || "") || "claude"),
       description: meta.named && existing ? existing.description : "Claude Code session (hook)",
       project_dir: payload.cwd ?? existing?.project_dir ?? null,
       metadata: { source: "claude-hook", ...meta, claude_pid: claudePid },
@@ -151,15 +219,16 @@ export function handleHookEvent(
     return;
   }
 
-  // prompt: name the node from the first user prompt (once per conversation)
+  // prompt: /rename title wins over the first-prompt excerpt
+  const title = readCustomTitle(id, payload.cwd ?? existing?.project_dir ?? null, claudeHome);
   const excerpt = promptExcerpt(payload.prompt);
-  if (existing && meta.named) {
+  if (existing && meta.named && (!title || existing.name === title)) {
     heartbeat(db, id);
     return;
   }
   registerSession(db, {
     id,
-    name: excerpt ?? (existing?.name ?? "claude"),
+    name: title ?? excerpt ?? (existing?.name ?? "claude"),
     description: "Claude Code session (hook)",
     project_dir: payload.cwd ?? existing?.project_dir ?? null,
     metadata: { source: "claude-hook", ...meta, named: true },
