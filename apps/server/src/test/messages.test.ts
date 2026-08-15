@@ -28,6 +28,13 @@ test("askSession refuses self-ask", () => {
   assert.throws(() => askSession(db, { from_session: "a", to_session: "a", question: "?" }), /cannot ask yourself/);
 });
 
+test("askSession rejects a pruned target with a clear error, not a FK violation", () => {
+  assert.throws(
+    () => askSession(db, { from_session: "a", to_session: "ghost", question: "?" }),
+    /target session not found/
+  );
+});
+
 test("replyAsk rejects non-addressee", () => {
   const m = askSession(db, { from_session: "a", to_session: "b", question: "q" });
   assert.throws(() => replyAsk(db, m.id, "a", "nope"), /not the addressee/);

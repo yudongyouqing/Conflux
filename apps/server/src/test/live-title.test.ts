@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { handleHookEvent, readCustomTitle } from "../core/live.js";
-import { getSession } from "../core/sessions.js";
+import { handleHookEvent, readCustomTitle, deleteUnreferencedSession } from "../core/live.js";
+import { getSession, registerSession } from "../core/sessions.js";
 import { makeDb } from "./helpers.js";
 
 const { db, cleanup } = makeDb();
@@ -111,5 +111,20 @@ describe("handleHookEvent title sync", () => {
     handleHookEvent(db, "prompt", { session_id: sid, cwd: "C:\\work\\untitled", prompt: "second line\nmore" }, join(home));
     assert.equal(getSession(db, sid)!.name, "second line");
     disposeHome(home);
+  });
+});
+
+describe("deleteUnreferencedSession", () => {
+  it("never deletes hook-registered sessions, even unreferenced", () => {
+    const sid = "c0c0c0c0-1111-2222-3333-444444444444";
+    handleHookEvent(db, "prompt", { session_id: sid, cwd: "C:\\work\\keep", prompt: "hook node" });
+    assert.equal(deleteUnreferencedSession(db, sid), false);
+    assert.ok(getSession(db, sid));
+  });
+
+  it("deletes unreferenced temp nodes (MCP auto-register)", () => {
+    registerSession(db, { id: "temp-uuid-1", name: "temp" });
+    assert.equal(deleteUnreferencedSession(db, "temp-uuid-1"), true);
+    assert.equal(getSession(db, "temp-uuid-1"), null);
   });
 });

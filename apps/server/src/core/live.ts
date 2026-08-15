@@ -258,11 +258,14 @@ export function findSessionByClaudePid(db: DB, pid: number): Session | null {
 /**
  * Delete a session row only if nothing references it (used to clean up the
  * MCP server's temporary uuid node after it adopts the hook-registered one).
+ * Hook-registered rows are real conversation identities that survive resumes
+ * and may be ask targets later — they are never eligible for cleanup.
  */
 export function deleteUnreferencedSession(db: DB, id: string): boolean {
   const res = db
     .prepare(
       `DELETE FROM sessions WHERE id = ? AND
+       COALESCE(metadata, '') NOT LIKE '%"source":"claude-hook"%' AND
        (SELECT COUNT(*) FROM messages WHERE from_session = ? OR to_session = ?) = 0 AND
        (SELECT COUNT(*) FROM edges WHERE from_session = ? OR to_session = ?) = 0 AND
        (SELECT COUNT(*) FROM context_entries WHERE session_id = ?) = 0`

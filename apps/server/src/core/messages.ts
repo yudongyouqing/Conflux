@@ -27,6 +27,14 @@ export function askSession(
   if (input.from_session === input.to_session) {
     throw new Error("cannot ask yourself");
   }
+  // target row may have been pruned (e.g. offline cleanup) — fail with a
+  // clear error instead of a raw FOREIGN KEY violation
+  const target = db
+    .prepare(`SELECT id FROM sessions WHERE id = ?`)
+    .get(input.to_session);
+  if (!target) {
+    throw new Error(`target session not found: ${input.to_session}`);
+  }
   const now = nowIso();
   const res = db
     .prepare(
