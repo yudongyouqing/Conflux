@@ -61,13 +61,15 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
 
   // Auto-register immediately so the session is visible in the graph
   // and available for cross-session communication without waiting for
-  // the LLM to call register_session.
+  // the LLM to call register_session. metadata.temp marks this as a
+  // placeholder node — the graph hides unadopted temps to cut noise.
   const dirName = projectDir.replace(/\\/g, "/").split("/").pop() || "session";
   registerSession(db, {
     id: sessionId,
     name: dirName,
     description: "Claude Code session (auto-registered)",
     project_dir: projectDir,
+    metadata: { temp: true },
   });
 
   logger.info({ sessionId, dataDir: config.dataDir, scope: config.scope }, "mcp starting");

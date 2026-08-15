@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo } from "react";
 import { Sidebar, type TabId } from "./components/Sidebar";
 import { GraphTab } from "./components/GraphTab";
+import { SessionsTab } from "./components/SessionsTab";
 import { MessageTab } from "./components/MessageTab";
 import { AgentTab } from "./components/AgentTab";
 import { DetailPanel } from "./components/DetailPanel";
@@ -49,6 +50,12 @@ export default function App() {
         <main className="flex-1 overflow-hidden">
           {tab === "graph" && (
             <GraphTab
+              onSelectSession={handleSelectSession}
+              selectedSessionId={selectedSession?.id ?? null}
+            />
+          )}
+          {tab === "sessions" && (
+            <SessionsTab
               onSelectSession={handleSelectSession}
               selectedSessionId={selectedSession?.id ?? null}
             />

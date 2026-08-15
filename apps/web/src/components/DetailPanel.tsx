@@ -1,7 +1,11 @@
-import { useSessionContext } from "../hooks";
+import { useState } from "react";
+import { useSessionContext, usePeerMessages, useWebAsk } from "../hooks";
 import type { Message, GraphNode } from "@muiltchat/shared";
 import { StatusDot } from "./StatusDot";
-import { FileText, Clock, ArrowRight } from "lucide-react";
+import { FileText, Clock, ArrowRight, FolderOpen, Send, Loader2 } from "lucide-react";
+
+const WEB_CONSOLE_ID = "web-console";
+const DEFAULT_DESC = "Claude Code session (hook)";
 
 interface DetailPanelProps {
   session: GraphNode | null;
@@ -17,73 +21,7 @@ export function DetailPanel({
   const { data: contextEntries } = useSessionContext(session?.id ?? null);
 
   if (session) {
-    return (
-      <div className="p-5 space-y-5 overflow-y-auto h-full">
-        <div>
-          <div className="flex items-center gap-2 mb-1.5">
-            <StatusDot status={session.status} />
-            <h2 className="text-gray-900 font-semibold text-[15px]">{session.name}</h2>
-          </div>
-          <div className="text-[10px] text-gray-400 font-mono break-all">
-            {session.id}
-          </div>
-        </div>
-
-        <div className="flex gap-5 text-xs">
-          <div>
-            <span className="text-gray-400">上下文</span>
-            <div className="text-gray-800 font-medium mt-0.5">{session.context_count}</div>
-          </div>
-          <div>
-            <span className="text-gray-400">待处理</span>
-            <div className="text-amber-600 font-medium mt-0.5">{session.pending_inbox}</div>
-          </div>
-          <div>
-            <span className="text-gray-400">类型</span>
-            <div className="text-gray-800 font-medium mt-0.5">
-              {session.type === "agent" ? "Agent" : "会话"}
-            </div>
-          </div>
-        </div>
-
-        <div>
-          <h3 className="text-xs text-gray-500 font-medium mb-2 flex items-center gap-1">
-            <FileText size={12} /> 已发布上下文
-          </h3>
-          {!contextEntries || contextEntries.entries.length === 0 ? (
-            <p className="text-xs text-gray-400">无</p>
-          ) : (
-            <div className="space-y-2">
-              {contextEntries.entries.map((e) => (
-                <div
-                  key={e.id}
-                  className="p-3 rounded-xl bg-gray-50 border border-gray-200"
-                >
-                  <div className="text-xs text-gray-800 font-medium">
-                    {e.title}
-                  </div>
-                  <div className="text-[11px] text-gray-500 mt-1 line-clamp-3">
-                    {e.content}
-                  </div>
-                  {e.tags && e.tags.length > 0 && (
-                    <div className="flex gap-1 mt-1.5 flex-wrap">
-                      {e.tags.map((t) => (
-                        <span
-                          key={t}
-                          className="text-[10px] px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-600 border border-blue-100"
-                        >
-                          {t}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    );
+    return <SessionDetail session={session} contextEntries={contextEntries} />;
   }
 
   if (message) {
@@ -96,8 +34,7 @@ export function DetailPanel({
           </span>
           <ArrowRight size={12} className="text-gray-400" />
           <span className="text-gray-700 font-medium">
-            {sessionNameLookup(message.to_session) ??
-              message.to_session.slice(0, 8)}
+            {sessionNameLookup(message.to_session) ?? message.to_session.slice(0, 8)}
           </span>
           <span
             className={`ml-auto px-1.5 py-0.5 rounded-md text-[10px] font-medium ${
@@ -125,8 +62,7 @@ export function DetailPanel({
           <div>
             <div className="text-[10px] text-gray-400 mb-1.5">
               回复
-              {message.replied_at &&
-                ` · ${new Date(message.replied_at).toLocaleString()}`}
+              {message.replied_at && ` · ${new Date(message.replied_at).toLocaleString()}`}
             </div>
             <div className="text-sm text-emerald-800 whitespace-pre-wrap bg-emerald-50 p-3 rounded-xl border border-emerald-200">
               {message.reply}
@@ -140,6 +76,186 @@ export function DetailPanel({
   return (
     <div className="flex items-center justify-center h-full text-gray-400 text-sm text-center px-6">
       点击图节点或消息条目查看详情
+    </div>
+  );
+}
+
+/** Session branch: identity + activity + context + web-console conversation. */
+function SessionDetail({
+  session,
+  contextEntries,
+}: {
+  session: GraphNode;
+  contextEntries: ReturnType<typeof useSessionContext>["data"];
+}) {
+  const isSession = session.type === "session";
+  const activity =
+    session.description && session.description !== DEFAULT_DESC
+      ? session.description
+      : null;
+
+  return (
+    <div className="p-5 space-y-5 overflow-y-auto h-full">
+      <div>
+        <div className="flex items-center gap-2 mb-1.5">
+          <StatusDot status={session.status} />
+          <h2 className="text-gray-900 font-semibold text-[15px] break-all">
+            {session.name}
+          </h2>
+        </div>
+        {activity && (
+          <div className="text-xs text-blue-600 bg-blue-50 border border-blue-100 rounded-lg px-2 py-1 mb-1.5 truncate" title={activity}>
+            正在: {activity}
+          </div>
+        )}
+        <div className="text-[10px] text-gray-400 font-mono break-all">
+          {session.id}
+        </div>
+        {session.project_dir && (
+          <div className="text-[11px] text-gray-500 mt-1 flex items-center gap-1 min-w-0" title={session.project_dir}>
+            <FolderOpen size={11} className="flex-shrink-0" />
+            <span className="truncate">{session.project_dir}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="flex gap-5 text-xs">
+        <div>
+          <span className="text-gray-400">上下文</span>
+          <div className="text-gray-800 font-medium mt-0.5">{session.context_count}</div>
+        </div>
+        <div>
+          <span className="text-gray-400">待处理</span>
+          <div className="text-amber-600 font-medium mt-0.5">{session.pending_inbox}</div>
+        </div>
+        <div>
+          <span className="text-gray-400">类型</span>
+          <div className="text-gray-800 font-medium mt-0.5">
+            {session.type === "agent" ? "Agent" : "会话"}
+          </div>
+        </div>
+      </div>
+
+      {isSession && <ConversationBox sessionId={session.id} />}
+
+      <div>
+        <h3 className="text-xs text-gray-500 font-medium mb-2 flex items-center gap-1">
+          <FileText size={12} /> 已发布上下文
+        </h3>
+        {!contextEntries || contextEntries.entries.length === 0 ? (
+          <p className="text-xs text-gray-400">无</p>
+        ) : (
+          <div className="space-y-2">
+            {contextEntries.entries.map((e) => (
+              <div
+                key={e.id}
+                className="p-3 rounded-xl bg-gray-50 border border-gray-200"
+              >
+                <div className="text-xs text-gray-800 font-medium">
+                  {e.title}
+                </div>
+                <div className="text-[11px] text-gray-500 mt-1 line-clamp-3">
+                  {e.content}
+                </div>
+                {e.tags && e.tags.length > 0 && (
+                  <div className="flex gap-1 mt-1.5 flex-wrap">
+                    {e.tags.map((t) => (
+                      <span
+                        key={t}
+                        className="text-[10px] px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-600 border border-blue-100"
+                      >
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Ask/message flow between the web console and one session. */
+function ConversationBox({ sessionId }: { sessionId: string }) {
+  const { data } = usePeerMessages(sessionId);
+  const ask = useWebAsk();
+  const [text, setText] = useState("");
+  const messages = data?.messages ?? [];
+
+  const send = () => {
+    const question = text.trim();
+    if (!question || ask.isPending) return;
+    ask.mutate(
+      { to_session: sessionId, question },
+      { onSuccess: () => setText("") }
+    );
+  };
+
+  return (
+    <div>
+      <h3 className="text-xs text-gray-500 font-medium mb-2 flex items-center gap-1">
+        <ArrowRight size={12} /> 对话(以 Web 控制台身份)
+      </h3>
+
+      {messages.length === 0 ? (
+        <p className="text-xs text-gray-400 mb-2">还没有消息,发一条试试。</p>
+      ) : (
+        <div className="space-y-2 mb-2 max-h-64 overflow-y-auto">
+          {messages.map((m) => {
+            const outgoing = m.from_session === WEB_CONSOLE_ID;
+            return (
+              <div key={m.id} className={`flex ${outgoing ? "justify-end" : "justify-start"}`}>
+                <div
+                  className={`max-w-[85%] rounded-xl px-2.5 py-1.5 border text-xs ${
+                    outgoing
+                      ? "bg-blue-50 border-blue-100 text-gray-800"
+                      : "bg-gray-50 border-gray-200 text-gray-800"
+                  }`}
+                >
+                  <div className="whitespace-pre-wrap break-words">{m.question}</div>
+                  {m.reply ? (
+                    <div className="mt-1 pt-1 border-t border-gray-200/70 text-emerald-700 whitespace-pre-wrap break-words">
+                      ↩ {m.reply}
+                    </div>
+                  ) : (
+                    <div className="mt-0.5 text-[10px] text-amber-600">等待回复…</div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="flex gap-1.5">
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.nativeEvent.isComposing) send();
+          }}
+          placeholder="问这个会话…"
+          className="flex-1 min-w-0 text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-300"
+        />
+        <button
+          onClick={send}
+          disabled={!text.trim() || ask.isPending}
+          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-blue-700 transition-colors flex-shrink-0"
+        >
+          {ask.isPending ? (
+            <Loader2 size={12} className="animate-spin" />
+          ) : (
+            <Send size={12} />
+          )}
+          发送
+        </button>
+      </div>
+      {ask.isError && (
+        <p className="text-[10px] text-red-500 mt-1">{(ask.error as Error).message}</p>
+      )}
     </div>
   );
 }

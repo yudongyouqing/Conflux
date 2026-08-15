@@ -9,6 +9,8 @@ export interface SessionNodeData {
   pending_inbox: number;
   conversation_count?: number;
   last_heartbeat_at?: string;
+  description?: string | null;
+  project_dir?: string | null;
   [key: string]: unknown;
 }
 
@@ -76,6 +78,14 @@ export function SessionNode({ data, selected, dragging }: NodeProps) {
           {d.name}
         </span>
       </div>
+      {d.description && d.description !== "Claude Code session (hook)" && (
+        <div
+          className="text-[10px] text-gray-400 truncate mt-0.5 max-w-[130px]"
+          title={d.description}
+        >
+          {d.description}
+        </div>
+      )}
       <div className="flex items-center gap-3 mt-1 text-[10px] text-gray-500">
         {d.context_count > 0 && (
           <span className="flex items-center gap-0.5">

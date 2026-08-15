@@ -38,6 +38,28 @@ export function useSessionContext(sessionId: string | null) {
   });
 }
 
+/** Two-way message flow between the web console and one session (Drawer view). */
+export function usePeerMessages(peer: string | null) {
+  return useQuery({
+    queryKey: ["peer-messages", peer],
+    queryFn: () => api.getPeerMessages(peer!),
+    enabled: !!peer,
+    refetchInterval: 5000,
+  });
+}
+
+/** Send a question to a session as the web console. */
+export function useWebAsk() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.webAsk,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["peer-messages"] });
+      qc.invalidateQueries({ queryKey: ["graph"] });
+    },
+  });
+}
+
 export function useAgents() {
   return useQuery({
     queryKey: ["agents"],

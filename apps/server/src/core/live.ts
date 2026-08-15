@@ -2,7 +2,14 @@ import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { DB } from "./db.js";
-import { registerSession, renameSession, getSession, heartbeat, type Session } from "./sessions.js";
+import {
+  registerSession,
+  renameSession,
+  setSessionDescription,
+  getSession,
+  heartbeat,
+  type Session,
+} from "./sessions.js";
 
 /**
  * Hook-driven liveness + identity for Claude Code sessions.
@@ -224,12 +231,14 @@ export function handleHookEvent(
   const excerpt = promptExcerpt(payload.prompt);
   if (existing && meta.named && (!title || existing.name === title)) {
     heartbeat(db, id);
+    // refresh the "what is this session doing" signal on every turn
+    if (excerpt) setSessionDescription(db, id, excerpt);
     return;
   }
   registerSession(db, {
     id,
     name: title ?? excerpt ?? (existing?.name ?? "claude"),
-    description: "Claude Code session (hook)",
+    description: excerpt ?? (existing?.description ?? "Claude Code session (hook)"),
     project_dir: payload.cwd ?? existing?.project_dir ?? null,
     metadata: { source: "claude-hook", ...meta, named: true },
   });

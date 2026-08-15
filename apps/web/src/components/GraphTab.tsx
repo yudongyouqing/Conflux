@@ -69,6 +69,8 @@ export function GraphTab({
         pending_inbox: n.pending_inbox,
         conversation_count: n.conversation_count,
         last_heartbeat_at: n.last_heartbeat_at,
+        description: n.description,
+        project_dir: n.project_dir,
       },
     });
 
