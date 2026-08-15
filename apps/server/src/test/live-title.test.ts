@@ -10,6 +10,12 @@ import { makeDb } from "./helpers.js";
 const { db, cleanup } = makeDb();
 after(cleanup);
 
+// Pin the Claude Code pid for getClaudePid(): the env var is checked before
+// the ancestor walk and is cached module-globally, so setting it before any
+// test runs makes same-pid pruning deterministic in this file.
+const TEST_CLAUDE_PID = 424242;
+process.env.MUILTCHAT_CLAUDE_PID = String(TEST_CLAUDE_PID);
+
 // fake ~/.claude with a transcript per test case
 function fakeHome(): string {
   return mkdtempSync(join(tmpdir(), "muiltchat-title-home-"));
@@ -121,6 +127,25 @@ describe("handleHookEvent title sync", () => {
     const s = getSession(db, sid)!;
     assert.equal(s.name, "first task"); // name stable after first prompt
     assert.equal(s.description, "now doing something else"); // description tracks latest
+    disposeHome(home);
+  });
+
+  it("reaps the same-pid zero-turn predecessor (open → immediately /resume)", () => {
+    const home = fakeHome();
+    const cwd = "C:\\work\\resume-flow";
+    // the id assigned when claude opened — abandoned by /resume before any prompt
+    const abandoned = "90909090-1111-2222-3333-444444444444";
+    registerSession(db, {
+      id: abandoned,
+      name: "resume-flow",
+      description: "Claude Code session (hook)",
+      metadata: { source: "claude-hook", claude_pid: TEST_CLAUDE_PID },
+    });
+    // /resume continues the old conversation under a fresh id → SessionStart
+    const sid = "91919191-1111-2222-3333-444444444444";
+    handleHookEvent(db, "session-start", { session_id: sid, cwd }, join(home));
+    assert.equal(getSession(db, abandoned), null, "abandoned predecessor is reaped");
+    assert.ok(getSession(db, sid), "the resumed session is registered");
     disposeHome(home);
   });
 });

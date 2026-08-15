@@ -13,6 +13,8 @@ import {
   listSessions,
   heartbeat,
   getSession,
+  markStaleSessions,
+  pruneAbandonedSessions,
 } from "../core/sessions.js";
 import {
   publishContext,
@@ -83,6 +85,22 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
     }
   }, 30_000);
   consoleBeat.unref();
+
+  // ---- zero-turn session reaper ----
+  // Sessions abandoned mid-startup (open claude → immediately /resume) and
+  // dead MCP temp placeholders go stale; sweep them out of the DB so the
+  // graph doesn't accumulate zombie nodes.
+  const sweepAbandoned = () => {
+    try {
+      markStaleSessions(db);
+      pruneAbandonedSessions(db);
+    } catch {
+      // transient sqlite lock — next tick retries
+    }
+  };
+  sweepAbandoned();
+  const abandonedSweep = setInterval(sweepAbandoned, 60_000);
+  abandonedSweep.unref();
 
   const app = Fastify({
     logger: false, // we use our own pino sink writing to stderr
