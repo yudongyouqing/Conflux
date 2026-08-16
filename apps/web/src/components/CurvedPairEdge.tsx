@@ -65,44 +65,49 @@ export function CurvedPairEdge(props: EdgeProps) {
   return (
     <>
       <BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} />
-      {label ? (
-        <EdgeLabelRenderer>
-          <div
-            style={{
-              position: "absolute",
-              transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)`,
-            }}
-            title={manual ? "拖动调整弧度 · 双击复位" : undefined}
-            className={`nodrag nopan touch-none select-none rounded border px-1 text-[9px] max-w-[140px] truncate ${
-              manual
-                ? "cursor-grab active:cursor-grabbing hover:border-blue-300"
-                : ""
-            } ${
-              isSelected
+      <EdgeLabelRenderer>
+        <div
+          style={{
+            position: "absolute",
+            transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)`,
+            // EdgeLabelRenderer's container is pointer-events:none — children
+            // must opt back in or drags never reach them.
+            pointerEvents: "all",
+          }}
+          title={manual ? "拖动调整弧度 · 双击复位" : undefined}
+          className={`nodrag nopan touch-none select-none rounded border ${
+            label ? "px-1 text-[9px] max-w-[140px] truncate" : "w-2.5 h-2.5 border-gray-300 bg-gray-200 opacity-0 hover:opacity-100"
+          } ${
+            manual
+              ? "cursor-grab active:cursor-grabbing hover:border-blue-300"
+              : ""
+          } ${
+            label
+              ? isSelected
                 ? "bg-blue-100 border-blue-300 text-blue-700 font-semibold"
                 : "bg-white border-gray-200 text-gray-500"
-            }`}
-            onPointerDown={(ev) => {
-              if (!manual) return;
-              ev.preventDefault();
-              ev.stopPropagation();
-              (ev.target as HTMLElement).setPointerCapture(ev.pointerId);
-            }}
-            onPointerMove={(ev) => {
-              if (!manual || !(ev.buttons & 1)) return;
-              ev.stopPropagation();
-              d.onOffsetChange!(d.offsetKey!, pointerToOffset(ev));
-            }}
-            onDoubleClick={(ev) => {
-              if (!manual) return;
-              ev.stopPropagation();
-              d.onOffsetChange!(d.offsetKey!, null);
-            }}
-          >
-            <span style={labelStyle}>{label}</span>
-          </div>
-        </EdgeLabelRenderer>
-      ) : null}
+              : "transition-opacity"
+          }`}
+          onPointerDown={(ev) => {
+            if (!manual) return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            (ev.target as HTMLElement).setPointerCapture(ev.pointerId);
+          }}
+          onPointerMove={(ev) => {
+            if (!manual || !(ev.buttons & 1)) return;
+            ev.stopPropagation();
+            d.onOffsetChange!(d.offsetKey!, pointerToOffset(ev));
+          }}
+          onDoubleClick={(ev) => {
+            if (!manual) return;
+            ev.stopPropagation();
+            d.onOffsetChange!(d.offsetKey!, null);
+          }}
+        >
+          {label ? <span style={labelStyle}>{label}</span> : null}
+        </div>
+      </EdgeLabelRenderer>
     </>
   );
 }
