@@ -6,7 +6,7 @@ import { logger } from "../log.js";
 
 export type DB = Database.Database;
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 // Track the checkpoint timer in a module-scoped variable (avoids touching the
 // globalThis type signature).
@@ -143,6 +143,12 @@ CREATE TABLE IF NOT EXISTS runtime_agents (
   instructions TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
+);
+
+-- Simple KV store for UI/server settings (e.g. terminal opener config).
+CREATE TABLE IF NOT EXISTS app_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS audit_log (

@@ -60,6 +60,9 @@ import {
   listRuntimeAgents,
   startRuntimeAgent,
 } from "../core/runtime-agents.js";
+import { getTerminalSettings, saveTerminalSettings } from "../core/app-settings.js";
+import { openInTerminal, resumeCommand } from "../core/terminal.js";
+import type { TerminalSettings } from "@muiltchat/shared";
 import { logger } from "../log.js";
 
 export interface HttpServerOptions {
@@ -654,6 +657,73 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
       providers[name] = { configured: entry.hasKey() };
     }
     return reply.send({ providers });
+  });
+
+  // ---- terminal settings (opener used by "open in terminal" + agent start) ----
+  app.get("/settings/terminal", {}, async (_req, reply) => {
+    try {
+      return reply.send({ terminal: getTerminalSettings(db) });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.put<{ Body: Partial<TerminalSettings> }>("/settings/terminal", {
+    schema: {
+      body: {
+        type: "object",
+        properties: {
+          terminal: { type: "string", enum: ["wt", "cmd", "wezterm"] },
+          claude_path: { type: "string", maxLength: 500 },
+          codex_path: { type: "string", maxLength: 500 },
+        },
+      },
+    },
+  }, async (req, reply) => {
+    try {
+      const terminal = saveTerminalSettings(db, req.body);
+      logAudit(db, { interface: "http", action: "save_terminal_settings", args: { terminal: terminal.terminal } });
+      return reply.send({ terminal });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // POST /sessions/:id/open-terminal — open the session's conversation in a
+  // new terminal window (claude --resume <id> / codex resume <id>)
+  app.post<{ Params: { id: string } }>("/sessions/:id/open-terminal", {}, async (req, reply) => {
+    try {
+      const id = req.params.id;
+      const session = getSession(db, id);
+      if (!session) return reply.code(404).send({ error: "session not found" });
+      if (id.startsWith("agent-")) {
+        return reply.code(400).send({ error: "internal agents have no terminal" });
+      }
+      let runtime: "claude" | "codex" = "claude";
+      try {
+        const meta = session.metadata ? (JSON.parse(session.metadata) as Record<string, unknown>) : null;
+        if (meta?.runtime === "codex") runtime = "codex";
+      } catch {
+        // malformed metadata — default runtime
+      }
+      const settings = getTerminalSettings(db);
+      const executable = runtime === "codex" ? settings.codex_path : settings.claude_path;
+      const result = openInTerminal(settings, {
+        command: resumeCommand(runtime, id, executable),
+        cwd: session.project_dir ?? undefined,
+        title: `muiltchat · ${session.name}`,
+      });
+      heartbeat(db, id);
+      logAudit(db, {
+        interface: "http",
+        action: "open_terminal",
+        args: { session: id, runtime },
+        result,
+      });
+      return reply.send(result);
+    } catch (err) {
+      return sendError(reply, err);
+    }
   });
 
   // GET /graph — return nodes (sessions) + edges (communication links)

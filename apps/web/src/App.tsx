@@ -5,6 +5,7 @@ import { SessionsTab } from "./components/SessionsTab";
 import { MessageTab } from "./components/MessageTab";
 import { AgentTab } from "./components/AgentTab";
 import { RuntimesTab } from "./components/RuntimesTab";
+import { SettingsTab } from "./components/SettingsTab";
 import { DetailPanel } from "./components/DetailPanel";
 import { useGraph } from "./hooks";
 import type { Message, GraphNode } from "@muiltchat/shared";
@@ -82,6 +83,7 @@ export default function App() {
           )}
           {tab === "agents" && <AgentTab />}
           {tab === "runtimes" && <RuntimesTab />}
+          {tab === "settings" && <SettingsTab />}
         </main>
         <aside className="w-80 border-l border-gray-200 bg-white overflow-hidden flex-shrink-0">
           <DetailPanel

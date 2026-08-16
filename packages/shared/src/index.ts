@@ -57,6 +57,18 @@ export interface Agent {
 
 export type RuntimeId = "claude" | "codex";
 
+/** How muiltchat opens a new terminal window (AgentRecall-style choice). */
+export type TerminalChoice = "wt" | "cmd" | "wezterm";
+
+export interface TerminalSettings {
+  /** Terminal opener. wt falls back to cmd when wt.exe is missing. */
+  terminal: TerminalChoice;
+  /** Claude Code executable override (default "claude"). */
+  claude_path: string;
+  /** Codex executable override (default "codex"). */
+  codex_path: string;
+}
+
 /**
  * User-configured runtime agent: a preset for spawning a real CLI agent
  * (Claude Code / Codex) with a fixed working directory and API channel.
