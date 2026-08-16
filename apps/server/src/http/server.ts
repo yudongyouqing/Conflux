@@ -63,6 +63,7 @@ import {
 } from "../core/runtime-agents.js";
 import { getTerminalSettings, saveTerminalSettings } from "../core/app-settings.js";
 import { openInTerminal, resumeCommand, terminalOptions } from "../core/terminal.js";
+import { probeClaudePids, reconcileLiveness } from "../core/liveness.js";
 import type { TerminalSettings } from "@muiltchat/shared";
 import { logger } from "../log.js";
 
@@ -124,6 +125,21 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   };
   const scheduleTimer = setInterval(scheduleTick, 30_000);
   scheduleTimer.unref();
+
+  // ---- liveness probe (AgentRecall-style process scan) ----
+  // Source of truth for session status: a conversation is alive iff its
+  // claude process exists. Refreshes idle-but-open terminals and reaps dead
+  // processes immediately; on probe failure the heartbeat TTL still applies.
+  const livenessTick = async () => {
+    try {
+      const livePids = await probeClaudePids();
+      if (livePids) reconcileLiveness(db, livePids);
+    } catch {
+      // transient — next tick retries
+    }
+  };
+  const livenessTimer = setInterval(livenessTick, 30_000);
+  livenessTimer.unref();
 
   const app = Fastify({
     logger: false, // we use our own pino sink writing to stderr

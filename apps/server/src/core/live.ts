@@ -9,6 +9,7 @@ import {
   getSession,
   heartbeat,
   pruneAbandonedSessions,
+  mergeSessionMeta,
   type Session,
 } from "./sessions.js";
 import { forwardInboxFromPid } from "./messages.js";
@@ -290,9 +291,12 @@ export function handleHookEvent(
       const title = readCustomTitle(id, payload.cwd ?? existing.project_dir, claudeHome);
       if (title && title !== existing.name) renameSession(db, id, title);
       heartbeat(db, id);
-      if (typeof meta.claude_pid === "number") {
-        setSetting(db, `claude-current:${meta.claude_pid}`, id);
-      }
+      const pid = refreshClaudePid(
+        db,
+        id,
+        typeof meta.claude_pid === "number" ? meta.claude_pid : null
+      );
+      if (pid !== null) setSetting(db, `claude-current:${pid}`, id);
     }
     return;
   }
@@ -301,7 +305,10 @@ export function handleHookEvent(
     // A /rename'd title survives resumes; otherwise keep a prompt-derived
     // name, and only pay the ancestor walk once per conversation.
     const title = readCustomTitle(id, payload.cwd, claudeHome);
-    const claudePid = typeof meta.claude_pid === "number" ? meta.claude_pid : getClaudePid();
+    // session-start is the one place the process identity may have CHANGED
+    // (resume in a new terminal): trust the actual ancestor walk over the
+    // stored pid — liveness probing keys off this value.
+    const claudePid = getClaudePid() ?? (typeof meta.claude_pid === "number" ? meta.claude_pid : null);
     registerSession(db, {
       id,
       name:
@@ -340,9 +347,15 @@ export function handleHookEvent(
     heartbeat(db, id);
     // refresh the "what is this session doing" signal on every turn
     if (excerpt) setSessionDescription(db, id, excerpt);
-    if (typeof meta.claude_pid === "number") {
-      setSetting(db, `claude-current:${meta.claude_pid}`, id);
-    }
+    // keep the recorded pid current — liveness probing keys off it. Cheap:
+    // signal-0 existence check first, ancestor walk only when the stored
+    // process died (conversation resumed in a new terminal).
+    const pid = refreshClaudePid(
+      db,
+      id,
+      typeof meta.claude_pid === "number" ? meta.claude_pid : null
+    );
+    if (pid !== null) setSetting(db, `claude-current:${pid}`, id);
     return;
   }
   registerSession(db, {
@@ -352,6 +365,32 @@ export function handleHookEvent(
     project_dir: payload.cwd ?? existing?.project_dir ?? null,
     metadata: { source: "claude-hook", ...meta, ...agentTag, ...(title ? { custom_title: true } : {}), named: true },
   });
+}
+
+/**
+ * Keep the session's recorded claude pid pointing at a LIVE process: the
+ * conversation may have been resumed in a new terminal, leaving the stored
+ * pid dead while the conversation lives on. Signal-0 check is free; the
+ * ancestor walk runs only when the stored pid is gone. (A recycled pid
+ * re-used by an unrelated process is tolerated — rare locally.)
+ */
+function refreshClaudePid(db: DB, id: string, stored: number | null): number | null {
+  if (stored !== null) {
+    try {
+      process.kill(stored, 0);
+      return stored; // definitively alive
+    } catch {
+      // ESRCH = gone. EPERM on Windows is ALSO usually a dead/zombie pid
+      // (OpenProcess quirk), not a restricted live one — don't trust it.
+      // Fall through: the walk self-corrects (same pid → no change).
+    }
+  }
+  const live = getClaudePid();
+  if (live !== null && live !== stored) {
+    mergeSessionMeta(db, id, { claude_pid: live });
+    return live;
+  }
+  return live ?? stored;
 }
 
 // ---- MCP adoption ----------------------------------------------------------
