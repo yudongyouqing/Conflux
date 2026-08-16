@@ -233,7 +233,7 @@ export function handleHookEvent(
           : basename(payload.cwd || "") || "claude"),
       description: meta.named && existing ? existing.description : "Claude Code session (hook)",
       project_dir: payload.cwd ?? existing?.project_dir ?? null,
-      metadata: { source: "claude-hook", ...meta, ...agentTag, claude_pid: claudePid },
+      metadata: { source: "claude-hook", ...meta, ...agentTag, ...(title ? { custom_title: true } : {}), claude_pid: claudePid },
     });
     // This process previously ran another conversation id that was abandoned
     // by /resume or /clear before receiving any prompt — reap it now.
@@ -257,7 +257,7 @@ export function handleHookEvent(
     name: title ?? excerpt ?? (existing?.name ?? "claude"),
     description: excerpt ?? (existing?.description ?? "Claude Code session (hook)"),
     project_dir: payload.cwd ?? existing?.project_dir ?? null,
-    metadata: { source: "claude-hook", ...meta, ...agentTag, named: true },
+    metadata: { source: "claude-hook", ...meta, ...agentTag, ...(title ? { custom_title: true } : {}), named: true },
   });
 }
 

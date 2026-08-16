@@ -5,6 +5,7 @@ import { getGraph } from "../core/graph.js";
 import { registerSession, endSession } from "../core/sessions.js";
 import { createAgent } from "../core/agents.js";
 import { createConversation } from "../core/conversations.js";
+import { createRuntimeAgent } from "../core/runtime-agents.js";
 
 const { db, cleanup } = makeDb();
 after(cleanup);
@@ -41,5 +42,29 @@ test("status filter excludes ended sessions", () => {
   assert.ok(!active.nodes.some((n) => n.id === "gone"));
   const all = getGraph(db, { status: "all" });
   assert.ok(all.nodes.some((n) => n.id === "gone"));
+});
+
+test("runtime-agent preset name is a fallback, never masks the session's own name", () => {
+  const ra = createRuntimeAgent(db, { name: "worker-x", runtime: "claude" });
+  // spawned but idle at the prompt — still on the cwd basename
+  registerSession(db, {
+    id: "spawn-idle",
+    name: "muiltchat",
+    description: "Claude Code session (hook)",
+    metadata: { source: "claude-hook", agent_id: ra.id, runtime: "claude" },
+  });
+  // user renamed the conversation in Claude Code (/rename test2)
+  registerSession(db, {
+    id: "spawn-renamed",
+    name: "test2",
+    description: "working",
+    metadata: { source: "claude-hook", agent_id: ra.id, runtime: "claude", named: true, custom_title: true },
+  });
+  const g = getGraph(db, { status: "all" });
+  const idle = g.nodes.find((n) => n.id === "spawn-idle")!;
+  const renamed = g.nodes.find((n) => n.id === "spawn-renamed")!;
+  assert.equal(idle.name, "worker-x", "unnamed spawn falls back to the preset name");
+  assert.equal(idle.agent_id, ra.id);
+  assert.equal(renamed.name, "test2", "custom title / prompt name wins over the preset name");
 });
 
