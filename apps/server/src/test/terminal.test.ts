@@ -5,6 +5,8 @@ import {
   buildLaunchPlan,
   resumeCommand,
   cleanTerminalEnv,
+  resolveOnPath,
+  terminalOptions,
 } from "../core/terminal.js";
 import {
   getTerminalSettings,
@@ -53,6 +55,34 @@ test("buildLaunchPlan: wt first with fallback, cmd-only for cmd choice", () => {
   assert.equal(cmd.length, 1);
   assert.equal(cmd[0].verbatim, true);
   assert.ok(cmd[0].args.join(" ").includes("start"));
+});
+
+test("buildLaunchPlan: powershell runs the command directly with pwsh fallback chain", () => {
+  const plan = buildLaunchPlan(
+    { terminal: "powershell" },
+    { command: "claude --resume abc", cwd: "C:/work/dir", title: "t" }
+  );
+  assert.equal(plan[0].file, "pwsh.exe");
+  assert.deepEqual(plan[0].args.slice(0, 4), ["-NoLogo", "-NoProfile", "-NoExit", "-Command"]);
+  assert.equal(plan[0].args[4], "claude --resume abc", "raw command, no cmd-syntax title prefix");
+  assert.equal(plan[0].cwd, "C:/work/dir");
+  assert.equal(plan[1].file, "powershell.exe");
+  assert.equal(plan[2].verbatim, true, "cmd start is the last fallback");
+});
+
+test("resolveOnPath resolves via where.exe (handles Store aliases); terminalOptions reports availability", () => {
+  if (process.platform !== "win32") return; // where.exe is Windows-only
+  assert.ok(resolveOnPath("cmd.exe"), "cmd.exe resolvable on any Windows box");
+  assert.equal(resolveOnPath("definitely-missing-exe-xyz"), null);
+
+  const opts = terminalOptions();
+  assert.deepEqual(
+    opts.map((o) => o.value),
+    ["wt", "powershell", "cmd", "wezterm"]
+  );
+  const cmdOpt = opts.find((o) => o.value === "cmd")!;
+  assert.equal(cmdOpt.available, true);
+  assert.ok(opts.every((o) => typeof o.label === "string" && o.label.length > 0));
 });
 
 test("resumeCommand builds runtime-correct commands with quoted paths", () => {

@@ -1,4 +1,4 @@
-import type { Graph, Message, MessageStatus, SessionSummary, ContextEntry, Agent, ModelConfig, Conversation, Turn, RuntimeAgent, RuntimeId, TerminalSettings } from "@muiltchat/shared";
+import type { Graph, Message, MessageStatus, SessionSummary, ContextEntry, Agent, ModelConfig, Conversation, Turn, RuntimeAgent, RuntimeId, TerminalSettings, TerminalOption } from "@muiltchat/shared";
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path);
@@ -101,7 +101,8 @@ export const api = {
   openSessionTerminal: (sessionId: string) =>
     post<{ opener: string }>(`/sessions/${encodeURIComponent(sessionId)}/open-terminal`, {}),
 
-  getTerminalSettings: () => get<{ terminal: TerminalSettings }>("/settings/terminal"),
+  getTerminalSettings: () =>
+    get<{ terminal: TerminalSettings; options: TerminalOption[] }>("/settings/terminal"),
 
   saveTerminalSettings: (body: Partial<TerminalSettings>) =>
     put<{ terminal: TerminalSettings }>("/settings/terminal", body),
