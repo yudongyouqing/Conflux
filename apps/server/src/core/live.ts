@@ -11,6 +11,7 @@ import {
   pruneAbandonedSessions,
   type Session,
 } from "./sessions.js";
+import { forwardInboxFromPid } from "./messages.js";
 
 /**
  * Hook-driven liveness + identity for Claude Code sessions.
@@ -104,6 +105,8 @@ export interface HookPayload {
   session_id: string;
   cwd?: string;
   prompt?: string;
+  /** SessionStart source: "startup" | "resume" | "clear" | "compact". */
+  source?: string;
 }
 
 function parseMeta(s: Session): Record<string, unknown> {
@@ -239,6 +242,13 @@ export function handleHookEvent(
     // by /resume or /clear before receiving any prompt — reap it now.
     if (claudePid !== null) {
       pruneAbandonedSessions(db, { claudePid, keepId: id });
+      // /resume continues the SAME conversation under a new id: re-address
+      // undelivered mail from this process's previous ids so it follows the
+      // conversation instead of stranding on the dead id. (source "clear"
+      // starts an unrelated conversation — its mail must NOT follow.)
+      if (payload.source === "resume") {
+        forwardInboxFromPid(db, claudePid, id);
+      }
     }
     return;
   }

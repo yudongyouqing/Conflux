@@ -9,6 +9,8 @@ import {
   checkReplies,
   listMessages,
   listPeerMessages,
+  forwardInboxFromPid,
+  formatInboxNotice,
 } from "../core/messages.js";
 import { recordEdge, getGraph } from "../core/graph.js";
 import { registerSession } from "../core/sessions.js";
@@ -152,3 +154,46 @@ test("recordEdge upsert is idempotent-safe increment", () => {
   assert.equal(g.edges.find((e) => e.from === "x" && e.to === "y")!.weight, 2);
 });
 
+
+// ---- inbox delivery across /resume + proactive notices ----------------------
+
+test("forwardInboxFromPid re-addresses undelivered mail to the resume successor", () => {
+  registerSession(db, { id: "old-conv", name: "old", metadata: { source: "claude-hook", claude_pid: 909 } });
+  registerSession(db, { id: "other-pid", name: "other", metadata: { source: "claude-hook", claude_pid: 111 } });
+  askSession(db, { from_session: "a", to_session: "old-conv", question: "resume 前的提问" });
+  askSession(db, { from_session: "a", to_session: "other-pid", question: "别动我" });
+  // one already-replied message must stay on the old id (history)
+  const replied = askSession(db, { from_session: "a", to_session: "old-conv", question: "已回复的" });
+  replyAsk(db, replied.id, "old-conv", "done");
+
+  // the successor row must exist first (messages.to_session has an FK to it)
+  registerSession(db, { id: "new-conv", name: "new" });
+  const moved = forwardInboxFromPid(db, 909, "new-conv");
+  assert.equal(moved, 1, "only the undelivered ask moves");
+  const inbox = checkInbox(db, "new-conv");
+  assert.ok(inbox.some((m) => m.question === "resume 前的提问"), "mail follows the conversation");
+  assert.equal(
+    listMessages(db, { to_session: "other-pid", status: "all" }).length,
+    1,
+    "other pid's mail untouched"
+  );
+  assert.ok(
+    listMessages(db, { to_session: "old-conv", status: "all" }).every((m) => m.status === "replied" || m.status === "read"),
+    "replied history stays on the old id"
+  );
+});
+
+test("formatInboxNotice is silent when read, nagging when pending", () => {
+  registerSession(db, { id: "notice-target", name: "nt" });
+  assert.equal(formatInboxNotice(db, "notice-target"), null, "empty inbox → no stdout noise");
+
+  askSession(db, { from_session: "a", to_session: "notice-target", question: "你好,\n   多行问题 内容" });
+  const notice = formatInboxNotice(db, "notice-target");
+  assert.ok(notice && notice.includes("1 条未读"), "mentions the count");
+  assert.ok(notice!.includes("多行问题"), "excerpt collapses whitespace");
+  assert.ok(notice!.includes("check_inbox"), "tells the model what to call");
+
+  // once the session has actually LOOKED (checkInbox → seen), the nag stops
+  checkInbox(db, "notice-target");
+  assert.equal(formatInboxNotice(db, "notice-target"), null, "seen mail stops nagging");
+});
