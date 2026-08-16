@@ -158,3 +158,21 @@ export function pruneAbandonedSessions(
   }
   return deleted;
 }
+
+/** Merge keys into a session's metadata JSON (in place, no full rewrite). */
+export function mergeSessionMeta(db: DB, id: string, patch: Record<string, unknown>): void {
+  const row = db.prepare(`SELECT metadata FROM sessions WHERE id = ?`).get(id) as
+    | { metadata: string | null }
+    | undefined;
+  if (!row) return;
+  let meta: Record<string, unknown> = {};
+  try {
+    meta = row.metadata ? (JSON.parse(row.metadata) as Record<string, unknown>) : {};
+  } catch {
+    // corrupted metadata — start fresh rather than losing the patch
+  }
+  db.prepare(`UPDATE sessions SET metadata = ? WHERE id = ?`).run(
+    JSON.stringify({ ...meta, ...patch }),
+    id
+  );
+}
