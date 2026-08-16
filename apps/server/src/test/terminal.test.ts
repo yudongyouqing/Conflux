@@ -34,9 +34,10 @@ test("saveTerminalSettings merges partials and validates the choice", () => {
   assert.equal(reread.terminal, "wezterm");
   assert.equal(reread.claude_path, "C:/tools/claude.exe");
 
-  // empty string resets to default; unknown choice rejected
+  // empty string resets to default; unknown choice rejected (iterm is a
+  // LEGAL macOS choice now — use a genuinely bogus value)
   assert.equal(saveTerminalSettings(db, { claude_path: "  " }).claude_path, "claude");
-  assert.throws(() => saveTerminalSettings(db, { terminal: "iterm" as never }));
+  assert.throws(() => saveTerminalSettings(db, { terminal: "ghost-term" as never }));
 });
 
 test("buildLaunchPlan: wt first with fallback, cmd-only for cmd choice", () => {
@@ -105,4 +106,70 @@ test("cleanTerminalEnv drops session-scoped Claude vars", () => {
   assert.equal(env.CLAUDECODE, undefined);
   assert.equal(env.ANTHROPIC_AUTH_TOKEN, undefined);
   assert.equal(env.ANTHROPIC_MODEL, undefined);
+});
+
+// ---- macOS launch plans -------------------------------------------------------
+
+const darwin = { platform: "darwin" as NodeJS.Platform };
+const macBase = {
+  command: '"claude" --resume abc',
+  cwd: "/Users/x/my proj",
+  title: "muiltchat · x",
+  env: { PATH: "/usr/local/bin:/usr/bin", ANTHROPIC_AUTH_TOKEN: "sk test" } as NodeJS.ProcessEnv,
+};
+
+test("darwin plan: Terminal.app osascript with inlined cd+env, posix-quoted", () => {
+  const plan = buildLaunchPlan({ terminal: "terminal" }, macBase, darwin);
+  assert.equal(plan.length, 1);
+  assert.equal(plan[0].file, "/usr/bin/osascript");
+  const script = plan[0].args.join("\n");
+  assert.ok(script.includes('tell application "Terminal"'));
+  assert.ok(script.includes('do script "'));
+  assert.ok(script.includes("cd '/Users/x/my proj'"), "space-containing cwd single-quoted");
+  assert.ok(script.includes("ANTHROPIC_AUTH_TOKEN='sk test'"), "env inlined with quoting");
+  assert.ok(script.includes('\\"claude\\" --resume abc'), "command quotes escaped for AppleScript");
+});
+
+test("darwin plan: iterm first with Terminal.app fallback; tmux new-window carries inline env", () => {
+  const it = buildLaunchPlan({ terminal: "iterm" }, macBase, darwin);
+  assert.ok(it[0].args.join(" ").includes("iTerm2"));
+  assert.ok(it[0].args.join(" ").includes("write text"));
+  assert.equal(it[1].file, "/usr/bin/osascript", "Terminal.app fallback");
+  assert.ok(it[1].args.join(" ").includes('tell application "Terminal"'));
+
+  const tm = buildLaunchPlan({ terminal: "tmux" }, { ...macBase, cwd: undefined }, darwin);
+  assert.equal(tm[0].file, "tmux");
+  assert.deepEqual(tm[0].args.slice(0, 3), ["new-window", "-n", "muiltchat · x"]);
+  const shIdx = tm[0].args.indexOf("-c");
+  assert.ok(tm[0].args[shIdx + 1].startsWith("env "), "env inlined into sh -c payload");
+  assert.ok(tm[0].args[shIdx + 1].endsWith('"claude" --resume abc'), "no AppleScript escaping on the tmux path");
+});
+
+test("darwin plan: windows-flavoured choice falls back to Terminal.app", () => {
+  const plan = buildLaunchPlan({ terminal: "wt" }, macBase, darwin);
+  assert.equal(plan[0].file, "/usr/bin/osascript");
+  assert.ok(plan[0].args.join(" ").includes('tell application "Terminal"'));
+});
+
+test("terminalOptions on darwin lists mac openers only", () => {
+  const opts = terminalOptions(process.env, darwin);
+  assert.deepEqual(
+    opts.map((o) => o.value),
+    ["terminal", "iterm", "tmux"]
+  );
+  assert.ok(opts.every((o) => typeof o.label === "string" && o.label.length > 0));
+});
+
+test("cleanTerminalEnv keeps POSIX essentials", () => {
+  const env = cleanTerminalEnv({
+    PATH: "/usr/local/bin",
+    SHELL: "/bin/zsh",
+    USER: "dev",
+    TMPDIR: "/var/folders/xx",
+    CLAUDECODE: "1",
+  } as NodeJS.ProcessEnv);
+  assert.equal(env.SHELL, "/bin/zsh");
+  assert.equal(env.USER, "dev");
+  assert.equal(env.TMPDIR, "/var/folders/xx");
+  assert.equal(env.CLAUDECODE, undefined);
 });

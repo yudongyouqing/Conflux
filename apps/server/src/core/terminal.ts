@@ -43,6 +43,12 @@ export function cleanTerminalEnv(baseEnv: NodeJS.ProcessEnv = process.env): Node
     "windir",
     "LANG",
     "TERM",
+    "SHELL",
+    "USER",
+    "TMPDIR",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_CACHE_HOME",
     "HTTP_PROXY",
     "HTTPS_PROXY",
     "NO_PROXY",
@@ -75,6 +81,86 @@ export function cmdQuote(s: string): string {
   return /[\s"]/.test(s) ? `"${s.replace(/"/g, "")}"` : s;
 }
 
+/** POSIX sh single-quoting: everything unlisted stays literal inside '...'. */
+export function posixQuote(s: string): string {
+  return /^[-A-Za-z0-9_@%+=:,./]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * The ordered candidate list for one opener choice (macOS). Env cannot ride
+ * along with the osascript/tmux spawn (Terminal.app and the tmux server run
+ * in their own environments), so vars are inlined into the command string.
+ * Pure — unit-testable without spawning anything.
+ */
+function macLaunchPlan(
+  settings: Pick<TerminalSettings, "terminal">,
+  opts: { command: string; cwd?: string; title: string; env?: NodeJS.ProcessEnv }
+): LaunchSpec[] {
+  const envPrefix = opts.env
+    ? Object.entries(opts.env)
+        .filter(([k]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k))
+        .map(([k, v]) => `${k}=${posixQuote(String(v))}`)
+        .join(" ")
+    : "";
+  const inner =
+    (opts.cwd ? `cd ${posixQuote(opts.cwd)} && ` : "") +
+    (envPrefix ? `env ${envPrefix} ` : "") +
+    opts.command;
+  // AppleScript string literal: escape backslashes and double quotes.
+  const apple = `"${inner.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+
+  const terminalApp = (): LaunchSpec => ({
+    file: "/usr/bin/osascript",
+    args: [
+      "-e",
+      'tell application "Terminal"',
+      "-e",
+      "activate",
+      "-e",
+      `do script ${apple}`,
+      "-e",
+      "end tell",
+    ],
+  });
+  const iterm = (): LaunchSpec => ({
+    file: "/usr/bin/osascript",
+    args: [
+      "-e",
+      'tell application "iTerm2"',
+      "-e",
+      "activate",
+      "-e",
+      "set w to create window with default profile",
+      "-e",
+      `tell current session of w to write text ${apple}`,
+      "-e",
+      "end tell",
+    ],
+  });
+  const tmux = (): LaunchSpec => ({
+    // The window lives in the tmux server (auto-started if none); attach
+    // from any terminal to see it. Env is inlined for the same reason as
+    // above — new windows inherit the SERVER's environment, not ours.
+    file: "tmux",
+    args: [
+      "new-window",
+      "-n",
+      opts.title,
+      ...(opts.cwd ? ["-c", opts.cwd] : []),
+      "sh",
+      "-c",
+      inner,
+    ],
+  });
+
+  if (settings.terminal === "iterm") return [iterm(), terminalApp()];
+  if (settings.terminal === "tmux") return [tmux(), terminalApp()];
+  // "terminal" default — and any windows-flavoured choice that leaked into
+  // the same DB via a synced home dir — lands on Terminal.app, which every
+  // Mac has.
+  return [terminalApp()];
+}
+
 /**
  * The ordered candidate list for one opener choice. The inner command runs
  * under `cmd.exe /d /k` so the window stays open after the CLI exits.
@@ -82,8 +168,11 @@ export function cmdQuote(s: string): string {
  */
 export function buildLaunchPlan(
   settings: Pick<TerminalSettings, "terminal">,
-  opts: { command: string; cwd?: string; title: string }
+  opts: { command: string; cwd?: string; title: string; env?: NodeJS.ProcessEnv },
+  io: { platform?: NodeJS.Platform } = {}
 ): LaunchSpec[] {
+  const platform = io.platform ?? process.platform;
+  if (platform === "darwin") return macLaunchPlan(settings, opts);
   const { command, cwd, title } = opts;
   const titled = `title ${cmdQuote(title)} && ${command}`;
 
@@ -146,6 +235,9 @@ const TERMINAL_FILES: Record<TerminalChoice, string[]> = {
   powershell: ["pwsh.exe", "powershell.exe"],
   cmd: ["cmd.exe"],
   wezterm: ["wezterm.exe"],
+  terminal: ["/usr/bin/osascript"],
+  iterm: ["/Applications/iTerm.app", "iterm2"],
+  tmux: ["tmux"],
 };
 
 const TERMINAL_LABELS: Record<TerminalChoice, { label: string; hint: string }> = {
@@ -153,6 +245,9 @@ const TERMINAL_LABELS: Record<TerminalChoice, { label: string; hint: string }> =
   powershell: { label: "PowerShell", hint: "pwsh / powershell · 未安装时回退 cmd" },
   cmd: { label: "系统默认", hint: "cmd start 新窗口 · 兼容性最好" },
   wezterm: { label: "WezTerm", hint: "wezterm.exe · 缺失时回退 wt → cmd" },
+  terminal: { label: "Terminal.app", hint: "macOS 自带 · 经 osascript 打开" },
+  iterm: { label: "iTerm2", hint: "缺 iTerm2 时回退 Terminal.app" },
+  tmux: { label: "tmux", hint: "窗口在 tmux 服务端 · attach 查看;缺失回退 Terminal.app" },
 };
 
 /**
@@ -161,10 +256,16 @@ const TERMINAL_LABELS: Record<TerminalChoice, { label: string; hint: string }> =
  * MSYS/Windows string, and Store-app aliases like wt.exe are reparse points
  * that statSync fails on with EACCES. `where` handles both correctly.
  */
-export function resolveOnPath(exe: string, baseEnv: NodeJS.ProcessEnv = process.env): string | null {
+export function resolveOnPath(
+  exe: string,
+  baseEnv: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform
+): string | null {
   if (/[\\/]/.test(exe)) return existsSync(exe) ? exe : null;
+  // macOS has no where.exe; /usr/bin/which covers it (no Store-alias quirks).
+  const resolver = platform === "darwin" ? "/usr/bin/which" : "where.exe";
   try {
-    const r = spawnSync("where.exe", [exe], {
+    const r = spawnSync(resolver, [exe], {
       encoding: "utf8",
       timeout: 5000,
       env: baseEnv,
@@ -175,7 +276,7 @@ export function resolveOnPath(exe: string, baseEnv: NodeJS.ProcessEnv = process.
       return first || null;
     }
   } catch {
-    // where unavailable — treat as unresolved
+    // resolver unavailable — treat as unresolved
   }
   return null;
 }
@@ -186,12 +287,19 @@ export function resolveOnPath(exe: string, baseEnv: NodeJS.ProcessEnv = process.
  * same select-style list; the launch plan still falls back if one is
  * chosen but missing).
  */
-export function terminalOptions(baseEnv: NodeJS.ProcessEnv = process.env): TerminalOption[] {
-  const order: TerminalChoice[] = ["wt", "powershell", "cmd", "wezterm"];
+export function terminalOptions(
+  baseEnv: NodeJS.ProcessEnv = process.env,
+  io: { platform?: NodeJS.Platform } = {}
+): TerminalOption[] {
+  const platform = io.platform ?? process.platform;
+  const order: TerminalChoice[] =
+    platform === "darwin"
+      ? ["terminal", "iterm", "tmux"]
+      : ["wt", "powershell", "cmd", "wezterm"];
   return order.map((value) => ({
     value,
     ...TERMINAL_LABELS[value],
-    available: TERMINAL_FILES[value].some((f) => resolveOnPath(f, baseEnv) !== null),
+    available: TERMINAL_FILES[value].some((f) => resolveOnPath(f, baseEnv, platform) !== null),
   }));
 }
 
@@ -207,11 +315,11 @@ export function openInTerminal(
   io: { platform?: NodeJS.Platform; comspec?: string } = {}
 ): { opener: string } {
   const platform = io.platform ?? process.platform;
-  if (platform !== "win32") {
-    throw new Error("opening a terminal is Windows-only for now");
+  if (platform !== "win32" && platform !== "darwin") {
+    throw new Error("opening a terminal is supported on Windows and macOS only");
   }
-  const plan = buildLaunchPlan(settings, opts);
   const env = opts.env ?? cleanTerminalEnv();
+  const plan = buildLaunchPlan(settings, { ...opts, env }, { platform });
 
   let lastError = "no terminal launched";
   for (const spec of plan) {
@@ -236,5 +344,9 @@ export function openInTerminal(
     logger.info({ opener: spec.file, title: opts.title }, "terminal opened");
     return { opener: spec.file };
   }
-  throw new Error(`no terminal available (${lastError}) — install Windows Terminal or set 终端打开方式 为 "系统默认"`);
+  throw new Error(
+    platform === "darwin"
+      ? `no terminal available (${lastError}) — macOS 自带 Terminal.app,理论上不应发生`
+      : `no terminal available (${lastError}) — install Windows Terminal or set 终端打开方式 为 "系统默认"`
+  );
 }

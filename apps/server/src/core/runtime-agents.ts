@@ -245,8 +245,8 @@ export function startRuntimeAgent(
   if (!agent) throw new Error(`runtime agent not found: ${id}`);
 
   const platform = opts.platform ?? process.platform;
-  if (platform !== "win32") {
-    throw new Error("starting a runtime agent is Windows-only for now (new terminal window)");
+  if (platform !== "win32" && platform !== "darwin") {
+    throw new Error("starting a runtime agent needs Windows (wt/cmd) or macOS (Terminal.app/iTerm2/tmux)");
   }
   if (agent.workdir && !existsSync(agent.workdir)) {
     throw new Error(`workdir does not exist: ${agent.workdir}`);
