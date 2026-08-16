@@ -17,15 +17,20 @@ export default function App() {
   const [selectedEdge, setSelectedEdge] = useState<{ from: string; to: string } | null>(null);
   const graph = useGraph();
 
-  const nameMap = useMemo(() => {
-    const m = new Map<string, string>();
-    graph.data?.nodes.forEach((n) => m.set(n.id, n.name));
+  const nodeMap = useMemo(() => {
+    const m = new Map<string, GraphNode>();
+    graph.data?.nodes.forEach((n) => m.set(n.id, n));
     return m;
   }, [graph.data]);
 
   const sessionNameLookup = useCallback(
-    (id: string) => nameMap.get(id),
-    [nameMap]
+    (id: string) => nodeMap.get(id)?.name,
+    [nodeMap]
+  );
+
+  const sessionStatusLookup = useCallback(
+    (id: string) => nodeMap.get(id)?.status,
+    [nodeMap]
   );
 
   const handleSelectSession = useCallback(
@@ -92,6 +97,7 @@ export default function App() {
             message={selectedMessage}
             edge={selectedEdge}
             sessionNameLookup={sessionNameLookup}
+            sessionStatusLookup={sessionStatusLookup}
           />
         </aside>
       </div>
