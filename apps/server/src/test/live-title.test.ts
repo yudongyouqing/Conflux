@@ -150,8 +150,7 @@ describe("handleHookEvent title sync", () => {
     disposeHome(home);
   });
 
-  it("forwards undelivered inbox to the resume successor, but not on /clear", () => {
-    const home = fakeHome();
+  it("forwards undelivered inbox to the resume successor, but not on /clear", () => {    const home = fakeHome();
     const cwd = "C:\\work\\inbox-fwd";
     const mk = (id: string, extra: Record<string, unknown> = {}) =>
       registerSession(db, {
@@ -215,5 +214,62 @@ describe("deleteUnreferencedSession", () => {
     registerSession(db, { id: "temp-uuid-1", name: "temp" });
     assert.equal(deleteUnreferencedSession(db, "temp-uuid-1"), true);
     assert.equal(getSession(db, "temp-uuid-1"), null);
+  });
+});
+
+describe("cross-process resume lineage (transcript matching)", () => {
+  it("re-addresses stranded mail when the resumed transcript contains the old conversation's first prompt", () => {
+    const home = fakeHome();
+    const cwd = "C:\work\lineage";
+    registerSession(db, { id: "asker-2", name: "asker2" });
+
+    // OLD conversation, run in a DIFFERENT (now dead) process, stale, with mail
+    const oldA = "aaaa1111-0000-0000-0000-000000000000";
+    writeTranscript(home, cwd, oldA, [
+      { type: "user", message: "alpha unique first prompt text for lineage" },
+    ]);
+    registerSession(db, {
+      id: oldA,
+      name: "alpha unique first prompt text for lineage",
+      description: "named",
+      metadata: { source: "claude-hook", named: true, claude_pid: 555 },
+    });
+    askSession(db, { from_session: "asker-2", to_session: oldA, question: "跨进程 stranded mail" });
+
+    // a DIFFERENT stale conversation with mail — must NOT be swept in
+    const otherC = "cccc3333-0000-0000-0000-000000000000";
+    registerSession(db, {
+      id: otherC,
+      name: "totally unrelated conversation name",
+      description: "named",
+      metadata: { source: "claude-hook", named: true, claude_pid: 556 },
+    });
+    askSession(db, { from_session: "asker-2", to_session: otherC, question: "别的对话的邮件" });
+    db.prepare(`UPDATE sessions SET status = 'stale' WHERE id IN (?, ?)`).run(oldA, otherC);
+
+    // resume in a NEW process: the successor transcript carries the old history
+    const newB = "bbbb2222-0000-0000-0000-000000000000";
+    writeTranscript(home, cwd, newB, [
+      { type: "user", message: "alpha unique first prompt text for lineage" },
+      { type: "assistant", message: "continuing the same conversation" },
+    ]);
+    handleHookEvent(
+      db,
+      "session-start",
+      { session_id: newB, cwd, source: "resume" },
+      join(home)
+    );
+
+    const got = listMessages(db, { to_session: newB, status: "all" });
+    assert.ok(
+      got.some((m) => m.question === "跨进程 stranded mail"),
+      "stranded mail follows the conversation across processes"
+    );
+    assert.equal(
+      listMessages(db, { to_session: otherC, status: "all" }).length,
+      1,
+      "unrelated conversation keeps its own mail"
+    );
+    disposeHome(home);
   });
 });

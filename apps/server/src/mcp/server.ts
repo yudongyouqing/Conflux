@@ -9,7 +9,9 @@ import {
   registerSession,
   listSessions,
   heartbeat,
+  getSession,
 } from "../core/sessions.js";
+import { getSetting } from "../core/app-settings.js";
 import {
   publishContext,
   updateContext,
@@ -90,18 +92,23 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
   // Claude Code process (matched by pid), adopt it: our tools then act as
   // that conversation-id-keyed session, and the temp uuid node is removed.
   // Best-effort — without hooks installed we keep the temp node.
-  let adopted = false;
+  //
+  // Re-resolved on every beat AND every tool call (no one-shot latch): a
+  // /resume mid-process moves the conversation to a new id, and the hook
+  // pins the authoritative current id under claude-current:<pid> — read
+  // that first; heartbeat-order guessing is only the fallback (it lags and
+  // can flap between the old and new rows).
   const tryAdopt = () => {
-    if (adopted) return;
     const pid = getClaudePid();
     if (pid === null) return;
-    const target = findSessionByClaudePid(db, pid);
+    const pinned = getSetting(db, `claude-current:${pid}`);
+    const target =
+      (pinned ? getSession(db, pinned) : null) ?? findSessionByClaudePid(db, pid);
     if (!target) return; // hook hasn't fired yet — retry on the next tick
-    adopted = true;
     if (target.id === sessionId) return;
     const oldId = sessionId;
     sessionId = target.id;
-    deleteUnreferencedSession(db, oldId);
+    deleteUnreferencedSession(db, oldId); // no-op for referenced/hook rows
     logger.info({ claudePid: pid, sessionId, oldId }, "mcp adopted hook-registered session");
   };
   tryAdopt();
@@ -132,12 +139,13 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
     }
   );
 
-  /** Wrapper that auto-heartbeats + audits + standardises errors. */
+  /** Wrapper that auto-adopts + heartbeats + audits + standardises errors. */
   async function withAudit<T>(
     action: string,
     args: Record<string, unknown>,
     fn: () => T | Promise<T>
   ): Promise<{ ok: true; result: T } | { ok: false; error: string }> {
+    tryAdopt(); // pick up /resume id changes instantly, not on the next 30s beat
     heartbeat(db, sessionId);
     try {
       const result = await fn();
