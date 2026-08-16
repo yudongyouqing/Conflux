@@ -12,6 +12,7 @@ import {
   type Session,
 } from "./sessions.js";
 import { forwardInboxFromPid } from "./messages.js";
+import { setSetting } from "./app-settings.js";
 
 /**
  * Hook-driven liveness + identity for Claude Code sessions.
@@ -148,24 +149,7 @@ export function readCustomTitle(
   cwd?: string | null,
   claudeHome?: string
 ): string | null {
-  const home = claudeHome ?? join(process.env.USERPROFILE || process.env.HOME || ".", ".claude");
-  const projectsDir = join(home, "projects");
-  const candidates: string[] = [];
-  if (cwd) {
-    const p = join(projectsDir, mungeProjectDir(cwd), `${sessionId}.jsonl`);
-    if (existsSync(p)) candidates.push(p);
-  }
-  try {
-    // fallback: the transcript lives in whatever project dir the session
-    // started in, which may differ from the hook's cwd
-    for (const dir of readdirSync(projectsDir)) {
-      const p = join(projectsDir, dir, `${sessionId}.jsonl`);
-      if (existsSync(p) && !candidates.includes(p)) candidates.push(p);
-    }
-  } catch {
-    // projects dir missing — nothing to read
-  }
-  for (const p of candidates) {
+  for (const p of findTranscriptPaths(sessionId, cwd, claudeHome)) {
     try {
       const lines = readFileSync(p, "utf8").split("\n");
       for (let i = lines.length - 1; i >= 0; i--) {
@@ -185,6 +169,94 @@ export function readCustomTitle(
     }
   }
   return null;
+}
+
+/** Transcript candidate paths for a conversation id (cwd dir first, then scan). */
+function findTranscriptPaths(
+  sessionId: string,
+  cwd?: string | null,
+  claudeHome?: string
+): string[] {
+  const home = claudeHome ?? join(process.env.USERPROFILE || process.env.HOME || ".", ".claude");
+  const projectsDir = join(home, "projects");
+  const candidates: string[] = [];
+  if (cwd) {
+    const p = join(projectsDir, mungeProjectDir(cwd), `${sessionId}.jsonl`);
+    if (existsSync(p)) candidates.push(p);
+  }
+  try {
+    // fallback: the transcript lives in whatever project dir the session
+    // started in, which may differ from the hook's cwd
+    for (const dir of readdirSync(projectsDir)) {
+      const p = join(projectsDir, dir, `${sessionId}.jsonl`);
+      if (existsSync(p) && !candidates.includes(p)) candidates.push(p);
+    }
+  } catch {
+    // projects dir missing — nothing to read
+  }
+  return candidates;
+}
+
+/** Full text of a conversation transcript (first readable candidate). */
+function readTranscriptText(
+  sessionId: string,
+  cwd?: string | null,
+  claudeHome?: string
+): string | null {
+  for (const p of findTranscriptPaths(sessionId, cwd, claudeHome)) {
+    try {
+      return readFileSync(p, "utf8");
+    } catch {
+      // unreadable — try next
+    }
+  }
+  return null;
+}
+
+/**
+ * Cross-process /resume lineage: when the conversation continues in a NEW
+ * OS process (close window → `claude --resume`), pid matching cannot link
+ * the ids — but the resumed transcript CONTAINS the copied-over history of
+ * the old one. A stale session with undelivered mail whose name (custom
+ * title or first-prompt excerpt) appears in the successor's transcript is
+ * the same conversation: re-address its pending/seen mail.
+ * False positives require two conversations sharing the first 24 chars of
+ * their first prompt — acceptable for a personal tool.
+ */
+export function forwardStrandedInboxByTranscript(
+  db: DB,
+  successorId: string,
+  cwd?: string | null,
+  claudeHome?: string
+): number {
+  const text = readTranscriptText(successorId, cwd, claudeHome);
+  if (!text) return 0;
+  const haystack = text.replace(/\s+/g, " ").toLowerCase();
+
+  const candidates = db
+    .prepare(
+      `SELECT s.id, s.name FROM sessions s
+       WHERE s.id != ? AND s.status IN ('stale','ended')
+         AND EXISTS (SELECT 1 FROM messages m
+                     WHERE m.to_session = s.id AND m.status IN ('pending','seen'))
+       ORDER BY s.last_heartbeat_at DESC LIMIT 20`
+    )
+    .all(successorId) as { id: string; name: string }[];
+
+  const matched = candidates
+    .filter((c) => {
+      const needle = c.name.replace(/\s+/g, " ").toLowerCase().slice(0, 24);
+      return needle.length >= 8 && haystack.includes(needle);
+    })
+    .map((c) => c.id);
+  if (matched.length === 0) return 0;
+  const placeholders = matched.map(() => "?").join(",");
+  return db
+    .prepare(
+      `UPDATE messages SET to_session = ?
+       WHERE status IN ('pending','seen') AND to_session IN (${placeholders})`
+    )
+    .run(successorId, ...matched).changes;
 }
 
 /**
@@ -218,6 +290,9 @@ export function handleHookEvent(
       const title = readCustomTitle(id, payload.cwd ?? existing.project_dir, claudeHome);
       if (title && title !== existing.name) renameSession(db, id, title);
       heartbeat(db, id);
+      if (typeof meta.claude_pid === "number") {
+        setSetting(db, `claude-current:${meta.claude_pid}`, id);
+      }
     }
     return;
   }
@@ -241,13 +316,18 @@ export function handleHookEvent(
     // This process previously ran another conversation id that was abandoned
     // by /resume or /clear before receiving any prompt — reap it now.
     if (claudePid !== null) {
+      // authoritative pid → current-conversation marker: the MCP server
+      // reads this to re-adopt instantly after a /resume (heartbeat-based
+      // guessing lags and can flap between the old and new rows)
+      setSetting(db, `claude-current:${claudePid}`, id);
       pruneAbandonedSessions(db, { claudePid, keepId: id });
       // /resume continues the SAME conversation under a new id: re-address
-      // undelivered mail from this process's previous ids so it follows the
-      // conversation instead of stranding on the dead id. (source "clear"
-      // starts an unrelated conversation — its mail must NOT follow.)
+      // undelivered mail so it follows the conversation instead of stranding
+      // on the dead id. (source "clear" starts an unrelated conversation —
+      // its mail must NOT follow.)
       if (payload.source === "resume") {
-        forwardInboxFromPid(db, claudePid, id);
+        forwardInboxFromPid(db, claudePid, id); // same-process predecessors
+        forwardStrandedInboxByTranscript(db, id, payload.cwd, claudeHome); // cross-process
       }
     }
     return;
@@ -260,6 +340,9 @@ export function handleHookEvent(
     heartbeat(db, id);
     // refresh the "what is this session doing" signal on every turn
     if (excerpt) setSessionDescription(db, id, excerpt);
+    if (typeof meta.claude_pid === "number") {
+      setSetting(db, `claude-current:${meta.claude_pid}`, id);
+    }
     return;
   }
   registerSession(db, {
