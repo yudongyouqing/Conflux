@@ -16,15 +16,27 @@ import { useGraph } from "../hooks";
 import { layoutGraph } from "../layout";
 import { SessionNode, type SessionNodeData } from "./SessionNode";
 import { StaleCluster, type StaleClusterData } from "./StaleCluster";
+import { DirLabelNode, type DirLabelData } from "./DirLabelNode";
 
-const nodeTypes = { session: SessionNode, cluster: StaleCluster };
+const nodeTypes = { session: SessionNode, cluster: StaleCluster, dirLabel: DirLabelNode };
 
-// Grid geometry for offline children inside an expanded cluster container.
+const CLUSTER_ID = "__orphan_cluster__";
+const dirLabelId = (dir: string) => `__dirlabel:${dir}`;
+
+// Grid geometry for orphan children inside the expanded cluster container.
 const CELL_W = 176;
 const CELL_H = 64;
 const GRID_COLS = 3;
 const GRID_PAD_X = 16;
 const GRID_PAD_TOP = 34; // room for the container title bar
+
+// Dirs-mode geometry: one row per project directory, hand-rolled (dagre
+// cannot be told about directory grouping). Rows are sorted newest-first.
+const START_X = 40;
+const START_Y = 24;
+const ROW_H = 130;
+const DIR_LABEL_SPAN = 190; // dir caption + breathing room before first card
+const COL_W = 210;
 
 type ViewMode = "active" | "dirs" | "all";
 
@@ -33,9 +45,6 @@ const VIEW_LABELS: Record<ViewMode, string> = {
   dirs: "目录分层",
   all: "全部",
 };
-
-/** Cluster node id for one project directory in dirs mode. */
-const dirClusterId = (dir: string) => `__dir:${dir}`;
 
 interface GraphTabProps {
   onSelectSession: (sessionId: string | null) => void;
@@ -50,19 +59,22 @@ export function GraphTab({
 }: GraphTabProps) {
   const { data, isLoading, error } = useGraph();
   const [viewMode, setViewMode] = useState<ViewMode>("active");
-  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
+  const [orphanExpanded, setOrphanExpanded] = useState(false);
 
   // Interactive state — required for node dragging in React Flow v12.
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
-  const [edges, setEdges, onEdgesStateChange] = useEdgesState<Edge>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
   // Sync polled data into state. Node positions the user dragged to are
   // preserved across polls; only data (name/status/counts) refreshes.
   //
   // View modes:
   //   active — live nodes only; edges never dangle onto offline/placeholder nodes
-  //   dirs   — live nodes + one collapsible cluster per project directory
-  //   all    — every node laid out flat with its real edges
+  //   dirs   — live + still-linked offline sessions laid out ONE BY ONE, one
+  //            row per project directory (newest directory first); orphan
+  //            offline sessions (no communication links) collapse into a
+  //            single archive cluster below the rows
+  //   all    — every node through dagre with its real edges
   useEffect(() => {
     if (!data) return;
 
@@ -92,142 +104,121 @@ export function GraphTab({
     });
 
     // An edge carries its channel's latest question as the label; clicking it
-    // (when both endpoints are real sessions) opens the two-way message flow.
-    const mkEdge = (
-      from: string,
-      to: string,
-      weight: number,
-      lastMessage: string | null | undefined,
-      i: number
-    ): Edge => {
-      const preview =
-        lastMessage && lastMessage.length > 0
-          ? lastMessage.length > 28
-            ? lastMessage.slice(0, 28) + "…"
-            : lastMessage
-          : "";
-      return {
-        id: `e-${from}-${to}-${i}`,
-        source: from,
-        target: to,
-        animated: true,
-        label: preview || (weight > 1 ? String(weight) : ""),
-        style: { strokeWidth: Math.min(1 + weight, 5), stroke: "#94a3b8" },
-        data: { from, to },
-      };
-    };
-
-    // Node id → the node that represents it on screen (itself or its cluster).
-    const foldMap = new Map<string, string>();
-    if (viewMode === "dirs") {
-      for (const n of offline) {
-        const dir = n.project_dir || "(无目录)";
-        if (!expandedDirs.has(dir)) foldMap.set(n.id, dirClusterId(dir));
-      }
-    }
+    // opens the two-way message flow in the detail panel.
+    const previewOf = (m: string | null | undefined) =>
+      !m ? "" : m.length > 28 ? m.slice(0, 28) + "…" : m;
+    const mkEdge = (e: (typeof data.edges)[number], i: number): Edge => ({
+      id: `e-${e.from}-${e.to}-${i}`,
+      source: e.from,
+      target: e.to,
+      animated: true,
+      label: previewOf(e.last_message) || (e.weight > 1 ? String(e.weight) : ""),
+      style: { strokeWidth: Math.min(1 + e.weight, 5), stroke: "#94a3b8" },
+      data: { from: e.from, to: e.to },
+    });
 
     let rawEdges: Edge[];
-    if (viewMode === "active") {
-      // Only edges between visible (live) nodes — no dangling connections.
+    let outNodes: Node[];
+
+    if (viewMode === "dirs") {
+      // Endpoints of any edge = sessions that still carry communication
+      // history. Offline sessions without links are orphans → archive cluster.
+      const linked = new Set<string>();
+      for (const e of data.edges) {
+        linked.add(e.from);
+        linked.add(e.to);
+      }
+      const individuals = [...live, ...offline.filter((n) => linked.has(n.id))];
+      const orphans = offline.filter((n) => !linked.has(n.id));
+
+      const groups = new Map<string, (typeof data.nodes)[number][]>();
+      for (const n of individuals) {
+        const dir = n.project_dir || "(无目录)";
+        const g = groups.get(dir) ?? [];
+        g.push(n);
+        groups.set(dir, g);
+      }
+      const hb = (n: (typeof data.nodes)[number]) => n.last_heartbeat_at ?? "";
+      const rows = [...groups.entries()]
+        .map(([dir, ns]) => ({ dir, nodes: [...ns].sort((a, b) => hb(b).localeCompare(hb(a))) }))
+        .sort((a, b) => hb(b.nodes[0]).localeCompare(hb(a.nodes[0])));
+
+      outNodes = [];
+      rows.forEach((row, r) => {
+        outNodes.push({
+          id: dirLabelId(row.dir),
+          type: "dirLabel",
+          position: { x: START_X, y: START_Y + r * ROW_H },
+          data: { label: row.dir.split(/[\\/]/).pop() || row.dir },
+          draggable: false,
+          selectable: false,
+        } as Node<DirLabelData>);
+        row.nodes.forEach((n, i) => {
+          const node = toSessionNode(n);
+          node.position = { x: START_X + DIR_LABEL_SPAN + i * COL_W, y: START_Y + r * ROW_H };
+          outNodes.push(node);
+        });
+      });
+
+      // Orphan archive cluster below the rows. Children are real React Flow
+      // children (parentId + extent: "parent") so the container drags as one.
+      if (orphans.length > 0) {
+        const clusterY = START_Y + Math.max(rows.length, 1) * ROW_H + 16;
+        if (orphanExpanded) {
+          const cols = Math.min(GRID_COLS, orphans.length);
+          const gridRows = Math.ceil(orphans.length / cols);
+          const width = cols * CELL_W + GRID_PAD_X * 2;
+          const height = gridRows * CELL_H + GRID_PAD_TOP + 12;
+          outNodes.push({
+            id: CLUSTER_ID,
+            type: "cluster",
+            position: { x: START_X, y: clusterY },
+            data: { label: null, count: orphans.length, expanded: true, width, height },
+            style: { width, height },
+            zIndex: -1,
+          } as Node<StaleClusterData>);
+          orphans.forEach((n, i) => {
+            const node = toSessionNode(n);
+            node.parentId = CLUSTER_ID;
+            node.extent = "parent";
+            node.position = {
+              x: GRID_PAD_X + (i % cols) * CELL_W,
+              y: GRID_PAD_TOP + Math.floor(i / cols) * CELL_H,
+            };
+            node.zIndex = 0;
+            outNodes.push(node);
+          });
+        } else {
+          outNodes.push({
+            id: CLUSTER_ID,
+            type: "cluster",
+            position: { x: START_X, y: clusterY },
+            data: { label: null, count: orphans.length, expanded: false, width: 0, height: 0 },
+          } as Node<StaleClusterData>);
+        }
+      }
+
+      // Orphans have no edges by definition, so every real edge already runs
+      // between visible individuals — no folding or aggregation needed.
+      rawEdges = data.edges.map((e, i) => mkEdge(e, i));
+    } else if (viewMode === "all") {
+      rawEdges = data.edges.map((e, i) => mkEdge(e, i));
+      const allNodes = [...live, ...offline];
+      const { nodes: layouted } = layoutGraph(
+        allNodes.map((n) => toSessionNode(n) as unknown as Node),
+        rawEdges as never
+      );
+      outNodes = layouted;
+    } else {
+      // active: only edges between visible (live) nodes — no dangling links.
       const visible = new Set(live.map((n) => n.id));
       rawEdges = data.edges
         .filter((e) => visible.has(e.from) && visible.has(e.to))
-        .map((e, i) => mkEdge(e.from, e.to, e.weight, e.last_message, i));
-    } else if (viewMode === "dirs" && foldMap.size > 0) {
-      // Fold offline endpoints onto their (collapsed) directory cluster and
-      // aggregate weights per folded pair.
-      const agg = new Map<string, { edge: Edge; weight: number }>();
-      let i = 0;
-      for (const e of data.edges) {
-        const from = foldMap.get(e.from) ?? e.from;
-        const to = foldMap.get(e.to) ?? e.to;
-        if (from === to) continue; // internal to one cluster
-        const key = `${from}->${to}`;
-        const prev = agg.get(key);
-        if (prev) {
-          prev.weight += e.weight;
-          if (!prev.edge.label) {
-            prev.edge.label =
-              e.last_message && e.last_message.length > 0
-                ? e.last_message.length > 28
-                  ? e.last_message.slice(0, 28) + "…"
-                  : e.last_message
-                : "";
-          }
-          prev.edge.style = {
-            ...prev.edge.style,
-            strokeWidth: Math.min(1 + prev.weight, 5),
-          };
-          if (prev.weight > 1) prev.edge.label ||= String(prev.weight);
-        } else {
-          agg.set(key, { edge: mkEdge(from, to, e.weight, e.last_message, i++), weight: e.weight });
-        }
-      }
-      rawEdges = [...agg.values()].map((v) => v.edge);
-    } else {
-      rawEdges = data.edges.map((e, i) => mkEdge(e.from, e.to, e.weight, e.last_message, i));
-    }
-
-    // ---- layout ----
-    // Clusters (one per dir in dirs mode) participate in the dagre layout as
-    // single placeholder nodes; children are placed on a grid inside the
-    // expanded container afterwards.
-    const dirsShown =
-      viewMode === "dirs"
-        ? [...new Set(offline.map((n) => n.project_dir || "(无目录)"))]
-        : [];
-    const collapsedDirs = dirsShown.filter((d) => !expandedDirs.has(d));
-
-    const layoutInputs: Node[] = live.map((n) => toSessionNode(n) as unknown as Node);
-    for (const dir of collapsedDirs) {
-      layoutInputs.push({
-        id: dirClusterId(dir),
-        type: "cluster",
-        position: { x: 0, y: 0 },
-        data: { label: dir.split(/[\\/]/).pop(), dir, count: 0, expanded: false, width: 0, height: 0 },
-      });
-    }
-    const layoutNodeIds = new Set(layoutInputs.map((n) => n.id));
-    const layoutEdges = rawEdges.filter(
-      (e) => layoutNodeIds.has(e.source) && layoutNodeIds.has(e.target)
-    );
-    const { nodes: layouted } = layoutGraph(layoutInputs, layoutEdges as never);
-
-    let outNodes: Node[];
-    if (viewMode === "dirs") {
-      outNodes = [...layouted];
-      // Children of expanded dir clusters are real React Flow children
-      // (parentId + extent: "parent"): dragging the container carries them.
-      for (const dir of dirsShown) {
-        if (!expandedDirs.has(dir)) continue;
-        const members = offline.filter((n) => (n.project_dir || "(无目录)") === dir);
-        const cols = Math.min(GRID_COLS, members.length);
-        const rows = Math.ceil(members.length / cols);
-        const width = cols * CELL_W + GRID_PAD_X * 2;
-        const height = rows * CELL_H + GRID_PAD_TOP + 12;
-        const clusterPos =
-          layouted.find((n) => n.id === dirClusterId(dir))?.position ?? { x: 0, y: 0 };
-        outNodes.push({
-          id: dirClusterId(dir),
-          type: "cluster",
-          position: clusterPos,
-          data: { label: dir.split(/[\\/]/).pop(), dir, count: members.length, expanded: true, width, height },
-          style: { width, height },
-          zIndex: -1,
-        } as Node<StaleClusterData>);
-        members.forEach((n, i) => {
-          const node = toSessionNode(n);
-          node.parentId = dirClusterId(dir);
-          node.extent = "parent";
-          node.position = {
-            x: GRID_PAD_X + (i % cols) * CELL_W,
-            y: GRID_PAD_TOP + Math.floor(i / cols) * CELL_H,
-          };
-          node.zIndex = 0;
-          outNodes.push(node);
-        });
-      }
-    } else {
+        .map((e, i) => mkEdge(e, i));
+      const { nodes: layouted } = layoutGraph(
+        live.map((n) => toSessionNode(n) as unknown as Node),
+        rawEdges as never
+      );
       outNodes = layouted;
     }
 
@@ -240,30 +231,24 @@ export function GraphTab({
       }));
     });
     setEdges(rawEdges);
-  }, [data, selectedSessionId, viewMode, expandedDirs, setNodes, setEdges]);
+  }, [data, selectedSessionId, viewMode, orphanExpanded, setNodes, setEdges]);
 
   const onNodeClick: NodeMouseHandler = useCallback(
     (_, node) => {
       if (node.type === "cluster") {
-        const d = node.data as StaleClusterData;
-        if (viewMode === "dirs" && d.dir) {
-          setExpandedDirs((prev) => {
-            const next = new Set(prev);
-            next.has(d.dir!) ? next.delete(d.dir!) : next.add(d.dir!);
-            return next;
-          });
-        }
+        setOrphanExpanded((v) => !v);
         return;
       }
+      if (node.type === "dirLabel") return;
       onSelectSession(node.id);
     },
-    [onSelectSession, viewMode]
+    [onSelectSession]
   );
 
   const onEdgeClick: EdgeMouseHandler = useCallback(
     (_, edge) => {
       const d = edge.data as { from: string; to: string } | undefined;
-      if (d && d.from && d.to && !d.from.startsWith("__dir:") && !d.to.startsWith("__dir:")) {
+      if (d && d.from && d.to && !d.from.startsWith("__") && !d.to.startsWith("__")) {
         onSelectEdge(d);
       }
     },
@@ -302,7 +287,7 @@ export function GraphTab({
       edges={edges}
       nodeTypes={nodeTypes}
       onNodesChange={onNodesChange}
-      onEdgesChange={onEdgesStateChange}
+      onEdgesChange={onEdgesChange}
       onNodeClick={onNodeClick}
       onEdgeClick={onEdgeClick}
       nodesConnectable={false}

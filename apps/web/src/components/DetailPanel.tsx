@@ -94,7 +94,8 @@ export function DetailPanel({
 
 /**
  * Edge branch: the two-way message flow carried by a graph edge.
- * Outgoing (from → to) bubbles right; incoming left; pending highlighted.
+ * Newest at the top, history below. Outgoing (from → to) bubbles right;
+ * incoming left; pending highlighted.
  */
 function EdgeFlowView({
   from,
@@ -106,7 +107,8 @@ function EdgeFlowView({
   sessionNameLookup: (id: string) => string | undefined;
 }) {
   const { data } = usePeerFlow(from, to);
-  const messages = data?.messages ?? [];
+  // listPeerMessages returns oldest-first; the panel reads newest-first.
+  const messages = (data?.messages ?? []).slice().reverse();
   const nameOf = (id: string) => sessionNameLookup(id) ?? id.slice(0, 8);
 
   return (
@@ -120,7 +122,9 @@ function EdgeFlowView({
           <span className="font-medium">{nameOf(from)}</span>
           <ArrowRight size={11} className="text-gray-400" />
           <span className="font-medium">{nameOf(to)}</span>
-          <span className="text-gray-400">· {messages.length} 条</span>
+          <span className="text-gray-400">
+            · {messages.length} 条 · 最新在上
+          </span>
         </div>
       </div>
 
