@@ -52,7 +52,7 @@ const VIEW_LABELS: Record<ViewMode, string> = {
 interface GraphTabProps {
   onSelectSession: (sessionId: string | null) => void;
   selectedSessionId: string | null;
-  onSelectEdge: (edge: { from: string; to: string } | null) => void;
+  onSelectEdge: (edge: { id: number; from: string; to: string } | null) => void;
   selectedEdge: { from: string; to: string } | null;
 }
 
@@ -163,7 +163,7 @@ export function GraphTab({
         width: 18,
         height: 18,
       },
-      data: { from: e.from, to: e.to },
+      data: { id: e.id, from: e.from, to: e.to },
     });
 
     let rawEdges: Edge[];
@@ -369,8 +369,8 @@ export function GraphTab({
 
   const onEdgeClick: EdgeMouseHandler = useCallback(
     (_, edge) => {
-      const d = edge.data as { from: string; to: string } | undefined;
-      if (d && d.from && d.to && !d.from.startsWith("__") && !d.to.startsWith("__")) {
+      const d = edge.data as { id: number; from: string; to: string } | undefined;
+      if (d && typeof d.id === "number" && !d.from.startsWith("__") && !d.to.startsWith("__")) {
         onSelectEdge(d);
       }
     },

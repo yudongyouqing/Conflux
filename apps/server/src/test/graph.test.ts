@@ -1,12 +1,13 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { makeDb } from "./helpers.js";
+import { collapseReplyEdges } from "../core/db.js";
 import { getGraph } from "../core/graph.js";
 import { registerSession, endSession, mergeSessionMeta } from "../core/sessions.js";
 import { createAgent } from "../core/agents.js";
 import { createConversation } from "../core/conversations.js";
 import { createRuntimeAgent } from "../core/runtime-agents.js";
-import { askSession, replyAsk } from "../core/messages.js";
+import { askSession, replyAsk, listEdgeMessages } from "../core/messages.js";
 
 const { db, cleanup } = makeDb();
 after(cleanup);
@@ -80,19 +81,42 @@ test("agent card skills surface on graph nodes", () => {
   assert.equal(plain.skills, undefined, "no card -> no skills field noise");
 });
 
-test("edge last_message is direction-aware: questions label their own edge, reply-only edges show the answer", () => {
+test("channels: a reply stays on the channel, no reverse edge is created", () => {
   registerSession(db, { id: "dl-web", name: "web" });
   registerSession(db, { id: "dl-test2", name: "test2" });
   const m = askSession(db, { from_session: "dl-web", to_session: "dl-test2", question: "问一下test1他在做什么" });
   replyAsk(db, m.id, "dl-test2", "test1在讨论mac端接入");
 
   const g = getGraph(db, { status: "all" });
-  const ask = g.edges.find((e) => e.from === "dl-web" && e.to === "dl-test2")!;
-  const ans = g.edges.find((e) => e.from === "dl-test2" && e.to === "dl-web")!;
-  assert.equal(ask.last_message, "问一下test1他在做什么", "asking edge carries its question");
-  assert.ok(
-    (ans.last_message ?? "").startsWith("↩ "),
-    `reply-only edge shows the answer it carried, got: ${ans.last_message}`
+  const channel = g.edges.find((e) => e.from === "dl-web" && e.to === "dl-test2")!;
+  assert.ok(channel, "the channel exists");
+  assert.ok(typeof channel.id === "number", "channel carries its id");
+  assert.equal(channel.last_message, "问一下test1他在做什么", "channel labels its own question");
+  assert.equal(
+    g.edges.find((e) => e.from === "dl-test2" && e.to === "dl-web"),
+    undefined,
+    "a reply never creates a reverse channel"
   );
-  assert.ok((ans.last_message ?? "").includes("test1在讨论mac端接入"));
+  // the exchange history lives on the channel
+  assert.equal(listEdgeMessages(db, channel.id).length, 1);
+});
+
+test("collapseReplyEdges removes question-less edges, keeps real channels", () => {
+  registerSession(db, { id: "cr-a", name: "a" });
+  registerSession(db, { id: "cr-b", name: "b" });
+  askSession(db, { from_session: "cr-a", to_session: "cr-b", question: "real channel" });
+  // a reply-created reverse edge (legacy bookkeeping): no question ever traveled b→a
+  db.prepare(
+    `INSERT INTO edges (from_session, to_session, weight, last_interact_at) VALUES ('cr-b', 'cr-a', 1, '2026-01-01T00:00:00Z')`
+  ).run();
+
+  const removed = collapseReplyEdges(db);
+  assert.ok(removed >= 1);
+  const g = getGraph(db, { status: "all" });
+  assert.ok(g.edges.some((e) => e.from === "cr-a" && e.to === "cr-b"), "real channel kept");
+  assert.equal(
+    g.edges.find((e) => e.from === "cr-b" && e.to === "cr-a"),
+    undefined,
+    "reply-only reverse edge collapsed"
+  );
 });

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useSessionContext, usePeerMessages, useWebAsk, usePeerFlow, useOpenSessionTerminal } from "../hooks";
+import { useSessionContext, useWebAsk, useEdgeMessages, useEdgeAsk, useOpenSessionTerminal } from "../hooks";
 import type { Message, GraphNode, SessionStatus } from "@muiltchat/shared";
 import { StatusDot } from "./StatusDot";
 import { FileText, Clock, ArrowRight, FolderOpen, Send, Loader2, ArrowLeftRight, TerminalSquare } from "lucide-react";
@@ -10,9 +10,11 @@ const DEFAULT_DESC = "Claude Code session (hook)";
 interface DetailPanelProps {
   session: GraphNode | null;
   message: Message | null;
-  edge: { from: string; to: string } | null;
+  edge: { id: number; from: string; to: string } | null;
   sessionNameLookup: (id: string) => string | undefined;
   sessionStatusLookup: (id: string) => SessionStatus | undefined;
+  /** Open a conversation channel in this panel (发起对话). */
+  onOpenEdge: (edge: { id: number; from: string; to: string }) => void;
 }
 
 export function DetailPanel({
@@ -21,18 +23,24 @@ export function DetailPanel({
   edge,
   sessionNameLookup,
   sessionStatusLookup,
+  onOpenEdge,
 }: DetailPanelProps) {
   const { data: contextEntries } = useSessionContext(session?.id ?? null);
 
   if (session) {
-    return <SessionDetail session={session} contextEntries={contextEntries} />;
+    return (
+      <SessionDetail
+        session={session}
+        contextEntries={contextEntries}
+        onOpenEdge={onOpenEdge}
+      />
+    );
   }
 
   if (edge) {
     return (
       <EdgeFlowView
-        from={edge.from}
-        to={edge.to}
+        edge={edge}
         sessionNameLookup={sessionNameLookup}
         sessionStatusLookup={sessionStatusLookup}
       />
@@ -98,42 +106,34 @@ export function DetailPanel({
 }
 
 /**
- * Edge branch: the two-way message flow carried by a graph edge.
- * Newest at the top, history below. Outgoing (from → to) bubbles right;
- * incoming left; pending highlighted.
+ * Channel (edge) branch: a directed conversation channel. The channel's
+ * `from` speaks (questions), its `to` answers — replies stay on this
+ * channel. Newest at the top. Only web-console channels can be spoken on
+ * from here; third-party channels are read-only.
  */
 function EdgeFlowView({
-  from,
-  to,
+  edge,
   sessionNameLookup,
   sessionStatusLookup,
 }: {
-  from: string;
-  to: string;
+  edge: { id: number; from: string; to: string };
   sessionNameLookup: (id: string) => string | undefined;
   sessionStatusLookup: (id: string) => SessionStatus | undefined;
 }) {
-  const { data } = usePeerFlow(from, to);
-  const ask = useWebAsk();
+  const { from, to } = edge;
+  const { data } = useEdgeMessages(edge.id);
+  const ask = useEdgeAsk();
   const [text, setText] = useState("");
-  // Which side of the pair the web console addresses. Default to the side
-  // that isn't the console itself; if neither is, the "to" side wins.
-  const [target, setTarget] = useState<"from" | "to">(
-    to === WEB_CONSOLE_ID ? "from" : "to"
-  );
-  // listPeerMessages returns oldest-first; the panel reads newest-first.
   const messages = (data?.messages ?? []).slice().reverse();
   const nameOf = (id: string) => sessionNameLookup(id) ?? id.slice(0, 8);
-  const targetId = target === "from" ? from : to;
-  // Whose perspective the bubble sides represent (see alignment note below).
-  const anchor =
-    from === WEB_CONSOLE_ID || to === WEB_CONSOLE_ID ? WEB_CONSOLE_ID : from;
+  const speakable = from === WEB_CONSOLE_ID;
+  const targetOffline = sessionStatusLookup(to) && sessionStatusLookup(to) !== "active";
 
   const send = () => {
     const question = text.trim();
     if (!question || ask.isPending) return;
     ask.mutate(
-      { to_session: targetId, question },
+      { edgeId: edge.id, question },
       { onSuccess: () => setText("") }
     );
   };
@@ -143,7 +143,7 @@ function EdgeFlowView({
       <div>
         <h2 className="text-gray-900 font-semibold text-[15px] flex items-center gap-1.5">
           <ArrowLeftRight size={14} className="text-gray-400" />
-          对话流
+          对话通道 #{edge.id}
         </h2>
         <div className="text-xs text-gray-600 mt-1 flex items-center gap-1.5 flex-wrap">
           <span className="font-medium flex items-center gap-1">
@@ -155,99 +155,55 @@ function EdgeFlowView({
             <StatusDot status={sessionStatusLookup(to) ?? "stale"} />
             {nameOf(to)}
           </span>
-          <span className="text-gray-400">
-            · {messages.length} 条 · 最新在上
-          </span>
+          <span className="text-gray-400">· {messages.length} 条 · 最新在上</span>
         </div>
         <div className="text-[10px] text-gray-400 mt-0.5">
-          每条消息标注自身方向;右侧(蓝色)= {nameOf(anchor)} 发出
-          {anchor !== WEB_CONSOLE_ID && "(第三方对话,以通道起点为观察位)"}
+          {nameOf(from)} 发起的通道:{nameOf(from)} 提问,{nameOf(to)} 回答,回复留在本通道。
         </div>
       </div>
 
-      {/* Join the conversation as the web console: the picker mirrors the
-          channel direction (from → to); asking always creates a NEW question
-          from the console to the chosen side. */}
-      <div>
-        <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
-          <span className="text-[10px] text-gray-400 flex-shrink-0">问:</span>
-          {(["from", "to"] as const).map((side, idx) => {
-            const id = side === "from" ? from : to;
-            const isSelf = id === WEB_CONSOLE_ID;
-            const selected = target === side;
-            return (
-              <span key={side} className="flex items-center gap-1.5">
-                {idx === 1 && (
-                  <ArrowRight size={11} className="text-gray-400" aria-label="方向" />
-                )}
-                <button
-                  onClick={() => !isSelf && setTarget(side)}
-                  disabled={isSelf}
-                  className={`px-2 py-0.5 rounded-md text-[10px] border transition-colors truncate max-w-[140px] ${
-                    isSelf
-                      ? "bg-gray-50 text-gray-300 border-gray-100 cursor-not-allowed"
-                      : selected
-                        ? "bg-blue-600 text-white border-blue-600"
-                        : "bg-white text-gray-600 border-gray-200 hover:border-blue-300"
-                  }`}
-                  title={isSelf ? "Web 控制台不能问自己" : id}
-                >
-                  问 {nameOf(id)}
-                </button>
-              </span>
-            );
-          })}
-        </div>
-        <div className="text-[10px] text-gray-400 mb-1.5">
-          通道方向:{nameOf(from)} → {nameOf(to)} · 你将以 Web 控制台身份向{" "}
-          {nameOf(targetId)} 发起新提问
-        </div>
-        {sessionStatusLookup(targetId) && sessionStatusLookup(targetId) !== "active" && (
-          <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mb-1.5">
-            ⚠ 目标 {nameOf(targetId)} 当前离线(心跳超时)。消息仍会投递,但要等它被唤醒才会处理;若该会话已被清理,发送会失败并在此提示。
+      {speakable ? (
+        <div>
+          {targetOffline && (
+            <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mb-1.5">
+              ⚠ {nameOf(to)} 当前离线。发送后将自动 headless 唤醒它回复(若可恢复)。
+            </div>
+          )}
+          <div className="flex gap-1.5">
+            <input
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.nativeEvent.isComposing) send();
+              }}
+              placeholder={`以 Web 控制台身份在通道 #${edge.id} 发言…`}
+              className="flex-1 min-w-0 text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-300"
+            />
+            <button
+              onClick={send}
+              disabled={!text.trim() || ask.isPending}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-blue-700 transition-colors flex-shrink-0"
+            >
+              {ask.isPending ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+              发送
+            </button>
           </div>
-        )}
-        <div className="flex gap-1.5">
-          <input
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.nativeEvent.isComposing) send();
-            }}
-            placeholder={`以 Web 控制台身份问 ${nameOf(targetId)}…`}
-            className="flex-1 min-w-0 text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-300"
-          />
-          <button
-            onClick={send}
-            disabled={!text.trim() || ask.isPending}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-blue-700 transition-colors flex-shrink-0"
-          >
-            {ask.isPending ? (
-              <Loader2 size={12} className="animate-spin" />
-            ) : (
-              <Send size={12} />
-            )}
-            发送
-          </button>
+          {ask.isError && (
+            <p className="text-[10px] text-red-500 mt-1">{(ask.error as Error).message}</p>
+          )}
         </div>
-        {ask.isError && (
-          <p className="text-[10px] text-red-500 mt-1">
-            {(ask.error as Error).message}
-          </p>
-        )}
-      </div>
+      ) : (
+        <div className="text-[10px] text-gray-500 bg-gray-50 border border-gray-200 rounded-md px-2 py-1.5">
+          只读通道:由 {nameOf(from)} 发起,只有它能在本通道发问;{nameOf(to)} 的回复会显示在这里。
+        </div>
+      )}
 
       {messages.length === 0 ? (
-        <p className="text-xs text-gray-400">这对会话之间还没有消息。</p>
+        <p className="text-xs text-gray-400">通道还没有消息。</p>
       ) : (
         <div className="space-y-3">
           {messages.map((m) => {
-            // Identity-anchored alignment: when the console is one of the
-            // endpoints, its messages are always "outgoing" (right/blue) —
-            // the same perspective as the session drawer — no matter which
-            // direction of edge was clicked. For third-party pairs neither
-            // side is "us", so fall back to the clicked edge's source.
-            const outgoing = m.from_session === anchor;
+            const outgoing = m.from_session === from;
             return (
               <div
                 key={m.id}
@@ -286,9 +242,11 @@ function EdgeFlowView({
 function SessionDetail({
   session,
   contextEntries,
+  onOpenEdge,
 }: {
   session: GraphNode;
   contextEntries: ReturnType<typeof useSessionContext>["data"];
+  onOpenEdge: (edge: { id: number; from: string; to: string }) => void;
 }) {
   const isSession = session.type === "session";
   const openTerminal = useOpenSessionTerminal();
@@ -380,7 +338,7 @@ function SessionDetail({
         </div>
       )}
 
-      {isSession && <ConversationBox sessionId={session.id} status={session.status} />}
+      {isSession && <InitiateConversation sessionId={session.id} status={session.status} onOpenEdge={onOpenEdge} />}
 
       <div>
         <h3 className="text-xs text-gray-500 font-medium mb-2 flex items-center gap-1">
@@ -423,84 +381,62 @@ function SessionDetail({
 }
 
 /** Ask/message flow between the web console and one session. */
-function ConversationBox({ sessionId, status }: { sessionId: string; status: SessionStatus }) {
-  const { data } = usePeerMessages(sessionId);
+function InitiateConversation({
+  sessionId,
+  status,
+  onOpenEdge,
+}: {
+  sessionId: string;
+  status: SessionStatus;
+  onOpenEdge: (edge: { id: number; from: string; to: string }) => void;
+}) {
   const ask = useWebAsk();
   const [text, setText] = useState("");
-  const messages = data?.messages ?? [];
 
-  const send = () => {
+  const initiate = () => {
     const question = text.trim();
     if (!question || ask.isPending) return;
     ask.mutate(
       { to_session: sessionId, question },
-      { onSuccess: () => setText("") }
+      {
+        onSuccess: (r) => {
+          setText("");
+          // jump straight into the channel this question created
+          if (r.message.edge_id != null) {
+            onOpenEdge({ id: r.message.edge_id, from: WEB_CONSOLE_ID, to: sessionId });
+          }
+        },
+      }
     );
   };
 
   return (
     <div>
       <h3 className="text-xs text-gray-500 font-medium mb-2 flex items-center gap-1">
-        <ArrowRight size={12} /> 对话(以 Web 控制台身份)
+        <ArrowRight size={12} /> 发起对话通道
       </h3>
-
       {status !== "active" && (
         <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mb-2">
-          ⚠ 对方当前{status === "ended" ? "已结束" : "离线(心跳超时)"}。消息仍会投递,但要等它被唤醒(终端里打开/resume)才会处理;若已被清理,发送会失败并提示。
+          ⚠ 对方当前{status === "ended" ? "已结束" : "离线"}。发送后将尝试自动唤醒它回复。
         </div>
       )}
-
-      {messages.length === 0 ? (
-        <p className="text-xs text-gray-400 mb-2">还没有消息,发一条试试。</p>
-      ) : (
-        <div className="space-y-2 mb-2 max-h-64 overflow-y-auto">
-          {messages.map((m) => {
-            const outgoing = m.from_session === WEB_CONSOLE_ID;
-            return (
-              <div key={m.id} className={`flex ${outgoing ? "justify-end" : "justify-start"}`}>
-                <div
-                  className={`max-w-[85%] rounded-xl px-2.5 py-1.5 border text-xs ${
-                    outgoing
-                      ? "bg-blue-50 border-blue-100 text-gray-800"
-                      : "bg-gray-50 border-gray-200 text-gray-800"
-                  }`}
-                >
-                  <div className="whitespace-pre-wrap break-words">{m.question}</div>
-                  {m.reply ? (
-                    <div className="mt-1 pt-1 border-t border-gray-200/70 text-emerald-700 whitespace-pre-wrap break-words">
-                      ↩ {m.reply}
-                    </div>
-                  ) : (
-                    <div className="mt-0.5 text-[10px] text-amber-600">等待回复…</div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
       <div className="flex gap-1.5">
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.nativeEvent.isComposing) send();
+            if (e.key === "Enter" && !e.nativeEvent.isComposing) initiate();
           }}
-          placeholder="问这个会话…"
+          placeholder="发起对话:Web 控制台 → 该会话…"
           className="flex-1 min-w-0 text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-300"
         />
         <button
-          onClick={send}
+          onClick={initiate}
           disabled={!text.trim() || ask.isPending}
           className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-blue-700 transition-colors flex-shrink-0"
         >
-          {ask.isPending ? (
-            <Loader2 size={12} className="animate-spin" />
-          ) : (
-            <Send size={12} />
-          )}
-          发送
+          {ask.isPending ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+          发起
         </button>
       </div>
       {ask.isError && (
@@ -509,3 +445,4 @@ function ConversationBox({ sessionId, status }: { sessionId: string; status: Ses
     </div>
   );
 }
+

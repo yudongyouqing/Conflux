@@ -9,6 +9,7 @@ import {
   checkReplies,
   listMessages,
   listPeerMessages,
+  listEdgeMessages,
   forwardInboxFromPid,
   formatInboxNotice,
   recordExchange,
@@ -169,15 +170,25 @@ test("listMessages filters by from/to/status", () => {
   assert.ok(toB.every((m) => m.to_session === "b"));
 });
 
-test("ask/reply record directed edges with accumulating weights", () => {
-  const before = getGraph(db, { status: "all" }).edges.find((e) => e.from === "a" && e.to === "b")?.weight ?? 0;
-  askSession(db, { from_session: "a", to_session: "b", question: "edge1" });
-  askSession(db, { from_session: "a", to_session: "b", question: "edge2" });
+test("ask/reply: questions carry the channel, replies stay on it without bumping weight", () => {
+  registerSession(db, { id: "ch-b2", name: "b2" });
+  const before = getGraph(db, { status: "all" }).edges.find((e) => e.from === "a" && e.to === "ch-b2")?.weight ?? 0;
+  const m1 = askSession(db, { from_session: "a", to_session: "ch-b2", question: "edge1" });
+  const m2 = askSession(db, { from_session: "a", to_session: "ch-b2", question: "edge2" });
+  replyAsk(db, m1.id, "ch-b2", "ans1");
   const g = getGraph(db, { status: "all" });
-  const ab = g.edges.find((e) => e.from === "a" && e.to === "b")!;
-  assert.equal(ab.weight, before + 2, "two more asks should add +2 weight");
-  const ba = g.edges.find((e) => e.from === "b" && e.to === "a");
-  assert.ok(ba, "reply should create reverse edge");
+  const ch = g.edges.find((e) => e.from === "a" && e.to === "ch-b2")!;
+  assert.equal(ch.weight, before + 2, "asks add weight; the reply does not");
+  assert.equal(
+    g.edges.find((e) => e.from === "ch-b2" && e.to === "a"),
+    undefined,
+    "a reply never creates a reverse channel"
+  );
+  // both exchanges link to the SAME channel
+  const flow = listEdgeMessages(db, ch.id);
+  assert.equal(flow.length, before + 2);
+  assert.ok(flow.every((m) => m.edge_id === ch.id));
+  assert.equal(m2.edge_id, ch.id);
 });
 
 test("recordEdge upsert is idempotent-safe increment", () => {

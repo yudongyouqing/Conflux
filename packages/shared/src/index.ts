@@ -143,12 +143,19 @@ export interface GraphNode {
   skills?: string[];
 }
 
+/**
+ * Edge = a directed conversation CHANNEL: `from` initiated it and speaks,
+ * `to` answers. Replies stay on the same channel (no reverse edge).
+ */
 export interface GraphEdge {
+  /** Channel id (edges.rowid). */
+  id: number;
   from: string;
   to: string;
+  /** Number of exchanges (asks) on this channel. */
   weight: number;
   last_interact_at: string;
-  /** Latest question exchanged over this channel (either direction), if any. */
+  /** Latest question on this channel; "↩ ..." when the channel only ever carried a reply. */
   last_message?: string | null;
 }
 
@@ -159,6 +166,8 @@ export interface Graph {
 
 export interface Message {
   id: number;
+  /** The conversation channel (edge) this exchange belongs to. */
+  edge_id?: number | null;
   from_session: string;
   to_session: string;
   question: string;

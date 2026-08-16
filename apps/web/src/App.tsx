@@ -14,7 +14,7 @@ export default function App() {
   const [tab, setTab] = useState<TabId>("graph");
   const [selectedSession, setSelectedSession] = useState<GraphNode | null>(null);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
-  const [selectedEdge, setSelectedEdge] = useState<{ from: string; to: string } | null>(null);
+  const [selectedEdge, setSelectedEdge] = useState<{ id: number; from: string; to: string } | null>(null);
   const graph = useGraph();
 
   const nodeMap = useMemo(() => {
@@ -54,7 +54,7 @@ export default function App() {
   }, []);
 
   const handleSelectEdge = useCallback(
-    (edge: { from: string; to: string } | null) => {
+    (edge: { id: number; from: string; to: string } | null) => {
       setSelectedSession(null);
       setSelectedMessage(null);
       setSelectedEdge(edge);
@@ -98,6 +98,7 @@ export default function App() {
             edge={selectedEdge}
             sessionNameLookup={sessionNameLookup}
             sessionStatusLookup={sessionStatusLookup}
+            onOpenEdge={handleSelectEdge}
           />
         </aside>
       </div>

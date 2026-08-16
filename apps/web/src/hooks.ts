@@ -48,6 +48,29 @@ export function usePeerMessages(peer: string | null) {
   });
 }
 
+/** One conversation channel's (edge) exchange history. */
+export function useEdgeMessages(edgeId: number | null) {
+  return useQuery({
+    queryKey: ["edge-messages", edgeId],
+    queryFn: () => api.getEdgeMessages(edgeId!),
+    enabled: edgeId !== null,
+    refetchInterval: 5000,
+  });
+}
+
+/** Speak on a web-console channel. */
+export function useEdgeAsk() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ edgeId, question }: { edgeId: number; question: string }) =>
+      api.edgeAsk(edgeId, question),
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ["edge-messages", vars.edgeId] });
+      qc.invalidateQueries({ queryKey: ["graph"] });
+    },
+  });
+}
+
 /** Two-way message flow between any two sessions (graph edge click). */
 export function usePeerFlow(a: string | null, b: string | null) {
   return useQuery({

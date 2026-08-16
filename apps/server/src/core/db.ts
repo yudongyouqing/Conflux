@@ -6,7 +6,7 @@ import { logger } from "../log.js";
 
 export type DB = Database.Database;
 
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 // Track the checkpoint timer in a module-scoped variable (avoids touching the
 // globalThis type signature).
@@ -182,6 +182,23 @@ export function openDb(config: Config): DB {
   return db;
 }
 
+/**
+ * Remove edges that never carried a question (from→to) — they were created
+ * by the old replyAsk reverse-edge bookkeeping; their content lives in the
+ * channel's message replies. Exported for tests.
+ */
+export function collapseReplyEdges(db: DB): number {
+  const res = db
+    .prepare(
+      `DELETE FROM edges WHERE NOT EXISTS (
+         SELECT 1 FROM messages m
+         WHERE m.from_session = edges.from_session AND m.to_session = edges.to_session
+       )`
+    )
+    .run();
+  return res.changes;
+}
+
 /** Run idempotent schema migrations. */
 function migrate(db: DB): void {
   const current = db.pragma("user_version", { simple: true }) as number;
@@ -196,6 +213,19 @@ function migrate(db: DB): void {
   };
   ensureColumn("runtime_agents", "interval_min", "interval_min INTEGER");
   ensureColumn("runtime_agents", "last_scheduled_run", "last_scheduled_run TEXT");
+  // v8: edge-centric channels — messages link to their channel edge, and
+  // reply-created reverse edges are collapsed (replies stay on the channel)
+  ensureColumn("messages", "edge_id", "edge_id INTEGER");
+  db.exec(`
+    INSERT OR IGNORE INTO edges (from_session, to_session, weight, last_interact_at)
+      SELECT from_session, to_session, COUNT(*), MAX(COALESCE(replied_at, created_at))
+      FROM messages GROUP BY from_session, to_session;
+    UPDATE messages SET edge_id = (
+      SELECT e.rowid FROM edges e
+      WHERE e.from_session = messages.from_session AND e.to_session = messages.to_session
+    ) WHERE edge_id IS NULL;
+  `);
+  collapseReplyEdges(db);
   db.pragma(`user_version = ${SCHEMA_VERSION}`);
   logger.info({ from: current, to: SCHEMA_VERSION }, "db migrated");
 }

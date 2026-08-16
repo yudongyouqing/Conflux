@@ -1,12 +1,13 @@
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
-import { recordEdge } from "./graph.js";
+import { recordEdge, touchEdge } from "./graph.js";
 import type { Message, MessageStatus } from "@muiltchat/shared";
 
 export type { Message, MessageStatus };
 
 interface MessageRow {
   id: number;
+  edge_id: number | null;
   from_session: string;
   to_session: string;
   question: string;
@@ -36,13 +37,14 @@ export function askSession(
     throw new Error(`target session not found: ${input.to_session}`);
   }
   const now = nowIso();
+  // the channel edge (from→to) IS the conversation: questions travel on it
+  const edgeId = recordEdge(db, input.from_session, input.to_session);
   const res = db
     .prepare(
-      `INSERT INTO messages (from_session, to_session, question, status, created_at)
-       VALUES (?, ?, ?, 'pending', ?)`
+      `INSERT INTO messages (from_session, to_session, question, status, created_at, edge_id)
+       VALUES (?, ?, ?, 'pending', ?, ?)`
     )
-    .run(input.from_session, input.to_session, input.question, now);
-  recordEdge(db, input.from_session, input.to_session);
+    .run(input.from_session, input.to_session, input.question, now, edgeId);
   return getMessage(db, Number(res.lastInsertRowid))!;
 }
 
@@ -68,7 +70,13 @@ export function replyAsk(
   db.prepare(
     `UPDATE messages SET reply = ?, status = 'replied', replied_at = ? WHERE id = ?`
   ).run(reply, now, id);
-  recordEdge(db, replierSessionId, msg.from_session);
+  // the reply stays ON the channel — no reverse edge (direction is fixed:
+  // the channel's from asked, its to answered)
+  if (msg.edge_id !== null && msg.edge_id !== undefined) {
+    touchEdge(db, msg.edge_id);
+  } else {
+    touchEdge(db, recordEdge(db, msg.from_session, msg.to_session));
+  }
   return getMessage(db, id)!;
 }
 
@@ -278,4 +286,32 @@ export function formatInboxNotice(db: DB, sessionId: string): string | null {
     `[muiltchat] 收件箱有 ${rows.length} 条未读消息(最新来自「${from}」: ${excerpt}…)。` +
     `请调用 muiltchat 的 check_inbox 工具查看并 reply_ask 回复。`
   );
+}
+
+/**
+ * The full exchange history of one conversation channel (edge), oldest
+ * first — the edge-panel view.
+ */
+export function listEdgeMessages(db: DB, edgeId: number, limit = 200): Message[] {
+  const rows = db
+    .prepare(
+      `SELECT * FROM messages WHERE edge_id = ? ORDER BY id DESC LIMIT ?`
+    )
+    .all(edgeId, Math.min(Math.max(limit, 1), 500)) as MessageRow[];
+  return rows.map(toMsg).reverse();
+}
+
+/** Channel header for the edge panel. */
+export function getEdge(
+  db: DB,
+  edgeId: number
+): { id: number; from_session: string; to_session: string; weight: number; last_interact_at: string } | null {
+  const row = db
+    .prepare(
+      `SELECT rowid AS id, from_session, to_session, weight, last_interact_at FROM edges WHERE rowid = ?`
+    )
+    .get(edgeId) as
+    | { id: number; from_session: string; to_session: string; weight: number; last_interact_at: string }
+    | undefined;
+  return row ?? null;
 }

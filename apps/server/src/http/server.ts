@@ -32,6 +32,8 @@ import {
   getMessage,
   listMessages,
   listPeerMessages,
+  listEdgeMessages,
+  getEdge,
 } from "../core/messages.js";
 import { getGraph } from "../core/graph.js";
 import {
@@ -797,7 +799,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   });
 
   // GET /messages/peers?a=<id>&b=<id> — two-way flow between any two sessions
-  // (graph edge click → message stream)
+  // (legacy pair view; the edge channel view below is the primary)
   app.get<{ Querystring: { a?: string; b?: string } }>("/messages/peers", {}, async (req, reply) => {
     const { a, b } = req.query;
     if (!a || !b) return reply.code(400).send({ error: "missing a/b query params" });
@@ -806,6 +808,68 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
       return reply.send({ messages });
     } catch (err) {
       return sendError(reply, err);
+    }
+  });
+
+  // ---- edge channels (directed conversation channels) ----
+
+  // GET /edges/:id/messages — the channel's exchange history
+  app.get<{ Params: { id: string } }>("/edges/:id/messages", {}, async (req, reply) => {
+    try {
+      const edgeId = Number(req.params.id);
+      const edge = getEdge(db, edgeId);
+      if (!edge) return reply.code(404).send({ error: "edge not found" });
+      return reply.send({
+        edge: { id: edge.id, from: edge.from_session, to: edge.to_session },
+        messages: listEdgeMessages(db, edgeId),
+      });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // POST /edges/:id/ask — speak ON the channel (web console may only use
+  // channels it initiated: edge.from === web-console)
+  app.post<{ Params: { id: string }; Body: { question: string } }>("/edges/:id/ask", {
+    schema: {
+      body: {
+        type: "object",
+        required: ["question"],
+        properties: { question: { type: "string", maxLength: 20000 } },
+      },
+    },
+  }, async (req, reply) => {
+    try {
+      const edgeId = Number(req.params.id);
+      const edge = getEdge(db, edgeId);
+      if (!edge) return reply.code(404).send({ error: "edge not found" });
+      if (edge.from_session !== WEB_CONSOLE_ID) {
+        return reply.code(403).send({
+          error: `只读通道:${edge.from_session} 发起的对话只能由该会话发言`,
+        });
+      }
+      heartbeat(db, WEB_CONSOLE_ID);
+      const msg = askSession(db, {
+        from_session: WEB_CONSOLE_ID,
+        to_session: edge.to_session,
+        question: req.body.question,
+      });
+      let wake: { woke: boolean; reason?: string } = { woke: false, reason: "skipped" };
+      try {
+        wake = wakeOfflineSession(db, edge.to_session);
+      } catch {
+        // best-effort auto-answer
+      }
+      logAudit(db, {
+        caller_session: WEB_CONSOLE_ID,
+        interface: "http",
+        action: "edge_ask",
+        args: { edge: edgeId },
+        result: { message_id: msg.id, wake },
+      });
+      return reply.send({ message: msg, wake });
+    } catch (err) {
+      return sendError(reply, err, WEB_CONSOLE_ID, "edge_ask");
     }
   });
 
