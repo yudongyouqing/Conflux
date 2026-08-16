@@ -109,9 +109,26 @@ function EdgeFlowView({
   sessionNameLookup: (id: string) => string | undefined;
 }) {
   const { data } = usePeerFlow(from, to);
+  const ask = useWebAsk();
+  const [text, setText] = useState("");
+  // Which side of the pair the web console addresses. Default to the side
+  // that isn't the console itself; if neither is, the "to" side wins.
+  const [target, setTarget] = useState<"from" | "to">(
+    to === WEB_CONSOLE_ID ? "from" : "to"
+  );
   // listPeerMessages returns oldest-first; the panel reads newest-first.
   const messages = (data?.messages ?? []).slice().reverse();
   const nameOf = (id: string) => sessionNameLookup(id) ?? id.slice(0, 8);
+  const targetId = target === "from" ? from : to;
+
+  const send = () => {
+    const question = text.trim();
+    if (!question || ask.isPending) return;
+    ask.mutate(
+      { to_session: targetId, question },
+      { onSuccess: () => setText("") }
+    );
+  };
 
   return (
     <div className="p-5 space-y-4 overflow-y-auto h-full">
@@ -128,6 +145,63 @@ function EdgeFlowView({
             · {messages.length} 条 · 最新在上
           </span>
         </div>
+      </div>
+
+      {/* Join the conversation as the web console: pick which side to ask. */}
+      <div>
+        <div className="flex items-center gap-1.5 mb-1.5">
+          <span className="text-[10px] text-gray-400 flex-shrink-0">问:</span>
+          {(["from", "to"] as const).map((side) => {
+            const id = side === "from" ? from : to;
+            const isSelf = id === WEB_CONSOLE_ID;
+            const selected = target === side;
+            return (
+              <button
+                key={side}
+                onClick={() => !isSelf && setTarget(side)}
+                disabled={isSelf}
+                className={`px-2 py-0.5 rounded-md text-[10px] border transition-colors truncate max-w-[140px] ${
+                  isSelf
+                    ? "bg-gray-50 text-gray-300 border-gray-100 cursor-not-allowed"
+                    : selected
+                      ? "bg-blue-600 text-white border-blue-600"
+                      : "bg-white text-gray-600 border-gray-200 hover:border-blue-300"
+                }`}
+                title={isSelf ? "Web 控制台不能问自己" : id}
+              >
+                {nameOf(id)}
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex gap-1.5">
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) send();
+            }}
+            placeholder={`以 Web 控制台身份问 ${nameOf(targetId)}…`}
+            className="flex-1 min-w-0 text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-300"
+          />
+          <button
+            onClick={send}
+            disabled={!text.trim() || ask.isPending}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-blue-700 transition-colors flex-shrink-0"
+          >
+            {ask.isPending ? (
+              <Loader2 size={12} className="animate-spin" />
+            ) : (
+              <Send size={12} />
+            )}
+            发送
+          </button>
+        </div>
+        {ask.isError && (
+          <p className="text-[10px] text-red-500 mt-1">
+            {(ask.error as Error).message}
+          </p>
+        )}
       </div>
 
       {messages.length === 0 ? (
