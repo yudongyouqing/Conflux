@@ -61,7 +61,7 @@ import {
   startRuntimeAgent,
 } from "../core/runtime-agents.js";
 import { getTerminalSettings, saveTerminalSettings } from "../core/app-settings.js";
-import { openInTerminal, resumeCommand } from "../core/terminal.js";
+import { openInTerminal, resumeCommand, terminalOptions } from "../core/terminal.js";
 import type { TerminalSettings } from "@muiltchat/shared";
 import { logger } from "../log.js";
 
@@ -662,7 +662,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   // ---- terminal settings (opener used by "open in terminal" + agent start) ----
   app.get("/settings/terminal", {}, async (_req, reply) => {
     try {
-      return reply.send({ terminal: getTerminalSettings(db) });
+      return reply.send({ terminal: getTerminalSettings(db), options: terminalOptions() });
     } catch (err) {
       return sendError(reply, err);
     }
@@ -673,7 +673,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
       body: {
         type: "object",
         properties: {
-          terminal: { type: "string", enum: ["wt", "cmd", "wezterm"] },
+          terminal: { type: "string", enum: ["wt", "powershell", "cmd", "wezterm"] },
           claude_path: { type: "string", maxLength: 500 },
           codex_path: { type: "string", maxLength: 500 },
         },

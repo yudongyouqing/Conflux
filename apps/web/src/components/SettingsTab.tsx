@@ -3,12 +3,6 @@ import { useTerminalSettings, useSaveTerminalSettings } from "../hooks";
 import type { TerminalChoice } from "@muiltchat/shared";
 import { Settings, Loader2, Check } from "lucide-react";
 
-const TERMINAL_OPTIONS: { value: TerminalChoice; label: string; hint: string }[] = [
-  { value: "wt", label: "Windows Terminal", hint: "wt.exe,未安装时自动回退到系统默认" },
-  { value: "cmd", label: "系统默认 (cmd)", hint: "cmd start 新窗口,兼容性最好" },
-  { value: "wezterm", label: "WezTerm", hint: "wezterm start,缺失时回退 wt → cmd" },
-];
-
 export function SettingsTab() {
   const { data, isLoading, error } = useTerminalSettings();
   const save = useSaveTerminalSettings();
@@ -51,6 +45,9 @@ export function SettingsTab() {
       </div>
     );
 
+  const options = data?.options ?? [];
+  const selected = options.find((o) => o.value === terminal);
+
   return (
     <div className="h-full overflow-y-auto p-6">
       <div className="max-w-xl mx-auto space-y-5">
@@ -64,37 +61,29 @@ export function SettingsTab() {
         </div>
 
         <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-4 shadow-sm">
-          <div>
+          <label className="block">
             <span className="block text-xs font-medium text-gray-700 mb-1.5">
               终端打开方式
             </span>
-            <div className="space-y-1.5">
-              {TERMINAL_OPTIONS.map((opt) => (
-                <label
-                  key={opt.value}
-                  className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${
-                    terminal === opt.value
-                      ? "border-blue-400 bg-blue-50/60"
-                      : "border-gray-200 hover:bg-gray-50"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="terminal"
-                    checked={terminal === opt.value}
-                    onChange={() => setTerminal(opt.value)}
-                    className="mt-0.5"
-                  />
-                  <span className="min-w-0">
-                    <span className="block text-xs font-medium text-gray-800">
-                      {opt.label}
-                    </span>
-                    <span className="block text-[11px] text-gray-400">{opt.hint}</span>
-                  </span>
-                </label>
+            <select
+              value={terminal}
+              onChange={(e) => setTerminal(e.target.value as TerminalChoice)}
+              className={selectCls}
+            >
+              {options.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                  {o.available ? "" : "(未安装,将回退)"}
+                </option>
               ))}
-            </div>
-          </div>
+            </select>
+            {selected && (
+              <span className="block text-[11px] text-gray-400 mt-1.5">
+                {selected.hint}
+                {selected.available ? "" : " · 本机未检测到,保存后走回退链"}
+              </span>
+            )}
+          </label>
 
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
@@ -146,7 +135,7 @@ export function SettingsTab() {
         </div>
 
         <p className="text-[11px] text-gray-400">
-          提示:留空使用默认值(claude / codex,从 PATH 解析)。点击图上任意会话 →
+          提示:可执行文件留空使用默认值(从 PATH 解析)。点击图上任意会话 →
           右侧面板「在终端打开」即可在新终端窗口 resume 该对话。
         </p>
       </div>
@@ -156,3 +145,5 @@ export function SettingsTab() {
 
 const inputCls =
   "w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 bg-white";
+const selectCls =
+  "w-full px-2.5 py-2 rounded-lg border border-gray-200 text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 bg-white cursor-pointer";

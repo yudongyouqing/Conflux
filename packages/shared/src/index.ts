@@ -58,7 +58,7 @@ export interface Agent {
 export type RuntimeId = "claude" | "codex";
 
 /** How muiltchat opens a new terminal window (AgentRecall-style choice). */
-export type TerminalChoice = "wt" | "cmd" | "wezterm";
+export type TerminalChoice = "wt" | "powershell" | "cmd" | "wezterm";
 
 export interface TerminalSettings {
   /** Terminal opener. wt falls back to cmd when wt.exe is missing. */
@@ -67,6 +67,15 @@ export interface TerminalSettings {
   claude_path: string;
   /** Codex executable override (default "codex"). */
   codex_path: string;
+}
+
+/** One dropdown entry in the settings UI, with live availability. */
+export interface TerminalOption {
+  value: TerminalChoice;
+  label: string;
+  hint: string;
+  /** Whether any of the opener's executables was found on PATH. */
+  available: boolean;
 }
 
 /**

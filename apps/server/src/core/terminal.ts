@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import type { TerminalSettings } from "@muiltchat/shared";
+import { existsSync } from "node:fs";
+import type { TerminalChoice, TerminalOption, TerminalSettings } from "@muiltchat/shared";
 import { logger } from "../log.js";
 
 /**
@@ -102,6 +103,13 @@ export function buildLaunchPlan(
     file: "wezterm.exe",
     args: ["start", ...(cwd ? ["--cwd", cwd] : []), "--", "cmd.exe", "/d", "/k", titled],
   });
+  // pwsh runs the command directly (-NoExit keeps the window open); the
+  // cmd-syntax `title &&` prefix would not parse there.
+  const pwshSpec = (file: string): LaunchSpec => ({
+    file,
+    args: ["-NoLogo", "-NoProfile", "-NoExit", "-Command", command],
+    cwd,
+  });
   // Plain new console window: the proven `cmd /c start` chain (a windowless
   // serve process cannot hand a console to a plain `cmd /k` child reliably).
   const cmdStart = (): LaunchSpec => ({
@@ -112,6 +120,7 @@ export function buildLaunchPlan(
   });
 
   if (settings.terminal === "cmd") return [cmdStart()];
+  if (settings.terminal === "powershell") return [pwshSpec("pwsh.exe"), pwshSpec("powershell.exe"), cmdStart()];
   if (settings.terminal === "wezterm") return [wezterm(), wt(), cmdStart()];
   // wt (default): wt first, fall back through cmd when wt.exe is missing.
   return [wt(), cmdStart()];
@@ -128,6 +137,62 @@ export function resumeCommand(
 ): string {
   const exe = cmdQuote(executable);
   return runtime === "codex" ? `${exe} resume ${sessionId}` : `${exe} --resume ${sessionId}`;
+}
+
+// ---- which terminals does this machine actually have? -----------------------
+
+const TERMINAL_FILES: Record<TerminalChoice, string[]> = {
+  wt: ["wt.exe"],
+  powershell: ["pwsh.exe", "powershell.exe"],
+  cmd: ["cmd.exe"],
+  wezterm: ["wezterm.exe"],
+};
+
+const TERMINAL_LABELS: Record<TerminalChoice, { label: string; hint: string }> = {
+  wt: { label: "Windows Terminal", hint: "wt.exe · 未安装时自动回退" },
+  powershell: { label: "PowerShell", hint: "pwsh / powershell · 未安装时回退 cmd" },
+  cmd: { label: "系统默认", hint: "cmd start 新窗口 · 兼容性最好" },
+  wezterm: { label: "WezTerm", hint: "wezterm.exe · 缺失时回退 wt → cmd" },
+};
+
+/**
+ * Resolve an executable via the OS (`where.exe`). existsSync-walking PATH is
+ * NOT reliable here: serve often runs under git-bash whose PATH is a hybrid
+ * MSYS/Windows string, and Store-app aliases like wt.exe are reparse points
+ * that statSync fails on with EACCES. `where` handles both correctly.
+ */
+export function resolveOnPath(exe: string, baseEnv: NodeJS.ProcessEnv = process.env): string | null {
+  if (/[\\/]/.test(exe)) return existsSync(exe) ? exe : null;
+  try {
+    const r = spawnSync("where.exe", [exe], {
+      encoding: "utf8",
+      timeout: 5000,
+      env: baseEnv,
+      windowsHide: true,
+    });
+    if (r.status === 0) {
+      const first = (r.stdout || "").trim().split(/\r?\n/)[0];
+      return first || null;
+    }
+  } catch {
+    // where unavailable — treat as unresolved
+  }
+  return null;
+}
+
+/**
+ * Dropdown entries for the settings UI with live PATH availability —
+ * we never assume which terminals the user has (AgentRecall exposes the
+ * same select-style list; the launch plan still falls back if one is
+ * chosen but missing).
+ */
+export function terminalOptions(baseEnv: NodeJS.ProcessEnv = process.env): TerminalOption[] {
+  const order: TerminalChoice[] = ["wt", "powershell", "cmd", "wezterm"];
+  return order.map((value) => ({
+    value,
+    ...TERMINAL_LABELS[value],
+    available: TERMINAL_FILES[value].some((f) => resolveOnPath(f, baseEnv) !== null),
+  }));
 }
 
 /**

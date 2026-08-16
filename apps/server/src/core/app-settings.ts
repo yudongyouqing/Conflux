@@ -9,7 +9,7 @@ export const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   codex_path: "codex",
 };
 
-const TERMINAL_CHOICES: TerminalChoice[] = ["wt", "cmd", "wezterm"];
+const TERMINAL_CHOICES: TerminalChoice[] = ["wt", "powershell", "cmd", "wezterm"];
 
 export function getSetting(db: DB, key: string): string | null {
   const row = db
