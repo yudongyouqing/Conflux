@@ -47,6 +47,7 @@ export function MessageTab({
         >
           <option value="all">全部状态</option>
           <option value="pending">待回复</option>
+          <option value="seen">已读未答</option>
           <option value="replied">已回复</option>
           <option value="read">已读</option>
         </select>

@@ -41,7 +41,7 @@ export function getGraph(
     .prepare(
       `SELECT s.id, s.name, s.description, s.project_dir, s.status, s.last_heartbeat_at, s.metadata,
          (SELECT COUNT(*) FROM context_entries c WHERE c.session_id = s.id) AS context_count,
-         (SELECT COUNT(*) FROM messages m WHERE m.to_session = s.id AND m.status = 'pending') AS pending_inbox
+         (SELECT COUNT(*) FROM messages m WHERE m.to_session = s.id AND m.status IN ('pending','seen')) AS pending_inbox
        FROM sessions s
        ${where}
        ORDER BY s.last_heartbeat_at DESC`
@@ -90,7 +90,7 @@ export function getGraph(
          'active' AS status,
          a.description,
          (SELECT COUNT(*) FROM context_entries c WHERE c.session_id = 'agent-' || a.id) AS context_count,
-         (SELECT COUNT(*) FROM messages m WHERE m.to_session = 'agent-' || a.id AND m.status = 'pending') AS pending_inbox,
+         (SELECT COUNT(*) FROM messages m WHERE m.to_session = 'agent-' || a.id AND m.status IN ('pending','seen')) AS pending_inbox,
          (SELECT COUNT(*) FROM conversations cv WHERE cv.agent_id = a.id) AS conversation_count
        FROM agents a
        ORDER BY a.updated_at DESC`

@@ -80,7 +80,7 @@ export function listSessions(
     .prepare(
       `SELECT s.*,
          (SELECT COUNT(*) FROM context_entries c WHERE c.session_id = s.id) AS context_count,
-         (SELECT COUNT(*) FROM messages m WHERE m.to_session = s.id AND m.status = 'pending') AS pending_inbox
+         (SELECT COUNT(*) FROM messages m WHERE m.to_session = s.id AND m.status IN ('pending','seen')) AS pending_inbox
        FROM sessions s
        ${where}
        ORDER BY s.last_heartbeat_at DESC`

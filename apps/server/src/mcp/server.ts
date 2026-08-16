@@ -342,7 +342,7 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
     "check_inbox",
     {
       description:
-        "Check questions other sessions have asked you that are still pending a reply.",
+        "Check unanswered questions other sessions have asked you. Reading marks them seen (askers can tell you looked); reply with reply_ask.",
       inputSchema: {},
     },
     async () => {

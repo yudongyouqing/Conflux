@@ -75,10 +75,23 @@ export function replyAsk(
 export function checkInbox(db: DB, sessionId: string): Message[] {
   const rows = db
     .prepare(
-      `SELECT * FROM messages WHERE to_session = ? AND status = 'pending' ORDER BY created_at ASC`
+      `SELECT * FROM messages WHERE to_session = ? AND status IN ('pending','seen') ORDER BY created_at ASC`
     )
     .all(sessionId) as MessageRow[];
-  return rows.map(toMsg);
+  // Mark freshly-fetched pending messages as seen so the asker can tell
+  // "read but not yet answered" from "never looked at". Unanswered items
+  // stay in the inbox until replied.
+  const fresh = rows.filter((r) => r.status === "pending");
+  if (fresh.length > 0) {
+    const ids = fresh.map((r) => r.id);
+    const placeholders = ids.map(() => "?").join(",");
+    db.prepare(
+      `UPDATE messages SET status = 'seen' WHERE status = 'pending' AND id IN (${placeholders})`
+    ).run(...ids);
+  }
+  return rows.map((r) =>
+    r.status === "pending" ? { ...toMsg(r), status: "seen" as const } : toMsg(r)
+  );
 }
 
 export function checkReplies(
