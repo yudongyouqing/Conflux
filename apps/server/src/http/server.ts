@@ -59,6 +59,7 @@ import {
   deleteRuntimeAgent,
   listRuntimeAgents,
   startRuntimeAgent,
+  tickScheduledAgents,
 } from "../core/runtime-agents.js";
 import { getTerminalSettings, saveTerminalSettings } from "../core/app-settings.js";
 import { openInTerminal, resumeCommand, terminalOptions } from "../core/terminal.js";
@@ -111,6 +112,18 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   sweepAbandoned();
   const abandonedSweep = setInterval(sweepAbandoned, 60_000);
   abandonedSweep.unref();
+
+  // ---- scheduled runtime agents (patrol pattern) ----
+  // Every 30s: launch due, non-overlapping scheduled presets headless.
+  const scheduleTick = () => {
+    try {
+      tickScheduledAgents(db);
+    } catch {
+      // transient sqlite lock — next tick retries
+    }
+  };
+  const scheduleTimer = setInterval(scheduleTick, 30_000);
+  scheduleTimer.unref();
 
   const app = Fastify({
     logger: false, // we use our own pino sink writing to stderr
@@ -790,6 +803,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
           api_key: { type: "string", maxLength: 500 },
           extra_env: { type: "string", maxLength: 10000 },
           instructions: { type: "string", maxLength: 20000 },
+          interval_min: { type: "integer", minimum: 1, maximum: 10080 },
         },
       },
     },
@@ -935,6 +949,7 @@ interface RuntimeAgentBody {
   api_key?: string;
   extra_env?: string;
   instructions?: string;
+  interval_min?: number | null;
 }
 interface ReplyBody {
   reply: string;

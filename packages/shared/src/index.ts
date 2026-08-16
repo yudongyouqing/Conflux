@@ -100,6 +100,10 @@ export interface RuntimeAgent {
   /** JSON object string of extra environment variables. */
   extra_env: string | null;
   instructions: string | null;
+  /** Scheduled wake-up interval in minutes; null/0 = manual start only. */
+  interval_min: number | null;
+  /** ISO timestamp of the last scheduled headless run. */
+  last_scheduled_run: string | null;
   created_at: string;
   updated_at: string;
 }

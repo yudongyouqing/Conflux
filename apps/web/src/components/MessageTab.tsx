@@ -17,10 +17,14 @@ export function MessageTab({
   const { data, isLoading } = useMessages({ status: statusFilter });
   const graph = useGraph();
 
-  const nameMap = useMemo(() => {
-    const m = new Map<string, string>();
-    graph.data?.nodes.forEach((n) => m.set(n.id, n.name));
-    return m;
+  const { nameMap, statusMap } = useMemo(() => {
+    const names = new Map<string, string>();
+    const statuses = new Map<string, string>();
+    graph.data?.nodes.forEach((n) => {
+      names.set(n.id, n.name);
+      statuses.set(n.id, n.status);
+    });
+    return { nameMap: names, statusMap: statuses };
   }, [graph.data]);
 
   const messages = data?.messages ?? [];
@@ -76,6 +80,7 @@ export function MessageTab({
             msg={msg}
             fromName={nameMap.get(msg.from_session)}
             toName={nameMap.get(msg.to_session)}
+            toStatus={statusMap.get(msg.to_session)}
             onClick={() => onSelectMessage(msg)}
             selected={msg.id === selectedMessageId}
           />
