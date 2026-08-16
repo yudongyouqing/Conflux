@@ -6,7 +6,7 @@ import { logger } from "../log.js";
 
 export type DB = Database.Database;
 
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 // Track the checkpoint timer in a module-scoped variable (avoids touching the
 // globalThis type signature).
@@ -188,6 +188,14 @@ function migrate(db: DB): void {
   if (current >= SCHEMA_VERSION) return;
 
   db.exec(SCHEMA_SQL);
+  // CREATE TABLE IF NOT EXISTS cannot extend existing tables — best-effort
+  // column additions for DBs created before v7.
+  const ensureColumn = (table: string, col: string, ddl: string) => {
+    const cols = db.pragma(`table_info(${table})`) as { name: string }[];
+    if (!cols.some((c) => c.name === col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+  };
+  ensureColumn("runtime_agents", "interval_min", "interval_min INTEGER");
+  ensureColumn("runtime_agents", "last_scheduled_run", "last_scheduled_run TEXT");
   db.pragma(`user_version = ${SCHEMA_VERSION}`);
   logger.info({ from: current, to: SCHEMA_VERSION }, "db migrated");
 }

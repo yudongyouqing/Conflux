@@ -92,6 +92,7 @@ export const api = {
     api_key?: string;
     extra_env?: string;
     instructions?: string;
+    interval_min?: number;
   }) => post<{ agent: RuntimeAgent }>("/runtimes", body),
 
   deleteRuntimeAgent: (id: number) => del<{ ok: boolean }>(`/runtimes/${id}`),

@@ -12,6 +12,8 @@ interface MessageCardProps {
   msg: Message;
   fromName?: string;
   toName?: string;
+  /** Graph status of the target session — offline + undelivered = dead letter. */
+  toStatus?: string;
   onClick: () => void;
   selected: boolean;
 }
@@ -20,9 +22,12 @@ export function MessageCard({
   msg,
   fromName,
   toName,
+  toStatus,
   onClick,
   selected,
 }: MessageCardProps) {
+  const undelivered = msg.status === "pending" || msg.status === "seen";
+  const deadLetter = undelivered && toStatus && toStatus !== "active";
   return (
     <div
       onClick={onClick}
@@ -40,8 +45,16 @@ export function MessageCard({
         <span className="text-gray-700 font-medium">
           {toName ?? msg.to_session.slice(0, 8)}
         </span>
+        {deadLetter && (
+          <span
+            className="ml-auto px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-red-50 text-red-600 border border-red-200"
+            title="目标会话离线:消息未送达,直到该对话被 resume"
+          >
+            目标离线
+          </span>
+        )}
         <span
-          className={`ml-auto px-1.5 py-0.5 rounded-md text-[10px] font-medium ${
+          className={`${deadLetter ? "" : "ml-auto"} px-1.5 py-0.5 rounded-md text-[10px] font-medium ${
             STATUS_COLORS[msg.status] ?? "bg-gray-100 text-gray-500 border border-gray-200"
           }`}
         >

@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { spawn } from "node:child_process";
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 import { logger } from "../log.js";
@@ -33,6 +34,8 @@ interface RuntimeAgentRow {
   api_key: string | null;
   extra_env: string | null;
   instructions: string | null;
+  interval_min: number | null;
+  last_scheduled_run: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -52,6 +55,7 @@ export function createRuntimeAgent(
     api_key?: string | null;
     extra_env?: string | null;
     instructions?: string | null;
+    interval_min?: number | null;
   }
 ): RuntimeAgent {
   if (!input.name?.trim()) throw new Error("name is required");
@@ -68,11 +72,18 @@ export function createRuntimeAgent(
       throw new Error("extra_env must be a JSON object, e.g. {\"FOO\":\"bar\"}");
     }
   }
+  const interval =
+    input.interval_min === undefined || input.interval_min === null
+      ? null
+      : Math.floor(input.interval_min);
+  if (interval !== null && (interval < 1 || interval > 10080)) {
+    throw new Error("interval_min must be 1..10080 minutes (a week)");
+  }
   const now = nowIso();
   const res = db
     .prepare(
-      `INSERT INTO runtime_agents (name, runtime, workdir, model, base_url, api_key, extra_env, instructions, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO runtime_agents (name, runtime, workdir, model, base_url, api_key, extra_env, instructions, interval_min, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       input.name.trim(),
@@ -83,6 +94,7 @@ export function createRuntimeAgent(
       input.api_key?.trim() || null,
       input.extra_env?.trim() || null,
       input.instructions?.trim() || null,
+      interval,
       now,
       now
     );
@@ -222,4 +234,119 @@ export function startRuntimeAgent(
   );
   logger.info({ agentId: id, runtime: agent.runtime, name: agent.name }, "runtime agent launched");
   return { started: true };
+}
+
+// ---- scheduled headless runs (patrol pattern) --------------------------------
+
+/** Wake-up prompt for scheduled runs; the operator system prompt does the rest. */
+export const SCHEDULED_WAKE_PROMPT = "定时唤醒:请按系统指令检查并处理收件箱,然后简短结束。";
+
+/** Args for a one-shot headless run (claude -p / codex exec). */
+export function buildHeadlessArgs(
+  agent: Pick<RuntimeAgent, "runtime" | "model" | "instructions">,
+  prompt: string = SCHEDULED_WAKE_PROMPT
+): string[] {
+  if (agent.runtime === "codex") {
+    return ["exec", ...(agent.model ? ["--model", agent.model] : []), "--", prompt];
+  }
+  return [...buildRuntimeArgs(agent), "-p", prompt];
+}
+
+/** Is a spawned instance of this preset still alive? (skip overlapping runs) */
+export function hasActiveRun(db: DB, agentId: number): boolean {
+  const rows = db
+    .prepare(
+      `SELECT id, metadata FROM sessions
+       WHERE status = 'active' AND metadata LIKE ?`
+    )
+    .all(`%"agent_id":${agentId},%`) as { id: string; metadata: string | null }[];
+  return rows.some((r) => {
+    try {
+      return JSON.parse(r.metadata ?? "{}").agent_id === agentId;
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** Due when an interval is set and it elapsed since the last scheduled run. */
+export function isDue(
+  agent: Pick<RuntimeAgent, "interval_min" | "last_scheduled_run">,
+  now: Date = new Date()
+): boolean {
+  if (!agent.interval_min || agent.interval_min < 1) return false;
+  if (!agent.last_scheduled_run) return true;
+  return now.getTime() - Date.parse(agent.last_scheduled_run) >= agent.interval_min * 60_000;
+}
+
+/**
+ * Launch one scheduled run: headless (no terminal window), detached, with the
+ * preset env. The run registers as a normal session via hooks, handles its
+ * inbox per the operator prompt, and exits. Output is discarded — the session
+ * row and any reply_ask results are the observable outcome.
+ */
+export function runScheduledAgent(
+  db: DB,
+  id: number,
+  opts: { platform?: NodeJS.Platform } = {}
+): { launched: true } {
+  const agent = getRuntimeAgent(db, id);
+  if (!agent) throw new Error(`runtime agent not found: ${id}`);
+  const platform = opts.platform ?? process.platform;
+  if (platform !== "win32" && platform !== "darwin" && platform !== "linux") {
+    throw new Error(`unsupported platform: ${platform}`);
+  }
+  if (agent.workdir && !existsSync(agent.workdir)) {
+    throw new Error(`workdir does not exist: ${agent.workdir}`);
+  }
+
+  const settings = getTerminalSettings(db);
+  const def = RUNTIMES[agent.runtime];
+  const defaultExe = agent.runtime === "claude" ? settings.claude_path : settings.codex_path;
+  const executable = process.env[def.executableEnv] || defaultExe;
+  const parts = [cmdQuote(executable), ...buildHeadlessArgs(agent).map(cmdQuote)];
+  const command = parts.join(" ");
+
+  const env = buildRuntimeEnv(agent, cleanTerminalEnv());
+  // Headless needs no console (unlike the windowed start), so detached is
+  // fine here; the cmd wrapper resolves npm .cmd shims and exits at once.
+  const child = spawn(process.env.comspec ?? "cmd.exe", ["/d", "/s", "/c", command], {
+    detached: true,
+    stdio: "ignore",
+    env,
+    cwd: agent.workdir || undefined,
+    windowsVerbatimArguments: process.platform === "win32",
+  });
+  child.unref();
+
+  db.prepare(`UPDATE runtime_agents SET last_scheduled_run = ? WHERE id = ?`).run(
+    nowIso(),
+    id
+  );
+  logger.info({ agentId: id, name: agent.name }, "scheduled runtime agent run launched");
+  return { launched: true };
+}
+
+/**
+ * Scheduler tick: launch every due, non-overlapping scheduled agent.
+ * The launcher is injectable for tests.
+ */
+export function tickScheduledAgents(
+  db: DB,
+  launcher: (db: DB, id: number) => unknown = runScheduledAgent
+): number {
+  let launched = 0;
+  for (const agent of listRuntimeAgents(db)) {
+    if (!isDue(agent) || hasActiveRun(db, agent.id)) continue;
+    try {
+      launcher(db, agent.id);
+      launched++;
+    } catch (err) {
+      logger.warn(
+        { agentId: agent.id, err: err instanceof Error ? err.message : String(err) },
+        "scheduled run failed"
+      );
+    }
+  }
+  return launched;
 }

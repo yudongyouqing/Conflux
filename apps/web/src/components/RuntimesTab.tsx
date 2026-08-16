@@ -6,9 +6,10 @@ import {
   useStartRuntimeAgent,
 } from "../hooks";
 import type { RuntimeId } from "@muiltchat/shared";
-import { Terminal, FolderOpen, Cpu, Trash2, Plus, Loader2 } from "lucide-react";
+import { Terminal, FolderOpen, Cpu, Trash2, Plus, Loader2, Clock } from "lucide-react";
 
 const EMPTY_FORM = {
+  interval_min: "",
   name: "",
   runtime: "claude" as RuntimeId,
   workdir: "",
@@ -47,6 +48,7 @@ export function RuntimesTab() {
         api_key: form.api_key || undefined,
         extra_env: form.extra_env || undefined,
         instructions: form.instructions || undefined,
+        interval_min: form.interval_min.trim() ? Number(form.interval_min) : undefined,
       },
       {
         onSuccess: () => {
@@ -157,6 +159,21 @@ export function RuntimesTab() {
                 />
               </Field>
             </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="定时间隔(分钟,可选)">
+                <input
+                  value={form.interval_min}
+                  onChange={(e) => set("interval_min", e.target.value.replace(/[^0-9]/g, ""))}
+                  placeholder="留空 = 仅手动启动;如 30 = 每半小时自动巡检"
+                  className={inputCls}
+                />
+              </Field>
+              <Field label="定时说明">
+                <div className="text-[11px] text-gray-400 px-1 py-1.5">
+                  到点后 headless 唤醒(无窗口):查收件箱、处理待办、简报后退出。
+                </div>
+              </Field>
+            </div>
             <Field label="API Key(可选,启动时注入环境变量,本地存储)">
               <input
                 type="password"
@@ -236,6 +253,19 @@ export function RuntimesTab() {
                     {a.model && (
                       <span className="text-[10px] text-gray-400 font-mono truncate">
                         {a.model}
+                      </span>
+                    )}
+                    {(a.interval_min ?? 0) > 0 && (
+                      <span
+                        className="text-[10px] px-1.5 py-px rounded bg-violet-50 text-violet-700 border border-violet-200 font-medium flex items-center gap-0.5 flex-shrink-0"
+                        title={
+                          a.last_scheduled_run
+                            ? `上次自动运行 ${new Date(a.last_scheduled_run).toLocaleString()}`
+                            : "尚未自动运行"
+                        }
+                      >
+                        <Clock size={9} />
+                        每 {a.interval_min} 分钟
                       </span>
                     )}
                   </div>
