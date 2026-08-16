@@ -108,10 +108,17 @@ export function getGraph(
   const edges = db
     .prepare(
       `SELECT e.from_session AS "from", e.to_session AS "to", e.weight, e.last_interact_at,
-         (SELECT m.question FROM messages m
-          WHERE (m.from_session = e.from_session AND m.to_session = e.to_session)
-             OR (m.from_session = e.to_session AND m.to_session = e.from_session)
-          ORDER BY m.id DESC LIMIT 1) AS last_message
+         COALESCE(
+           -- traffic THIS edge's direction carried: its own questions first
+           (SELECT m.question FROM messages m
+            WHERE m.from_session = e.from_session AND m.to_session = e.to_session
+            ORDER BY m.id DESC LIMIT 1),
+           -- a reply-only edge (created by reply_ask) shows the answer it carried
+           (SELECT '↩ ' || m.reply FROM messages m
+            WHERE m.to_session = e.from_session AND m.from_session = e.to_session
+              AND m.reply IS NOT NULL
+            ORDER BY m.replied_at DESC LIMIT 1)
+         ) AS last_message
        FROM edges e
        ORDER BY e.weight DESC, e.last_interact_at DESC`
     )
