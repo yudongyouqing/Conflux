@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -69,6 +69,42 @@ export function GraphTab({
   // Interactive state — required for node dragging in React Flow v12.
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+
+  // Manual edge curvature overrides, keyed `${from}->${to}`. Survives the 5s
+  // poll rebuilds (read when edges are rebuilt) and page reloads (localStorage).
+  const OFFSETS_KEY = "muiltchat:edge-offsets:v1";
+  const manualOffsets = useRef<Record<string, number>>(
+    (() => {
+      try {
+        return JSON.parse(localStorage.getItem(OFFSETS_KEY) ?? "{}");
+      } catch {
+        return {};
+      }
+    })()
+  );
+
+  const handleOffsetChange = useCallback(
+    (key: string, offset: number | null) => {
+      if (offset === null) delete manualOffsets.current[key];
+      else manualOffsets.current[key] = Math.round(offset);
+      try {
+        localStorage.setItem(OFFSETS_KEY, JSON.stringify(manualOffsets.current));
+      } catch {
+        // storage full/blocked — in-memory override still works this session
+      }
+      setEdges((eds) =>
+        eds.map((e) => {
+          const d = e.data as
+            | { offsetKey?: string; offset?: number; autoOffset?: number }
+            | undefined;
+          if (d?.offsetKey !== key) return e;
+          const auto = d.autoOffset ?? 0;
+          return { ...e, data: { ...d, offset: offset === null ? auto : Math.round(offset) } };
+        })
+      );
+    },
+    [setEdges]
+  );
 
   // Sync polled data into state. Node positions the user dragged to are
   // preserved across polls; only data (name/status/counts) refreshes.
@@ -247,12 +283,20 @@ export function GraphTab({
     }
     rawEdges = rawEdges.map((e) => {
       const d = e.data as { from: string; to: string };
-      const key = d.from < d.to ? `${d.from}|${d.to}` : `${d.to}|${d.from}`;
-      const twoWay = (pairCount.get(key) ?? 0) > 1;
+      const pairKey = d.from < d.to ? `${d.from}|${d.to}` : `${d.to}|${d.from}`;
+      const twoWay = (pairCount.get(pairKey) ?? 0) > 1;
+      const dirKey = `${d.from}->${d.to}`;
+      const auto = twoWay ? 34 : 0;
       return {
         ...e,
         type: "curved" as const,
-        data: { ...d, offset: twoWay ? 34 : 0 },
+        data: {
+          ...d,
+          offset: manualOffsets.current[dirKey] ?? auto,
+          autoOffset: auto,
+          offsetKey: dirKey,
+          onOffsetChange: handleOffsetChange,
+        },
       };
     });
 
@@ -308,7 +352,7 @@ export function GraphTab({
       }));
     });
     setEdges(styledEdges);
-  }, [data, selectedSessionId, selectedEdge, viewMode, orphanExpanded, setNodes, setEdges]);
+  }, [data, selectedSessionId, selectedEdge, viewMode, orphanExpanded, handleOffsetChange, setNodes, setEdges]);
 
   const onNodeClick: NodeMouseHandler = useCallback(
     (_, node) => {
