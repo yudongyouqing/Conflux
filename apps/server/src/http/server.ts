@@ -60,8 +60,14 @@ import {
   listRuntimeAgentsWithLiveness,
   startRuntimeAgent,
   tickScheduledAgents,
+  wakeOfflineSession,
 } from "../core/runtime-agents.js";
-import { getTerminalSettings, saveTerminalSettings } from "../core/app-settings.js";
+import {
+  getAutoWake,
+  getTerminalSettings,
+  saveTerminalSettings,
+  setAutoWake,
+} from "../core/app-settings.js";
 import { openInTerminal, resumeCommand, terminalOptions } from "../core/terminal.js";
 import { probeClaudePids, reconcileLiveness } from "../core/liveness.js";
 import type { TerminalSettings } from "@muiltchat/shared";
@@ -388,8 +394,14 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
         to_session: req.body.to_session,
         question: req.body.question,
       });
-      audit(sid, "ask_session", { to_session: req.body.to_session }, { message_id: msg.id });
-      return reply.send({ message: msg });
+      let wake: { woke: boolean; reason?: string } = { woke: false, reason: "skipped" };
+      try {
+        wake = wakeOfflineSession(db, req.body.to_session);
+      } catch {
+        // best-effort auto-answer
+      }
+      audit(sid, "ask_session", { to_session: req.body.to_session }, { message_id: msg.id, wake });
+      return reply.send({ message: msg, wake });
     } catch (err) {
       return sendError(reply, err, sid, "ask_session");
     }
@@ -691,13 +703,17 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   // ---- terminal settings (opener used by "open in terminal" + agent start) ----
   app.get("/settings/terminal", {}, async (_req, reply) => {
     try {
-      return reply.send({ terminal: getTerminalSettings(db), options: terminalOptions() });
+      return reply.send({
+        terminal: getTerminalSettings(db),
+        options: terminalOptions(),
+        auto_wake: getAutoWake(db),
+      });
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
-  app.put<{ Body: Partial<TerminalSettings> }>("/settings/terminal", {
+  app.put<{ Body: Partial<TerminalSettings> & { auto_wake?: boolean } }>("/settings/terminal", {
     schema: {
       body: {
         type: "object",
@@ -705,14 +721,16 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
           terminal: { type: "string", enum: ["wt", "powershell", "cmd", "wezterm"] },
           claude_path: { type: "string", maxLength: 500 },
           codex_path: { type: "string", maxLength: 500 },
+          auto_wake: { type: "boolean" },
         },
       },
     },
   }, async (req, reply) => {
     try {
       const terminal = saveTerminalSettings(db, req.body);
+      if (typeof req.body.auto_wake === "boolean") setAutoWake(db, req.body.auto_wake);
       logAudit(db, { interface: "http", action: "save_terminal_settings", args: { terminal: terminal.terminal } });
-      return reply.send({ terminal });
+      return reply.send({ terminal, auto_wake: getAutoWake(db) });
     } catch (err) {
       return sendError(reply, err);
     }
@@ -884,14 +902,21 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
         to_session: req.body.to_session,
         question: req.body.question,
       });
+      // true auto-answer: if the addressee is offline, wake its conversation
+      let wake: { woke: boolean; reason?: string } = { woke: false, reason: "skipped" };
+      try {
+        wake = wakeOfflineSession(db, req.body.to_session);
+      } catch {
+        // best-effort — the mail is still delivered by the notice/forwarding paths
+      }
       logAudit(db, {
         caller_session: WEB_CONSOLE_ID,
         interface: "http",
         action: "web_ask",
         args: { to_session: req.body.to_session },
-        result: { message_id: msg.id },
+        result: { message_id: msg.id, wake },
       });
-      return reply.send({ message: msg });
+      return reply.send({ message: msg, wake });
     } catch (err) {
       return sendError(reply, err, WEB_CONSOLE_ID, "web_ask");
     }

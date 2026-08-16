@@ -198,6 +198,15 @@ function findTranscriptPaths(
   return candidates;
 }
 
+/** Does a transcript exist for this conversation? (resume requires it) */
+export function hasTranscript(
+  sessionId: string,
+  cwd?: string | null,
+  claudeHome?: string
+): boolean {
+  return findTranscriptPaths(sessionId, cwd, claudeHome).length > 0;
+}
+
 /** Full text of a conversation transcript (first readable candidate). */
 function readTranscriptText(
   sessionId: string,

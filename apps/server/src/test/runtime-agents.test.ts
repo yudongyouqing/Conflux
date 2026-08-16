@@ -11,8 +11,24 @@ import {
   tickScheduledAgents,
   createRuntimeAgent,
   listRuntimeAgentsWithLiveness,
+  wakeOfflineSession,
 } from "../core/runtime-agents.js";
+import { getAutoWake, setAutoWake, setSetting } from "../core/app-settings.js";
 import { registerSession, mergeSessionMeta } from "../core/sessions.js";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+// fake ~/.claude so the transcript guard can be exercised hermetically
+const FAKE_HOME = mkdtempSync(join(tmpdir(), "muiltchat-wake-home-"));
+const makeTranscript = (sessionId: string, projectDir: string) => {
+  const dir = join(FAKE_HOME, "projects", projectDir.replace(/[^a-zA-Z0-9]/g, "-"));
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${sessionId}.jsonl`), '{"type":"user","message":"hi"}' + "\n", "utf8");
+};
+after(() => {
+  try { rmSync(FAKE_HOME, { recursive: true, force: true }); } catch {}
+});
 import { makeDb } from "./helpers.js";
 
 const { db, cleanup } = makeDb();
@@ -81,6 +97,7 @@ test("isDue: interval gating math", () => {
 test("buildHeadlessArgs: one-shot prompts per runtime", () => {
   const claudeArgs = buildHeadlessArgs({ runtime: "claude", model: null, instructions: null });
   assert.ok(claudeArgs.includes("-p"), "headless claude runs -p");
+  assert.ok(claudeArgs.includes("mcp__muiltchat__*"), "headless pre-authorizes muiltchat tools");
   assert.equal(claudeArgs[claudeArgs.indexOf("-p") + 1], SCHEDULED_WAKE_PROMPT);
 
   const codexArgs = buildHeadlessArgs({ runtime: "codex", model: "gpt-5", instructions: null });
@@ -160,4 +177,92 @@ test("listRuntimeAgentsWithLiveness derives live from spawned session heartbeats
   assert.ok(la.last_seen);
   assert.equal(lb.live, false, "old heartbeat -> offline");
   assert.ok(lb.last_seen, "offline still reports last_seen");
+});
+
+// ---- auto-answer wake ----
+
+test("wakeOfflineSession: guards, dedup and command shape", () => {
+  // not a CLI conversation
+  registerSession(db, { id: "web-console", name: "Web 控制台" });
+  assert.equal(wakeOfflineSession(db, "web-console", { dryRun: true }).woke, false);
+  assert.deepEqual(
+    wakeOfflineSession(db, "agent-1", { dryRun: true }),
+    { woke: false, reason: "not a CLI conversation" }
+  );
+
+  // active sessions rely on the notice hook instead
+  registerSession(db, {
+    id: "wake-alive",
+    name: "alive",
+    description: "d",
+    metadata: { source: "claude-hook", named: true, claude_pid: 424242 },
+  });
+  assert.equal(wakeOfflineSession(db, "wake-alive", { dryRun: true }).woke, false);
+
+  // offline claude session → dry-run returns the full wake command
+  registerSession(db, {
+    id: "wake-dead",
+    name: "dead",
+    description: "d",
+    metadata: { source: "claude-hook", named: true, claude_pid: 999999 },
+  });
+  db.prepare(`UPDATE sessions SET status = 'stale' WHERE id = 'wake-dead'`).run();
+  assert.deepEqual(
+    wakeOfflineSession(db, "wake-dead", { dryRun: true }),
+    { woke: false, reason: "no transcript (zero-turn conversation)" },
+    "no transcript → cannot resume"
+  );
+  makeTranscript("wake-dead", "C:/Project folder/项目/muiltchat");
+  const w = wakeOfflineSession(db, "wake-dead", { dryRun: true, claudeHome: FAKE_HOME });
+  assert.equal(w.woke, true);
+  if (w.woke) {
+    assert.ok(w.command.includes("--resume wake-dead"), "resumes the conversation");
+    assert.ok(w.command.includes("-p "), "headless wake prompt");
+  }
+
+  // global opt-out
+  setAutoWake(db, false);
+  assert.equal(wakeOfflineSession(db, "wake-dead", { dryRun: true }).woke, false);
+  setAutoWake(db, true);
+});
+
+test("wakeOfflineSession dedups within the window", () => {
+  registerSession(db, {
+    id: "wake-dedup",
+    name: "dd",
+    description: "d",
+    metadata: { source: "claude-hook", named: true },
+  });
+  db.prepare(`UPDATE sessions SET status = 'stale' WHERE id = 'wake-dedup'`).run();
+  makeTranscript("wake-dedup", "C:/Project folder/项目/muiltchat");
+  // dryRun is a pure preview (no side effects), so simulate the dedup key a
+  // real wake would have stamped
+  const first = wakeOfflineSession(db, "wake-dedup", {
+    dryRun: true,
+    now: new Date("2026-08-16T11:59:00Z"),
+    claudeHome: FAKE_HOME,
+  });
+  assert.equal(first.woke, true, "no in-flight wake → wakeable");
+  setSetting(db, "auto-wake:wake-dedup", "2026-08-16T12:00:00Z");
+  const second = wakeOfflineSession(db, "wake-dedup", {
+    dryRun: true,
+    now: new Date("2026-08-16T12:01:00Z"),
+    claudeHome: FAKE_HOME,
+  });
+  assert.deepEqual(second, { woke: false, reason: "wake already in flight" });
+  // past the dedup window it may wake again
+  const third = wakeOfflineSession(db, "wake-dedup", {
+    dryRun: true,
+    now: new Date("2026-08-16T12:05:00Z"),
+    claudeHome: FAKE_HOME,
+  });
+  assert.equal(third.woke, true);
+});
+
+test("auto_wake setting round-trips with default on", () => {
+  assert.equal(getAutoWake(db), true);
+  setAutoWake(db, false);
+  assert.equal(getAutoWake(db), false);
+  setAutoWake(db, true);
+  assert.equal(getAutoWake(db), true);
 });

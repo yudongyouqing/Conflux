@@ -78,3 +78,12 @@ export function saveTerminalSettings(
   setSetting(db, TERMINAL_KEY, JSON.stringify(merged));
   return merged;
 }
+
+/** Auto-answer: wake offline sessions headless when someone asks them. */
+export function getAutoWake(db: DB): boolean {
+  return getSetting(db, "auto_wake") !== "false";
+}
+
+export function setAutoWake(db: DB, enabled: boolean): void {
+  setSetting(db, "auto_wake", enabled ? "true" : "false");
+}

@@ -1,12 +1,15 @@
-import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 import { STALE_AFTER_MS } from "../config.js";
 import { logger } from "../log.js";
 import type { RuntimeAgent, RuntimeId } from "@muiltchat/shared";
-import { cleanTerminalEnv, cmdQuote, openInTerminal } from "./terminal.js";
-import { getTerminalSettings } from "./app-settings.js";
+import { cleanTerminalEnv, cmdQuote, HEADLESS_ALLOWED_TOOLS, openInTerminal, wakeCommand } from "./terminal.js";
+import { getAutoWake, getSetting, getTerminalSettings, setSetting } from "./app-settings.js";
+import { getSession } from "./sessions.js";
+import { hasTranscript } from "./live.js";
 
 // moved to terminal.ts; re-exported for existing importers
 export { cleanTerminalEnv } from "./terminal.js";
@@ -287,7 +290,8 @@ export function buildHeadlessArgs(
   if (agent.runtime === "codex") {
     return ["exec", ...(agent.model ? ["--model", agent.model] : []), "--", prompt];
   }
-  return [...buildRuntimeArgs(agent), "-p", prompt];
+  // headless runs cannot answer permission prompts — pre-authorize muiltchat tools
+  return [...buildRuntimeArgs(agent), "--allowedTools", HEADLESS_ALLOWED_TOOLS, "-p", prompt];
 }
 
 /** Is a spawned instance of this preset still alive? (skip overlapping runs) */
@@ -346,14 +350,16 @@ export function runScheduledAgent(
   const command = parts.join(" ");
 
   const env = buildRuntimeEnv(agent, cleanTerminalEnv());
-  // Headless needs no console (unlike the windowed start), so detached is
-  // fine here; the cmd wrapper resolves npm .cmd shims and exits at once.
   const child = spawn(process.env.comspec ?? "cmd.exe", ["/d", "/s", "/c", command], {
-    detached: true,
+    // NOT detached: DETACHED_PROCESS children die silently with the spawner
+    // on Windows. windowsHide gives the child its own invisible console —
+    // proven working for headless claude runs.
+    detached: process.platform !== "win32",
     stdio: "ignore",
     env,
     cwd: agent.workdir || undefined,
     windowsVerbatimArguments: process.platform === "win32",
+    windowsHide: true,
   });
   child.unref();
 
@@ -387,4 +393,82 @@ export function tickScheduledAgents(
     }
   }
   return launched;
+}
+
+// ---- auto-answer: wake an OFFLINE session when someone asks it --------------
+
+/**
+ * True auto-answer: a question sent to a session whose claude process is
+ * gone would be a dead letter — instead, headlessly resume THAT
+ * conversation with a wake prompt; the run checks its inbox and replies.
+ * (The resume lineage forwarding re-addresses the pending mail to the run's
+ * new conversation id, so the wake finds the question.)
+ *
+ * Skips: active sessions (the notice hook already covers them), web console,
+ * internal agents, codex runtimes (no headless resume-with-prompt), and
+ * repeats within DEDUP_MS. dryRun returns the command without spawning.
+ */
+const AUTO_WAKE_DEDUP_MS = 90_000;
+
+export function wakeOfflineSession(
+  db: DB,
+  sessionId: string,
+  opts: { dryRun?: boolean; now?: Date; claudeHome?: string } = {}
+): { woke: true; command: string } | { woke: false; reason: string } {
+  if (!getAutoWake(db)) return { woke: false, reason: "auto_wake disabled" };
+  if (sessionId === "web-console" || sessionId.startsWith("agent-")) {
+    return { woke: false, reason: "not a CLI conversation" };
+  }
+  const session = getSession(db, sessionId);
+  if (!session) return { woke: false, reason: "session not found" };
+  if (session.status === "active") {
+    return { woke: false, reason: "active — hook notice will surface it" };
+  }
+  let runtime: "claude" | "codex" = "claude";
+  try {
+    const meta = session.metadata ? (JSON.parse(session.metadata) as Record<string, unknown>) : null;
+    if (meta?.runtime === "codex") runtime = "codex";
+  } catch {
+    // default runtime
+  }
+  if (runtime === "codex") {
+    return { woke: false, reason: "codex headless wake not supported yet" };
+  }
+  // `claude --resume` needs the transcript file — claude only writes it on
+  // the first turn, so zero-turn conversations cannot be woken (they have
+  // no context to answer from anyway)
+  if (!hasTranscript(sessionId, session.project_dir, opts.claudeHome)) {
+    return { woke: false, reason: "no transcript (zero-turn conversation)" };
+  }
+
+  // dedup: an in-flight wake (or a recent one) must not stack
+  const now = (opts.now ?? new Date()).getTime();
+  const last = getSetting(db, `auto-wake:${sessionId}`);
+  if (last && now - Date.parse(last) < AUTO_WAKE_DEDUP_MS) {
+    return { woke: false, reason: "wake already in flight" };
+  }
+
+  const settings = getTerminalSettings(db);
+  const exe = process.env.CLAUDE_PATH || settings.claude_path;
+  const command = wakeCommand("claude", sessionId, exe);
+
+  if (opts.dryRun) return { woke: true, command };
+
+  // Assume the target's identity: newer claude versions don't fire
+  // registering hooks headlessly, so the run's MCP adopts the target
+  // conversation via env (mail never needs forwarding to reach it).
+  const env = cleanTerminalEnv();
+  env.MUILTCHAT_ASSUME_SESSION = sessionId;
+  const child = spawn(process.env.comspec ?? "cmd.exe", ["/d", "/s", "/c", command], {
+    detached: process.platform !== "win32",
+    stdio: "ignore",
+    env,
+    cwd: session.project_dir ?? undefined,
+    windowsVerbatimArguments: process.platform === "win32",
+    windowsHide: true,
+  });
+  child.unref();
+  setSetting(db, `auto-wake:${sessionId}`, new Date(now).toISOString());
+  logger.info({ sessionId }, "auto-wake launched for offline session");
+  return { woke: true, command };
 }
