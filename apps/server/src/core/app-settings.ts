@@ -4,12 +4,20 @@ import type { TerminalChoice, TerminalSettings } from "@muiltchat/shared";
 const TERMINAL_KEY = "terminal";
 
 export const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
-  terminal: "wt",
+  terminal: process.platform === "darwin" ? "terminal" : "wt",
   claude_path: "claude",
   codex_path: "codex",
 };
 
-const TERMINAL_CHOICES: TerminalChoice[] = ["wt", "powershell", "cmd", "wezterm"];
+const TERMINAL_CHOICES: TerminalChoice[] = [
+  "wt",
+  "powershell",
+  "cmd",
+  "wezterm",
+  "terminal",
+  "iterm",
+  "tmux",
+];
 
 export function getSetting(db: DB, key: string): string | null {
   const row = db

@@ -64,7 +64,17 @@ export interface Agent {
 export type RuntimeId = "claude" | "codex";
 
 /** How muiltchat opens a new terminal window (AgentRecall-style choice). */
-export type TerminalChoice = "wt" | "powershell" | "cmd" | "wezterm";
+export type TerminalChoice =
+  | "wt"
+  | "powershell"
+  | "cmd"
+  | "wezterm"
+  /** macOS Terminal.app */
+  | "terminal"
+  /** macOS iTerm2 */
+  | "iterm"
+  /** tmux window in the tmux server (attach from any terminal) */
+  | "tmux";
 
 export interface TerminalSettings {
   /** Terminal opener. wt falls back to cmd when wt.exe is missing. */
