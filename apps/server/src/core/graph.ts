@@ -6,10 +6,11 @@ import type { Graph, GraphEdge, GraphNode, NodeType } from "@muiltchat/shared";
 export type { Graph, GraphEdge, GraphNode, NodeType };
 
 /**
- * Upsert a directed edge: increment weight if it exists, create otherwise.
- * Called from askSession (A→B) and replyAsk (B→A).
+ * Upsert the directed conversation channel (edge) and return its id.
+ * Called from askSession only — a reply stays ON the channel it answers
+ * (no reverse edge; the channel's last_interact_at is touched instead).
  */
-export function recordEdge(db: DB, from: string, to: string): void {
+export function recordEdge(db: DB, from: string, to: string): number {
   const now = nowIso();
   db.prepare(
     `INSERT INTO edges (from_session, to_session, weight, last_interact_at)
@@ -18,6 +19,15 @@ export function recordEdge(db: DB, from: string, to: string): void {
        weight = edges.weight + 1,
        last_interact_at = excluded.last_interact_at`
   ).run(from, to, now);
+  const row = db
+    .prepare(`SELECT rowid AS id FROM edges WHERE from_session = ? AND to_session = ?`)
+    .get(from, to) as { id: number };
+  return row.id;
+}
+
+/** Touch a channel's activity timestamp without creating traffic (replies). */
+export function touchEdge(db: DB, edgeId: number): void {
+  db.prepare(`UPDATE edges SET last_interact_at = ? WHERE rowid = ?`).run(nowIso(), edgeId);
 }
 
 /**
@@ -107,7 +117,7 @@ export function getGraph(
 
   const edges = db
     .prepare(
-      `SELECT e.from_session AS "from", e.to_session AS "to", e.weight, e.last_interact_at,
+      `SELECT e.rowid AS id, e.from_session AS "from", e.to_session AS "to", e.weight, e.last_interact_at,
          COALESCE(
            -- traffic THIS edge's direction carried: its own questions first
            (SELECT m.question FROM messages m

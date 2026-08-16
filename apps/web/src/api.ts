@@ -72,6 +72,15 @@ export const api = {
   getPeerMessages: (peer: string) =>
     get<{ messages: Message[] }>(`/web/peer-messages?peer=${encodeURIComponent(peer)}`),
 
+  getEdgeMessages: (edgeId: number) =>
+    get<{
+      edge: { id: number; from: string; to: string };
+      messages: Message[];
+    }>(`/edges/${edgeId}/messages`),
+
+  edgeAsk: (edgeId: number, question: string) =>
+    post<{ message: Message }>(`/edges/${edgeId}/ask`, { question }),
+
   getPeerFlow: (a: string, b: string) =>
     get<{ messages: Message[] }>(
       `/messages/peers?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`
