@@ -125,6 +125,9 @@ function EdgeFlowView({
   const messages = (data?.messages ?? []).slice().reverse();
   const nameOf = (id: string) => sessionNameLookup(id) ?? id.slice(0, 8);
   const targetId = target === "from" ? from : to;
+  // Whose perspective the bubble sides represent (see alignment note below).
+  const anchor =
+    from === WEB_CONSOLE_ID || to === WEB_CONSOLE_ID ? WEB_CONSOLE_ID : from;
 
   const send = () => {
     const question = text.trim();
@@ -155,6 +158,10 @@ function EdgeFlowView({
           <span className="text-gray-400">
             · {messages.length} 条 · 最新在上
           </span>
+        </div>
+        <div className="text-[10px] text-gray-400 mt-0.5">
+          每条消息标注自身方向;右侧(蓝色)= {nameOf(anchor)} 发出
+          {anchor !== WEB_CONSOLE_ID && "(第三方对话,以通道起点为观察位)"}
         </div>
       </div>
 
@@ -235,14 +242,20 @@ function EdgeFlowView({
       ) : (
         <div className="space-y-3">
           {messages.map((m) => {
-            const outgoing = m.from_session === from;
+            // Identity-anchored alignment: when the console is one of the
+            // endpoints, its messages are always "outgoing" (right/blue) —
+            // the same perspective as the session drawer — no matter which
+            // direction of edge was clicked. For third-party pairs neither
+            // side is "us", so fall back to the clicked edge's source.
+            const outgoing = m.from_session === anchor;
             return (
               <div
                 key={m.id}
                 className={`flex flex-col ${outgoing ? "items-end" : "items-start"}`}
               >
                 <div className="text-[10px] text-gray-400 mb-0.5">
-                  {nameOf(m.from_session)} · {new Date(m.created_at).toLocaleString()}
+                  {nameOf(m.from_session)} → {nameOf(m.to_session)} ·{" "}
+                  {new Date(m.created_at).toLocaleString()}
                 </div>
                 <div
                   className={`text-sm whitespace-pre-wrap p-2.5 rounded-xl border max-w-[95%] ${
