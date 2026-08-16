@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { useSessionContext, usePeerMessages, useWebAsk, usePeerFlow } from "../hooks";
+import { useSessionContext, usePeerMessages, useWebAsk, usePeerFlow, useOpenSessionTerminal } from "../hooks";
 import type { Message, GraphNode } from "@muiltchat/shared";
 import { StatusDot } from "./StatusDot";
-import { FileText, Clock, ArrowRight, FolderOpen, Send, Loader2, ArrowLeftRight } from "lucide-react";
+import { FileText, Clock, ArrowRight, FolderOpen, Send, Loader2, ArrowLeftRight, TerminalSquare } from "lucide-react";
 
 const WEB_CONSOLE_ID = "web-console";
 const DEFAULT_DESC = "Claude Code session (hook)";
@@ -176,10 +176,20 @@ function SessionDetail({
   contextEntries: ReturnType<typeof useSessionContext>["data"];
 }) {
   const isSession = session.type === "session";
+  const openTerminal = useOpenSessionTerminal();
+  const [openNote, setOpenNote] = useState<string | null>(null);
   const activity =
     session.description && session.description !== DEFAULT_DESC
       ? session.description
       : null;
+
+  const handleOpenTerminal = () => {
+    setOpenNote(null);
+    openTerminal.mutate(session.id, {
+      onSuccess: (r) => setOpenNote(`已在 ${r.opener} 打开`),
+      onError: (e) => setOpenNote(`打开失败: ${(e as Error).message}`),
+    });
+  };
 
   return (
     <div className="p-5 space-y-5 overflow-y-auto h-full">
@@ -222,6 +232,25 @@ function SessionDetail({
           </div>
         </div>
       </div>
+
+      {isSession && (
+        <div>
+          <button
+            onClick={handleOpenTerminal}
+            disabled={openTerminal.isPending}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 text-white text-xs hover:bg-gray-700 disabled:opacity-50"
+            title="在新终端窗口 resume 这个对话"
+          >
+            {openTerminal.isPending ? (
+              <Loader2 size={12} className="animate-spin" />
+            ) : (
+              <TerminalSquare size={13} />
+            )}
+            在终端打开
+          </button>
+          {openNote && <div className="text-[11px] text-gray-500 mt-1.5">{openNote}</div>}
+        </div>
+      )}
 
       {isSession && <ConversationBox sessionId={session.id} />}
 

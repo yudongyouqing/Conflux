@@ -1,4 +1,4 @@
-import type { Graph, Message, MessageStatus, SessionSummary, ContextEntry, Agent, ModelConfig, Conversation, Turn, RuntimeAgent, RuntimeId } from "@muiltchat/shared";
+import type { Graph, Message, MessageStatus, SessionSummary, ContextEntry, Agent, ModelConfig, Conversation, Turn, RuntimeAgent, RuntimeId, TerminalSettings } from "@muiltchat/shared";
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path);
@@ -24,6 +24,19 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 
 async function del<T>(path: string): Promise<T> {
   const res = await fetch(path, { method: "DELETE" });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+async function put<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
@@ -84,6 +97,14 @@ export const api = {
   deleteRuntimeAgent: (id: number) => del<{ ok: boolean }>(`/runtimes/${id}`),
 
   startRuntimeAgent: (id: number) => post<{ started: boolean }>(`/runtimes/${id}/start`, {}),
+
+  openSessionTerminal: (sessionId: string) =>
+    post<{ opener: string }>(`/sessions/${encodeURIComponent(sessionId)}/open-terminal`, {}),
+
+  getTerminalSettings: () => get<{ terminal: TerminalSettings }>("/settings/terminal"),
+
+  saveTerminalSettings: (body: Partial<TerminalSettings>) =>
+    put<{ terminal: TerminalSettings }>("/settings/terminal", body),
 
   webAsk: (body: { to_session: string; question: string }) =>
     post<{ message: Message }>("/web/ask", body),

@@ -1,9 +1,13 @@
-import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 import { logger } from "../log.js";
 import type { RuntimeAgent, RuntimeId } from "@muiltchat/shared";
+import { cleanTerminalEnv, cmdQuote, openInTerminal } from "./terminal.js";
+import { getTerminalSettings } from "./app-settings.js";
+
+// moved to terminal.ts; re-exported for existing importers
+export { cleanTerminalEnv } from "./terminal.js";
 
 // ---- runtime catalog (AgentRecall-style: static definitions per CLI) ------
 
@@ -145,56 +149,6 @@ export function buildRuntimeEnv(
   return env;
 }
 
-/**
- * Minimal clean environment for a spawned agent terminal. The serve process
- * may carry session-scoped vars of the Claude Code session that started it
- * (CLAUDECODE, CLAUDE_CODE_ENTRYPOINT, its auth token and model overrides) —
- * leaking those into a fresh agent both breaks it and confuses identities.
- * So we whitelist the OS/user essentials instead of inheriting, then apply
- * the preset channel on top via buildRuntimeEnv.
- */
-export function cleanTerminalEnv(baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const keep = [
-    "PATH",
-    "PATHEXT",
-    "SystemRoot",
-    "SystemDrive",
-    "ComSpec",
-    "TEMP",
-    "TMP",
-    "USERNAME",
-    "USERDOMAIN",
-    "USERPROFILE",
-    "HOME",
-    "HOMEDRIVE",
-    "HOMEPATH",
-    "APPDATA",
-    "LOCALAPPDATA",
-    "PROGRAMDATA",
-    "ProgramFiles",
-    "ProgramFiles(x86)",
-    "ProgramW6432",
-    "NUMBER_OF_PROCESSORS",
-    "PROCESSOR_ARCHITECTURE",
-    "OS",
-    "windir",
-    "LANG",
-    "TERM",
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "NO_PROXY",
-    "http_proxy",
-    "https_proxy",
-    "no_proxy",
-  ];
-  const env: NodeJS.ProcessEnv = {};
-  for (const k of keep) {
-    const v = baseEnv[k];
-    if (v !== undefined) env[k] = v;
-  }
-  return env;
-}
-
 /** CLI arguments for the runtime (model / system prompt presets). */
 export function buildRuntimeArgs(agent: Pick<RuntimeAgent, "runtime" | "model" | "instructions">): string[] {
   if (agent.runtime === "claude") {
@@ -211,10 +165,10 @@ export function buildRuntimeArgs(agent: Pick<RuntimeAgent, "runtime" | "model" |
 
 /**
  * Launch the agent's CLI in a NEW terminal window with the preset env and
- * working directory. The window is owned by the user's terminal host, not by
- * the serve process — serve only triggers it. On non-Windows platforms we
- * refuse rather than fake support (spawn-in-current-terminal needs a TTY we
- * don't have).
+ * working directory. The window is owned by the user's terminal host (per
+ * the terminal opener setting), not by the serve process — serve only
+ * triggers it. On non-Windows platforms we refuse rather than fake support
+ * (spawn-in-current-terminal needs a TTY we don't have).
  */
 export function startRuntimeAgent(
   db: DB,
@@ -228,43 +182,28 @@ export function startRuntimeAgent(
   if (platform !== "win32") {
     throw new Error("starting a runtime agent is Windows-only for now (new terminal window)");
   }
-
-  const def = RUNTIMES[agent.runtime];
-  const executable = process.env[def.executableEnv] || def.executable;
-  const args = buildRuntimeArgs(agent);
-  const env = buildRuntimeEnv(agent, cleanTerminalEnv());
-
   if (agent.workdir && !existsSync(agent.workdir)) {
     throw new Error(`workdir does not exist: ${agent.workdir}`);
   }
 
-  // `cmd /d /s /c start "<title>" [/D "<workdir>"] "<exe>" [args...]`
-  // - npm-installed CLIs are .cmd shims, which only `start` (via cmd) resolves
-  // - the new window inherits env from this cmd process
-  // - windowsVerbatimArguments means WE do the quoting: quote every token that
-  //   can contain spaces; start reads the first quoted token as window title
-  // - NOT detached: a DETACHED_PROCESS cmd has no console and `start` fails
-  //   silently in it. `start` already opens an independent window, and the
-  //   wrapper cmd exits within milliseconds, so a sync spawn is fine.
-  // - stdio MUST be "ignore": with pipes, the started child inherits the pipe
-  //   handles and spawnSync blocks until the terminal closes.
-  const cmdQuote = (s: string) => (/[\s"]/.test(s) ? `"${s.replace(/"/g, "")}"` : s);
-  const parts = ["start", cmdQuote(`muiltchat · ${agent.name}`)];
-  if (agent.workdir) parts.push("/D", cmdQuote(agent.workdir));
-  parts.push(cmdQuote(executable), ...args.map(cmdQuote));
-  const command = parts.join(" ");
+  const settings = getTerminalSettings(db);
+  const def = RUNTIMES[agent.runtime];
+  const defaultExe =
+    agent.runtime === "claude" ? settings.claude_path : settings.codex_path;
+  const executable = process.env[def.executableEnv] || defaultExe;
+  const args = buildRuntimeArgs(agent);
+  const command = [cmdQuote(executable), ...args.map(cmdQuote)].join(" ");
 
-  const comspec = opts.comspec ?? process.env.comspec ?? "cmd.exe";
-  const res = spawnSync(comspec, ["/d", "/s", "/c", command], {
-    stdio: "ignore",
-    timeout: 15_000,
-    env,
-    windowsVerbatimArguments: true,
-  });
-  if (res.error || res.status !== 0) {
-    const detail = res.error?.message ?? `exit ${res.status}`;
-    throw new Error(`failed to launch terminal: ${detail}`);
-  }
+  openInTerminal(
+    settings,
+    {
+      command,
+      cwd: agent.workdir || undefined,
+      title: `muiltchat · ${agent.name}`,
+      env: buildRuntimeEnv(agent, cleanTerminalEnv()),
+    },
+    opts
+  );
   logger.info({ agentId: id, runtime: agent.runtime, name: agent.name }, "runtime agent launched");
   return { started: true };
 }

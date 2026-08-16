@@ -125,3 +125,26 @@ export function useStartRuntimeAgent() {
     mutationFn: api.startRuntimeAgent,
   });
 }
+
+// ---- terminal settings + open-in-terminal ----
+
+export function useTerminalSettings() {
+  return useQuery({
+    queryKey: ["terminal-settings"],
+    queryFn: () => api.getTerminalSettings(),
+  });
+}
+
+export function useSaveTerminalSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.saveTerminalSettings,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["terminal-settings"] }),
+  });
+}
+
+export function useOpenSessionTerminal() {
+  return useMutation({
+    mutationFn: api.openSessionTerminal,
+  });
+}
