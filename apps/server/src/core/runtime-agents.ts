@@ -149,15 +149,31 @@ export function buildRuntimeEnv(
   return env;
 }
 
+/**
+ * Always appended to spawned claude runtime agents: turns the terminal
+ * session into an active muiltchat responder instead of a passive mailbox.
+ * User instructions (if any) come after it.
+ */
+export const RUNTIME_OPERATOR_PROMPT = [
+  "你是 muiltchat 网络的常驻应答会话。",
+  "每次被唤起时,先调用 muiltchat 的 check_inbox 工具:如有其他会话的问题,认真处理后用 reply_ask 回复;",
+  "处理过程中发现值得共享的结论,用 publish_context 发布。",
+  "没有待办时保持安静、简短,不要输出无关内容。",
+].join("");
+
 /** CLI arguments for the runtime (model / system prompt presets). */
 export function buildRuntimeArgs(agent: Pick<RuntimeAgent, "runtime" | "model" | "instructions">): string[] {
   if (agent.runtime === "claude") {
     const args: string[] = [];
     if (agent.model) args.push("--model", agent.model);
-    if (agent.instructions) args.push("--append-system-prompt", agent.instructions);
+    // Operator prompt is unconditional; user instructions extend it.
+    const systemPrompt = agent.instructions?.trim()
+      ? `${RUNTIME_OPERATOR_PROMPT}\n\n${agent.instructions.trim()}`
+      : RUNTIME_OPERATOR_PROMPT;
+    args.push("--append-system-prompt", systemPrompt);
     return args;
   }
-  // codex
+  // codex: no append-system-prompt equivalent on the CLI — model only
   const args: string[] = [];
   if (agent.model) args.push("--model", agent.model);
   return args;

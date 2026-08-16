@@ -10,7 +10,13 @@ export type SessionStatus = "active" | "stale" | "ended";
 
 export type NodeType = "session" | "agent";
 
-export type MessageStatus = "pending" | "replied" | "read";
+/**
+ * Message lifecycle: pending (unseen by addressee) -> seen (read but not
+ * yet answered) -> replied (answer written) -> read (asker consumed the
+ * reply). "seen" distinguishes "looked at, still composing" from "never
+ * opened".
+ */
+export type MessageStatus = "pending" | "seen" | "replied" | "read";
 
 export interface Session {
   id: string;

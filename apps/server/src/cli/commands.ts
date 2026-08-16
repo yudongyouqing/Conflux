@@ -602,7 +602,7 @@ export function buildCli(): Command {
     .description("list all messages globally (message-flow viewer)")
     .option("--from <session>", "filter by sender")
     .option("--to <session>", "filter by receiver")
-    .option("--status <status>", '"pending" | "replied" | "read" | "all"')
+    .option("--status <status>", '"pending" | "seen" | "replied" | "read" | "all"')
     .option("--since <iso>", "only messages after this ISO timestamp")
     .option("--limit <n>", "max results", "50")
     .action(async function (this: Command) {

@@ -71,6 +71,51 @@ test("checkInbox returns pending questions for addressee only", () => {
   assert.equal(checkInbox(db, "a").length, 0);
 });
 
+test("checkInbox marks messages seen; they stay until replied", () => {
+  const m = askSession(db, { from_session: "a", to_session: "b", question: "seen?" });
+  assert.equal(getMessage(db, m.id)!.status, "pending");
+  const first = checkInbox(db, "b");
+  const fetched = first.find((x) => x.id === m.id)!;
+  assert.equal(fetched.status, "seen", "fetched copy reports seen");
+  assert.equal(getMessage(db, m.id)!.status, "seen", "row updated to seen");
+  // unanswered items keep appearing on subsequent checks
+  const second = checkInbox(db, "b");
+  assert.ok(second.some((x) => x.id === m.id));
+  // replying transitions seen -> replied
+  const r = replyAsk(db, m.id, "b", "answered");
+  assert.equal(r.status, "replied");
+});
+
+test("pending_inbox counts seen-but-unanswered messages", () => {
+  const before = getGraph(db, { status: "all" }).nodes.find((n) => n.id === "b")!.pending_inbox;
+  const m = askSession(db, { from_session: "a", to_session: "b", question: "count-seen?" });
+  assert.equal(
+    getGraph(db, { status: "all" }).nodes.find((n) => n.id === "b")!.pending_inbox,
+    before + 1
+  );
+  checkInbox(db, "b"); // pending -> seen, still unanswered
+  assert.equal(
+    getGraph(db, { status: "all" }).nodes.find((n) => n.id === "b")!.pending_inbox,
+    before + 1,
+    "seen should still count as pending_inbox"
+  );
+  replyAsk(db, m.id, "b", "done");
+  assert.equal(
+    getGraph(db, { status: "all" }).nodes.find((n) => n.id === "b")!.pending_inbox,
+    before,
+    "replied no longer counts"
+  );
+});
+
+test("listMessages can filter by seen status", () => {
+  const m = askSession(db, { from_session: "a", to_session: "b", question: "filter-seen?" });
+  checkInbox(db, "b");
+  const seenList = listMessages(db, { status: "seen" });
+  assert.ok(seenList.some((x) => x.id === m.id));
+  const pendingList = listMessages(db, { status: "pending" });
+  assert.ok(!pendingList.some((x) => x.id === m.id));
+});
+
 test("checkReplies returns answered then marks read", () => {
   const m = askSession(db, { from_session: "a", to_session: "b", question: "read?" });
   replyAsk(db, m.id, "b", "answer");
