@@ -57,7 +57,7 @@ import {
   RUNTIMES,
   createRuntimeAgent,
   deleteRuntimeAgent,
-  listRuntimeAgents,
+  listRuntimeAgentsWithLiveness,
   startRuntimeAgent,
   tickScheduledAgents,
 } from "../core/runtime-agents.js";
@@ -798,7 +798,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
     try {
       return reply.send({
         runtimes: RUNTIMES,
-        agents: listRuntimeAgents(db),
+        agents: listRuntimeAgentsWithLiveness(db),
       });
     } catch (err) {
       return sendError(reply, err);

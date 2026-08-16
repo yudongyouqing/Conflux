@@ -124,6 +124,48 @@ export function checkReplies(
  * viewer. Unlike checkInbox/checkReplies, this does NOT mutate status.
  */
 /**
+ * Archive an exchange that already happened out-of-band (e.g. Claude Code's
+ * native SendMessage). The delivery is complete, so the row is written in
+ * its terminal state — no pending/seen inbox noise — and both directions'
+ * edges are recorded so the graph reflects the communication.
+ */
+export function recordExchange(
+  db: DB,
+  input: {
+    from_session: string;
+    to_session: string;
+    question: string;
+    reply?: string | null;
+    /** ISO timestamp of when the exchange happened; default now. */
+    occurred_at?: string;
+  }
+): Message {
+  for (const id of [input.from_session, input.to_session]) {
+    const row = db.prepare(`SELECT id FROM sessions WHERE id = ?`).get(id);
+    if (!row) throw new Error(`session not found: ${id}`);
+  }
+  const occurred = input.occurred_at ?? nowIso();
+  const status: MessageStatus = input.reply ? "replied" : "read";
+  const res = db
+    .prepare(
+      `INSERT INTO messages (from_session, to_session, question, reply, status, created_at, replied_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      input.from_session,
+      input.to_session,
+      input.question,
+      input.reply ?? null,
+      status,
+      occurred,
+      input.reply ? occurred : null
+    );
+  recordEdge(db, input.from_session, input.to_session);
+  if (input.reply) recordEdge(db, input.to_session, input.from_session);
+  return getMessage(db, Number(res.lastInsertRowid))!;
+}
+
+/**
  * Two-way message flow between two sessions (web console ↔ peer), oldest
  * first — used by the web Drawer conversation view.
  */

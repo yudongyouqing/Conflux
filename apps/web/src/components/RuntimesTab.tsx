@@ -233,76 +233,29 @@ export function RuntimesTab() {
             还没有运行时 agent 预设。点「新建」创建一个。
           </div>
         ) : (
-          <div className="space-y-2">
-            {agents.map((a) => (
-              <div
-                key={a.id}
-                className="bg-white border border-gray-200 rounded-xl p-3.5 shadow-sm flex items-center gap-3"
-              >
-                <div className="w-8 h-8 rounded-lg bg-cyan-50 border border-cyan-200 flex items-center justify-center flex-shrink-0">
-                  <Cpu size={15} className="text-cyan-600" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-gray-900 truncate">
-                      {a.name}
-                    </span>
-                    <span className="text-[10px] px-1.5 py-px rounded bg-cyan-50 text-cyan-700 border border-cyan-200 font-medium">
-                      {runtimeLabel(a.runtime)}
-                    </span>
-                    {a.model && (
-                      <span className="text-[10px] text-gray-400 font-mono truncate">
-                        {a.model}
-                      </span>
-                    )}
-                    {(a.interval_min ?? 0) > 0 && (
-                      <span
-                        className="text-[10px] px-1.5 py-px rounded bg-violet-50 text-violet-700 border border-violet-200 font-medium flex items-center gap-0.5 flex-shrink-0"
-                        title={
-                          a.last_scheduled_run
-                            ? `上次自动运行 ${new Date(a.last_scheduled_run).toLocaleString()}`
-                            : "尚未自动运行"
-                        }
-                      >
-                        <Clock size={9} />
-                        每 {a.interval_min} 分钟
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-[11px] text-gray-500 flex items-center gap-1 mt-0.5 min-w-0">
-                    <FolderOpen size={10} className="flex-shrink-0" />
-                    <span className="truncate" title={a.workdir ?? ""}>
-                      {a.workdir || "(未设置目录)"}
-                    </span>
-                    {a.base_url && (
-                      <span className="text-gray-400 truncate">· {a.base_url}</span>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5 flex-shrink-0">
-                  <button
-                    onClick={() => launch(a.id, a.name)}
-                    disabled={start.isPending && start.variables === a.id}
-                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white text-xs hover:bg-emerald-500 disabled:opacity-50"
-                    title="在新终端窗口启动"
-                  >
-                    {start.isPending && start.variables === a.id ? (
-                      <Loader2 size={12} className="animate-spin" />
-                    ) : (
-                      <Terminal size={12} />
-                    )}
-                    启动
-                  </button>
-                  <button
-                    onClick={() => del.mutate(a.id)}
-                    className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50"
-                    title="删除预设"
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              </div>
-            ))}
+          <div className="grid grid-cols-2 gap-4">
+            <KanbanColumn
+              title="运行中"
+              accent="border-emerald-300 bg-emerald-50/60"
+              countAccent="text-emerald-700"
+              agents={agents.filter((a) => a.live)}
+              runtimeLabel={runtimeLabel}
+              launch={launch}
+              del={del}
+              start={start}
+              emptyHint="没有存活的实例 — 启动一个预设或等心跳超时后回这里。"
+            />
+            <KanbanColumn
+              title="离线"
+              accent="border-gray-300 bg-gray-50/60"
+              countAccent="text-gray-500"
+              agents={agents.filter((a) => !a.live)}
+              runtimeLabel={runtimeLabel}
+              launch={launch}
+              del={del}
+              start={start}
+              emptyHint="全部在跑,没有离线预设。"
+            />
           </div>
         )}
       </div>
@@ -319,5 +272,116 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="block text-[11px] text-gray-500 mb-1">{label}</span>
       {children}
     </label>
+  );
+}
+
+function KanbanColumn({
+  title,
+  accent,
+  countAccent,
+  agents,
+  runtimeLabel,
+  launch,
+  del,
+  start,
+  emptyHint,
+}: {
+  title: string;
+  accent: string;
+  countAccent: string;
+  agents: import("@muiltchat/shared").RuntimeAgent[];
+  runtimeLabel: (id: string) => string;
+  launch: (id: number, name: string) => void;
+  del: ReturnType<typeof useDeleteRuntimeAgent>;
+  start: ReturnType<typeof useStartRuntimeAgent>;
+  emptyHint: string;
+}) {
+  return (
+    <div className={`rounded-xl border ${accent} p-3 min-h-[120px]`}>
+      <div className="flex items-center justify-between mb-2.5 px-1">
+        <span className={`text-xs font-semibold ${countAccent}`}>{title}</span>
+        <span className={`text-[10px] ${countAccent}`}>{agents.length}</span>
+      </div>
+      {agents.length === 0 ? (
+        <div className="text-[11px] text-gray-400 text-center py-6">{emptyHint}</div>
+      ) : (
+        <div className="space-y-2">
+          {agents.map((a) => (
+            <div
+              key={a.id}
+              className="bg-white border border-gray-200 rounded-xl p-3 shadow-sm flex items-center gap-3"
+            >
+              <div className="w-8 h-8 rounded-lg bg-cyan-50 border border-cyan-200 flex items-center justify-center flex-shrink-0">
+                <Cpu size={15} className="text-cyan-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-gray-900 truncate">
+                    {a.name}
+                  </span>
+                  <span className="text-[10px] px-1.5 py-px rounded bg-cyan-50 text-cyan-700 border border-cyan-200 font-medium">
+                    {runtimeLabel(a.runtime)}
+                  </span>
+                  {a.model && (
+                    <span className="text-[10px] text-gray-400 font-mono truncate">
+                      {a.model}
+                    </span>
+                  )}
+                  {(a.interval_min ?? 0) > 0 && (
+                    <span
+                      className="text-[10px] px-1.5 py-px rounded bg-violet-50 text-violet-700 border border-violet-200 font-medium flex items-center gap-0.5 flex-shrink-0"
+                      title={
+                        a.last_scheduled_run
+                          ? `上次自动运行 ${new Date(a.last_scheduled_run).toLocaleString()}`
+                          : "尚未自动运行"
+                      }
+                    >
+                      <Clock size={9} />
+                      每 {a.interval_min} 分钟
+                    </span>
+                  )}
+                </div>
+                <div className="text-[11px] text-gray-500 flex items-center gap-1 mt-0.5 min-w-0">
+                  <FolderOpen size={10} className="flex-shrink-0" />
+                  <span className="truncate" title={a.workdir ?? ""}>
+                    {a.workdir || "(未设置目录)"}
+                  </span>
+                  {a.last_seen && (
+                    <span
+                      className="text-gray-400 truncate"
+                      title={`最近心跳 ${new Date(a.last_seen).toLocaleString()}`}
+                    >
+                      · {new Date(a.last_seen).toLocaleTimeString()}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <button
+                  onClick={() => launch(a.id, a.name)}
+                  disabled={start.isPending && start.variables === a.id}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white text-xs hover:bg-emerald-500 disabled:opacity-50"
+                  title="在新终端窗口启动"
+                >
+                  {start.isPending && start.variables === a.id ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : (
+                    <Terminal size={12} />
+                  )}
+                  启动
+                </button>
+                <button
+                  onClick={() => del.mutate(a.id)}
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50"
+                  title="删除预设"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

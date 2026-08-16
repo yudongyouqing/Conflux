@@ -24,8 +24,10 @@ import {
   checkInbox,
   replyAsk,
   checkReplies,
+  recordExchange,
 } from "../core/messages.js";
 import { getGraph } from "../core/graph.js";
+import { mergeSessionMeta } from "../core/sessions.js";
 import { logAudit } from "../core/audit.js";
 import { getClaudePid, findSessionByClaudePid, deleteUnreferencedSession } from "../core/live.js";
 import { logger } from "../log.js";
@@ -41,6 +43,11 @@ You share a SQLite file with other sessions, so you can:
   - query_context: FTS-search what other sessions have published
   - ask_session / reply_ask / check_inbox / check_replies: async Q&A between sessions
   - get_graph: see the session topology (who's online, who talked to whom)
+
+For messaging Claude Code peers you may prefer your NATIVE SendMessage tool
+(lower latency). When you do, call log_exchange once afterwards so the
+exchange lands in the shared archive + graph. muiltchat ask_session stays
+the channel for non-claude runtimes and offline mail.
 
 After answering a user, if you discovered something worth sharing, proactively
 publish_context. Before answering a question that might already be answered
@@ -183,19 +190,32 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
           .max(2000)
           .optional()
           .describe("Short description of this session's purpose"),
+        skills: z
+          .array(z.string().min(1).max(60))
+          .max(20)
+          .optional()
+          .describe(
+            "Agent Card: what this session is good at (e.g. ['typescript','sql']) — shown on the graph so peers can route questions"
+          ),
       },
     },
-    async ({ name, description }) => {
+    async ({ name, description, skills }) => {
       const r = await withAudit(
         "register_session",
-        { name, description },
-        () =>
-          registerSession(db, {
+        { name, description, skills },
+        () => {
+          const session = registerSession(db, {
             id: sessionId,
             name,
             description: description ?? null,
             project_dir: projectDir,
-          })
+          });
+          // Merge (not replace) so hook metadata (claude_pid, named, …) survives.
+          if (skills && skills.length > 0) {
+            mergeSessionMeta(db, sessionId, { agent_card: { skills } });
+          }
+          return session;
+        }
       );
       return json(r.ok ? { session_id: sessionId, session: r.result } : { error: r.error });
     }
@@ -400,7 +420,44 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
     }
   );
 
-  // 12. get_graph
+  // 12. log_exchange — archive a native-channel exchange (see INSTRUCTIONS)
+  server.registerTool(
+    "log_exchange",
+    {
+      description:
+        "Archive a message exchange that already happened OUTSIDE muiltchat (e.g. via Claude Code's native SendMessage) into the shared history + graph, so other sessions can discover it. Call after the native exchange completes; do not use for muiltchat-delivered mail.",
+      inputSchema: {
+        to_session: z.string().min(1).describe("Peer the exchange was with"),
+        question: z.string().min(1).max(20_000).describe("What was asked/sent"),
+        reply: z
+          .string()
+          .max(20_000)
+          .optional()
+          .describe("Their answer, if already received"),
+        occurred_at: z
+          .string()
+          .optional()
+          .describe("ISO timestamp of the exchange; default now"),
+      },
+    },
+    async ({ to_session, question, reply, occurred_at }) => {
+      const r = await withAudit(
+        "log_exchange",
+        { to_session, questionLen: question.length },
+        () =>
+          recordExchange(db, {
+            from_session: sessionId,
+            to_session,
+            question,
+            reply: reply ?? null,
+            occurred_at,
+          })
+      );
+      return json(r.ok ? { message: r.result } : { error: r.error });
+    }
+  );
+
+  // 13. get_graph
   server.registerTool(
     "get_graph",
     {

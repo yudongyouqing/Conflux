@@ -10,8 +10,9 @@ import {
   hasActiveRun,
   tickScheduledAgents,
   createRuntimeAgent,
+  listRuntimeAgentsWithLiveness,
 } from "../core/runtime-agents.js";
-import { registerSession } from "../core/sessions.js";
+import { registerSession, mergeSessionMeta } from "../core/sessions.js";
 import { makeDb } from "./helpers.js";
 
 const { db, cleanup } = makeDb();
@@ -135,4 +136,28 @@ test("hasActiveRun matches only its own preset's live sessions", () => {
   });
   assert.equal(hasActiveRun(db, mine.id), false);
   assert.equal(hasActiveRun(db, other.id), true);
+});
+
+test("listRuntimeAgentsWithLiveness derives live from spawned session heartbeats", () => {
+  const a = createRuntimeAgent(db, { name: "live-probe", runtime: "claude" });
+  const b = createRuntimeAgent(db, { name: "dead-probe", runtime: "claude" });
+
+  // fresh heartbeat for a's spawned session (via mergeSessionMeta, like hooks)
+  registerSession(db, { id: "spawn-a1", name: "spawn-a1" });
+  mergeSessionMeta(db, "spawn-a1", { agent_id: a.id, runtime: "claude" });
+  // b's session heartbeated long ago (stale string in the past)
+  registerSession(db, { id: "spawn-b1", name: "spawn-b1" });
+  mergeSessionMeta(db, "spawn-b1", { agent_id: b.id });
+  db.prepare(`UPDATE sessions SET last_heartbeat_at = ? WHERE id = ?`).run(
+    new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+    "spawn-b1"
+  );
+
+  const agents = listRuntimeAgentsWithLiveness(db);
+  const la = agents.find((x) => x.id === a.id)!;
+  const lb = agents.find((x) => x.id === b.id)!;
+  assert.equal(la.live, true, "fresh heartbeat -> live");
+  assert.ok(la.last_seen);
+  assert.equal(lb.live, false, "old heartbeat -> offline");
+  assert.ok(lb.last_seen, "offline still reports last_seen");
 });

@@ -11,6 +11,7 @@ import {
   listPeerMessages,
   forwardInboxFromPid,
   formatInboxNotice,
+  recordExchange,
 } from "../core/messages.js";
 import { recordEdge, getGraph } from "../core/graph.js";
 import { registerSession } from "../core/sessions.js";
@@ -116,6 +117,38 @@ test("listMessages can filter by seen status", () => {
   assert.ok(seenList.some((x) => x.id === m.id));
   const pendingList = listMessages(db, { status: "pending" });
   assert.ok(!pendingList.some((x) => x.id === m.id));
+});
+
+test("recordExchange archives native exchanges without inbox noise", () => {
+  const wBefore = getGraph(db, { status: "all" }).edges.find((e) => e.from === "a" && e.to === "b")?.weight ?? 0;
+  const m = recordExchange(db, {
+    from_session: "a",
+    to_session: "b",
+    question: "native q",
+    reply: "native a",
+  });
+  assert.equal(m.status, "replied", "with reply archived as replied");
+  assert.ok(m.replied_at);
+  // no pending/seen residue — delivery happened out-of-band
+  const inbox = checkInbox(db, "b");
+  assert.ok(!inbox.some((x) => x.id === m.id));
+  // both directed edges reflect the exchange
+  const g = getGraph(db, { status: "all" });
+  assert.equal(g.edges.find((e) => e.from === "a" && e.to === "b")!.weight, wBefore + 1);
+  assert.ok(g.edges.some((e) => e.from === "b" && e.to === "a"));
+});
+
+test("recordExchange without reply archives as read", () => {
+  const m = recordExchange(db, { from_session: "b", to_session: "a", question: "fire-and-forget" });
+  assert.equal(m.status, "read");
+  assert.equal(checkInbox(db, "a").some((x) => x.id === m.id), false);
+});
+
+test("recordExchange rejects unknown sessions", () => {
+  assert.throws(
+    () => recordExchange(db, { from_session: "a", to_session: "ghost-x", question: "x" }),
+    /session not found/
+  );
 });
 
 test("checkReplies returns answered then marks read", () => {

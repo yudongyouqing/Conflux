@@ -2,7 +2,7 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { makeDb } from "./helpers.js";
 import { getGraph } from "../core/graph.js";
-import { registerSession, endSession } from "../core/sessions.js";
+import { registerSession, endSession, mergeSessionMeta } from "../core/sessions.js";
 import { createAgent } from "../core/agents.js";
 import { createConversation } from "../core/conversations.js";
 import { createRuntimeAgent } from "../core/runtime-agents.js";
@@ -68,3 +68,13 @@ test("runtime-agent preset name is a fallback, never masks the session's own nam
   assert.equal(renamed.name, "test2", "custom title / prompt name wins over the preset name");
 });
 
+
+test("agent card skills surface on graph nodes", () => {
+  registerSession(db, { id: "card-a", name: "card-a" });
+  mergeSessionMeta(db, "card-a", { agent_card: { skills: ["typescript", "sql", 42] } });
+  const g = getGraph(db, { status: "all" });
+  const node = g.nodes.find((n) => n.id === "card-a")!;
+  assert.deepEqual(node.skills, ["typescript", "sql"], "skills extracted, non-strings dropped");
+  const plain = g.nodes.find((n) => n.id === "ext")!;
+  assert.equal(plain.skills, undefined, "no card -> no skills field noise");
+});
