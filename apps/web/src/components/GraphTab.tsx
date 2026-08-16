@@ -141,6 +141,7 @@ export function GraphTab({
         description: n.description,
         project_dir: n.project_dir,
         runtime: n.runtime ?? null,
+        skills: n.skills,
       },
     });
 

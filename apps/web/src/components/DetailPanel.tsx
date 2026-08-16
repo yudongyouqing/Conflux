@@ -329,6 +329,19 @@ function SessionDetail({
             <span className="truncate">{session.project_dir}</span>
           </div>
         )}
+        {session.skills && session.skills.length > 0 && (
+          <div className="flex gap-1 flex-wrap mt-1.5">
+            {session.skills.map((s) => (
+              <span
+                key={s}
+                className="text-[10px] px-1.5 py-0.5 rounded-md bg-cyan-50 text-cyan-700 border border-cyan-200"
+                title="Agent Card 技能"
+              >
+                {s}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="flex gap-5 text-xs">

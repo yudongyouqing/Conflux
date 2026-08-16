@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
+import { STALE_AFTER_MS } from "../config.js";
 import { logger } from "../log.js";
 import type { RuntimeAgent, RuntimeId } from "@muiltchat/shared";
 import { cleanTerminalEnv, cmdQuote, openInTerminal } from "./terminal.js";
@@ -112,6 +113,43 @@ export function listRuntimeAgents(db: DB): RuntimeAgent[] {
   return (db
     .prepare(`SELECT * FROM runtime_agents ORDER BY updated_at DESC`)
     .all() as RuntimeAgentRow[]).map(toAgent);
+}
+
+/**
+ * Annotate presets with liveness derived from their spawned sessions:
+ * a preset is live iff at least one session tagged agent_id=<preset> has a
+ * heartbeat newer than STALE_AFTER_MS. Sessions are matched by parsing
+ * metadata in JS (LIKE '%agent_id":N%' alone would also match 10N/100N).
+ */
+export function listRuntimeAgentsWithLiveness(db: DB): RuntimeAgent[] {
+  const threshold = Date.now() - STALE_AFTER_MS;
+  const tagged = db
+    .prepare(
+      `SELECT id, last_heartbeat_at, metadata FROM sessions WHERE metadata LIKE '%"agent_id":%'`
+    )
+    .all() as { id: string; last_heartbeat_at: string; metadata: string | null }[];
+  const byPreset = new Map<number, string[]>(); // preset id -> heartbeats
+  for (const row of tagged) {
+    try {
+      const meta = row.metadata ? (JSON.parse(row.metadata) as Record<string, unknown>) : {};
+      if (typeof meta.agent_id === "number") {
+        const list = byPreset.get(meta.agent_id) ?? [];
+        list.push(row.last_heartbeat_at);
+        byPreset.set(meta.agent_id, list);
+      }
+    } catch {
+      // malformed metadata — skip
+    }
+  }
+  return listRuntimeAgents(db).map((a) => {
+    const beats = (byPreset.get(a.id) ?? []).sort();
+    const lastSeen = beats[beats.length - 1] ?? null;
+    return {
+      ...a,
+      last_seen: lastSeen,
+      live: !!lastSeen && new Date(lastSeen).getTime() > threshold,
+    };
+  });
 }
 
 export function deleteRuntimeAgent(db: DB, id: number): boolean {

@@ -12,6 +12,8 @@ export interface SessionNodeData {
   description?: string | null;
   project_dir?: string | null;
   runtime?: string | null;
+  /** Agent Card skills (capability self-description). */
+  skills?: string[];
   /** Endpoint of the currently selected edge — amber ring emphasis. */
   highlighted?: boolean;
   [key: string]: unknown;
@@ -50,6 +52,7 @@ export function SessionNode({ data, selected, dragging }: NodeProps) {
 
   return (
     <div
+      title={d.skills?.length ? `技能: ${d.skills.join(" · ")}` : undefined}
       className={`px-3 py-2 rounded-xl border min-w-[120px] transition-all duration-150 cursor-grab active:cursor-grabbing ${
         dragging
           ? "shadow-xl scale-[1.03] ring-2 ring-blue-500/40"

@@ -104,6 +104,10 @@ export interface RuntimeAgent {
   interval_min: number | null;
   /** ISO timestamp of the last scheduled headless run. */
   last_scheduled_run: string | null;
+  /** Derived: does any spawned session of this preset have a fresh heartbeat? */
+  live?: boolean;
+  /** Derived: newest heartbeat across this preset's sessions (ISO). */
+  last_seen?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -125,6 +129,8 @@ export interface GraphNode {
   agent_id?: number | null;
   /** CLI runtime identifier, e.g. "claude" | "codex" (runtime-agent sessions). */
   runtime?: string | null;
+  /** Agent Card: capability self-description (register_session skills). */
+  skills?: string[];
 }
 
 export interface GraphEdge {

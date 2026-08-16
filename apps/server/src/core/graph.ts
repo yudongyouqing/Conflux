@@ -64,6 +64,7 @@ export function getGraph(
     let agentId: number | null = null;
     let runtime: string | null = null;
     let ownName = false;
+    let skills: string[] | undefined;
     try {
       const meta = n.metadata ? (JSON.parse(n.metadata) as Record<string, unknown>) : null;
       if (meta && typeof meta.agent_id === "number") {
@@ -71,13 +72,20 @@ export function getGraph(
         runtime = typeof meta.runtime === "string" ? meta.runtime : null;
       }
       ownName = !!(meta && (meta.named === true || meta.custom_title === true));
+      // Agent Card: capability self-description written by register_session
+      const card = meta?.agent_card;
+      if (card && typeof card === "object" && Array.isArray((card as { skills?: unknown }).skills)) {
+        skills = ((card as { skills: unknown[] }).skills)
+          .filter((s): s is string => typeof s === "string")
+          .slice(0, 20);
+      }
     } catch {
       // malformed metadata — leave unannotated
     }
     const { metadata, ...rest } = n;
     const name =
       agentId !== null && !ownName ? presetNames.get(agentId) ?? n.name : n.name;
-    return { ...rest, name, agent_id: agentId, runtime };
+    return { ...rest, name, agent_id: agentId, runtime, skills };
   };
 
   // Also include internal agents as nodes — they are always visible
