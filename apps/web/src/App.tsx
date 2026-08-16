@@ -67,6 +67,7 @@ export default function App() {
               onSelectSession={handleSelectSession}
               selectedSessionId={selectedSession?.id ?? null}
               onSelectEdge={handleSelectEdge}
+              selectedEdge={selectedEdge}
             />
           )}
           {tab === "sessions" && (
