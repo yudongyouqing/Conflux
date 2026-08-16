@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useSessionContext, usePeerMessages, useWebAsk, usePeerFlow, useOpenSessionTerminal } from "../hooks";
-import type { Message, GraphNode } from "@muiltchat/shared";
+import type { Message, GraphNode, SessionStatus } from "@muiltchat/shared";
 import { StatusDot } from "./StatusDot";
 import { FileText, Clock, ArrowRight, FolderOpen, Send, Loader2, ArrowLeftRight, TerminalSquare } from "lucide-react";
 
@@ -12,6 +12,7 @@ interface DetailPanelProps {
   message: Message | null;
   edge: { from: string; to: string } | null;
   sessionNameLookup: (id: string) => string | undefined;
+  sessionStatusLookup: (id: string) => SessionStatus | undefined;
 }
 
 export function DetailPanel({
@@ -19,6 +20,7 @@ export function DetailPanel({
   message,
   edge,
   sessionNameLookup,
+  sessionStatusLookup,
 }: DetailPanelProps) {
   const { data: contextEntries } = useSessionContext(session?.id ?? null);
 
@@ -32,6 +34,7 @@ export function DetailPanel({
         from={edge.from}
         to={edge.to}
         sessionNameLookup={sessionNameLookup}
+        sessionStatusLookup={sessionStatusLookup}
       />
     );
   }
@@ -103,10 +106,12 @@ function EdgeFlowView({
   from,
   to,
   sessionNameLookup,
+  sessionStatusLookup,
 }: {
   from: string;
   to: string;
   sessionNameLookup: (id: string) => string | undefined;
+  sessionStatusLookup: (id: string) => SessionStatus | undefined;
 }) {
   const { data } = usePeerFlow(from, to);
   const ask = useWebAsk();
@@ -138,9 +143,15 @@ function EdgeFlowView({
           对话流
         </h2>
         <div className="text-xs text-gray-600 mt-1 flex items-center gap-1.5 flex-wrap">
-          <span className="font-medium">{nameOf(from)}</span>
+          <span className="font-medium flex items-center gap-1">
+            <StatusDot status={sessionStatusLookup(from) ?? "stale"} />
+            {nameOf(from)}
+          </span>
           <ArrowRight size={11} className="text-gray-400" />
-          <span className="font-medium">{nameOf(to)}</span>
+          <span className="font-medium flex items-center gap-1">
+            <StatusDot status={sessionStatusLookup(to) ?? "stale"} />
+            {nameOf(to)}
+          </span>
           <span className="text-gray-400">
             · {messages.length} 条 · 最新在上
           </span>
@@ -184,6 +195,11 @@ function EdgeFlowView({
           通道方向:{nameOf(from)} → {nameOf(to)} · 你将以 Web 控制台身份向{" "}
           {nameOf(targetId)} 发起新提问
         </div>
+        {sessionStatusLookup(targetId) && sessionStatusLookup(targetId) !== "active" && (
+          <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mb-1.5">
+            ⚠ 目标 {nameOf(targetId)} 当前离线(心跳超时)。消息仍会投递,但要等它被唤醒才会处理;若该会话已被清理,发送会失败并在此提示。
+          </div>
+        )}
         <div className="flex gap-1.5">
           <input
             value={text}
@@ -338,7 +354,7 @@ function SessionDetail({
         </div>
       )}
 
-      {isSession && <ConversationBox sessionId={session.id} />}
+      {isSession && <ConversationBox sessionId={session.id} status={session.status} />}
 
       <div>
         <h3 className="text-xs text-gray-500 font-medium mb-2 flex items-center gap-1">
@@ -381,7 +397,7 @@ function SessionDetail({
 }
 
 /** Ask/message flow between the web console and one session. */
-function ConversationBox({ sessionId }: { sessionId: string }) {
+function ConversationBox({ sessionId, status }: { sessionId: string; status: SessionStatus }) {
   const { data } = usePeerMessages(sessionId);
   const ask = useWebAsk();
   const [text, setText] = useState("");
@@ -401,6 +417,12 @@ function ConversationBox({ sessionId }: { sessionId: string }) {
       <h3 className="text-xs text-gray-500 font-medium mb-2 flex items-center gap-1">
         <ArrowRight size={12} /> 对话(以 Web 控制台身份)
       </h3>
+
+      {status !== "active" && (
+        <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mb-2">
+          ⚠ 对方当前{status === "ended" ? "已结束" : "离线(心跳超时)"}。消息仍会投递,但要等它被唤醒(终端里打开/resume)才会处理;若已被清理,发送会失败并提示。
+        </div>
+      )}
 
       {messages.length === 0 ? (
         <p className="text-xs text-gray-400 mb-2">还没有消息,发一条试试。</p>
