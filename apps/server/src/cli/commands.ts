@@ -26,6 +26,7 @@ import {
   replyAsk,
   checkReplies,
   listMessages,
+  formatInboxNotice,
 } from "../core/messages.js";
 import { getGraph } from "../core/graph.js";
 import {
@@ -766,10 +767,19 @@ export function buildCli(): Command {
       try {
         const db = openDb(resolveConfig("global"));
         handleHookEvent(db, event as HookEvent, payload as never);
+        // UserPromptSubmit / SessionStart stdout is injected into the
+        // conversation context — the only push channel into a live session.
+        // Silent unless there is unread mail, so hooks never spam.
+        if (event === "prompt" || event === "session-start") {
+          const sid = typeof payload.session_id === "string" ? payload.session_id : null;
+          if (sid) {
+            const notice = formatInboxNotice(db, sid);
+            if (notice) process.stdout.write(notice + "\n");
+          }
+        }
       } catch (err) {
         logger.warn({ err: err instanceof Error ? err.message : String(err) }, "hook dispatch failed");
       }
-      // no stdout: UserPromptSubmit stdout would be injected into model context
     });
 
   return program;

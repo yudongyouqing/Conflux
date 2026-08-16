@@ -173,3 +173,67 @@ export function listMessages(
     .all(...params, limit) as MessageRow[];
   return rows.map(toMsg);
 }
+
+// ---- inbox delivery across /resume + proactive notices ----------------------
+
+/**
+ * /resume continues the same conversation under a NEW conversation id, so
+ * mail addressed to the process's previous ids would strand there forever
+ * even though the conversation lives on. Re-address undelivered mail
+ * (pending/seen) to the successor. Called from the session-start hook when
+ * source === "resume"; a /clear'ed conversation is a DIFFERENT conversation
+ * and must not be forwarded.
+ */
+export function forwardInboxFromPid(db: DB, claudePid: number, successorId: string): number {
+  const rows = db
+    .prepare(
+      `SELECT id, metadata FROM sessions WHERE id != ? AND metadata LIKE ?`
+    )
+    .all(successorId, `%"claude_pid":${claudePid}%`) as { id: string; metadata: string | null }[];
+  const ids = rows
+    .filter((r) => {
+      try {
+        return (
+          JSON.parse(r.metadata ?? "{}").claude_pid === claudePid
+        );
+      } catch {
+        return false;
+      }
+    })
+    .map((r) => r.id);
+  if (ids.length === 0) return 0;
+  const placeholders = ids.map(() => "?").join(",");
+  const res = db
+    .prepare(
+      `UPDATE messages SET to_session = ?
+       WHERE status IN ('pending','seen') AND to_session IN (${placeholders})`
+    )
+    .run(successorId, ...ids);
+  return res.changes;
+}
+
+/**
+ * Short stdout notice for hook events (UserPromptSubmit/SessionStart stdout
+ * is injected into the conversation context). Returns null when there is
+ * nothing unread — hooks must stay silent in the common case. Only
+ * still-pending (never even seen) messages trigger a notice, so the nag
+ * stops once the session actually runs check_inbox.
+ */
+export function formatInboxNotice(db: DB, sessionId: string): string | null {
+  const rows = db
+    .prepare(
+      `SELECT m.question, s.name, substr(m.from_session, 1, 8) AS sid8
+       FROM messages m LEFT JOIN sessions s ON s.id = m.from_session
+       WHERE m.to_session = ? AND m.status = 'pending'
+       ORDER BY m.id ASC`
+    )
+    .all(sessionId) as { question: string; name: string | null; sid8: string }[];
+  if (rows.length === 0) return null;
+  const first = rows[0];
+  const excerpt = first.question.replace(/\s+/g, " ").slice(0, 60);
+  const from = first.name ?? first.sid8;
+  return (
+    `[muiltchat] 收件箱有 ${rows.length} 条未读消息(最新来自「${from}」: ${excerpt}…)。` +
+    `请调用 muiltchat 的 check_inbox 工具查看并 reply_ask 回复。`
+  );
+}

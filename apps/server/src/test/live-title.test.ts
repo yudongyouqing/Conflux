@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleHookEvent, readCustomTitle, deleteUnreferencedSession } from "../core/live.js";
 import { getSession, registerSession } from "../core/sessions.js";
+import { askSession, listMessages } from "../core/messages.js";
 import { makeDb } from "./helpers.js";
 
 const { db, cleanup } = makeDb();
@@ -146,6 +147,58 @@ describe("handleHookEvent title sync", () => {
     handleHookEvent(db, "session-start", { session_id: sid, cwd }, join(home));
     assert.equal(getSession(db, abandoned), null, "abandoned predecessor is reaped");
     assert.ok(getSession(db, sid), "the resumed session is registered");
+    disposeHome(home);
+  });
+
+  it("forwards undelivered inbox to the resume successor, but not on /clear", () => {
+    const home = fakeHome();
+    const cwd = "C:\\work\\inbox-fwd";
+    const mk = (id: string, extra: Record<string, unknown> = {}) =>
+      registerSession(db, {
+        id,
+        name: id,
+        description: "named conversation",
+        metadata: { source: "claude-hook", named: true, claude_pid: TEST_CLAUDE_PID, ...extra },
+      });
+    mk("a0a0a0a0-1111-2222-3333-444444444444"); // conversation id before the resume
+    registerSession(db, { id: "test-asker", name: "asker" });
+    askSession(db, {
+      from_session: "test-asker",
+      to_session: "a0a0a0a0-1111-2222-3333-444444444444",
+      question: "跟对话走的邮件",
+    });
+
+    // /resume: same conversation, new id → mail follows
+    handleHookEvent(
+      db,
+      "session-start",
+      { session_id: "b1b1b1b1-1111-2222-3333-444444444444", cwd, source: "resume" },
+      join(home)
+    );
+    assert.equal(
+      listMessages(db, { to_session: "b1b1b1b1-1111-2222-3333-444444444444", status: "all" }).length,
+      1,
+      "pending mail re-addressed to the successor id"
+    );
+
+    // /clear: a DIFFERENT conversation starts → its mail must not follow
+    mk("c2c2c2c2-1111-2222-3333-444444444444");
+    askSession(db, {
+      from_session: "test-asker",
+      to_session: "c2c2c2c2-1111-2222-3333-444444444444",
+      question: "clear 后的邮件",
+    });
+    handleHookEvent(
+      db,
+      "session-start",
+      { session_id: "d3d3d3d3-1111-2222-3333-444444444444", cwd, source: "clear" },
+      join(home)
+    );
+    assert.equal(
+      listMessages(db, { to_session: "d3d3d3d3-1111-2222-3333-444444444444", status: "all" }).length,
+      0,
+      "clear starts an unrelated conversation — no forwarding"
+    );
     disposeHome(home);
   });
 });
