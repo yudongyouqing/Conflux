@@ -147,32 +147,42 @@ function EdgeFlowView({
         </div>
       </div>
 
-      {/* Join the conversation as the web console: pick which side to ask. */}
+      {/* Join the conversation as the web console: the picker mirrors the
+          channel direction (from → to); asking always creates a NEW question
+          from the console to the chosen side. */}
       <div>
-        <div className="flex items-center gap-1.5 mb-1.5">
+        <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
           <span className="text-[10px] text-gray-400 flex-shrink-0">问:</span>
-          {(["from", "to"] as const).map((side) => {
+          {(["from", "to"] as const).map((side, idx) => {
             const id = side === "from" ? from : to;
             const isSelf = id === WEB_CONSOLE_ID;
             const selected = target === side;
             return (
-              <button
-                key={side}
-                onClick={() => !isSelf && setTarget(side)}
-                disabled={isSelf}
-                className={`px-2 py-0.5 rounded-md text-[10px] border transition-colors truncate max-w-[140px] ${
-                  isSelf
-                    ? "bg-gray-50 text-gray-300 border-gray-100 cursor-not-allowed"
-                    : selected
-                      ? "bg-blue-600 text-white border-blue-600"
-                      : "bg-white text-gray-600 border-gray-200 hover:border-blue-300"
-                }`}
-                title={isSelf ? "Web 控制台不能问自己" : id}
-              >
-                {nameOf(id)}
-              </button>
+              <span key={side} className="flex items-center gap-1.5">
+                {idx === 1 && (
+                  <ArrowRight size={11} className="text-gray-400" aria-label="方向" />
+                )}
+                <button
+                  onClick={() => !isSelf && setTarget(side)}
+                  disabled={isSelf}
+                  className={`px-2 py-0.5 rounded-md text-[10px] border transition-colors truncate max-w-[140px] ${
+                    isSelf
+                      ? "bg-gray-50 text-gray-300 border-gray-100 cursor-not-allowed"
+                      : selected
+                        ? "bg-blue-600 text-white border-blue-600"
+                        : "bg-white text-gray-600 border-gray-200 hover:border-blue-300"
+                  }`}
+                  title={isSelf ? "Web 控制台不能问自己" : id}
+                >
+                  问 {nameOf(id)}
+                </button>
+              </span>
             );
           })}
+        </div>
+        <div className="text-[10px] text-gray-400 mb-1.5">
+          通道方向:{nameOf(from)} → {nameOf(to)} · 你将以 Web 控制台身份向{" "}
+          {nameOf(targetId)} 发起新提问
         </div>
         <div className="flex gap-1.5">
           <input

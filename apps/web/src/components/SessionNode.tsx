@@ -12,6 +12,8 @@ export interface SessionNodeData {
   description?: string | null;
   project_dir?: string | null;
   runtime?: string | null;
+  /** Endpoint of the currently selected edge — amber ring emphasis. */
+  highlighted?: boolean;
   [key: string]: unknown;
 }
 
@@ -56,7 +58,9 @@ export function SessionNode({ data, selected, dragging }: NodeProps) {
             : "shadow-sm hover:shadow-md"
       } ${
         isAgent ? "bg-indigo-50 border-indigo-300" : "bg-white border-gray-200"
-      } ${STATUS_BORDER[d.status] ?? "border-gray-200"}`}
+      } ${STATUS_BORDER[d.status] ?? "border-gray-200"} ${
+        d.highlighted ? "ring-2 ring-amber-400/80" : ""
+      }`}
     >
       <Handle
         type="target"

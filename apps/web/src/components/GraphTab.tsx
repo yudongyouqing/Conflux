@@ -6,6 +6,7 @@ import {
   Panel,
   useNodesState,
   useEdgesState,
+  MarkerType,
   type Node,
   type Edge,
   type NodeMouseHandler,
@@ -50,12 +51,14 @@ interface GraphTabProps {
   onSelectSession: (sessionId: string | null) => void;
   selectedSessionId: string | null;
   onSelectEdge: (edge: { from: string; to: string } | null) => void;
+  selectedEdge: { from: string; to: string } | null;
 }
 
 export function GraphTab({
   onSelectSession,
   selectedSessionId,
   onSelectEdge,
+  selectedEdge,
 }: GraphTabProps) {
   const { data, isLoading, error } = useGraph();
   const [viewMode, setViewMode] = useState<ViewMode>("active");
@@ -104,7 +107,8 @@ export function GraphTab({
     });
 
     // An edge carries its channel's latest question as the label; clicking it
-    // opens the two-way message flow in the detail panel.
+    // opens the two-way message flow in the detail panel. The closed marker
+    // makes the direction (who asked whom) readable at a glance.
     const previewOf = (m: string | null | undefined) =>
       !m ? "" : m.length > 28 ? m.slice(0, 28) + "…" : m;
     const mkEdge = (e: (typeof data.edges)[number], i: number): Edge => ({
@@ -114,6 +118,12 @@ export function GraphTab({
       animated: true,
       label: previewOf(e.last_message) || (e.weight > 1 ? String(e.weight) : ""),
       style: { strokeWidth: Math.min(1 + e.weight, 5), stroke: "#94a3b8" },
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: "#94a3b8",
+        width: 18,
+        height: 18,
+      },
       data: { from: e.from, to: e.to },
     });
 
@@ -222,16 +232,59 @@ export function GraphTab({
       outNodes = layouted;
     }
 
+    // Selection emphasis. Edge selected: that edge goes strong blue with a
+    // bigger arrow, its two endpoint nodes get an amber ring, all other
+    // edges dim. Node selected instead: its incident edges go blue.
+    const selKey = selectedEdge ? `${selectedEdge.from}->${selectedEdge.to}` : null;
+    const endpoints = selectedEdge ? new Set([selectedEdge.from, selectedEdge.to]) : null;
+    const styledEdges = rawEdges.map((e) => {
+      const d = e.data as { from: string; to: string };
+      const w = (e.style?.strokeWidth as number) ?? 2;
+      if (selKey && `${d.from}->${d.to}` === selKey) {
+        return {
+          ...e,
+          zIndex: 5,
+          style: { ...e.style, stroke: "#2563eb", strokeWidth: Math.min(w + 1, 6) },
+          labelStyle: { fill: "#1d4ed8", fontWeight: 600 },
+          labelBgStyle: { fill: "#dbeafe" },
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color: "#2563eb",
+            width: 22,
+            height: 22,
+          },
+        };
+      }
+      if (!selKey && selectedSessionId && (d.from === selectedSessionId || d.to === selectedSessionId)) {
+        return {
+          ...e,
+          style: { ...e.style, stroke: "#3b82f6" },
+          markerEnd: { type: MarkerType.ArrowClosed, color: "#3b82f6", width: 18, height: 18 },
+        };
+      }
+      if (selKey) {
+        // another edge is in focus — fade this one out
+        return {
+          ...e,
+          animated: false,
+          style: { ...e.style, stroke: "#d1d5db" },
+          markerEnd: { type: MarkerType.ArrowClosed, color: "#d1d5db", width: 16, height: 16 },
+        };
+      }
+      return e;
+    });
+
     setNodes((prev) => {
       const prevPos = new Map(prev.map((n) => [n.id, n.position]));
       return outNodes.map((n) => ({
         ...n,
         position: prevPos.get(n.id) ?? n.position,
         selected: n.id === selectedSessionId,
+        data: { ...n.data, highlighted: !!endpoints?.has(n.id) },
       }));
     });
-    setEdges(rawEdges);
-  }, [data, selectedSessionId, viewMode, orphanExpanded, setNodes, setEdges]);
+    setEdges(styledEdges);
+  }, [data, selectedSessionId, selectedEdge, viewMode, orphanExpanded, setNodes, setEdges]);
 
   const onNodeClick: NodeMouseHandler = useCallback(
     (_, node) => {
