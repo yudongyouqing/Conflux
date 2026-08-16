@@ -303,6 +303,20 @@ export function terminalOptions(
   }));
 }
 
+/** Wake-up prompt for auto-answer: asker's message is waiting in the inbox. */
+export const AUTO_WAKE_PROMPT =
+  "你收到一条新消息:请立即调用 muiltchat 的 check_inbox 查看收件箱,用 reply_ask 认真回复每条,然后结束本轮,不要做其他事。";
+
+/** Pre-authorized tools for headless runs (-p cannot show permission prompts). */
+export const HEADLESS_ALLOWED_TOOLS = "mcp__muiltchat__*";
+
+/** Full headless wake command: resume the conversation and drive the reply. */
+export function wakeCommand(runtime: "claude", sessionId: string, executable: string): string {
+  return `${resumeCommand(runtime, sessionId, executable)} --allowedTools ${cmdQuote(
+    HEADLESS_ALLOWED_TOOLS
+  )} -p ${cmdQuote(AUTO_WAKE_PROMPT)}`;
+}
+
 /**
  * Try each candidate in order; ENOENT (terminal not installed) moves to the
  * next, anything else (success or real failure) stops. NOT detached — a

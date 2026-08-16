@@ -30,6 +30,7 @@ import { getGraph } from "../core/graph.js";
 import { mergeSessionMeta } from "../core/sessions.js";
 import { logAudit } from "../core/audit.js";
 import { getClaudePid, findSessionByClaudePid, deleteUnreferencedSession } from "../core/live.js";
+import { wakeOfflineSession } from "../core/runtime-agents.js";
 import { logger } from "../log.js";
 
 const INSTRUCTIONS = `
@@ -106,11 +107,16 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
   // that first; heartbeat-order guessing is only the fallback (it lags and
   // can flap between the old and new rows).
   const tryAdopt = () => {
+    // Explicit identity first: a headless auto-answer wake tells us which
+    // conversation it is answering FOR (newer claude versions don't fire
+    // registering hooks in -p mode, so pid/pin adoption may find nothing).
+    const assume = process.env.MUILTCHAT_ASSUME_SESSION;
     const pid = getClaudePid();
-    if (pid === null) return;
-    const pinned = getSetting(db, `claude-current:${pid}`);
+    const pinned = pid === null ? null : getSetting(db, `claude-current:${pid}`);
     const target =
-      (pinned ? getSession(db, pinned) : null) ?? findSessionByClaudePid(db, pid);
+      (assume ? getSession(db, assume) : null) ??
+      (pinned ? getSession(db, pinned) : null) ??
+      (pid === null ? null : findSessionByClaudePid(db, pid));
     if (!target) return; // hook hasn't fired yet — retry on the next tick
     if (target.id === sessionId) return;
     const oldId = sessionId;
@@ -361,7 +367,16 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
         { to_session, questionLen: question.length },
         () => askSession(db, { from_session: sessionId, to_session, question })
       );
-      return json(r.ok ? { message: r.result } : { error: r.error });
+      // true auto-answer: offline addressees get headlessly woken to reply
+      let wake: { woke: boolean; reason?: string } = { woke: false, reason: "ask failed" };
+      if (r.ok) {
+        try {
+          wake = wakeOfflineSession(db, to_session);
+        } catch {
+          // best-effort
+        }
+      }
+      return json(r.ok ? { message: r.result, wake } : { error: r.error });
     }
   );
 
