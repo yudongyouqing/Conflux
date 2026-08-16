@@ -52,8 +52,9 @@ export function getGraph(
 
   // Annotate sessions spawned from a runtime-agent preset (metadata carries
   // {agent_id, runtime} — written by hooks/MCP from MUILTCHAT_AGENT_ID).
-  // Preset-spawned sessions display the preset name — their identity comes
-  // from the user's definition, not from the cwd basename.
+  // The preset name is a FALLBACK identity for sessions that never got a
+  // name of their own (custom title or first prompt excerpt); it must not
+  // mask a name the user gave the conversation in Claude Code.
   const presetNames = new Map<number, string>(
     (db.prepare(`SELECT id, name FROM runtime_agents`).all() as { id: number; name: string }[]).map(
       (r) => [r.id, r.name]
@@ -62,17 +63,20 @@ export function getGraph(
   const annotate = (n: (typeof nodes)[number]) => {
     let agentId: number | null = null;
     let runtime: string | null = null;
+    let ownName = false;
     try {
       const meta = n.metadata ? (JSON.parse(n.metadata) as Record<string, unknown>) : null;
       if (meta && typeof meta.agent_id === "number") {
         agentId = meta.agent_id;
         runtime = typeof meta.runtime === "string" ? meta.runtime : null;
       }
+      ownName = !!(meta && (meta.named === true || meta.custom_title === true));
     } catch {
       // malformed metadata — leave unannotated
     }
     const { metadata, ...rest } = n;
-    const name = agentId !== null ? presetNames.get(agentId) ?? n.name : n.name;
+    const name =
+      agentId !== null && !ownName ? presetNames.get(agentId) ?? n.name : n.name;
     return { ...rest, name, agent_id: agentId, runtime };
   };
 
