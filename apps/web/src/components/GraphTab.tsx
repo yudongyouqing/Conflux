@@ -18,8 +18,10 @@ import { layoutGraph } from "../layout";
 import { SessionNode, type SessionNodeData } from "./SessionNode";
 import { StaleCluster, type StaleClusterData } from "./StaleCluster";
 import { DirLabelNode, type DirLabelData } from "./DirLabelNode";
+import { CurvedPairEdge } from "./CurvedPairEdge";
 
 const nodeTypes = { session: SessionNode, cluster: StaleCluster, dirLabel: DirLabelNode };
+const edgeTypes = { curved: CurvedPairEdge };
 
 const CLUSTER_ID = "__orphan_cluster__";
 const dirLabelId = (dir: string) => `__dirlabel:${dir}`;
@@ -232,6 +234,28 @@ export function GraphTab({
       outNodes = layouted;
     }
 
+    // Reciprocal separation: count edges per unordered node pair, then bend
+    // both directions of a two-way pair by the same perpendicular offset —
+    // the reversed direction vector flips the bow to the opposite side, so
+    // A→B and B→A render as a symmetric lens instead of overlapping lines.
+    // Single edges stay straight (offset 0).
+    const pairCount = new Map<string, number>();
+    for (const e of rawEdges) {
+      const d = e.data as { from: string; to: string };
+      const key = d.from < d.to ? `${d.from}|${d.to}` : `${d.to}|${d.from}`;
+      pairCount.set(key, (pairCount.get(key) ?? 0) + 1);
+    }
+    rawEdges = rawEdges.map((e) => {
+      const d = e.data as { from: string; to: string };
+      const key = d.from < d.to ? `${d.from}|${d.to}` : `${d.to}|${d.from}`;
+      const twoWay = (pairCount.get(key) ?? 0) > 1;
+      return {
+        ...e,
+        type: "curved" as const,
+        data: { ...d, offset: twoWay ? 34 : 0 },
+      };
+    });
+
     // Selection emphasis. Edge selected: that edge goes strong blue with a
     // bigger arrow, its two endpoint nodes get an amber ring, all other
     // edges dim. Node selected instead: its incident edges go blue.
@@ -339,6 +363,7 @@ export function GraphTab({
       nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
+      edgeTypes={edgeTypes}
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       onNodeClick={onNodeClick}
