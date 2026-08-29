@@ -14,11 +14,14 @@
 
 - 创建：`apps/desktop/package.json`，声明 Electron workspace 和开发脚本。
 - 创建：`apps/desktop/src/dev-services.cjs`，定义子进程命令、HTTP 就绪检测和停止逻辑。
+- 创建：`apps/desktop/src/runtime-config.cjs`，配置开发态 Electron 用户数据目录和图形运行时。
 - 创建：`apps/desktop/src/main.cjs`，创建安全 BrowserWindow、启动服务和处理退出清理。
 - 创建：`apps/desktop/src/preload.cjs`，通过 `contextBridge` 暴露最小桌面信息。
 - 创建：`apps/desktop/test/dev-services.test.cjs`，覆盖服务命令和就绪检测。
+- 创建：`apps/desktop/test/runtime-config.test.cjs`，覆盖开发态和打包态运行时配置。
 - 修改：`package.json`，增加 `dev:desktop` 根脚本。
 - 修改：`apps/web/vite.config.ts`，将 API proxy 固定到 `127.0.0.1:9527`。
+- 修改：`.gitignore`，忽略 Electron 开发缓存目录。
 - 修改：`package-lock.json`，由 npm 安装 Electron workspace 依赖生成。
 
 ### 任务 1：为开发服务边界编写失败测试
@@ -61,7 +64,16 @@ test("creates IPv4 service specs rooted at the repository", () => {
       {
         name: "web",
         command: process.platform === "win32" ? "npm.cmd" : "npm",
-        args: ["run", "dev", "-w", "apps/web", "--", "--host", "127.0.0.1"],
+        args: [
+          "run",
+          "dev",
+          "-w",
+          "apps/web",
+          "--",
+          "--host",
+          "127.0.0.1",
+          "--strictPort",
+        ],
         cwd: "C:\\repo",
         url: "http://127.0.0.1:5173/",
       },
@@ -134,7 +146,16 @@ function createDevServiceSpecs(repoRoot) {
     {
       name: "web",
       command,
-      args: ["run", "dev", "-w", "apps/web", "--", "--host", "127.0.0.1"],
+      args: [
+        "run",
+        "dev",
+        "-w",
+        "apps/web",
+        "--",
+        "--host",
+        "127.0.0.1",
+        "--strictPort",
+      ],
       cwd: repoRoot,
       url: WEB_URL,
     },
@@ -192,7 +213,7 @@ module.exports = {
 
 运行：`node --test apps/desktop/test/dev-services.test.cjs`
 
-预期：3 个测试全部 PASS，退出码为 0。
+预期：4 个测试全部 PASS，退出码为 0。
 
 - [ ] **步骤 3：Commit**
 
@@ -223,7 +244,7 @@ git commit -m "feat: add desktop dev service lifecycle"
     "dev": "electron ."
   },
   "devDependencies": {
-    "electron": "latest"
+    "electron": "^37.2.6"
   }
 }
 ```
@@ -270,11 +291,13 @@ git commit -m "build: add electron desktop workspace"
 **文件：**
 - 创建：`apps/desktop/src/main.cjs`
 - 创建：`apps/desktop/src/preload.cjs`
+- 创建：`apps/desktop/src/runtime-config.cjs`
+- 创建：`apps/desktop/test/runtime-config.test.cjs`
 - 依赖：`apps/desktop/src/dev-services.cjs`
 
 - [ ] **步骤 1：编写主进程最少实现**
 
-`apps/desktop/src/main.cjs` 应完成以下行为：从 `__dirname` 向上两级计算仓库根目录；根据 `createDevServiceSpecs` 启动服务；服务子进程使用 `stdio: "inherit"`、`windowsHide: true`；等待两个 URL；创建 `BrowserWindow` 时设置 `contextIsolation: true`、`nodeIntegration: false`、`preload`；加载 `WEB_URL`；在 `before-quit` 中对所有子进程调用 `stopChild`；启动失败通过 `dialog.showErrorBox` 展示服务名或 URL 后调用 `app.quit()`。
+`apps/desktop/src/main.cjs` 应完成以下行为：从 `__dirname` 向上两级计算仓库根目录；调用 `configureElectronRuntime`；根据 `createDevServiceSpecs` 启动服务；服务子进程使用 `stdio: "inherit"`、`windowsHide: true`；使用 `waitForService` 等待两个 URL；创建 `BrowserWindow` 时设置 `contextIsolation: true`、`nodeIntegration: false`、`preload`；加载 `WEB_URL`；在 `before-quit` 中对所有子进程调用 `stopChild`；启动失败通过 `dialog.showErrorBox` 展示服务名或 URL 后调用 `app.quit()`。
 
 主进程的关键实现形状：
 
@@ -283,7 +306,7 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 const {
   createDevServiceSpecs,
-  waitForHttp,
+  waitForService,
   stopChild,
   WEB_URL,
 } = require("./dev-services.cjs");
@@ -321,7 +344,9 @@ async function start() {
     });
     children.push(child);
   }
-  await Promise.all(specs.map((spec) => waitForHttp(spec.url)));
+  await Promise.all(
+    specs.map((spec, index) => waitForService(spec, processes[index]))
+  );
   await createWindow();
 }
 
@@ -361,7 +386,7 @@ contextBridge.exposeInMainWorld("muiltchatDesktop", {
 - [ ] **步骤 4：Commit**
 
 ```bash
-git add apps/desktop/src/main.cjs apps/desktop/src/preload.cjs
+git add apps/desktop/src/main.cjs apps/desktop/src/preload.cjs apps/desktop/src/runtime-config.cjs apps/desktop/test/runtime-config.test.cjs
 git commit -m "feat: launch muiltchat in electron"
 ```
 
@@ -374,9 +399,9 @@ git commit -m "feat: launch muiltchat in electron"
 
 - [ ] **步骤 1：运行桌面服务单元测试**
 
-运行：`node --test apps/desktop/test/dev-services.test.cjs`
+运行：`node --test apps/desktop/test/*.test.cjs`
 
-预期：3 个测试通过，0 个失败。
+预期：6 个测试通过，0 个失败。
 
 - [ ] **步骤 2：运行后端回归测试**
 

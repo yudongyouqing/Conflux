@@ -21,23 +21,47 @@ function createDevServiceSpecs(repoRoot) {
     {
       name: "web",
       command,
-      args: ["run", "dev", "-w", "apps/web", "--", "--host", "127.0.0.1"],
+      args: [
+        "run",
+        "dev",
+        "-w",
+        "apps/web",
+        "--",
+        "--host",
+        "127.0.0.1",
+        "--strictPort",
+      ],
       cwd: repoRoot,
       url: WEB_URL,
     },
   ];
 }
 
-function waitForHttp(url, { timeoutMs = 30_000, intervalMs = 100 } = {}) {
+function waitForHttp(
+  url,
+  { timeoutMs = 30_000, intervalMs = 100, signal } = {}
+) {
   const deadline = Date.now() + timeoutMs;
   let timer;
-  let settled = false;
+  let request;
 
   return new Promise((resolve, reject) => {
+    let settled = false;
+
+    const abort = () => {
+      finish(reject, new Error(`Aborted waiting for ${url}`));
+    };
+
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      if (request) request.destroy();
+      signal?.removeEventListener("abort", abort);
+    };
+
     const finish = (callback, value) => {
       if (settled) return;
       settled = true;
-      if (timer) clearTimeout(timer);
+      cleanup();
       callback(value);
     };
 
@@ -53,14 +77,88 @@ function waitForHttp(url, { timeoutMs = 30_000, intervalMs = 100 } = {}) {
     const attempt = () => {
       if (settled) return;
 
-      const request = http.get(url, (response) => {
+      request = http.get(url, (response) => {
         response.resume();
+        request = undefined;
         finish(resolve);
       });
       request.once("error", retry);
     };
 
+    if (signal?.aborted) {
+      abort();
+      return;
+    }
+    signal?.addEventListener("abort", abort, { once: true });
     attempt();
+  });
+}
+
+function waitForService(
+  spec,
+  child,
+  { timeoutMs = 30_000, intervalMs = 100, exitProbeTimeoutMs = 250 } = {}
+) {
+  const controller = new AbortController();
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let childExited = false;
+
+    const cleanup = () => {
+      child.removeListener("error", onError);
+      child.removeListener("exit", onExit);
+      controller.abort();
+    };
+
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback(value);
+    };
+
+    const onError = (error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      finish(reject, new Error(`${spec.name} failed to start: ${message}`));
+    };
+
+    const onExit = (code, signal) => {
+      childExited = true;
+      controller.abort();
+      waitForHttp(spec.url, {
+        timeoutMs: exitProbeTimeoutMs,
+        intervalMs: Math.min(intervalMs, 25),
+      })
+        .then(() => finish(resolve))
+        .catch(() => {
+          const reason = signal ? `signal ${signal}` : `code ${code ?? "unknown"}`;
+          finish(
+            reject,
+            new Error(`${spec.name} exited before becoming ready (${reason})`)
+          );
+        });
+    };
+
+    child.once("error", onError);
+    child.once("exit", onExit);
+
+    if (child.exitCode !== null && child.exitCode !== undefined) {
+      onExit(child.exitCode, null);
+      return;
+    }
+
+    waitForHttp(spec.url, {
+      timeoutMs,
+      intervalMs,
+      signal: controller.signal,
+    })
+      .then(() => {
+        if (!childExited) finish(resolve);
+      })
+      .catch((error) => {
+        if (!childExited) finish(reject, error);
+      });
   });
 }
 
@@ -84,6 +182,7 @@ module.exports = {
   API_HEALTH_URL,
   WEB_URL,
   createDevServiceSpecs,
+  waitForService,
   waitForHttp,
   stopChild,
 };

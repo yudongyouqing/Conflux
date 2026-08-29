@@ -1,9 +1,11 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { EventEmitter } = require("node:events");
 const http = require("node:http");
 
 const {
   createDevServiceSpecs,
+  waitForService,
   waitForHttp,
 } = require("../src/dev-services.cjs");
 
@@ -29,7 +31,16 @@ test("creates IPv4 service specs rooted at the repository", () => {
       {
         name: "web",
         command: process.platform === "win32" ? "npm.cmd" : "npm",
-        args: ["run", "dev", "-w", "apps/web", "--", "--host", "127.0.0.1"],
+        args: [
+          "run",
+          "dev",
+          "-w",
+          "apps/web",
+          "--",
+          "--host",
+          "127.0.0.1",
+          "--strictPort",
+        ],
         cwd: "C:\\repo",
         url: "http://127.0.0.1:5173/",
       },
@@ -62,5 +73,28 @@ test("waitForHttp rejects with the URL after its timeout", async () => {
   await assert.rejects(
     waitForHttp(url, { timeoutMs: 40, intervalMs: 10 }),
     (error) => error instanceof Error && error.message === `Timed out waiting for ${url}`
+  );
+});
+
+test("waitForService rejects promptly when its child exits before readiness", async () => {
+  const child = new EventEmitter();
+  child.exitCode = null;
+  child.killed = false;
+  const spec = {
+    name: "web",
+    url: "http://127.0.0.1:1/never-ready",
+  };
+
+  const pending = waitForService(spec, child, {
+    timeoutMs: 5_000,
+    intervalMs: 10,
+    exitProbeTimeoutMs: 20,
+  });
+  child.exitCode = 1;
+  child.emit("exit", 1, null);
+
+  await assert.rejects(
+    pending,
+    (error) => error instanceof Error && error.message.includes("web exited before becoming ready")
   );
 });
