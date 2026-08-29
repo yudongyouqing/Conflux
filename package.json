@@ -12,6 +12,7 @@
     "build": "npm run build -w packages/shared && npm run build -w apps/server && npm run build -w apps/web",
     "dev:server": "npm run dev -w apps/server",
     "dev:web": "npm run dev -w apps/web",
+    "dev:desktop": "npm run dev -w apps/desktop",
     "dev:all": "concurrently -n server,web -c blue,green \"npm run serve -w apps/server\" \"npm run dev -w apps/web\"",
     "serve": "npm run serve -w apps/server",
     "mcp": "npm run mcp -w apps/server",

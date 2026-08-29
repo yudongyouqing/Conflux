@@ -1,0 +1,12 @@
+{
+  "name": "muiltchat-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "main": "src/main.cjs",
+  "scripts": {
+    "dev": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^37.2.6"
+  }
+}
