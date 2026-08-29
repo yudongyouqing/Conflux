@@ -1,142 +1,297 @@
-# muiltchat
+# Conflux
 
-> Cross-session context sharing, async messaging and agent orchestration for AI coding assistants.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-339933.svg)](https://nodejs.org/)
 
-AI coding assistants like Claude Code run each session in its own process with
-isolated context. Session A cannot see what session B is doing; the only way to
-share is copy-paste by hand. **muiltchat** fixes that — and goes further: you
-can also define internal agents that chat with you and reach out to other
-sessions on their own.
+> A local-first desktop workspace for connecting AI coding sessions, agents, messages, and shared context.
 
-- **query** — search context entries another session has published
-- **ask** — fire an async question at another session; it replies later.
-  Undelivered mail follows the conversation across `/resume` (id changes),
-  and unread mail is surfaced proactively inside the recipient session
-- **agents** — create internal agents (system prompt + model), chat with them
-  in the web UI, and let them use cross-session tools autonomously
-- **runtime agents** — define CLI agent presets (Claude Code / Codex with a
-  fixed directory, API channel and instructions) and launch them in new
-  terminal windows; spawned sessions auto-tag back to their preset
-- **open in terminal** — click any (offline) session node → its conversation
-  resumes in a new terminal window, in your terminal of choice
-- **graph** — sessions and agents as nodes, edges carry their latest exchange;
-  click an edge to read the two-way message flow
+Conflux gives AI coding sessions a shared place to exchange context and coordinate work. Each session can publish knowledge, ask another session a question, receive asynchronous replies, and appear as a live node in a conversation graph.
 
-Zero ops: everything lives in one SQLite file (WAL mode). No database server,
-no message queue, no broker.
+The project is built for local development and personal workflows. Data stays in a SQLite database on your machine, while the Electron desktop client brings the existing React workspace into a native window.
 
-## Repository layout
+## Why Conflux?
 
-```
-apps/server          Node.js + TypeScript backend (Fastify HTTP + MCP + CLI)
-apps/web             React 18 + Vite + React Flow dashboard (Dify-style)
-packages/shared      TypeScript types shared by server and web
-```
+AI coding assistants usually run as isolated processes. That makes it difficult to answer simple questions such as:
 
-## Quick start
+- What is another session working on?
+- Where did a previous session publish the implementation notes I need?
+- How can two agents exchange work without manual copy and paste?
+- Which runtime agents are active, stale, or offline?
+
+Conflux connects those sessions without requiring a database server, message broker, or hosted control plane.
+
+## Features
+
+- **Session graph**: Browse sessions, agents, and directed conversation channels as a graph.
+- **Shared context**: Publish searchable notes and query context owned by other sessions.
+- **Async messaging**: Ask another session a question and receive the reply later, including across `/resume` transitions.
+- **Internal agents**: Define model-backed agents with a system prompt and chat with them from the workspace.
+- **Runtime agents**: Configure Claude Code or Codex CLI presets and launch them in a clean terminal environment.
+- **Claude Code integration**: Connect sessions through MCP and optional lifecycle hooks.
+- **Three interfaces**: Use the same capabilities through MCP, HTTP REST, or the CLI.
+- **Local-first storage**: Keep application state in one SQLite database with WAL mode.
+- **Electron client**: Run the React workspace in a desktop window while the local server starts automatically.
+
+## Project Status
+
+Conflux is in active development. The current development version includes the first Electron desktop development shell and the existing web workspace.
+
+Available now:
+
+- Electron development mode on Windows
+- Fastify HTTP server
+- React, Vite, and React Flow workspace
+- MCP server and Claude Code hooks
+- SQLite persistence and core regression tests
+
+Still planned:
+
+- Packaged installers for Windows, macOS, and Linux
+- Tray and background process support
+- Automatic updates
+- Full migration of internal package and data-directory names from `muiltchat` to `Conflux`
+
+## Quick Start
+
+### Requirements
+
+- Node.js 18 or newer
+- npm 9 or newer
+- Claude Code, if you want MCP session integration
+- An Anthropic or OpenAI API key, if you want to use internal agents
+
+### Install
 
 ```bash
-git clone <this-repo> muiltchat && cd muiltchat
-npm run setup        # installs all workspaces
-npm run dev:all      # backend (:9527) + web dev server (:5173) concurrently
+git clone https://github.com/yudongyouqing/Conflux.git
+cd Conflux
+npm install
 ```
 
-Open http://localhost:5173 — tabs: 图拓扑 (view modes: 仅活跃 / 目录分层 with
-orphan-archive cluster / 全部; click nodes for details, click edges for the
-message flow), 会话 (project-grouped list), 消息流, Agents, 运行时, 设置.
-Production mode: `npm start` builds everything and serves the UI from the API
-port (http://localhost:9527).
+### Start the desktop client
 
-### Claude Code integration (MCP)
+```bash
+npm run dev:desktop
+```
 
-Add to your project's `.mcp.json`:
+The Electron process starts the local API server and Vite development server, waits for both services to become available, and opens the workspace in a desktop window.
+
+The development endpoints are:
+
+- Web workspace: http://127.0.0.1:5173
+- API server: http://127.0.0.1:9527
+- OpenAPI docs: http://127.0.0.1:9527/docs
+
+Do not run `npm run dev:all` at the same time as `npm run dev:desktop`. Both commands use the same ports and SQLite data directory.
+
+### Run the web workspace separately
+
+If you prefer a browser during development:
+
+```bash
+npm run dev:all
+```
+
+Then open http://127.0.0.1:5173.
+
+### Run the local production server
+
+```bash
+npm start
+```
+
+This builds the shared package, server, and web workspace, then serves the built frontend from the API server at http://127.0.0.1:9527.
+
+## Architecture
+
+```text
+                    +----------------------+
+                    |  Electron desktop    |
+                    |  apps/desktop        |
+                    +----------+-----------+
+                               |
+                               v
+                    +----------------------+
+                    |  React workspace     |
+                    |  apps/web + Vite     |
+                    +----------+-----------+
+                               |
+                               v
+                    +----------------------+
+                    |  Fastify local API   |
+                    |  HTTP + OpenAPI      |
+                    +-----+-----------+----+
+                          |           |
+                          v           v
+                 +------------+  +----------+
+                 | SQLite     |  | MCP + CLI|
+                 | local data |  | adapters |
+                 +------------+  +----------+
+```
+
+The core business logic lives in `apps/server/src/core`. The HTTP, MCP, and CLI interfaces call the same core operations, so data behavior stays consistent across interfaces.
+
+## Repository Layout
+
+```text
+apps/
+  desktop/       Electron main process and desktop development runtime
+  server/        Fastify API, SQLite core, MCP server, and CLI
+  web/           React workspace built with Vite and React Flow
+packages/
+  shared/        Shared TypeScript types for server and web
+docs/
+  plans/         Development plans
+  specs/         Design specifications
+```
+
+## Claude Code Integration
+
+### MCP
+
+Add Conflux to a project's `.mcp.json`:
 
 ```json
 {
   "mcpServers": {
-    "muiltchat": {
+    "conflux": {
       "command": "npx",
-      "args": ["tsx", "<repo>/apps/server/src/index.ts", "mcp"]
+      "args": [
+        "tsx",
+        "<repo>/apps/server/src/index.ts",
+        "mcp"
+      ]
     }
   }
 }
 ```
 
-Each Claude Code session spawns its own MCP process, auto-registers as a node
-in the graph, and gains these tools: `publish_context`, `query_context`,
-`ask_session`, `reply_ask`, `check_inbox`, `check_replies`, `get_graph`.
+An MCP-connected session can use tools such as:
 
-### Claude Code hooks (session identity + liveness)
+- `publish_context`
+- `query_context`
+- `ask_session`
+- `reply_ask`
+- `check_inbox`
+- `check_replies`
+- `get_graph`
 
-MCP alone cannot see the conversation id. Optional hooks close the gap:
+Each session registers itself in the graph and can participate in shared context and asynchronous messaging.
 
-```bash
-npm run mcp -- hooks install    # merges SessionStart/UserPromptSubmit/Stop
-                                # into ~/.claude/settings.json (backup first)
-```
+### Hooks
 
-With hooks installed: resuming a conversation reactivates the same graph node,
-`/rename` titles sync (node name = your title, first prompt as fallback), every
-prompt refreshes a live "doing right now" description, and sessions heartbeat
-every 30s so idle-but-open sessions stay alive.
-
-Hooks also close two delivery gaps: a session with unread inbox gets a short
-notice injected into its context on the next prompt (so it actually calls
-`check_inbox`), and `/resume` re-addresses undelivered mail to the new
-conversation id — matched by process pid, or by transcript lineage when the
-conversation was resumed in a different terminal.
-
-## Internal agents + chat
-
-1. Agents tab → create an agent (name, system prompt, provider, model)
-2. Click 对话 and chat — responses stream token by token
-3. The agent can call cross-session tools on its own: `list_sessions`,
-   `query_context`, `ask_session`, `check_inbox`, `reply_ask`,
-   `publish_context`. Tool calls render inline in the chat.
-
-Providers via the [Vercel AI SDK](https://ai-sdk.dev): `anthropic`, `openai`.
-Set `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` before starting the server;
-`GET /settings` reports which are configured.
-
-## Runtime agents (spawn real CLI agents)
-
-The 运行时 tab: create a preset — runtime (Claude Code / Codex), working
-directory, model, API base URL + key (injected as env on launch, replacing
-inherited credentials), extra env, system instructions — then hit 启动. The
-preset opens in a new terminal window with a clean environment (no
-session-scoped vars leak in), and the spawned session carries the preset tag
-so the graph shows it under the preset name with a runtime badge. It is a
-normal node: ask it from the web console, from other sessions, or open its
-directory in another terminal.
-
-The terminal opener is configurable in 设置: Windows Terminal / PowerShell /
-cmd / WezTerm, with live availability detection (`where.exe`) and automatic
-fallback chains when a terminal is missing.
-
-## Three equivalent interfaces (white-box by design)
-
-Every capability is reachable three ways, all audited to `audit_log`:
-
-| Interface | Entry |
-|---|---|
-| MCP | `muiltchat mcp` (Claude Code spawns per session) |
-| HTTP REST | `muiltchat serve` — OpenAPI docs at `/docs` |
-| CLI | `muiltchat sessions / context / msg / agents / graph / hooks / audit` |
-
-The database is a plain SQLite file — open it with any client
-(`muiltchat path` prints the location). `muiltchat audit` replays every call.
-
-## Development
+Hooks associate lifecycle events with the session identity and keep liveness information current:
 
 ```bash
-npm run build                 # shared → server → web
-npm test -w apps/server       # core regression suite (node:test, 74 tests)
-npm run dev:all               # both dev servers
+npm run mcp -- hooks install
 ```
 
-Stack: Fastify 5 · better-sqlite3 (WAL) · MCP SDK · AI SDK 7 · React 18 ·
-Vite · React Flow · Tailwind · TanStack Query.
+The hook integration supports session start, prompt submission, and stop events. It also keeps custom titles, `/resume` lineage, and undelivered messages synchronized with the local graph.
+
+## Internal Agents
+
+Internal agents are model-backed agents stored in the local database. Create one from the Agents tab with a name, system prompt, provider, and model, then chat with it from the workspace.
+
+Supported provider environment variables:
+
+```bash
+ANTHROPIC_API_KEY=your-anthropic-key
+OPENAI_API_KEY=your-openai-key
+```
+
+The settings endpoint reports which providers are configured:
+
+```text
+GET /settings
+```
+
+## Runtime Agents
+
+Runtime agents are presets for launching real CLI coding assistants. A preset can define:
+
+- Runtime: Claude Code or Codex
+- Working directory
+- Model
+- API base URL and API key
+- Extra environment variables
+- Startup instructions
+- Heartbeat interval
+
+The terminal launcher removes session-scoped variables before starting a new process and uses platform-specific fallback chains when a preferred terminal is unavailable.
+
+## Data and Configuration
+
+By default, Conflux stores its SQLite data under:
+
+```text
+~/.muiltchat
+```
+
+The current implementation still uses `.muiltchat` for compatibility during the rename transition. You can override the data directory with `MUILTCHAT_HOME` or the CLI `--data-dir` option:
+
+```bash
+MUILTCHAT_HOME=/path/to/conflux-data npm run dev:server
+```
+
+On Windows PowerShell:
+
+```powershell
+$env:MUILTCHAT_HOME = "C:\\path\\to\\conflux-data"
+npm run dev:server
+```
+
+The database uses SQLite WAL mode. No external database service is required.
+
+## Development Commands
+
+```bash
+# Build shared types, server, and web workspace
+npm run build
+
+# Start the Electron desktop development client
+npm run dev:desktop
+
+# Start the server and browser development server together
+npm run dev:all
+
+# Start only the server development process
+npm run dev:server
+
+# Start only the web development process
+npm run dev:web
+
+# Run the server regression suite
+npm test -w apps/server
+
+# Run Electron service and runtime tests
+node --test "apps/desktop/test/*.test.cjs"
+```
+
+## HTTP API
+
+The local server exposes OpenAPI documentation and Swagger UI at `/docs` when running in development mode. Common resources include:
+
+- `/graph`
+- `/sessions`
+- `/messages`
+- `/context`
+- `/agents`
+- `/conversations`
+- `/runtimes`
+- `/settings`
+- `/audit`
+
+The API binds to `127.0.0.1` by default.
+
+## Contributing
+
+Issues, ideas, and pull requests are welcome. Before opening a pull request:
+
+1. Keep changes focused and explain the user-facing behavior.
+2. Run `npm run build`.
+3. Run `npm test -w apps/server`.
+4. Run `node --test "apps/desktop/test/*.test.cjs"` when changing the desktop runtime.
 
 ## License
 
-MIT
+Conflux is released under the [MIT License](./LICENSE).
