@@ -37,6 +37,17 @@ function createDevServiceSpecs(repoRoot) {
   ];
 }
 
+function createDevServiceSpawnOptions(cwd, env = process.env) {
+  return {
+    cwd,
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+    // Electron is a GUI process on Windows; npm.cmd must run through cmd.exe.
+    shell: process.platform === "win32",
+    windowsHide: true,
+  };
+}
+
 function waitForHttp(
   url,
   { timeoutMs = 30_000, intervalMs = 100, signal } = {}
@@ -182,6 +193,7 @@ module.exports = {
   API_HEALTH_URL,
   WEB_URL,
   createDevServiceSpecs,
+  createDevServiceSpawnOptions,
   waitForService,
   waitForHttp,
   stopChild,

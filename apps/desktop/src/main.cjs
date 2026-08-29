@@ -4,6 +4,7 @@ const { app, BrowserWindow, dialog } = require("electron");
 
 const {
   createDevServiceSpecs,
+  createDevServiceSpawnOptions,
   waitForService,
   stopChild,
   WEB_URL,
@@ -14,6 +15,11 @@ const repoRoot = path.resolve(__dirname, "../../..");
 const children = [];
 let mainWindow;
 
+function log(message) {
+  process.stderr.write(`[desktop] ${message}\n`);
+}
+
+log(`boot cwd=${process.cwd()} repoRoot=${repoRoot}`);
 configureElectronRuntime(app, repoRoot);
 
 function startDevServices() {
@@ -21,12 +27,19 @@ function startDevServices() {
   const processes = [];
 
   for (const spec of specs) {
-    const child = spawn(spec.command, spec.args, {
-      cwd: spec.cwd,
-      env: process.env,
-      stdio: "inherit",
-      windowsHide: true,
-    });
+    log(`spawning ${spec.name}: ${spec.command} ${spec.args.join(" ")}`);
+    const child = spawn(
+      spec.command,
+      spec.args,
+      createDevServiceSpawnOptions(spec.cwd, process.env)
+    );
+    child.stdout.on("data", (chunk) => process.stderr.write(`[${spec.name}] ${chunk}`));
+    child.stderr.on("data", (chunk) => process.stderr.write(`[${spec.name}] ${chunk}`));
+    child.once("error", (error) => log(`${spec.name} error: ${error.message}`));
+    child.once("exit", (code, signal) =>
+      log(`${spec.name} exit code=${code ?? "null"} signal=${signal ?? "null"}`)
+    );
+    log(`${spec.name} pid=${child.pid ?? "unknown"}`);
     children.push(child);
     processes.push(child);
   }
@@ -53,19 +66,26 @@ function createWindow() {
 }
 
 async function start() {
+  log("starting development services");
   const { specs, processes } = startDevServices();
   await Promise.all(
     specs.map((spec, index) => waitForService(spec, processes[index]))
   );
+  log("development services ready");
   await createWindow();
+  log("window loaded");
 }
 
 function stopDevServices() {
   for (const child of children) stopChild(child);
 }
 
-app.whenReady().then(start).catch((error) => {
+app.whenReady().then(() => {
+  log("app ready");
+  return start();
+}).catch((error) => {
   const message = error instanceof Error ? error.message : String(error);
+  log(`startup failed: ${message}`);
   dialog.showErrorBox("muiltchat 启动失败", message);
   app.quit();
 });

@@ -5,9 +5,22 @@ const http = require("node:http");
 
 const {
   createDevServiceSpecs,
+  createDevServiceSpawnOptions,
   waitForService,
   waitForHttp,
 } = require("../src/dev-services.cjs");
+
+test("uses pipe-safe stdio for Electron child processes", () => {
+  const env = { PATH: "C:\\tools" };
+
+  assert.deepEqual(createDevServiceSpawnOptions("C:\\repo", env), {
+    cwd: "C:\\repo",
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+    shell: process.platform === "win32",
+    windowsHide: true,
+  });
+});
 
 test("creates IPv4 service specs rooted at the repository", () => {
   const specs = createDevServiceSpecs("C:\\repo");

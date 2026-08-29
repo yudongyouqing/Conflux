@@ -9,6 +9,9 @@ test("configures a writable development userData directory", () => {
     isPackaged: false,
     setPath: (...args) => calls.push(["setPath", ...args]),
     disableHardwareAcceleration: () => calls.push(["disableHardwareAcceleration"]),
+    commandLine: {
+      appendSwitch: (...args) => calls.push(["appendSwitch", ...args]),
+    },
   };
 
   configureElectronRuntime(electronApp, "C:\\repo");
@@ -16,6 +19,8 @@ test("configures a writable development userData directory", () => {
   assert.deepEqual(calls, [
     ["setPath", "userData", "C:\\repo\\.electron-dev"],
     ["disableHardwareAcceleration"],
+    ["appendSwitch", "disable-gpu"],
+    ["appendSwitch", "no-sandbox"],
   ]);
 });
 
@@ -25,6 +30,9 @@ test("leaves packaged Electron runtime configuration unchanged", () => {
     isPackaged: true,
     setPath: (...args) => calls.push(["setPath", ...args]),
     disableHardwareAcceleration: () => calls.push(["disableHardwareAcceleration"]),
+    commandLine: {
+      appendSwitch: (...args) => calls.push(["appendSwitch", ...args]),
+    },
   };
 
   configureElectronRuntime(electronApp, "C:\\repo");
