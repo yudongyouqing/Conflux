@@ -1,5 +1,6 @@
 const http = require("node:http");
 const { spawn } = require("node:child_process");
+const { assertPortAvailable } = require("./port-diagnostics.cjs");
 
 const API_HEALTH_URL = "http://127.0.0.1:9527/healthz";
 const WEB_URL = "http://127.0.0.1:5173/";
@@ -16,6 +17,8 @@ function createDevServiceSpecs(repoRoot) {
       command,
       args: ["run", "serve", "-w", "apps/server"],
       cwd: repoRoot,
+      host: "127.0.0.1",
+      port: 9527,
       url: API_HEALTH_URL,
     },
     {
@@ -32,9 +35,20 @@ function createDevServiceSpecs(repoRoot) {
         "--strictPort",
       ],
       cwd: repoRoot,
+      host: "127.0.0.1",
+      port: 5173,
       url: WEB_URL,
     },
   ];
+}
+
+async function assertDevServicePorts(
+  specs,
+  { assertPortAvailableFn = assertPortAvailable } = {}
+) {
+  for (const spec of specs) {
+    await assertPortAvailableFn(spec.port, spec.host);
+  }
 }
 
 function createDevServiceSpawnOptions(cwd, env = process.env) {
@@ -173,27 +187,38 @@ function waitForService(
   });
 }
 
-function stopChild(child) {
-  if (!child || child.killed || (child.exitCode !== null && child.exitCode !== undefined)) {
+function stopChild(child, { platform = process.platform, spawnFn = spawn } = {}) {
+  if (
+    !child ||
+    stoppingChildren.has(child) ||
+    child.killed ||
+    (child.exitCode !== null && child.exitCode !== undefined)
+  ) {
     return;
   }
 
-  if (process.platform === "win32" && child.pid) {
-    spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+  stoppingChildren.add(child);
+
+  if (platform === "win32" && child.pid) {
+    const killer = spawnFn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
       windowsHide: true,
       stdio: "ignore",
     });
+    killer?.once?.("error", () => {});
     return;
   }
 
   child.kill("SIGTERM");
 }
 
+const stoppingChildren = new WeakSet();
+
 module.exports = {
   API_HEALTH_URL,
   WEB_URL,
   createDevServiceSpecs,
   createDevServiceSpawnOptions,
+  assertDevServicePorts,
   waitForService,
   waitForHttp,
   stopChild,

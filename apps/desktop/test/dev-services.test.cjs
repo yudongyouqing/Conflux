@@ -6,6 +6,8 @@ const http = require("node:http");
 const {
   createDevServiceSpecs,
   createDevServiceSpawnOptions,
+  assertDevServicePorts,
+  stopChild,
   waitForService,
   waitForHttp,
 } = require("../src/dev-services.cjs");
@@ -59,6 +61,73 @@ test("creates IPv4 service specs rooted at the repository", () => {
       },
     ]
   );
+});
+
+test("declares the host and port for every development service", () => {
+  const specs = createDevServiceSpecs("C:\\repo");
+  assert.deepEqual(
+    specs.map(({ name, host, port }) => ({ name, host, port })),
+    [
+      { name: "server", host: "127.0.0.1", port: 9527 },
+      { name: "web", host: "127.0.0.1", port: 5173 },
+    ]
+  );
+});
+
+test("checks every development port before services are spawned", async () => {
+  const checked = [];
+  await assertDevServicePorts(createDevServiceSpecs("C:\\repo"), {
+    assertPortAvailableFn: async (port, host) => checked.push({ port, host }),
+  });
+  assert.deepEqual(checked, [
+    { port: 9527, host: "127.0.0.1" },
+    { port: 5173, host: "127.0.0.1" },
+  ]);
+});
+
+test("stops port preflight at the first conflict", async () => {
+  const checked = [];
+  await assert.rejects(
+    assertDevServicePorts(createDevServiceSpecs("C:\\repo"), {
+      assertPortAvailableFn: async (port, host) => {
+        checked.push({ port, host });
+        if (port === 9527) throw new Error("server port is occupied");
+      },
+    }),
+    /server port is occupied/
+  );
+  assert.deepEqual(checked, [{ port: 9527, host: "127.0.0.1" }]);
+});
+
+test("stopChild uses taskkill once on Windows", () => {
+  const calls = [];
+  const child = { pid: 2468, killed: false, exitCode: null, kill() {} };
+  const spawnFn = (...args) => calls.push(args);
+
+  stopChild(child, { platform: "win32", spawnFn });
+  stopChild(child, { platform: "win32", spawnFn });
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], [
+    "taskkill",
+    ["/pid", "2468", "/T", "/F"],
+    { windowsHide: true, stdio: "ignore" },
+  ]);
+});
+
+test("stopChild sends SIGTERM once on non-Windows", () => {
+  const signals = [];
+  const child = {
+    pid: 2468,
+    killed: false,
+    exitCode: null,
+    kill: (signal) => signals.push(signal),
+  };
+
+  stopChild(child, { platform: "linux", spawnFn: () => assert.fail("must not spawn") });
+  stopChild(child, { platform: "linux", spawnFn: () => assert.fail("must not spawn") });
+
+  assert.deepEqual(signals, ["SIGTERM"]);
 });
 
 test("waitForHttp resolves when a local service responds", async () => {
