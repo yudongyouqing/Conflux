@@ -40,11 +40,12 @@ export function getGraph(
 ): Graph {
   markStaleSessions(db);
   const status = opts.status ?? "active";
-  // Hide MCP placeholder nodes (temp:true) that were never adopted by a
-  // hook-registered session — they are UUID noise, not real identities.
+  // Active MCP placeholders represent live Codex/Claude sessions. Hide only
+  // stale or ended placeholders, which are UUID noise after their process exits.
+  const tempVisibility = `(COALESCE(s.metadata, '') NOT LIKE '%"temp":true%' OR s.status = 'active')`;
   const where = status === "all"
-    ? `WHERE s.id NOT LIKE 'agent-%' AND COALESCE(s.metadata, '') NOT LIKE '%"temp":true%'`
-    : `WHERE s.status = ? AND s.id NOT LIKE 'agent-%' AND COALESCE(s.metadata, '') NOT LIKE '%"temp":true%'`;
+    ? `WHERE s.id NOT LIKE 'agent-%' AND ${tempVisibility}`
+    : `WHERE s.status = ? AND s.id NOT LIKE 'agent-%' AND ${tempVisibility}`;
   const params: string[] = status === "all" ? [] : [status];
 
   const nodes = db

@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 import { makeDb } from "./helpers.js";
 import {
   parseProcessLines,
+  isRuntimeCommand,
+  runtimePidsFrom,
+  probeRuntimePids,
+  reconcileRuntimeLiveness,
   isClaudeCommand,
   claudePidsFrom,
   probeClaudePids,
@@ -38,6 +42,42 @@ test("isClaudeCommand matches claude invocation shapes, rejects lookalikes", () 
   assert.ok(!isClaudeCommand("node server.js"));
   assert.ok(!isClaudeCommand("vim my-claude-notes.md"), "similar filename ≠ claude process");
   assert.ok(!isClaudeCommand("powershell -Command Get-CimInstance"));
+});
+
+test("isRuntimeCommand matches Codex invocation shapes, rejects lookalikes", () => {
+  assert.ok(isRuntimeCommand("codex", "codex"));
+  assert.ok(isRuntimeCommand("codex.exe exec --full-auto", "codex"));
+  assert.ok(
+    isRuntimeCommand(
+      '"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\x\\node_modules\\@openai\\codex\\bin\\codex.js"',
+      "codex"
+    )
+  );
+  assert.ok(isRuntimeCommand("node /tools/codex-cli/bin/run.js", "codex"));
+  assert.ok(!isRuntimeCommand("vim my-codex-notes.md", "codex"), "similar filename != Codex process");
+  assert.ok(!isRuntimeCommand("node /notes/my-codex-cli-notes.js", "codex"), "similar package name != Codex process");
+  assert.ok(!isRuntimeCommand("node server.js", "codex"));
+  assert.ok(!isRuntimeCommand("claude --resume 123", "codex"));
+});
+
+test("runtimePidsFrom separates Claude and Codex processes", () => {
+  const entries = [
+    { pid: 11, command: "cmd /c claude" },
+    { pid: 22, command: "codex exec" },
+    { pid: 22, command: "codex exec --full-auto" },
+    { pid: 33, command: "node /app/@openai/codex/bin/codex.js" },
+    { pid: 44, command: "node app.js" },
+  ];
+  assert.deepEqual([...runtimePidsFrom(entries, "claude")], [11]);
+  assert.deepEqual([...runtimePidsFrom(entries, "codex")].sort(), [22, 33]);
+});
+
+test("probeRuntimePids returns both runtime PID sets", async () => {
+  const fake = async () =>
+    "10 cmd /c claude\n20 codex exec\n30 node x @openai/codex\n40 node x.js";
+  const pids = await probeRuntimePids(fake as never, "win32");
+  assert.deepEqual([...pids!.claude], [10]);
+  assert.deepEqual([...pids!.codex].sort(), [20, 30]);
 });
 
 test("claudePidsFrom dedups pids across entries", () => {
@@ -95,6 +135,43 @@ test("reconcileLiveness: live pid stays active + refreshed; dead pid reaped imme
   assert.equal(row("dead-proc").status, "stale", "dead process reaped without TTL wait");
   assert.equal(row("already-stale").status, "stale");
   assert.equal(row("no-pid").status, "active", "pidless row keeps the heartbeat model");
+});
+
+test("reconcileRuntimeLiveness refreshes live Codex and reaps dead Codex immediately", () => {
+  const mk = (id: string, runtime: "claude" | "codex", pid: number) =>
+    registerSession(db, {
+      id,
+      name: id,
+      description: "named",
+      metadata: { source: `${runtime}-hook`, named: true, runtime, runtime_pid: pid },
+    });
+  mk("codex-idle-open", "codex", 710);
+  mk("codex-dead-proc", "codex", 720);
+  mk("claude-idle-open", "claude", 730);
+  db.prepare(
+    `UPDATE sessions SET last_heartbeat_at = ?, status = 'active'
+     WHERE id IN ('codex-idle-open', 'codex-dead-proc', 'claude-idle-open')`
+  ).run(new Date(Date.now() - 3600_000).toISOString());
+
+  const now = new Date("2030-01-02T03:04:05.000Z");
+  const result = reconcileRuntimeLiveness(
+    db,
+    { claude: new Set([730]), codex: new Set([710]) },
+    now
+  );
+  assert.ok(result.refreshed >= 2);
+  assert.ok(result.reaped >= 1);
+
+  const row = (id: string) =>
+    db.prepare(`SELECT status, last_heartbeat_at FROM sessions WHERE id = ?`).get(id) as {
+      status: string;
+      last_heartbeat_at: string;
+    };
+  assert.equal(row("codex-idle-open").status, "active");
+  assert.equal(row("codex-idle-open").last_heartbeat_at, now.toISOString());
+  assert.equal(row("codex-dead-proc").status, "stale");
+  assert.equal(row("claude-idle-open").status, "active");
+  assert.equal(row("claude-idle-open").last_heartbeat_at, now.toISOString());
 });
 
 test("reconcileLiveness never touches the web console", () => {

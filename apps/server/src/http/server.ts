@@ -71,7 +71,7 @@ import {
   setAutoWake,
 } from "../core/app-settings.js";
 import { openInTerminal, resumeCommand, terminalOptions } from "../core/terminal.js";
-import { probeClaudePids, reconcileLiveness } from "../core/liveness.js";
+import { probeRuntimePids, reconcileRuntimeLiveness } from "../core/liveness.js";
 import type { TerminalSettings } from "@muiltchat/shared";
 import { logger } from "../log.js";
 
@@ -136,12 +136,13 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
 
   // ---- liveness probe (AgentRecall-style process scan) ----
   // Source of truth for session status: a conversation is alive iff its
-  // claude process exists. Refreshes idle-but-open terminals and reaps dead
-  // processes immediately; on probe failure the heartbeat TTL still applies.
+  // Claude or Codex process exists. Refreshes idle-but-open terminals and
+  // reaps dead processes immediately; on probe failure the heartbeat TTL
+  // still applies.
   const livenessTick = async () => {
     try {
-      const livePids = await probeClaudePids();
-      if (livePids) reconcileLiveness(db, livePids);
+      const livePids = await probeRuntimePids();
+      if (livePids) reconcileRuntimeLiveness(db, livePids);
     } catch {
       // transient — next tick retries
     }

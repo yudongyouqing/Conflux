@@ -70,11 +70,13 @@ export function listSessions(
 ): SessionSummary[] {
   markStaleSessions(db);
   const status = opts.status ?? "active";
-  // MCP placeholder (temp) nodes are UUID noise — hidden from every listing.
+  // Active MCP placeholders represent live Codex/Claude sessions. Hide only
+  // stale or ended placeholders, which are UUID noise after their process exits.
+  const tempVisibility = `(COALESCE(s.metadata, '') NOT LIKE '%"temp":true%' OR s.status = 'active')`;
   const where =
     status === "all"
-      ? `WHERE COALESCE(s.metadata, '') NOT LIKE '%"temp":true%'`
-      : `WHERE s.status = ? AND COALESCE(s.metadata, '') NOT LIKE '%"temp":true%'`;
+      ? `WHERE ${tempVisibility}`
+      : `WHERE s.status = ? AND ${tempVisibility}`;
   const params: string[] = status === "all" ? [] : [status];
   const rows = db
     .prepare(

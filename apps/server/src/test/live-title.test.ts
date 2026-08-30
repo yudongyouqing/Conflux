@@ -3,7 +3,13 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { handleHookEvent, readCustomTitle, deleteUnreferencedSession } from "../core/live.js";
+import {
+  handleHookEvent,
+  readCustomTitle,
+  deleteUnreferencedSession,
+  getRuntimePid,
+  findSessionByRuntimePid,
+} from "../core/live.js";
 import { getSession, registerSession } from "../core/sessions.js";
 import { askSession, listMessages } from "../core/messages.js";
 import { makeDb } from "./helpers.js";
@@ -214,6 +220,53 @@ describe("deleteUnreferencedSession", () => {
     registerSession(db, { id: "temp-uuid-1", name: "temp" });
     assert.equal(deleteUnreferencedSession(db, "temp-uuid-1"), true);
     assert.equal(getSession(db, "temp-uuid-1"), null);
+  });
+});
+
+describe("Codex runtime identity", () => {
+  it("reads the Codex PID override and adopts a matching runtime session", () => {
+    const pid = 515151;
+    process.env.MUILTCHAT_CODEX_PID = String(pid);
+    try {
+      assert.equal(getRuntimePid("codex"), pid);
+    } finally {
+      delete process.env.MUILTCHAT_CODEX_PID;
+    }
+
+    registerSession(db, {
+      id: "codex-runtime-session",
+      name: "codex",
+      description: "Codex session",
+      metadata: { runtime: "codex", runtime_pid: pid },
+    });
+    registerSession(db, {
+      id: "codex-runtime-temp",
+      name: "temp",
+      description: "Codex session (auto-registered)",
+      metadata: { temp: true, runtime: "codex", runtime_pid: pid },
+    });
+    assert.equal(
+      findSessionByRuntimePid(db, "codex", pid, "codex-runtime-temp")?.id,
+      "codex-runtime-session"
+    );
+  });
+
+  it("keeps runtime matching exact when Claude and Codex share a PID value", () => {
+    const pid = 515152;
+    registerSession(db, {
+      id: "codex-runtime-session",
+      name: "codex",
+      description: "Codex session",
+      metadata: { runtime: "codex", runtime_pid: pid },
+    });
+    registerSession(db, {
+      id: "claude-runtime-session",
+      name: "claude",
+      description: "Claude session",
+      metadata: { runtime: "claude", runtime_pid: pid },
+    });
+    assert.equal(findSessionByRuntimePid(db, "codex", pid)?.id, "codex-runtime-session");
+    assert.equal(findSessionByRuntimePid(db, "claude", pid)?.id, "claude-runtime-session");
   });
 });
 

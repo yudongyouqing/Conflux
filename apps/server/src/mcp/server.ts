@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { v4 as uuidv4 } from "uuid";
+import type { RuntimeId } from "@muiltchat/shared";
 
 import { resolveConfig, type Scope } from "../config.js";
 import { openDb, type DB } from "../core/db.js";
@@ -29,7 +30,11 @@ import {
 import { getGraph } from "../core/graph.js";
 import { mergeSessionMeta } from "../core/sessions.js";
 import { logAudit } from "../core/audit.js";
-import { getClaudePid, findSessionByClaudePid, deleteUnreferencedSession } from "../core/live.js";
+import {
+  getRuntimePid,
+  findSessionByRuntimePid,
+  deleteUnreferencedSession,
+} from "../core/live.js";
 import { wakeOfflineSession } from "../core/runtime-agents.js";
 import { logger } from "../log.js";
 
@@ -63,11 +68,22 @@ export interface McpServerOptions {
   overrideDataDir?: string;
 }
 
+function detectMcpRuntime(): { runtime: RuntimeId; pid: number | null } {
+  const configured = process.env.MUILTCHAT_AGENT_RUNTIME;
+  if (configured === "claude" || configured === "codex") {
+    return { runtime: configured, pid: getRuntimePid(configured) };
+  }
+  const codexPid = getRuntimePid("codex");
+  if (codexPid !== null) return { runtime: "codex", pid: codexPid };
+  return { runtime: "claude", pid: getRuntimePid("claude") };
+}
+
 export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
   const config = resolveConfig(opts.scope ?? "global", opts.overrideDataDir);
   const db: DB = openDb(config);
   let sessionId = uuidv4();
   const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  let identity = detectMcpRuntime();
 
   // Auto-register immediately so the session is visible in the graph
   // and available for cross-session communication without waiting for
@@ -89,16 +105,24 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
   registerSession(db, {
     id: sessionId,
     name: dirName,
-    description: "Claude Code session (auto-registered)",
+    description: `${identity.runtime === "codex" ? "Codex" : "Claude Code"} session (auto-registered)`,
     project_dir: projectDir,
-    metadata: { temp: true, ...agentTag },
+    metadata: {
+      temp: true,
+      ...agentTag,
+      runtime: identity.runtime,
+      ...(identity.pid !== null ? { runtime_pid: identity.pid } : {}),
+    },
   });
 
-  logger.info({ sessionId, dataDir: config.dataDir, scope: config.scope }, "mcp starting");
+  logger.info(
+    { sessionId, runtime: identity.runtime, runtimePid: identity.pid, dataDir: config.dataDir, scope: config.scope },
+    "mcp starting"
+  );
 
-  // If the Claude Code hooks integration registered a session for this same
-  // Claude Code process (matched by pid), adopt it: our tools then act as
-  // that conversation-id-keyed session, and the temp uuid node is removed.
+  // If the CLI integration registered a session for this same runtime
+  // process (matched by pid), adopt it: our tools then act as that
+  // conversation-id-keyed session, and the temp uuid node is removed.
   // Best-effort — without hooks installed we keep the temp node.
   //
   // Re-resolved on every beat AND every tool call (no one-shot latch): a
@@ -110,19 +134,23 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
     // Explicit identity first: a headless auto-answer wake tells us which
     // conversation it is answering FOR (newer claude versions don't fire
     // registering hooks in -p mode, so pid/pin adoption may find nothing).
+    if (identity.pid === null) identity = detectMcpRuntime();
     const assume = process.env.MUILTCHAT_ASSUME_SESSION;
-    const pid = getClaudePid();
-    const pinned = pid === null ? null : getSetting(db, `claude-current:${pid}`);
+    const pid = getRuntimePid(identity.runtime);
+    const pinned = pid === null ? null : getSetting(db, `${identity.runtime}-current:${pid}`);
+    if (pid !== null) {
+      mergeSessionMeta(db, sessionId, { runtime: identity.runtime, runtime_pid: pid });
+    }
     const target =
       (assume ? getSession(db, assume) : null) ??
       (pinned ? getSession(db, pinned) : null) ??
-      (pid === null ? null : findSessionByClaudePid(db, pid));
+      (pid === null ? null : findSessionByRuntimePid(db, identity.runtime, pid, sessionId));
     if (!target) return; // hook hasn't fired yet — retry on the next tick
     if (target.id === sessionId) return;
     const oldId = sessionId;
     sessionId = target.id;
     deleteUnreferencedSession(db, oldId); // no-op for referenced/hook rows
-    logger.info({ claudePid: pid, sessionId, oldId }, "mcp adopted hook-registered session");
+    logger.info({ runtime: identity.runtime, runtimePid: pid, sessionId, oldId }, "mcp adopted hook-registered session");
   };
   tryAdopt();
 
