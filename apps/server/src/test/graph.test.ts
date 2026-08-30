@@ -31,6 +31,29 @@ test("getGraph unions sessions and agents, no duplicate agent nodes", () => {
   assert.ok(!sessionTyped.some((n) => n.id.startsWith("agent-")), "agent-% filtered out of session nodes");
 });
 
+test("getGraph shows active MCP placeholders but hides stale ones", () => {
+  registerSession(db, {
+    id: "graph-codex-live-temp",
+    name: "muiltchat",
+    description: "Codex session (auto-registered)",
+    metadata: { temp: true, runtime: "codex", runtime_pid: 22345 },
+  });
+  registerSession(db, {
+    id: "graph-codex-stale-temp",
+    name: "muiltchat",
+    description: "Codex session (auto-registered)",
+    metadata: { temp: true, runtime: "codex", runtime_pid: 22346 },
+  });
+  db.prepare(`UPDATE sessions SET last_heartbeat_at = ? WHERE id = ?`).run(
+    new Date(Date.now() - 3600_000).toISOString(),
+    "graph-codex-stale-temp"
+  );
+
+  const g = getGraph(db, { status: "all" });
+  assert.ok(g.nodes.some((n) => n.id === "graph-codex-live-temp"));
+  assert.ok(!g.nodes.some((n) => n.id === "graph-codex-stale-temp"));
+});
+
 test("agent node carries conversation_count", () => {
   createConversation(db, { agent_id: agent.id, initiated_by: "test", title: "t" });
   const g = getGraph(db, { status: "all" });

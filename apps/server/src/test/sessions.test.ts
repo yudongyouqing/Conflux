@@ -47,6 +47,29 @@ test("listSessions carries context_count and pending_inbox", () => {
   assert.equal(a.pending_inbox, 1);
 });
 
+test("listSessions shows active MCP placeholders but hides stale ones", () => {
+  registerSession(db, {
+    id: "codex-live-temp",
+    name: "muiltchat",
+    description: "Codex session (auto-registered)",
+    metadata: { temp: true, runtime: "codex", runtime_pid: 12345 },
+  });
+  registerSession(db, {
+    id: "codex-stale-temp",
+    name: "muiltchat",
+    description: "Codex session (auto-registered)",
+    metadata: { temp: true, runtime: "codex", runtime_pid: 12346 },
+  });
+  db.prepare(`UPDATE sessions SET last_heartbeat_at = ? WHERE id = ?`).run(
+    new Date(Date.now() - 3600_000).toISOString(),
+    "codex-stale-temp"
+  );
+
+  const all = listSessions(db, { status: "all" });
+  assert.ok(all.some((s) => s.id === "codex-live-temp"));
+  assert.ok(!all.some((s) => s.id === "codex-stale-temp"));
+});
+
 test("endSession marks ended", () => {
   registerSession(db, { id: "bye", name: "bye" });
   endSession(db, "bye");
@@ -139,4 +162,3 @@ test("pruneAbandonedSessions claudePid mode reaps the /resume-away predecessor i
   assert.equal(getSession(db, "abandoned-id"), null, "same-pid unnamed predecessor is reaped");
   assert.ok(getSession(db, "current-id"), "the session being registered is kept");
 });
-
