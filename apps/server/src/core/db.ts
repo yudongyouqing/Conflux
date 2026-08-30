@@ -3,10 +3,15 @@ import { existsSync, statSync } from "fs";
 import { join } from "path";
 import { Config } from "../config.js";
 import { logger } from "../log.js";
+import {
+  parseIdentitySource,
+  parseRuntimePid,
+  parseSessionRuntime,
+} from "./session-identity.js";
 
 export type DB = Database.Database;
 
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 // Track the checkpoint timer in a module-scoped variable (avoids touching the
 // globalThis type signature).
@@ -22,7 +27,10 @@ CREATE TABLE IF NOT EXISTS sessions (
   status TEXT NOT NULL DEFAULT 'active',
   created_at TEXT NOT NULL,
   last_heartbeat_at TEXT NOT NULL,
-  metadata TEXT
+  metadata TEXT,
+  runtime TEXT,
+  identity_source TEXT,
+  runtime_pid INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
@@ -204,30 +212,106 @@ function migrate(db: DB): void {
   const current = db.pragma("user_version", { simple: true }) as number;
   if (current >= SCHEMA_VERSION) return;
 
-  db.exec(SCHEMA_SQL);
-  // CREATE TABLE IF NOT EXISTS cannot extend existing tables — best-effort
-  // column additions for DBs created before v7.
-  const ensureColumn = (table: string, col: string, ddl: string) => {
-    const cols = db.pragma(`table_info(${table})`) as { name: string }[];
-    if (!cols.some((c) => c.name === col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
-  };
-  ensureColumn("runtime_agents", "interval_min", "interval_min INTEGER");
-  ensureColumn("runtime_agents", "last_scheduled_run", "last_scheduled_run TEXT");
-  // v8: edge-centric channels — messages link to their channel edge, and
-  // reply-created reverse edges are collapsed (replies stay on the channel)
-  ensureColumn("messages", "edge_id", "edge_id INTEGER");
-  db.exec(`
-    INSERT OR IGNORE INTO edges (from_session, to_session, weight, last_interact_at)
-      SELECT from_session, to_session, COUNT(*), MAX(COALESCE(replied_at, created_at))
-      FROM messages GROUP BY from_session, to_session;
-    UPDATE messages SET edge_id = (
-      SELECT e.rowid FROM edges e
-      WHERE e.from_session = messages.from_session AND e.to_session = messages.to_session
-    ) WHERE edge_id IS NULL;
-  `);
-  collapseReplyEdges(db);
-  db.pragma(`user_version = ${SCHEMA_VERSION}`);
+  const runMigration = db.transaction(() => {
+    db.exec(SCHEMA_SQL);
+    // CREATE TABLE IF NOT EXISTS cannot extend existing tables — add columns
+    // for databases created before the column was introduced.
+    const ensureColumn = (table: string, col: string, ddl: string) => {
+      const cols = db.pragma(`table_info(${table})`) as { name: string }[];
+      if (!cols.some((c) => c.name === col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+    };
+    ensureColumn("runtime_agents", "interval_min", "interval_min INTEGER");
+    ensureColumn("runtime_agents", "last_scheduled_run", "last_scheduled_run TEXT");
+    ensureColumn("sessions", "runtime", "runtime TEXT");
+    ensureColumn("sessions", "identity_source", "identity_source TEXT");
+    ensureColumn("sessions", "runtime_pid", "runtime_pid INTEGER");
+    // v8: edge-centric channels — messages link to their channel edge, and
+    // reply-created reverse edges are collapsed (replies stay on the channel)
+    ensureColumn("messages", "edge_id", "edge_id INTEGER");
+    db.exec(`
+      INSERT OR IGNORE INTO edges (from_session, to_session, weight, last_interact_at)
+        SELECT from_session, to_session, COUNT(*), MAX(COALESCE(replied_at, created_at))
+        FROM messages GROUP BY from_session, to_session;
+      UPDATE messages SET edge_id = (
+        SELECT e.rowid FROM edges e
+        WHERE e.from_session = messages.from_session AND e.to_session = messages.to_session
+      ) WHERE edge_id IS NULL;
+    `);
+    collapseReplyEdges(db);
+    backfillSessionIdentity(db);
+    db.pragma(`user_version = ${SCHEMA_VERSION}`);
+  });
+  runMigration();
   logger.info({ from: current, to: SCHEMA_VERSION }, "db migrated");
+}
+
+function backfillSessionIdentity(db: DB): void {
+  const rows = db
+    .prepare(`SELECT id, metadata, runtime, identity_source, runtime_pid FROM sessions`)
+    .all() as {
+    id: string;
+    metadata: string | null;
+    runtime: unknown;
+    identity_source: unknown;
+    runtime_pid: unknown;
+  }[];
+  const update = db.prepare(
+    `UPDATE sessions SET
+       runtime = ?,
+       identity_source = ?,
+       runtime_pid = ?
+     WHERE id = ?`
+  );
+
+  for (const row of rows) {
+    const storedRuntime = parseSessionRuntime(row.runtime);
+    const storedIdentitySource = parseIdentitySource(row.identity_source);
+    const storedRuntimePid = parseRuntimePid(row.runtime_pid);
+    let runtime = storedRuntime;
+    let identitySource = storedIdentitySource;
+    let runtimePid = storedRuntimePid;
+
+    if (row.metadata) {
+      let meta: Record<string, unknown>;
+      try {
+        const parsed: unknown = JSON.parse(row.metadata);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          throw new Error("session metadata is not a JSON object");
+        }
+        meta = parsed as Record<string, unknown>;
+      } catch (err) {
+        logger.warn(
+          { err, sessionId: row.id },
+          "skipping malformed session metadata during identity migration"
+        );
+        if (
+          row.runtime !== runtime ||
+          row.identity_source !== identitySource ||
+          row.runtime_pid !== runtimePid
+        ) {
+          update.run(runtime, identitySource, runtimePid, row.id);
+        }
+        continue;
+      }
+
+      const legacyClaudePid = parseRuntimePid(meta.claude_pid);
+      runtime = runtime ?? parseSessionRuntime(meta.runtime);
+      if (runtime === null && legacyClaudePid !== null) runtime = "claude";
+      identitySource = identitySource ?? parseIdentitySource(meta.identity_source);
+      runtimePid =
+        runtimePid ??
+        parseRuntimePid(meta.runtime_pid) ??
+        (runtime === "claude" ? legacyClaudePid : null);
+    }
+
+    if (
+      row.runtime !== runtime ||
+      row.identity_source !== identitySource ||
+      row.runtime_pid !== runtimePid
+    ) {
+      update.run(runtime, identitySource, runtimePid, row.id);
+    }
+  }
 }
 
 /**
