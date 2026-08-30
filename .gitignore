@@ -13,3 +13,4 @@ Thumbs.db
 *.tsbuildinfo
 data-*-test*/
 .electron-dev/
+.worktrees/
