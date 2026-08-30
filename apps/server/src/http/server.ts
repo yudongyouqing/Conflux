@@ -6,7 +6,12 @@ import fastifyStatic from "@fastify/static";
 import { existsSync } from "fs";
 import { resolve } from "path";
 
-import { resolveConfig, type Scope, DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT } from "../config.js";
+import {
+  resolveConfig,
+  resolveHttpHost,
+  resolveHttpPort,
+  type Scope,
+} from "../config.js";
 import { openDb, type DB } from "../core/db.js";
 import {
   registerSession,
@@ -85,8 +90,11 @@ export interface HttpServerOptions {
 export async function startHttpServer(opts: HttpServerOptions = {}): Promise<FastifyInstance> {
   const config = resolveConfig(opts.scope ?? "global", opts.overrideDataDir);
   const db: DB = openDb(config);
-  const host = opts.host ?? DEFAULT_HTTP_HOST;
-  const port = opts.port ?? DEFAULT_HTTP_PORT;
+  const host = resolveHttpHost(opts.host);
+  const port = resolveHttpPort(opts.port);
+  const webDist = process.env.MUILTCHAT_WEB_DIST
+    ? resolve(process.env.MUILTCHAT_WEB_DIST)
+    : resolve(__dirname, "../../../web/dist");
 
   // ---- Web console identity ----
   // The browser UI acts as one fixed pseudo-session, so Drawer-originated
@@ -171,10 +179,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   // CORS — allow the Vite dev server (and any local client) to call the API.
   await app.register(cors, { origin: true });
 
-  // Serve the built frontend (apps/web/dist/) if it exists.
-  // __dirname is apps/server/{src,dist}/http — four levels up reaches the repo
-  // root, then into apps/web/dist.
-  const webDist = resolve(__dirname, "../../../../apps/web/dist");
+  // Serve the built frontend when either the packaged or repository path exists.
   if (existsSync(webDist)) {
     await app.register(fastifyStatic, {
       root: webDist,
@@ -1022,7 +1027,10 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   app.get("/healthz", {}, async (_req, reply) => reply.send({ ok: true }));
 
   await app.listen({ host, port });
-  logger.info({ host, port, dataDir: config.dataDir }, "http server listening");
+  logger.info(
+    { webDist, host, port, dataDir: config.dataDir },
+    "http server listening"
+  );
 
   return app;
 }

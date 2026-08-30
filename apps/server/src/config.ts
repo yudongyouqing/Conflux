@@ -17,8 +17,9 @@ export interface Config {
  * Resolve the muiltchat data directory.
  *
  * Precedence (highest first):
- *   1. `MUILTCHAT_HOME` env var (always wins if set & non-empty)
- *   2. `$CLAUDE_PROJECT_DIR/.muiltchat` — only when scope === "project"
+ *   1. Explicit `override` argument
+ *   2. `MUILTCHAT_HOME` env var (when set & non-empty)
+ *   3. `$CLAUDE_PROJECT_DIR/.muiltchat` — only when scope === "project"
  *      AND that directory already exists OR cwd contains a `.muiltchat`
  *      marker (avoids accidentally creating project-scoped dirs in random cwds).
  *   3. `~/.muiltchat` (global default)
@@ -79,6 +80,22 @@ function finalize(dataDir: string, scope: Scope): Config {
 /** Default HTTP server settings. */
 export const DEFAULT_HTTP_HOST = "127.0.0.1";
 export const DEFAULT_HTTP_PORT = 9527;
+
+export function resolveHttpHost(override?: string): string {
+  const envHost = process.env.MUILTCHAT_HOST?.trim();
+  return envHost || override || DEFAULT_HTTP_HOST;
+}
+
+export function resolveHttpPort(override?: number): number {
+  const envPort = process.env.MUILTCHAT_PORT?.trim();
+  if (!envPort) return override ?? DEFAULT_HTTP_PORT;
+
+  const port = Number(envPort);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error(`invalid MUILTCHAT_PORT: ${envPort}`);
+  }
+  return port;
+}
 
 /** Heartbeat staleness threshold in ms (2 minutes; MCP processes beat every 30s). */
 export const STALE_AFTER_MS = 2 * 60 * 1000;
