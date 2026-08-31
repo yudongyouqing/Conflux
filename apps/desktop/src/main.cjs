@@ -10,24 +10,39 @@ const {
   stopChild,
   WEB_URL,
 } = require("./dev-services.cjs");
+const {
+  PRODUCTION_HOST,
+  PRODUCTION_PORT,
+  startProductionService,
+} = require("./production-services.cjs");
+const { assertPortAvailable } = require("./port-diagnostics.cjs");
+const { resolveRuntimePaths } = require("./runtime-paths.cjs");
 const { configureElectronRuntime } = require("./runtime-config.cjs");
 const { createTray } = require("./tray.cjs");
 const { externalLinkDecision } = require("./security.cjs");
 
 const repoRoot = path.resolve(__dirname, "../../..");
+const PRODUCTION_URL = `http://${PRODUCTION_HOST}:${PRODUCTION_PORT}/`;
 const children = [];
 let mainWindow;
 let tray;
 let isQuitting = false;
 let servicesStopped = false;
 let focusWhenReady = false;
+const startupController = new AbortController();
 
 function log(message) {
   process.stderr.write(`[desktop] ${message}\n`);
 }
 
 log(`boot cwd=${process.cwd()} repoRoot=${repoRoot}`);
-configureElectronRuntime(app, repoRoot);
+const runtime = configureElectronRuntime(app, repoRoot);
+
+function throwIfStartupAborted(signal) {
+  if (signal?.aborted) {
+    throw new Error("Conflux startup was aborted");
+  }
+}
 
 function focusMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) {
@@ -54,39 +69,65 @@ function routeNavigation(event, url, appOrigin) {
   if (decision.action === "external") openExternal(decision.url);
 }
 
-async function startDevServices() {
+function recordChild(spec, child) {
+  child.stdout?.on("data", (chunk) => process.stderr.write(`[${spec.name}] ${chunk}`));
+  child.stderr?.on("data", (chunk) => process.stderr.write(`[${spec.name}] ${chunk}`));
+  child.once("error", (error) => log(`${spec.name} error: ${error.message}`));
+  child.once("exit", (code, signal) =>
+    log(`${spec.name} exit code=${code ?? "null"} signal=${signal ?? "null"}`)
+  );
+
+  const record = {
+    name: spec.name,
+    pid: child.pid ?? null,
+    startedAt: new Date().toISOString(),
+    child,
+  };
+  log(`${record.name} pid=${record.pid ?? "unknown"} startedAt=${record.startedAt}`);
+  children.push(record);
+  return child;
+}
+
+async function startDevServices(signal) {
   const specs = createDevServiceSpecs(repoRoot);
   await assertDevServicePorts(specs);
+  throwIfStartupAborted(signal);
   const processes = [];
 
   for (const spec of specs) {
+    throwIfStartupAborted(signal);
     log(`spawning ${spec.name}: ${spec.command} ${spec.args.join(" ")}`);
     const child = spawn(
       spec.command,
       spec.args,
       createDevServiceSpawnOptions(spec.cwd, process.env)
     );
-    child.stdout.on("data", (chunk) => process.stderr.write(`[${spec.name}] ${chunk}`));
-    child.stderr.on("data", (chunk) => process.stderr.write(`[${spec.name}] ${chunk}`));
-    child.once("error", (error) => log(`${spec.name} error: ${error.message}`));
-    child.once("exit", (code, signal) =>
-      log(`${spec.name} exit code=${code ?? "null"} signal=${signal ?? "null"}`)
-    );
-    const record = {
-      name: spec.name,
-      pid: child.pid ?? null,
-      startedAt: new Date().toISOString(),
-      child,
-    };
-    log(`${record.name} pid=${record.pid ?? "unknown"} startedAt=${record.startedAt}`);
-    children.push(record);
-    processes.push(child);
+    processes.push(recordChild(spec, child));
   }
 
   return { specs, processes };
 }
 
-function createWindow() {
+async function startProductionServiceOwned(signal) {
+  const paths = resolveRuntimePaths({
+    isPackaged: true,
+    resourcesPath: process.resourcesPath,
+    appPath: app.getAppPath(),
+  });
+  await assertPortAvailable(PRODUCTION_PORT, PRODUCTION_HOST);
+  throwIfStartupAborted(signal);
+
+  const { child } = await startProductionService(paths, {
+    signal,
+    spawnFn: (command, args, options) => {
+      const ownedChild = spawn(command, args, options);
+      return recordChild({ name: "server" }, ownedChild);
+    },
+  });
+  return { webUrl: PRODUCTION_URL, processes: [child] };
+}
+
+function createWindow(webUrl) {
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -100,14 +141,17 @@ function createWindow() {
     },
   });
 
-  const appOrigin = new URL(WEB_URL).origin;
+  const appOrigin = new URL(webUrl).origin;
   mainWindow.webContents.on("will-navigate", (event, url) =>
+    routeNavigation(event, url, appOrigin)
+  );
+  mainWindow.webContents.on("will-redirect", (event, url) =>
     routeNavigation(event, url, appOrigin)
   );
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     const decision = externalLinkDecision(url, appOrigin);
     if (decision.action === "external") openExternal(decision.url);
-    return { action: decision.action === "allow" ? "allow" : "deny" };
+    return { action: "deny" };
   });
   mainWindow.on("close", (event) => {
     if (isQuitting) return;
@@ -125,17 +169,25 @@ function createWindow() {
     }
     mainWindow.show();
   });
-  return mainWindow.loadURL(WEB_URL);
+  return mainWindow.loadURL(webUrl);
 }
 
-async function start() {
-  log("starting development services");
-  const { specs, processes } = await startDevServices();
-  await Promise.all(
-    specs.map((spec, index) => waitForService(spec, processes[index]))
-  );
-  log("development services ready");
-  await createWindow();
+async function start(signal) {
+  const services = runtime.mode === "production"
+    ? await startProductionServiceOwned(signal)
+    : await (async () => {
+        log("starting development services");
+        const { specs, processes } = await startDevServices(signal);
+        await Promise.all(
+          specs.map((spec, index) =>
+            waitForService(spec, processes[index], { signal })
+          )
+        );
+        return { webUrl: WEB_URL };
+      })();
+  throwIfStartupAborted(signal);
+  log(`${runtime.mode} services ready`);
+  await createWindow(services.webUrl);
   log("window loaded");
 }
 
@@ -159,8 +211,9 @@ if (!hasSingleInstanceLock) {
       showWindow: focusMainWindow,
       quit: () => app.quit(),
     });
-    return start();
+    return start(startupController.signal);
   }).catch((error) => {
+    if (isQuitting || startupController.signal.aborted) return;
     const message = error instanceof Error ? error.message : String(error);
     log(`startup failed: ${message}`);
     dialog.showErrorBox("muiltchat 启动失败", message);
@@ -170,6 +223,7 @@ if (!hasSingleInstanceLock) {
   app.on("before-quit", () => {
     if (isQuitting) return;
     isQuitting = true;
+    startupController.abort();
     stopDevServices();
     tray?.destroy();
     tray = undefined;

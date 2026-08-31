@@ -122,9 +122,15 @@ function waitForHttp(
 function waitForService(
   spec,
   child,
-  { timeoutMs = 30_000, intervalMs = 100, exitProbeTimeoutMs = 250 } = {}
+  {
+    timeoutMs = 30_000,
+    intervalMs = 100,
+    exitProbeTimeoutMs = 250,
+    signal,
+  } = {}
 ) {
   const controller = new AbortController();
+  const exitProbeController = new AbortController();
 
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -133,7 +139,9 @@ function waitForService(
     const cleanup = () => {
       child.removeListener("error", onError);
       child.removeListener("exit", onExit);
+      signal?.removeEventListener("abort", onAbort);
       controller.abort();
+      exitProbeController.abort();
     };
 
     const finish = (callback, value) => {
@@ -148,16 +156,23 @@ function waitForService(
       finish(reject, new Error(`${spec.name} failed to start: ${message}`));
     };
 
-    const onExit = (code, signal) => {
+    const onAbort = () => {
+      finish(reject, new Error(`Aborted waiting for ${spec.name}`));
+    };
+
+    const onExit = (code, exitSignal) => {
       childExited = true;
       controller.abort();
       waitForHttp(spec.url, {
         timeoutMs: exitProbeTimeoutMs,
         intervalMs: Math.min(intervalMs, 25),
+        signal: exitProbeController.signal,
       })
         .then(() => finish(resolve))
         .catch(() => {
-          const reason = signal ? `signal ${signal}` : `code ${code ?? "unknown"}`;
+          const reason = exitSignal
+            ? `signal ${exitSignal}`
+            : `code ${code ?? "unknown"}`;
           finish(
             reject,
             new Error(`${spec.name} exited before becoming ready (${reason})`)
@@ -167,6 +182,12 @@ function waitForService(
 
     child.once("error", onError);
     child.once("exit", onExit);
+
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
 
     if (child.exitCode !== null && child.exitCode !== undefined) {
       onExit(child.exitCode, null);

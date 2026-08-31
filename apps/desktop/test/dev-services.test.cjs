@@ -180,3 +180,26 @@ test("waitForService rejects promptly when its child exits before readiness", as
     (error) => error instanceof Error && error.message.includes("web exited before becoming ready")
   );
 });
+
+test("waitForService rejects when startup is aborted", async () => {
+  const child = new EventEmitter();
+  child.exitCode = null;
+  child.killed = false;
+  const controller = new AbortController();
+  const spec = {
+    name: "web",
+    url: "http://127.0.0.1:1/never-ready",
+  };
+
+  const pending = waitForService(spec, child, {
+    timeoutMs: 40,
+    intervalMs: 5,
+    signal: controller.signal,
+  });
+  controller.abort();
+
+  await assert.rejects(
+    pending,
+    (error) => error instanceof Error && error.message === "Aborted waiting for web"
+  );
+});
