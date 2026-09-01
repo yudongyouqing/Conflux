@@ -94,6 +94,14 @@ test("HTTP data routes import and export a validated bundle", async () => {
       payload: { bundle: { ...bundle, format: "invalid" } },
     });
     assert.equal(invalid.statusCode, 400, invalid.body);
+    assert.equal(JSON.parse(invalid.body).code, "BAD_REQUEST");
+
+    const notFound = await app.inject({
+      method: "GET",
+      url: "/route-that-does-not-exist",
+    });
+    assert.equal(notFound.statusCode, 404, notFound.body);
+    assert.equal(JSON.parse(notFound.body).code, "NOT_FOUND");
   } finally {
     if (app) await app.close();
     if (previousPort === undefined) delete process.env.MUILTCHAT_PORT;

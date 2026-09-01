@@ -12,7 +12,13 @@ import {
   resolveHttpPort,
   type Scope,
 } from "../config.js";
-import { openDb, type DB } from "../core/db.js";
+import {
+  openDb,
+  publicError,
+  stopWalCheckpoint,
+  type DB,
+  type PublicErrorCode,
+} from "../core/db.js";
 import {
   registerSession,
   listSessions,
@@ -168,6 +174,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
     clearInterval(abandonedSweep);
     clearInterval(scheduleTimer);
     clearInterval(livenessTimer);
+    stopWalCheckpoint(db);
     if (db.open) db.close();
   };
   app.addHook("onClose", async () => {
@@ -233,26 +240,46 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
     err: unknown,
     sid?: string,
     action?: string,
-    args?: Record<string, unknown>
+    args?: Record<string, unknown>,
+    statusOverride?: number
   ) {
-    const message = err instanceof Error ? err.message : String(err);
+    const mapped = publicError(err, { dataDir: config.dataDir, port });
+    const status = statusOverride ?? publicStatus(err, mapped.code);
+    logger.error(
+      { err, sid, action, code: mapped.code, status },
+      "http request failed"
+    );
     if (sid && action) {
-      logAudit(db, {
-        caller_session: sid,
-        interface: "http",
-        action,
-        args: args ?? {},
-        result: { error: message },
-      });
+      try {
+        logAudit(db, {
+          caller_session: sid,
+          interface: "http",
+          action,
+          args: args ?? {},
+          result: { code: mapped.code },
+        });
+      } catch (auditError) {
+        logger.warn({ err: auditError, action }, "failed to audit HTTP error");
+      }
     }
-    const code =
-      message.includes("not owner") || message.includes("not the addressee")
-        ? 403
-        : message.includes("not found") || message.includes("missing") || message.includes("cannot ask yourself")
-          ? 400
-          : 500;
-    return reply.code(code).send({ error: message });
+    return reply.code(status).send({ ...mapped, error: mapped.message });
   }
+
+  function sendHttpError(reply: FastifyReply, status: number, message: string) {
+    const mapped = publicError(httpError(status, message), {
+      dataDir: config.dataDir,
+      port,
+    });
+    return reply.code(status).send({ ...mapped, error: mapped.message });
+  }
+
+  app.setNotFoundHandler((req, reply) =>
+    sendError(reply, httpError(404, `route not found: ${req.method} ${req.url}`))
+  );
+  app.setErrorHandler((err, _req, reply) => {
+    if (reply.sent) return;
+    return sendError(reply, err);
+  });
 
   // POST /sessions/register
   app.post<{ Body: RegisterBody }>("/sessions/register", {
@@ -374,7 +401,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
         tags: req.body.tags,
       });
       audit(sid, "update_context", { id: req.params.id }, entry ? { id: entry.id } : null);
-      if (!entry) return reply.code(404).send({ error: "not found" });
+      if (!entry) return sendHttpError(reply, 404, "not found");
       return reply.send({ entry });
     } catch (err) {
       return sendError(reply, err, sid, "update_context");
@@ -387,7 +414,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
     try {
       const ok = deleteContext(db, Number(req.params.id), sid);
       audit(sid, "delete_context", { id: req.params.id }, { ok });
-      if (!ok) return reply.code(404).send({ error: "not found" });
+      if (!ok) return sendHttpError(reply, 404, "not found");
       return reply.send({ deleted: true });
     } catch (err) {
       return sendError(reply, err, sid, "delete_context");
@@ -526,7 +553,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   app.get<{ Params: { id: string } }>("/agents/:id", {}, async (req, reply) => {
     try {
       const agent = getAgent(db, Number(req.params.id));
-      if (!agent) return reply.code(404).send({ error: "agent not found" });
+      if (!agent) return sendHttpError(reply, 404, "agent not found");
       return reply.send({ agent });
     } catch (err) {
       return sendError(reply, err);
@@ -563,7 +590,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
         model_config: req.body.model_config as ModelConfig | undefined,
         description: req.body.description,
       });
-      if (!agent) return reply.code(404).send({ error: "agent not found" });
+      if (!agent) return sendHttpError(reply, 404, "agent not found");
       return reply.send({ agent });
     } catch (err) {
       return sendError(reply, err);
@@ -574,7 +601,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   app.delete<{ Params: { id: string } }>("/agents/:id", {}, async (req, reply) => {
     try {
       const ok = deleteAgent(db, Number(req.params.id));
-      if (!ok) return reply.code(404).send({ error: "agent not found" });
+      if (!ok) return sendHttpError(reply, 404, "agent not found");
       return reply.send({ deleted: true });
     } catch (err) {
       return sendError(reply, err);
@@ -598,21 +625,23 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   }, async (req, reply) => {
     const agentId = Number(req.params.id);
     const agent = getAgent(db, agentId);
-    if (!agent) return reply.code(404).send({ error: "agent not found" });
+    if (!agent) return sendHttpError(reply, 404, "agent not found");
 
     if (!hasApiKey(agent.model_config.provider)) {
       const entry = providerRegistry[agent.model_config.provider];
       const envVar = entry?.envVar ?? `${agent.model_config.provider.toUpperCase()}_API_KEY`;
-      return reply.code(503).send({
-        error: `${agent.model_config.provider} API key not configured. Set ${envVar} environment variable before starting the server.`,
-      });
+      return sendHttpError(
+        reply,
+        503,
+        `${agent.model_config.provider} API key not configured. Set ${envVar} environment variable before starting the server.`
+      );
     }
 
     // Create or reuse conversation
     let conv;
     if (req.body.conversation_id) {
       conv = getConversation(db, req.body.conversation_id);
-      if (!conv) return reply.code(404).send({ error: "conversation not found" });
+      if (!conv) return sendHttpError(reply, 404, "conversation not found");
     } else {
       conv = createConversation(db, {
         agent_id: agentId,
@@ -704,7 +733,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   app.delete<{ Params: { id: string } }>("/conversations/:id", {}, async (req, reply) => {
     try {
       const ok = deleteConversation(db, Number(req.params.id));
-      if (!ok) return reply.code(404).send({ error: "conversation not found" });
+      if (!ok) return sendHttpError(reply, 404, "conversation not found");
       return reply.send({ deleted: true });
     } catch (err) {
       return sendError(reply, err);
@@ -762,9 +791,9 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
     try {
       const id = req.params.id;
       const session = getSession(db, id);
-      if (!session) return reply.code(404).send({ error: "session not found" });
+      if (!session) return sendHttpError(reply, 404, "session not found");
       if (id.startsWith("agent-")) {
-        return reply.code(400).send({ error: "internal agents have no terminal" });
+        return sendHttpError(reply, 400, "internal agents have no terminal");
       }
       let runtime: "claude" | "codex" = "claude";
       try {
@@ -807,7 +836,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   // GET /web/peer-messages?peer=<id> — two-way flow between the web console and a session
   app.get<{ Querystring: { peer?: string } }>("/web/peer-messages", {}, async (req, reply) => {
     const peer = req.query.peer;
-    if (!peer) return reply.code(400).send({ error: "missing peer query param" });
+    if (!peer) return sendHttpError(reply, 400, "missing peer query param");
     try {
       const messages = listPeerMessages(db, WEB_CONSOLE_ID, peer);
       return reply.send({ messages });
@@ -820,7 +849,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   // (legacy pair view; the edge channel view below is the primary)
   app.get<{ Querystring: { a?: string; b?: string } }>("/messages/peers", {}, async (req, reply) => {
     const { a, b } = req.query;
-    if (!a || !b) return reply.code(400).send({ error: "missing a/b query params" });
+    if (!a || !b) return sendHttpError(reply, 400, "missing a/b query params");
     try {
       const messages = listPeerMessages(db, a, b);
       return reply.send({ messages });
@@ -836,7 +865,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
     try {
       const edgeId = Number(req.params.id);
       const edge = getEdge(db, edgeId);
-      if (!edge) return reply.code(404).send({ error: "edge not found" });
+      if (!edge) return sendHttpError(reply, 404, "edge not found");
       return reply.send({
         edge: { id: edge.id, from: edge.from_session, to: edge.to_session },
         messages: listEdgeMessages(db, edgeId),
@@ -860,11 +889,13 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
     try {
       const edgeId = Number(req.params.id);
       const edge = getEdge(db, edgeId);
-      if (!edge) return reply.code(404).send({ error: "edge not found" });
+      if (!edge) return sendHttpError(reply, 404, "edge not found");
       if (edge.from_session !== WEB_CONSOLE_ID) {
-        return reply.code(403).send({
-          error: `只读通道:${edge.from_session} 发起的对话只能由该会话发言`,
-        });
+        return sendHttpError(
+          reply,
+          403,
+          `只读通道:${edge.from_session} 发起的对话只能由该会话发言`
+        );
       }
       heartbeat(db, WEB_CONSOLE_ID);
       const msg = askSession(db, {
@@ -940,7 +971,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   app.delete<{ Params: { id: string } }>("/runtimes/:id", {}, async (req, reply) => {
     try {
       const ok = deleteRuntimeAgent(db, Number(req.params.id));
-      if (!ok) return reply.code(404).send({ error: "runtime agent not found" });
+      if (!ok) return sendHttpError(reply, 404, "runtime agent not found");
       logAudit(db, { interface: "http", action: "delete_runtime_agent", args: { id: req.params.id } });
       return reply.send({ ok: true });
     } catch (err) {
@@ -1023,7 +1054,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   // GET /data/export - portable, secret-free database export
   app.get<{ Querystring: DataExportQs }>("/data/export", {}, async (req, reply) => {
     const scope = parseDataScope(req.query.scope);
-    if (!scope) return reply.code(400).send({ error: "scope must be global or project" });
+    if (!scope) return sendHttpError(reply, 400, "scope must be global or project");
     try {
       const bundle = exportData(db, {
         scope,
@@ -1058,7 +1089,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   }, async (req, reply) => {
     const conflict = req.body.conflict ?? "skip";
     if (!isImportConflictStrategy(conflict)) {
-      return reply.code(400).send({ error: "conflict must be skip, overwrite, or copy" });
+      return sendHttpError(reply, 400, "conflict must be skip, overwrite, or copy");
     }
     try {
       const result = importData(db, req.body.bundle, {
@@ -1073,14 +1104,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
       });
       return reply.send(result);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      logAudit(db, {
-        interface: "http",
-        action: "import_data",
-        args: { conflict },
-        result: { error: message },
-      });
-      return reply.code(400).send({ error: message });
+      return sendError(reply, err, undefined, "import_data", { conflict }, 400);
     }
   });
 
@@ -1207,6 +1231,31 @@ function safeSummary(value: unknown): Record<string, unknown> | null {
     return v;
   }
   return { value: String(value).slice(0, 200) };
+}
+
+function publicStatus(error: unknown, code: PublicErrorCode): number {
+  if (typeof error === "object" && error !== null) {
+    const statusCode = (error as { statusCode?: unknown }).statusCode;
+    if (typeof statusCode === "number" && statusCode >= 400 && statusCode <= 599) {
+      return statusCode;
+    }
+  }
+  switch (code) {
+    case "DATA_LOCKED":
+    case "PORT_IN_USE":
+    case "SERVICE_UNAVAILABLE":
+      return 503;
+    case "NOT_FOUND":
+      return 404;
+    case "CONFLICT":
+      return 409;
+    case "FORBIDDEN":
+      return 403;
+    case "BAD_REQUEST":
+      return 400;
+    default:
+      return 500;
+  }
 }
 
 function parseDataScope(value: string | undefined): "global" | "project" | null {
