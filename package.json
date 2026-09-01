@@ -10,6 +10,10 @@
   "scripts": {
     "setup": "npm install",
     "build": "npm run build -w packages/shared && npm run build -w apps/server && npm run build -w apps/web",
+    "build:desktop": "npm run build && npm run build -w apps/desktop",
+    "package:desktop": "npm run build:desktop && electron-builder --projectDir apps/desktop --config electron-builder.yml",
+    "test:desktop": "node --test apps/desktop/test/*.test.cjs",
+    "verify:desktop-package": "node apps/desktop/test/package-smoke.cjs",
     "dev:server": "npm run dev -w apps/server",
     "dev:web": "npm run dev -w apps/web",
     "dev:desktop": "npm run dev -w apps/desktop",
@@ -17,6 +21,9 @@
     "serve": "npm run serve -w apps/server",
     "mcp": "npm run mcp -w apps/server",
     "start": "npm run build && npm run serve"
+  },
+  "dependencies": {
+    "muiltchat": "file:apps/server"
   },
   "devDependencies": {
     "concurrently": "^10.0.4"
