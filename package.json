@@ -14,6 +14,7 @@
     "package:desktop": "npm run build:desktop && electron-builder --projectDir apps/desktop --config electron-builder.yml",
     "test:desktop": "node --test apps/desktop/test/*.test.cjs",
     "verify:desktop-package": "node apps/desktop/test/package-smoke.cjs",
+    "check:secrets": "node scripts/check-secrets.cjs",
     "dev:server": "npm run dev -w apps/server",
     "dev:web": "npm run dev -w apps/web",
     "dev:desktop": "npm run dev -w apps/desktop",

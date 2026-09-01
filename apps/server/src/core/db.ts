@@ -11,11 +11,102 @@ import {
 
 export type DB = Database.Database;
 
+export type PublicErrorCode =
+  | "DATA_LOCKED"
+  | "DATA_CORRUPT"
+  | "PORT_IN_USE"
+  | "NOT_FOUND"
+  | "CONFLICT"
+  | "FORBIDDEN"
+  | "BAD_REQUEST"
+  | "SERVICE_UNAVAILABLE"
+  | "INTERNAL_ERROR";
+
+export interface PublicError {
+  code: PublicErrorCode;
+  message: string;
+}
+
+export interface PublicErrorContext {
+  dataDir?: string;
+  port?: number;
+}
+
+/** Convert internal failures into a stable, non-sensitive public response. */
+export function publicError(
+  error: unknown,
+  context: PublicErrorContext = {}
+): PublicError {
+  const value = isRecord(error) ? error : {};
+  const rawCode = typeof value.code === "string" ? value.code : "";
+  const rawStatus = typeof value.statusCode === "number" ? value.statusCode : undefined;
+  const rawMessage = typeof value.message === "string" ? value.message : String(error ?? "");
+  const code = rawCode || (rawMessage.match(/\b(SQLITE_[A-Z_]+|EADDRINUSE)\b/)?.[1] ?? "");
+
+  if (/^SQLITE_(BUSY|LOCKED)/.test(code)) {
+    return {
+      code: "DATA_LOCKED",
+      message: "数据库正在被另一个进程使用，请稍后重试或关闭重复的 Conflux 实例。",
+    };
+  }
+
+  if (/^SQLITE_(CORRUPT|NOTADB)/.test(code)) {
+    return {
+      code: "DATA_CORRUPT",
+      message:
+        "数据库文件可能已损坏，请先停止 Conflux，备份数据目录后从最近的导出文件恢复。" +
+        (context.dataDir ? ` 数据目录：${context.dataDir}` : ""),
+    };
+  }
+
+  if (code === "EADDRINUSE") {
+    return {
+      code: "PORT_IN_USE",
+      message: `端口 ${context.port ?? "9527"} 已被其他进程占用，请关闭重复的 Conflux 实例后重试。`,
+    };
+  }
+
+  if (rawStatus === 404 || /\bnot found\b/i.test(rawMessage)) {
+    return { code: "NOT_FOUND", message: safePublicMessage(rawMessage, "请求的资源不存在。") };
+  }
+  if (rawStatus === 409 || /^SQLITE_CONSTRAINT/.test(code)) {
+    return { code: "CONFLICT", message: safePublicMessage(rawMessage, "请求与现有数据冲突。") };
+  }
+  if (rawStatus === 403 || /not owner|not the addressee/i.test(rawMessage)) {
+    return { code: "FORBIDDEN", message: safePublicMessage(rawMessage, "无权执行此操作。") };
+  }
+  if (
+    rawStatus === 400 ||
+    rawStatus === 422 ||
+    /\bmissing\b|cannot ask yourself|invalid data bundle|invalid import|must be /i.test(rawMessage)
+  ) {
+    return { code: "BAD_REQUEST", message: safePublicMessage(rawMessage, "请求参数无效。") };
+  }
+  if (rawStatus === 503) {
+    return {
+      code: "SERVICE_UNAVAILABLE",
+      message: safePublicMessage(rawMessage, "服务暂时不可用，请稍后重试。"),
+    };
+  }
+
+  return { code: "INTERNAL_ERROR", message: "服务器内部错误，请查看日志。" };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function safePublicMessage(value: string, fallback: string): string {
+  const message = value.trim();
+  if (!message || message.length > 500) return fallback;
+  return message;
+}
+
 const SCHEMA_VERSION = 9;
 
-// Track the checkpoint timer in a module-scoped variable (avoids touching the
-// globalThis type signature).
-let checkpointTimer: NodeJS.Timeout | null = null;
+// Keep checkpoint timers tied to their database handles. A process can open
+// more than one temporary database during tests and interface operations.
+const checkpointTimers = new WeakMap<DB, NodeJS.Timeout>();
 
 const SCHEMA_SQL = `
 -- schema_version marker (user_version PRAGMA, set separately)
@@ -180,14 +271,23 @@ CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_log(caller_session);
  */
 export function openDb(config: Config): DB {
   const db = new Database(config.dbPath);
-  db.pragma(`journal_mode = WAL`);
-  db.pragma(`busy_timeout = 10000`);
-  db.pragma(`synchronous = NORMAL`);
-  db.pragma(`foreign_keys = ON`);
+  try {
+    db.pragma(`journal_mode = WAL`);
+    db.pragma(`busy_timeout = 10000`);
+    db.pragma(`synchronous = NORMAL`);
+    db.pragma(`foreign_keys = ON`);
 
-  migrate(db);
-  scheduleWalCheckpoint(config, db);
-  return db;
+    migrate(db);
+    scheduleWalCheckpoint(config, db);
+    return db;
+  } catch (err) {
+    try {
+      if (db.open) db.close();
+    } catch (closeError) {
+      logger.warn({ err: closeError, dataDir: config.dataDir }, "failed to close database after startup error");
+    }
+    throw err;
+  }
 }
 
 /**
@@ -323,7 +423,7 @@ function scheduleWalCheckpoint(config: Config, db: DB): void {
   const intervalMs = 30_000;
   const walThresholdBytes = 64 * 1024 * 1024;
 
-  if (checkpointTimer) return;
+  if (checkpointTimers.has(db)) return;
   const timer = setInterval(() => {
     try {
       const walPath = `${config.dbPath}-wal`;
@@ -343,7 +443,14 @@ function scheduleWalCheckpoint(config: Config, db: DB): void {
     }
   }, intervalMs);
   if (typeof timer.unref === "function") timer.unref();
-  checkpointTimer = timer;
+  checkpointTimers.set(db, timer);
+}
+
+export function stopWalCheckpoint(db: DB): void {
+  const timer = checkpointTimers.get(db);
+  if (!timer) return;
+  clearInterval(timer);
+  checkpointTimers.delete(db);
 }
 
 export function nowIso(): string {

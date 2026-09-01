@@ -99,6 +99,8 @@ npm run dev:all
 
 然后打开 <http://127.0.0.1:5173>。如果 `localhost` 无法访问，优先尝试 `127.0.0.1`。`dev:all` 会并行启动本地 API 服务器和 Vite 开发服务器。
 
+如果页面或 API 无法打开，请先查看[故障排查指南](docs/TROUBLESHOOTING.md)，其中包含地址检查、端口诊断、MCP 重启和数据恢复步骤。
+
 ### 运行本地生产服务器
 
 ```bash
@@ -315,6 +317,8 @@ node --test apps/desktop/test/dev-services.test.cjs apps/desktop/test/runtime-co
 - `/audit`
 
 需要会话身份的请求应提供 `X-Session-Id` 请求头。HTTP、MCP 和 CLI 接口共享同一套核心数据操作。
+
+启动失败、端口冲突、数据库锁定、MCP 配置或迁移恢复问题，请参阅[故障排查 / Troubleshooting](docs/TROUBLESHOOTING.md)。
 
 ## 贡献
 
