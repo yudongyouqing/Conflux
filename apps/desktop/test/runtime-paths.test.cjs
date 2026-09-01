@@ -1,9 +1,12 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const path = require("node:path");
 
 const { resolveRuntimePaths } = require("../src/runtime-paths.cjs");
 
 test("resolves packaged resources without using process.cwd", () => {
+  const resourcesPath = path.resolve("Program Files", "Conflux", "resources");
+  const appPath = path.join(resourcesPath, "app.asar");
   const originalCwd = process.cwd;
   process.cwd = () => {
     throw new Error("packaged path resolution must not read process.cwd");
@@ -12,31 +15,26 @@ test("resolves packaged resources without using process.cwd", () => {
   try {
     const paths = resolveRuntimePaths({
       isPackaged: true,
-      resourcesPath: "C:\\Program Files\\Conflux\\resources",
-      appPath: "C:\\Program Files\\Conflux\\resources\\app.asar",
+      resourcesPath,
+      appPath,
     });
 
-    assert.equal(
-      paths.serverEntry,
-      "C:\\Program Files\\Conflux\\resources\\app.asar\\apps\\server\\dist\\index.js"
-    );
-    assert.equal(
-      paths.webDist,
-      "C:\\Program Files\\Conflux\\resources\\app.asar\\apps\\web\\dist"
-    );
+    assert.equal(paths.serverEntry, path.join(appPath, "apps", "server", "dist", "index.js"));
+    assert.equal(paths.webDist, path.join(appPath, "apps", "web", "dist"));
   } finally {
     process.cwd = originalCwd;
   }
 });
 
 test("resolves development resources from the desktop app path", () => {
+  const repoRoot = path.resolve("repo");
   const paths = resolveRuntimePaths({
     isPackaged: false,
-    resourcesPath: "C:\\repo\\node_modules\\electron\\dist\\resources",
-    appPath: "C:\\repo\\apps\\desktop",
+    resourcesPath: path.join(repoRoot, "node_modules", "electron", "dist", "resources"),
+    appPath: path.join(repoRoot, "apps", "desktop"),
   });
 
-  assert.equal(paths.repoRoot, "C:\\repo");
-  assert.equal(paths.serverEntry, "C:\\repo\\apps\\server\\dist\\index.js");
-  assert.equal(paths.webDist, "C:\\repo\\apps\\web\\dist");
+  assert.equal(paths.repoRoot, repoRoot);
+  assert.equal(paths.serverEntry, path.join(repoRoot, "apps", "server", "dist", "index.js"));
+  assert.equal(paths.webDist, path.join(repoRoot, "apps", "web", "dist"));
 });

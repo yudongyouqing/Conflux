@@ -1,9 +1,11 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const path = require("node:path");
 
 const { configureElectronRuntime } = require("../src/runtime-config.cjs");
 
 test("configures a writable development userData directory", () => {
+  const repoRoot = path.resolve("repo");
   const calls = [];
   const electronApp = {
     isPackaged: false,
@@ -14,10 +16,10 @@ test("configures a writable development userData directory", () => {
     },
   };
 
-  configureElectronRuntime(electronApp, "C:\\repo");
+  configureElectronRuntime(electronApp, repoRoot);
 
   assert.deepEqual(calls, [
-    ["setPath", "userData", "C:\\repo\\.electron-dev"],
+    ["setPath", "userData", path.join(repoRoot, ".electron-dev")],
     ["disableHardwareAcceleration"],
     ["appendSwitch", "disable-gpu"],
     ["appendSwitch", "no-sandbox"],
