@@ -21,6 +21,13 @@ test("production build config includes app, server, web, and native module resou
   ]);
   assert.ok(config.asarUnpack.includes("**/better-sqlite3/**"));
   assert.ok(config.win.target.some((target) => target.target === "nsis"));
+  assert.equal(
+    config.artifactName,
+    "${productName}-${version}-${os}-${arch}.${ext}"
+  );
+  assert.equal(config.nsis.deleteAppDataOnUninstall, false);
+  assert.deepEqual(config.mac.target, ["dir"]);
+  assert.deepEqual(config.linux.target, ["dir"]);
 });
 
 test("declares the server workspace as a root production dependency", () => {

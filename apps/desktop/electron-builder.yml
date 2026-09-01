@@ -10,6 +10,8 @@ directories:
 extraMetadata:
   main: apps/desktop/src/main.cjs
 
+artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
+
 files:
   - apps/desktop/**/*
   - apps/server/dist/**/*
@@ -29,3 +31,12 @@ win:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+
+mac:
+  target:
+    - dir
+
+linux:
+  target:
+    - dir
