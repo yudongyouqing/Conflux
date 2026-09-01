@@ -10,6 +10,18 @@
 
 ---
 
+## 当前进度（2026-09-01）
+
+- [x] 任务 1：名称和数据目录兼容层（`4bc2f6b`）。
+- [x] 任务 2：版本化数据导出和事务导入（`b3c682e`）。
+- [x] 任务 3：故障诊断和敏感信息扫描（`8ddb28d`、`21bb42f`）。
+- [x] 任务 4：CI 和 Electron 发布流水线（`3afe27a`）。
+- [x] 任务 5：开源文档和发布验收材料（`8f103a9`）。
+
+最终验收仍需在当前机器上尝试 Electron 目录打包；`better-sqlite3` 的 Electron native rebuild 需要 Visual Studio C++ Build Tools，Windows 发布流水线会在 `windows-latest` 上完成该步骤。
+
+---
+
 ## 依赖与边界
 
 本计划依赖阶段一的生产 server、Electron Builder 基础和阶段二的 runtime_instances 数据表。迁移操作不删除旧目录、不覆盖原数据库；导入前先解析和校验，事务失败时回滚。自动更新、代码签名和远程同步不属于本计划。
