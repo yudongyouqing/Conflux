@@ -2,7 +2,7 @@ import { Command, Option } from "commander";
 import { v4 as uuidv4 } from "uuid";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 import { resolveConfig, type Scope, DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT } from "../config.js";
 import { openDb, type DB } from "../core/db.js";
@@ -37,6 +37,12 @@ import {
   type ModelConfig,
 } from "../core/agents.js";
 import { logAudit, queryAudit } from "../core/audit.js";
+import {
+  exportData,
+  importData,
+  type DataBundleScope,
+  type ImportConflictStrategy,
+} from "../core/data-transfer.js";
 
 /**
  * Build the CLI command tree.
@@ -137,6 +143,54 @@ export function buildCli(argv?: string | readonly string[]): Command {
           2
         )
       );
+    });
+
+  // data ------------------------------------------------------------
+  const data = program.command("data").description("export and import local data");
+
+  data
+    .command("export")
+    .description("export a secret-free data bundle")
+    .option("--scope <scope>", "global or project", "global")
+    .option("--project-dir <path>", "project directory for project scope")
+    .option("--output <file>", "write JSON to a file instead of stdout")
+    .action(async function (this: Command) {
+      const o = this.optsWithGlobals() as CliOpts & {
+        scope?: string;
+        projectDir?: string;
+        output?: string;
+      };
+      const scope = parseDataScope(o.scope);
+      if (!scope) throw new Error("scope must be global or project");
+      const result = await runOp(
+        program,
+        () => exportData(openDbFrom(o), { scope, projectDir: o.projectDir }),
+        "GET",
+        `/data/export?scope=${encodeURIComponent(scope)}`
+      );
+      writeDataOutput(result, o.output);
+    });
+
+  data
+    .command("import")
+    .description("import a versioned data bundle")
+    .requiredOption("--file <file>", "JSON bundle to import")
+    .option("--conflict <strategy>", "skip, overwrite, or copy", "skip")
+    .action(async function (this: Command) {
+      const o = this.optsWithGlobals() as CliOpts & {
+        file: string;
+        conflict?: string;
+      };
+      const conflict = parseImportConflict(o.conflict);
+      const bundle = JSON.parse(readFileSync(resolve(o.file), "utf8")) as unknown;
+      const result = await runOp(
+        program,
+        () => importData(openDbFrom(o), bundle, { conflict }),
+        "POST",
+        "/data/import",
+        { bundle, conflict }
+      );
+      console.log(JSON.stringify(result, null, 2));
     });
 
   // graph -----------------------------------------------------------
@@ -871,6 +925,27 @@ function normaliseScope(s: string | undefined): Scope {
   if (s === "project") return "project";
   if (s === "global") return "global";
   return "global"; // "auto" + anything else falls back to global resolution
+}
+
+function parseDataScope(value: string | undefined): DataBundleScope | null {
+  if (value === undefined || value === "global") return "global";
+  if (value === "project") return "project";
+  return null;
+}
+
+function parseImportConflict(value: string | undefined): ImportConflictStrategy {
+  if (value === undefined || value === "skip") return "skip";
+  if (value === "overwrite" || value === "copy") return value;
+  throw new Error("conflict must be skip, overwrite, or copy");
+}
+
+function writeDataOutput(value: unknown, output?: string): void {
+  const serialized = `${JSON.stringify(value, null, 2)}\n`;
+  if (output) {
+    writeFileSync(resolve(output), serialized, "utf8");
+    return;
+  }
+  console.log(serialized.trimEnd());
 }
 
 /** Options available on every command via optsWithGlobals(). */

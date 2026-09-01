@@ -204,3 +204,25 @@ export interface Turn {
   content: string;
   created_at: string;
 }
+
+export type DataBundleScope = "global" | "project";
+
+/** Runtime preset shape used by portable exports; secrets never leave the database. */
+export interface ExportedRuntimeAgent extends Omit<RuntimeAgent, "api_key" | "live" | "last_seen"> {
+  api_key_configured: boolean;
+}
+
+export interface ConfluxDataBundle {
+  format: "conflux-data";
+  version: 1;
+  exported_at: string;
+  scope: DataBundleScope;
+  sessions: Session[];
+  context_entries: ContextEntry[];
+  messages: Message[];
+  edges: GraphEdge[];
+  agents: Agent[];
+  conversations: Conversation[];
+  turns: Turn[];
+  runtime_agents: ExportedRuntimeAgent[];
+}
