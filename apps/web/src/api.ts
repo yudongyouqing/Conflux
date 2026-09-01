@@ -1,4 +1,19 @@
-import type { Graph, Message, MessageStatus, SessionSummary, ContextEntry, Agent, ModelConfig, Conversation, Turn, RuntimeAgent, RuntimeId, TerminalSettings, TerminalOption } from "@muiltchat/shared";
+import type {
+  Agent,
+  ConfluxDataBundle,
+  ContextEntry,
+  Conversation,
+  Graph,
+  Message,
+  MessageStatus,
+  ModelConfig,
+  RuntimeAgent,
+  RuntimeId,
+  SessionSummary,
+  TerminalOption,
+  TerminalSettings,
+  Turn,
+} from "@muiltchat/shared";
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path);
@@ -150,6 +165,21 @@ export const api = {
 
   getSettings: () =>
     get<{ providers: Record<string, { configured: boolean }> }>("/settings"),
+
+  exportData: (scope: "global" | "project" = "global") =>
+    get<ConfluxDataBundle>(`/data/export?scope=${encodeURIComponent(scope)}`),
+
+  importData: (
+    bundle: ConfluxDataBundle,
+    conflict: "skip" | "overwrite" | "copy" = "skip"
+  ) =>
+    post<{
+      conflict: "skip" | "overwrite" | "copy";
+      imported: number;
+      skipped: number;
+      overwritten: number;
+      copied: number;
+    }>("/data/import", { bundle, conflict }),
 
   streamChat: async (
     agentId: number,
