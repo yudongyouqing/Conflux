@@ -12,7 +12,7 @@
 
 Conflux 为多个 AI 编程会话提供一个共享空间。每个会话都可以发布知识、向其他会话提问、异步接收回复，并作为实时节点出现在会话图谱中。
 
-公开项目名为 `Conflux`。当前内部 npm package 名称、CLI 命令、环境变量、数据目录和部分运行时文本仍使用 `muiltchat`，这是重命名过渡期的兼容约定。
+公开项目名和新 CLI 入口为 `Conflux`。npm package 名称、旧 CLI 入口、环境变量和默认数据目录继续保留 `muiltchat` 兼容性。
 
 ## 项目简介
 
@@ -173,7 +173,7 @@ docs/
 }
 ```
 
-如果直接使用仓库根目录中的配置，现有的 `muiltchat` MCP server key 仍然可以继续使用。公开名称和 MCP key 可以不同，内部兼容名称不会影响功能。
+仓库根目录中的配置默认只启动 `conflux` MCP server。旧项目可以手动把唯一的 key 改为 `muiltchat`；不要在同一配置中同时保留两个 key，否则会启动两份 server。
 
 MCP 会话可以使用以下工具：
 
@@ -244,7 +244,7 @@ GET /settings
 ~/.muiltchat
 ```
 
-当前实现仍使用 `.muiltchat`，以兼容重命名前的版本。可以通过 `MUILTCHAT_HOME` 环境变量或 CLI 的 `--data-dir` 选项覆盖数据目录。数据库文件名为 `data.db`，并启用 SQLite WAL 模式。
+当前实现默认使用 `.muiltchat`，以兼容重命名前的版本。目录优先级为 CLI `--data-dir`、`CONFLUX_HOME`、`MUILTCHAT_HOME`、已有项目目录和 `~/.muiltchat`。没有显式迁移命令时不会创建 `~/.conflux`，也不会移动旧目录。数据库文件名为 `data.db`，并启用 SQLite WAL 模式。
 
 Linux、macOS 或 Git Bash：
 
@@ -264,6 +264,8 @@ CLI 也支持 `--scope global` 和 `--scope project`。如果需要精确指定�
 ```bash
 npx tsx apps/server/src/index.ts --data-dir /path/to/conflux-data path
 ```
+
+显式迁移旧目录时使用 `conflux migrate --from <legacy-dir> --to <conflux-dir>`；查看目标 marker 使用 `conflux migrate --status --to <conflux-dir>`。迁移只复制数据库文件并保留源目录。
 
 不需要部署外部数据库服务。
 

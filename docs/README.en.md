@@ -12,7 +12,7 @@
 
 Conflux gives AI coding sessions a shared place to exchange context and coordinate work. Each session can publish knowledge, ask another session a question, receive asynchronous replies, and appear as a live node in a conversation graph.
 
-The public project name is `Conflux`. Internal npm package names, CLI commands, environment variables, data directories, and some runtime text still use `muiltchat` during the rename transition.
+The public project name and new CLI entry are `Conflux`. The npm package name, legacy CLI entry, environment variables, and default data directory retain `muiltchat` compatibility.
 
 ## Overview
 
@@ -173,7 +173,7 @@ Add Conflux to the `.mcp.json` used by a Claude Code project:
 }
 ```
 
-If you use the configuration in the repository root directly, its existing `muiltchat` MCP server key continues to work. The public name and MCP key may differ; the internal compatibility name does not change the behavior.
+The repository-root configuration starts only the `conflux` MCP server by default. Older projects can manually rename that single key to `muiltchat`; do not keep both keys in one configuration or two servers will start.
 
 An MCP-connected session can use tools such as:
 
@@ -244,7 +244,7 @@ By default, Conflux stores SQLite data under:
 ~/.muiltchat
 ```
 
-The current implementation still uses `.muiltchat` for compatibility with pre-rename versions. Override the data directory with the `MUILTCHAT_HOME` environment variable or the CLI `--data-dir` option. The database file is `data.db`, and SQLite WAL mode is enabled.
+The current implementation defaults to `.muiltchat` for compatibility with pre-rename versions. Directory precedence is CLI `--data-dir`, `CONFLUX_HOME`, `MUILTCHAT_HOME`, an existing project directory, and finally `~/.muiltchat`. Without an explicit migration command it does not create `~/.conflux` or move the old directory. The database file is `data.db`, and SQLite WAL mode is enabled.
 
 On Linux, macOS, or Git Bash:
 
@@ -264,6 +264,8 @@ The CLI also supports `--scope global` and `--scope project`. To specify an exac
 ```bash
 npx tsx apps/server/src/index.ts --data-dir /path/to/conflux-data path
 ```
+
+To explicitly migrate an old directory, run `conflux migrate --from <legacy-dir> --to <conflux-dir>`. Check the destination marker with `conflux migrate --status --to <conflux-dir>`. Migration copies only the database files and preserves the source directory.
 
 No external database service is required.
 

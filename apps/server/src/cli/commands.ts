@@ -1,11 +1,12 @@
 import { Command, Option } from "commander";
 import { v4 as uuidv4 } from "uuid";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 
 import { resolveConfig, type Scope, DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT } from "../config.js";
 import { openDb, type DB } from "../core/db.js";
+import { migrateDataDir, readMigrationStatus } from "../core/config-migration.js";
 import { handleHookEvent, readJsonFile } from "../core/live.js";
 import { logger } from "../log.js";
 import {
@@ -48,10 +49,10 @@ import { logAudit, queryAudit } from "../core/audit.js";
  * Adding a new endpoint no longer requires touching two places: the core
  * function lives in the local() closure, and only --http mode needs the path.
  */
-export function buildCli(): Command {
+export function buildCli(argv?: string | readonly string[]): Command {
   const program = new Command();
   program
-    .name("muiltchat")
+    .name(cliDisplayName(argv))
     .description("Cross-session context query and conversation system")
     .version("0.1.0")
     .option(
@@ -103,6 +104,39 @@ export function buildCli(): Command {
       const o = this.optsWithGlobals();
       const cfg = resolveConfig(normaliseScope(o.scope), o.dataDir);
       console.log(JSON.stringify(cfg, null, 2));
+    });
+
+  // migrate --------------------------------------------------------
+  program
+    .command("migrate")
+    .description("copy legacy muiltchat data into a Conflux directory")
+    .option("--from <legacy-dir>", "source muiltchat data directory")
+    .option("--to <conflux-dir>", "destination Conflux data directory")
+    .option("--status", "show migration marker status without changing files")
+    .action(function (this: Command) {
+      const o = this.optsWithGlobals() as CliOpts & {
+        from?: string;
+        to?: string;
+        status?: boolean;
+      };
+
+      if (o.status) {
+        if (o.from) throw new Error("migrate --status cannot be combined with --from");
+        const destination = o.to ?? o.dataDir ?? join(homedir(), ".conflux");
+        console.log(JSON.stringify(readMigrationStatus(destination), null, 2));
+        return;
+      }
+
+      if (!o.from || !o.to) {
+        throw new Error("migrate requires --from <legacy-dir> and --to <conflux-dir>");
+      }
+      console.log(
+        JSON.stringify(
+          migrateDataDir({ from: o.from, to: o.to }),
+          null,
+          2
+        )
+      );
     });
 
   // graph -----------------------------------------------------------
@@ -786,6 +820,25 @@ export function buildCli(): Command {
 }
 
 // --- helpers --------------------------------------------------------
+
+function cliDisplayName(argv?: string | readonly string[]): "conflux" | "muiltchat" {
+  const candidates =
+    typeof argv === "string"
+      ? [argv]
+      : argv
+        ? [argv[0], argv[1]]
+        : [process.argv[0], process.argv[1]];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const name = basename(candidate)
+      .replace(/\.(?:cmd|exe|js|ts)$/i, "")
+      .toLowerCase();
+    if (name === "conflux") return "conflux";
+    if (name === "muiltchat") return "muiltchat";
+  }
+  return "muiltchat";
+}
 
 type HookEvent = "session-start" | "prompt" | "stop";
 const HOOK_EVENTS: HookEvent[] = ["session-start", "prompt", "stop"];
