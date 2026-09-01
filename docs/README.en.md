@@ -99,6 +99,8 @@ npm run dev:all
 
 Then open <http://127.0.0.1:5173>. If `localhost` is unavailable, try `127.0.0.1` first. `dev:all` starts the local API server and Vite development server in parallel.
 
+If the page or API does not open, see the [troubleshooting guide](TROUBLESHOOTING.md) for endpoint checks, port diagnostics, MCP restart steps, and data recovery instructions.
+
 ### Run the local production server
 
 ```bash
@@ -315,6 +317,8 @@ Common resources include:
 - `/audit`
 
 Requests that require a session identity should provide the `X-Session-Id` header. The HTTP, MCP, and CLI interfaces share the same core data operations.
+
+For startup failures, port conflicts, database locks, MCP configuration, or migration recovery, see [Troubleshooting](TROUBLESHOOTING.md).
 
 ## Contributing
 
