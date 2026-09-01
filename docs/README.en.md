@@ -5,7 +5,7 @@
   <p>
     <img src="https://img.shields.io/badge/Electron-37-47848F?logo=electron&logoColor=white" alt="Electron">
     <img src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white" alt="React">
-    <img src="https://img.shields.io/badge/Node.js-%3E%3D18-339933?logo=nodedotjs&logoColor=white" alt="Node.js">
+    <img src="https://img.shields.io/badge/Node.js-%3E%3D22-339933?logo=nodedotjs&logoColor=white" alt="Node.js">
     <a href="../LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
   </p>
 </div>
@@ -13,6 +13,8 @@
 Conflux gives AI coding sessions a shared place to exchange context and coordinate work. Each session can publish knowledge, ask another session a question, receive asynchronous replies, and appear as a live node in a conversation graph.
 
 The public project name and new CLI entry are `Conflux`. The npm package name, legacy CLI entry, environment variables, and default data directory retain `muiltchat` compatibility.
+
+Documentation: [Migration](MIGRATION.md) · [Troubleshooting](TROUBLESHOOTING.md) · [Contributing](../CONTRIBUTING.md) · [Changelog](../CHANGELOG.md)
 
 ## Overview
 
@@ -39,28 +41,31 @@ Conflux connects those sessions without requiring a database server, message bro
 
 ## Project Status
 
-Conflux is in active development. The current version includes the Electron desktop development shell and the existing web workspace. The Electron integration currently targets development workflows; packaged installers for Windows, macOS, or Linux are not available yet.
+Conflux is in active development. The current version includes the Electron desktop shell, production resource paths, packaging configuration, and cross-platform CI. Official releases are currently unsigned artifacts produced by GitHub Actions.
 
 Available now:
 
 - Electron development mode on Windows.
+- Electron single-instance behavior, tray support, service lifecycle, port diagnostics, and a secure window boundary.
 - Fastify HTTP server.
 - Workspace built with React, Vite, and React Flow.
 - MCP server and Claude Code hooks.
+- Claude Code/Codex liveness detection, resume lineage, and asynchronous collaboration messages.
+- Versioned data transfer, legacy directory migration, stable error codes, and secret scanning.
+- CI configuration for unsigned Windows NSIS and unpacked directory builds.
 - SQLite persistence and core regression tests.
 
 Planned:
 
-- Packaged installers for Windows, macOS, and Linux.
-- Tray and background process support.
-- Automatic updates.
-- Full migration of internal package and data-directory names from `muiltchat` to `Conflux`.
+- Automatic updates and code signing.
+- Official installer distribution for macOS and Linux.
+- Full migration of internal package and data-directory names from `muiltchat` to `Conflux` while retaining the compatibility layer.
 
 ## Quick Start
 
 ### Requirements
 
-- Node.js >= 18.
+- Node.js 22 LTS (the server package still declares Node.js >= 18 compatibility).
 - npm >= 9.
 - Install Claude Code if you want MCP session integration.
 - Prepare an Anthropic or OpenAI API key if you want to use internal agents.
@@ -70,7 +75,7 @@ Planned:
 ```bash
 git clone https://github.com/yudongyouqing/Conflux.git
 cd Conflux
-npm install
+npm ci
 ```
 
 ### Start the Electron desktop client
@@ -108,6 +113,26 @@ npm start
 ```
 
 This command builds the shared package, server, and web workspace, then serves the built frontend from `apps/web/dist` through the API server at <http://127.0.0.1:9527>.
+
+For startup, port, database, MCP, or migration issues, see the [troubleshooting guide](TROUBLESHOOTING.md). See the [migration guide](MIGRATION.md) for legacy compatibility and the [contribution guide](../CONTRIBUTING.md) before making changes.
+
+## Releases and installers
+
+GitHub Actions builds Windows releases from `v*` tags. Each release contains an unsigned NSIS installer and a `win-unpacked` directory artifact. The artifacts are not code-signed and should be verified before use.
+
+Build an unpacked directory for the current platform locally:
+
+```bash
+npm run package:desktop:dir
+```
+
+Build the NSIS installer on Windows:
+
+```bash
+npm run package:desktop
+```
+
+Artifacts are written to `release/` and are ignored by Git. Native `better-sqlite3` packaging on Windows may require Visual Studio C++ Build Tools; use the repository Windows CI when the local toolchain is unavailable. Uninstalling Conflux does not delete user data under `%USERPROFILE%\\.muiltchat`.
 
 ## Architecture
 
@@ -177,6 +202,8 @@ Add Conflux to the `.mcp.json` used by a Claude Code project:
 
 The repository-root configuration starts only the `conflux` MCP server by default. Older projects can manually rename that single key to `muiltchat`; do not keep both keys in one configuration or two servers will start.
 
+Completely restart the MCP host after changing `.mcp.json`; reloading the web page does not recreate a stdio connection. Confirm that the configured path points to the current repository and never run both the `conflux` and `muiltchat` entries for one project.
+
 An MCP-connected session can use tools such as:
 
 - `publish_context`
@@ -224,6 +251,8 @@ The settings endpoint reports which providers are configured:
 GET /settings
 ```
 
+Keep provider keys in local secure configuration. Do not commit real credentials or put them in logs or export files. Run `npm run check:secrets` before sharing changes.
+
 ## Runtime Agents
 
 Runtime agents are presets for launching real CLI coding assistants. A preset can define:
@@ -269,6 +298,14 @@ npx tsx apps/server/src/index.ts --data-dir /path/to/conflux-data path
 
 To explicitly migrate an old directory, run `conflux migrate --from <legacy-dir> --to <conflux-dir>`. Check the destination marker with `conflux migrate --status --to <conflux-dir>`. Migration copies only the database files and preserves the source directory.
 
+Export readable data for backup:
+
+```bash
+npx tsx apps/server/src/index.ts data export --output ./conflux-backup.json
+```
+
+Import with `data import --file <bundle.json> --conflict skip|overwrite|copy`. The bundle is validated before one SQLite transaction, and a failed import rolls back as a whole.
+
 No external database service is required.
 
 ## Development Commands
@@ -295,6 +332,15 @@ npm run mcp
 # Run the server regression suite
 npm test -w apps/server
 
+# Run CI-equivalent tests and release configuration checks
+npm run ci:test
+
+# Run the CI-equivalent build
+npm run ci:build
+
+# Scan public files for credentials
+npm run check:secrets
+
 # Run Electron service and runtime tests
 node --test apps/desktop/test/dev-services.test.cjs apps/desktop/test/runtime-config.test.cjs
 ```
@@ -315,6 +361,8 @@ Common resources include:
 - `/runtimes`
 - `/settings`
 - `/audit`
+- `/data/export`
+- `/data/import`
 
 Requests that require a session identity should provide the `X-Session-Id` header. The HTTP, MCP, and CLI interfaces share the same core data operations.
 
@@ -322,12 +370,13 @@ For startup failures, port conflicts, database locks, MCP configuration, or migr
 
 ## Contributing
 
-Issues, ideas, and pull requests are welcome. Before opening a pull request:
+Issues, ideas, and pull requests are welcome. Read the [contribution guide](../CONTRIBUTING.md) before opening a pull request:
 
 1. Keep changes focused and explain user-facing behavior changes.
 2. Run `npm run build`.
 3. Run `npm test -w apps/server`.
-4. Run `node --test apps/desktop/test/dev-services.test.cjs apps/desktop/test/runtime-config.test.cjs` when changing the desktop runtime.
+4. Run `npm run test:desktop` when changing the desktop runtime.
+5. Run `npm run check:secrets` and `git diff --check`.
 
 ## License
 

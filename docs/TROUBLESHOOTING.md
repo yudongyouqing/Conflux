@@ -17,8 +17,8 @@
 浏览器开发模式下，`5173` 是 Vite 页面端口，`9527` 是 API 端口。看到 `VITE ready` 只说明 Vite 已启动；看到 `http server listening` 只说明 API 已监听。可以分别检查：
 
 ```powershell
-Invoke-WebRequest http://127.0.0.1:5173/ -UseBasicParsing
-Invoke-WebRequest http://127.0.0.1:9527/healthz -UseBasicParsing
+(Invoke-WebRequest http://127.0.0.1:5173/ -UseBasicParsing).StatusCode
+(Invoke-WebRequest http://127.0.0.1:9527/healthz -UseBasicParsing).Content
 ```
 
 预期第二条返回包含 `{"ok":true}`。如果 `localhost` 无法打开，优先使用 `127.0.0.1`，避免本机 IPv4/IPv6 解析差异。
@@ -67,7 +67,7 @@ npx tsx apps/server/src/index.ts data export --output .\conflux-backup.json
 恢复时使用一份新的数据目录和事务导入：
 
 ```powershell
-npx tsx apps/server/src/index.ts --data-dir .\conflux-recovered data import .\conflux-backup.json --conflict copy
+npx tsx apps/server/src/index.ts --data-dir .\conflux-recovered data import --file .\conflux-backup.json --conflict copy
 ```
 
 导入失败会回滚当前事务。原目录和迁移源目录始终保留，确认恢复结果后再处理备份。
