@@ -1,6 +1,7 @@
 import { homedir } from "os";
 import { join, resolve } from "path";
 import { existsSync, mkdirSync } from "fs";
+import { resolveDataHome } from "./core/config-migration.js";
 
 export type Scope = "project" | "global";
 
@@ -14,53 +15,34 @@ export interface Config {
 }
 
 /**
- * Resolve the muiltchat data directory.
+ * Resolve the shared Conflux/muiltchat data directory.
  *
  * Precedence (highest first):
  *   1. Explicit `override` argument
- *   2. `MUILTCHAT_HOME` env var (when set & non-empty)
- *   3. `$CLAUDE_PROJECT_DIR/.muiltchat` — only when scope === "project"
- *      AND that directory already exists OR cwd contains a `.muiltchat`
- *      marker (avoids accidentally creating project-scoped dirs in random cwds).
- *   3. `~/.muiltchat` (global default)
+ *   2. `CONFLUX_HOME` env var (when set & non-empty)
+ *   3. `MUILTCHAT_HOME` env var (when set & non-empty)
+ *   4. an existing project-scoped `.muiltchat` directory
+ *   5. `~/.muiltchat` (global default)
  *
  * `scope` overrides detection: `--scope global` forces the home dir even when
  * `CLAUDE_PROJECT_DIR` is set.
  */
 export function resolveConfig(scope: Scope = "global", override?: string): Config {
-  const envHome = process.env.MUILTCHAT_HOME;
-  if (override && override.trim().length > 0) {
-    return finalize(resolve(override), detectScope(resolve(override)));
-  }
-  if (envHome && envHome.trim().length > 0) {
-    return finalize(resolve(envHome), detectScope(resolve(envHome)));
-  }
-
-  const projectDir = process.env.CLAUDE_PROJECT_DIR;
-  if (scope === "project" && projectDir && projectDir.trim().length > 0) {
-    const candidate = join(projectDir, ".muiltchat");
-    return finalize(candidate, "project");
-  }
-
-  // Auto-detect: prefer an existing project-scoped dir under CLAUDE_PROJECT_DIR.
-  if (projectDir && projectDir.trim().length > 0) {
-    const candidate = join(projectDir, ".muiltchat");
-    if (existsSync(candidate)) {
-      return finalize(candidate, "project");
-    }
-  }
-
-  const globalDir = join(homedir(), ".muiltchat");
-  return finalize(globalDir, "global");
+  const dataDir = resolveDataHome({
+    override,
+    scope,
+    env: process.env,
+  });
+  return finalize(dataDir, detectScope(dataDir));
 }
 
 function detectScope(dir: string): Scope {
   // If the directory sits inside $CLAUDE_PROJECT_DIR/.muiltchat we treat it as project-scoped.
   const projectDir = process.env.CLAUDE_PROJECT_DIR;
-  if (projectDir && dir === join(projectDir, ".muiltchat")) {
+  if (projectDir && dir === resolve(join(projectDir, ".muiltchat"))) {
     return "project";
   }
-  if (dir === join(homedir(), ".muiltchat")) {
+  if (dir === resolve(join(homedir(), ".muiltchat"))) {
     return "global";
   }
   return "global";

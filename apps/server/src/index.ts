@@ -2,7 +2,7 @@
 import { buildCli } from "./cli/commands.js";
 
 async function main(): Promise<void> {
-  const program = buildCli();
+  const program = buildCli(process.argv);
   await program.parseAsync(process.argv);
 }
 
