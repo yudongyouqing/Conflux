@@ -5,7 +5,7 @@
   <p>
     <img src="https://img.shields.io/badge/Electron-37-47848F?logo=electron&logoColor=white" alt="Electron">
     <img src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white" alt="React">
-    <img src="https://img.shields.io/badge/Node.js-%3E%3D18-339933?logo=nodedotjs&logoColor=white" alt="Node.js">
+    <img src="https://img.shields.io/badge/Node.js-%3E%3D22-339933?logo=nodedotjs&logoColor=white" alt="Node.js">
     <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
   </p>
 </div>
@@ -13,6 +13,8 @@
 Conflux 为多个 AI 编程会话提供一个共享空间。每个会话都可以发布知识、向其他会话提问、异步接收回复，并作为实时节点出现在会话图谱中。
 
 公开项目名和新 CLI 入口为 `Conflux`。npm package 名称、旧 CLI 入口、环境变量和默认数据目录继续保留 `muiltchat` 兼容性。
+
+文档入口：[迁移指南](docs/MIGRATION.md) · [故障排查](docs/TROUBLESHOOTING.md) · [贡献指南](CONTRIBUTING.md) · [更新日志](CHANGELOG.md)
 
 ## 项目简介
 
@@ -39,28 +41,31 @@ Conflux 连接这些会话，不要求额外部署数据库服务、消息代理
 
 ## 项目状态
 
-Conflux 目前处于积极开发阶段。当前版本包含 Electron 桌面开发壳和现有 Web 工作空间。Electron 集成目前面向开发环境，尚未提供 Windows、macOS 或 Linux 安装包。
+Conflux 目前处于积极开发阶段。当前版本已经包含 Electron 桌面开发壳、生产资源加载路径、安装包配置和跨平台 CI；正式发布仍以 GitHub Actions 生成的未签名产物为准。
 
 当前可用：
 
 - Windows 上的 Electron 开发模式。
+- Electron 单实例、托盘、服务生命周期、端口诊断和窗口安全边界。
 - Fastify HTTP 服务器。
 - 基于 React、Vite 和 React Flow 的工作空间。
 - MCP 服务器和 Claude Code Hooks。
+- Claude Code/Codex 会话存活探测、恢复继承和异步协作消息。
+- 版本化数据导入导出、旧目录迁移、稳定错误码和敏感信息扫描。
+- Windows 未签名 NSIS 与目录包的 CI 构建配置。
 - SQLite 持久化和核心回归测试。
 
 后续计划：
 
-- Windows、macOS 和 Linux 安装包。
-- 系统托盘和后台进程支持。
-- 自动更新。
-- 将内部 package 名称和数据目录从 `muiltchat` 完整迁移到 `Conflux`。
+- 自动更新和代码签名。
+- 面向 macOS/Linux 的正式安装包发行。
+- 将内部 package 名称和数据目录从 `muiltchat` 完整迁移到 `Conflux`，同时继续保留兼容层。
 
 ## 快速开始
 
 ### 环境要求
 
-- Node.js >= 18。
+- Node.js 22 LTS（server package 仍声明 Node.js >= 18 兼容）。
 - npm >= 9。
 - 如果需要 MCP 会话集成，请安装 Claude Code。
 - 如果需要使用内置智能体，请准备 Anthropic 或 OpenAI API key。
@@ -70,7 +75,7 @@ Conflux 目前处于积极开发阶段。当前版本包含 Electron 桌面开�
 ```bash
 git clone https://github.com/yudongyouqing/Conflux.git
 cd Conflux
-npm install
+npm ci
 ```
 
 ### 启动 Electron 桌面客户端
@@ -108,6 +113,26 @@ npm start
 ```
 
 该命令会构建 shared package、server 和 web workspace，然后由 API 服务器从 `apps/web/dist` 提供静态文件，默认地址为 <http://127.0.0.1:9527>。
+
+遇到启动、端口、数据库、MCP 或迁移问题时，请查看[故障排查指南](docs/TROUBLESHOOTING.md)。旧版数据和配置的兼容行为见[迁移指南](docs/MIGRATION.md)；参与开发前请阅读[贡献指南](CONTRIBUTING.md)。
+
+## 发布与安装包
+
+Windows 发布由 GitHub Actions 在 `v*` 标签上构建，包含未签名的 NSIS 安装包和 `win-unpacked` 目录包。安装包不代表代码已签名，不应在没有验证来源的情况下运行。
+
+本地构建当前平台的目录包：
+
+```bash
+npm run package:desktop:dir
+```
+
+在 Windows 上构建 NSIS 安装包：
+
+```bash
+npm run package:desktop
+```
+
+目录和安装包输出到 `release/`，不会提交到 Git。Windows 上的 native `better-sqlite3` 可能需要 Visual Studio C++ Build Tools；本机没有该工具链时，请使用仓库的 Windows CI。卸载 Conflux 不会删除 `%USERPROFILE%\\.muiltchat` 中的用户数据。
 
 ## 架构
 
@@ -177,6 +202,8 @@ docs/
 
 仓库根目录中的配置默认只启动 `conflux` MCP server。旧项目可以手动把唯一的 key 改为 `muiltchat`；不要在同一配置中同时保留两个 key，否则会启动两份 server。
 
+修改 `.mcp.json` 后必须完全重启 MCP 宿主；刷新网页不会重新建立 stdio 连接。确认使用的是当前仓库路径，避免同一项目同时运行 `conflux` 和 `muiltchat` 两个 server。
+
 MCP 会话可以使用以下工具：
 
 - `publish_context`
@@ -224,6 +251,8 @@ OPENAI_API_KEY=your-openai-key
 GET /settings
 ```
 
+设置环境变量或运行时预设时只使用本地安全配置，不要把真实 API key 提交到 Git、日志或导出文件。仓库可以用 `npm run check:secrets` 检查公开文件。
+
 ## 运行时智能体
 
 运行时智能体是用于启动真实 CLI 编程助手的预设。每个预设可以配置：
@@ -269,6 +298,14 @@ npx tsx apps/server/src/index.ts --data-dir /path/to/conflux-data path
 
 显式迁移旧目录时使用 `conflux migrate --from <legacy-dir> --to <conflux-dir>`；查看目标 marker 使用 `conflux migrate --status --to <conflux-dir>`。迁移只复制数据库文件并保留源目录。
 
+备份可读取的数据：
+
+```bash
+npx tsx apps/server/src/index.ts data export --output ./conflux-backup.json
+```
+
+导入时使用 `data import --file <bundle.json> --conflict skip|overwrite|copy`。导入会先校验格式，再在一个 SQLite 事务中写入，失败时整体回滚。
+
 不需要部署外部数据库服务。
 
 ## 开发命令
@@ -295,6 +332,15 @@ npm run mcp
 # 运行 server 回归测试
 npm test -w apps/server
 
+# 运行 CI 等价的测试和发布配置检查
+npm run ci:test
+
+# 运行 CI 等价的构建
+npm run ci:build
+
+# 检查公开文件中的敏感信息
+npm run check:secrets
+
 # 运行 Electron 服务和运行时测试
 node --test apps/desktop/test/dev-services.test.cjs apps/desktop/test/runtime-config.test.cjs
 ```
@@ -315,6 +361,8 @@ node --test apps/desktop/test/dev-services.test.cjs apps/desktop/test/runtime-co
 - `/runtimes`
 - `/settings`
 - `/audit`
+- `/data/export`
+- `/data/import`
 
 需要会话身份的请求应提供 `X-Session-Id` 请求头。HTTP、MCP 和 CLI 接口共享同一套核心数据操作。
 
@@ -322,12 +370,13 @@ node --test apps/desktop/test/dev-services.test.cjs apps/desktop/test/runtime-co
 
 ## 贡献
 
-欢迎提交 Issue、改进建议和 Pull Request。提交 Pull Request 前，请：
+欢迎提交 Issue、改进建议和 Pull Request。提交 Pull Request 前，请阅读[贡献指南](CONTRIBUTING.md)并：
 
 1. 保持改动聚焦，并说明面向用户的行为变化。
 2. 运行 `npm run build`。
 3. 运行 `npm test -w apps/server`。
-4. 修改桌面运行时相关代码时，运行 `node --test apps/desktop/test/dev-services.test.cjs apps/desktop/test/runtime-config.test.cjs`。
+4. 修改桌面运行时相关代码时，运行 `npm run test:desktop`。
+5. 运行 `npm run check:secrets` 和 `git diff --check`。
 
 ## 许可证
 
