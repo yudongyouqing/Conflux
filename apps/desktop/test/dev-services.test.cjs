@@ -10,6 +10,7 @@ const {
   stopChild,
   waitForService,
   waitForHttp,
+  createServiceRuntimeGuard,
 } = require("../src/dev-services.cjs");
 
 test("uses pipe-safe stdio for Electron child processes", () => {
@@ -202,4 +203,58 @@ test("waitForService rejects when startup is aborted", async () => {
     pending,
     (error) => error instanceof Error && error.message === "Aborted waiting for web"
   );
+});
+
+test("runtime child failures are ignored before readiness and during shutdown", () => {
+  let servicesReady = false;
+  let isQuitting = false;
+  const failures = [];
+  const guard = createServiceRuntimeGuard({
+    isServicesReady: () => servicesReady,
+    isQuitting: () => isQuitting,
+    onFailure: (failure) => failures.push(failure),
+  });
+
+  assert.equal(guard.handleChildExit({ name: "web" }, 1, null), false);
+  servicesReady = true;
+  assert.equal(guard.handleChildExit({ name: "web" }, 1, null), true);
+  assert.equal(guard.handleChildExit({ name: "server" }, 1, "SIGTERM"), false);
+  isQuitting = true;
+  assert.equal(guard.handleChildExit({ name: "server" }, 1, null), false);
+
+  assert.deepEqual(failures, [
+    {
+      type: "child-exit",
+      name: "web",
+      reason: "code 1",
+    },
+  ]);
+});
+
+test("runtime health failure is reported once and recovery does not fail the app", () => {
+  let servicesReady = true;
+  let isQuitting = false;
+  const failures = [];
+  const guard = createServiceRuntimeGuard({
+    isServicesReady: () => servicesReady,
+    isQuitting: () => isQuitting,
+    onFailure: (failure) => failures.push(failure),
+  });
+
+  assert.equal(guard.handleHealthState({ name: "server", state: "degraded" }), false);
+  assert.equal(guard.handleHealthState({ name: "server", state: "unhealthy" }), true);
+  assert.equal(guard.handleHealthState({ name: "server", state: "healthy" }), false);
+  assert.equal(guard.handleHealthState({ name: "server", state: "unhealthy" }), false);
+
+  assert.deepEqual(failures, [
+    {
+      type: "health",
+      name: "server",
+      reason: "health state unhealthy",
+    },
+  ]);
+
+  servicesReady = false;
+  isQuitting = false;
+  assert.equal(guard.handleHealthState({ name: "web", state: "unhealthy" }), false);
 });
