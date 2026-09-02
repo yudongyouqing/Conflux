@@ -2,6 +2,11 @@ import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 import { markStaleSessions } from "./sessions.js";
 import type { Graph, GraphEdge, GraphNode, NodeType } from "@muiltchat/shared";
+import {
+  parseIdentitySource,
+  parseRuntimePid,
+  parseSessionRuntime,
+} from "./session-identity.js";
 
 export type { Graph, GraphEdge, GraphNode, NodeType };
 
@@ -50,14 +55,15 @@ export function getGraph(
 
   const nodes = db
     .prepare(
-      `SELECT s.id, s.name, s.description, s.project_dir, s.status, s.last_heartbeat_at, s.metadata,
+      `SELECT s.id, s.name, s.description, s.project_dir, s.status, s.last_heartbeat_at,
+         s.metadata, s.runtime, s.identity_source, s.runtime_pid,
          (SELECT COUNT(*) FROM context_entries c WHERE c.session_id = s.id) AS context_count,
          (SELECT COUNT(*) FROM messages m WHERE m.to_session = s.id AND m.status IN ('pending','seen')) AS pending_inbox
        FROM sessions s
        ${where}
        ORDER BY s.last_heartbeat_at DESC`
     )
-    .all(...params) as (Omit<GraphNode, "type" | "agent_id" | "runtime"> & {
+    .all(...params) as (Omit<GraphNode, "type" | "agent_id" | "skills"> & {
       metadata: string | null;
     })[];
 
@@ -73,14 +79,25 @@ export function getGraph(
   );
   const annotate = (n: (typeof nodes)[number]) => {
     let agentId: number | null = null;
-    let runtime: string | null = null;
+    let runtime = parseSessionRuntime(n.runtime);
+    let identitySource = parseIdentitySource(n.identity_source);
+    let runtimePid = parseRuntimePid(n.runtime_pid);
     let ownName = false;
     let skills: string[] | undefined;
     try {
       const meta = n.metadata ? (JSON.parse(n.metadata) as Record<string, unknown>) : null;
       if (meta && typeof meta.agent_id === "number") {
         agentId = meta.agent_id;
-        runtime = typeof meta.runtime === "string" ? meta.runtime : null;
+      }
+      if (runtime === null) {
+        const legacyClaudePid = parseRuntimePid(meta?.claude_pid);
+        runtime = parseSessionRuntime(meta?.runtime) ?? (legacyClaudePid !== null ? "claude" : null);
+      }
+      if (identitySource === null) identitySource = parseIdentitySource(meta?.identity_source);
+      if (runtimePid === null) {
+        const legacyClaudePid = parseRuntimePid(meta?.claude_pid);
+        const metadataRuntimePid = parseRuntimePid(meta?.runtime_pid);
+        runtimePid = metadataRuntimePid ?? (runtime === "claude" ? legacyClaudePid : null);
       }
       ownName = !!(meta && (meta.named === true || meta.custom_title === true));
       // Agent Card: capability self-description written by register_session
@@ -96,7 +113,15 @@ export function getGraph(
     const { metadata, ...rest } = n;
     const name =
       agentId !== null && !ownName ? presetNames.get(agentId) ?? n.name : n.name;
-    return { ...rest, name, agent_id: agentId, runtime, skills };
+    return {
+      ...rest,
+      name,
+      agent_id: agentId,
+      runtime,
+      identity_source: identitySource,
+      runtime_pid: runtimePid,
+      skills,
+    };
   };
 
   // Also include internal agents as nodes — they are always visible
@@ -138,7 +163,14 @@ export function getGraph(
   return {
     nodes: [
       ...nodes.map((n) => ({ ...annotate(n), type: "session" as const })),
-      ...agentNodes.map((n) => ({ ...n, agent_id: null, runtime: null, type: "agent" as const })),
+      ...agentNodes.map((n) => ({
+        ...n,
+        agent_id: null,
+        runtime: null,
+        identity_source: null,
+        runtime_pid: null,
+        type: "agent" as const,
+      })),
     ],
     edges,
   };

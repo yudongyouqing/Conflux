@@ -4,9 +4,14 @@
   "version": "0.1.0",
   "main": "src/main.cjs",
   "scripts": {
-    "dev": "electron ."
+    "dev": "electron .",
+    "build": "electron-builder --config electron-builder.yml --dir",
+    "package": "electron-builder --config electron-builder.yml"
   },
   "devDependencies": {
-    "electron": "^37.2.6"
+    "@electron/asar": "^3.4.1",
+    "electron": "37.10.3",
+    "electron-builder": "^26.0.12",
+    "yaml": "^2.8.1"
   }
 }
