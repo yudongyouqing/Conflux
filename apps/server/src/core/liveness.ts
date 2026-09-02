@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import type { RuntimeId } from "@muiltchat/shared";
 import type { DB } from "./db.js";
 import { logger } from "../log.js";
+import { hasMcpConnection } from "./mcp-liveness.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -137,6 +138,7 @@ function metadataRuntimePid(meta: Record<string, unknown>): { runtime: RuntimeId
  * Reconcile session rows against the probed runtime pid sets:
  *   - row's runtime pid is alive → active + heartbeat refresh (no idle TTL)
  *   - row's runtime pid is gone  → stale immediately (no 2-min TTL lag)
+ *   - rows with an MCP lease are skipped; MCP heartbeat / lease TTL owns liveness
  *   - rows without a recorded pid keep the plain heartbeat TTL model
  * Returns how many rows were refreshed / reaped.
  */
@@ -163,7 +165,10 @@ export function reconcileRuntimeLiveness(
   for (const row of rows) {
     if (row.id === "web-console") continue;
     try {
-      const identity = metadataRuntimePid(JSON.parse(row.metadata ?? "{}"));
+      const metadata = JSON.parse(row.metadata ?? "{}") as Record<string, unknown>;
+      // MCP lease sessions are managed by MCP heartbeats and lease TTL, not PID probing.
+      if (hasMcpConnection(metadata)) continue;
+      const identity = metadataRuntimePid(metadata);
       if (!identity) continue;
       if (livePids[identity.runtime].has(identity.pid)) {
         refresh.run(nowIso, row.id);
