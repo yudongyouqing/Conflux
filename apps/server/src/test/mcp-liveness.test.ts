@@ -40,6 +40,12 @@ type McpServerApi = {
     agentTag?: Record<string, unknown>;
     now?: Date;
   }) => Record<string, unknown>;
+  adoptMcpSession?: (
+    currentSessionId: string,
+    targetSessionId: string,
+    claim: () => boolean,
+    deletePrevious: (id: string) => void
+  ) => { sessionId: string; adopted: boolean };
 };
 
 class FakeStdin implements StdioEventSource {
@@ -122,6 +128,42 @@ test("MCP server session metadata builder combines identity and lease metadata",
   assert.equal(metadata.agent_id, 7);
   assert.equal(metadata.mcp_connection_id, "connection-builder");
   assert.equal(metadata.mcp_last_heartbeat_at, now.toISOString());
+});
+
+test("failed MCP adoption claim keeps the current lease owner for a later retry", async () => {
+  const api = await loadMcpServerApi();
+  assert.equal(typeof api.adoptMcpSession, "function", "MCP adoption helper is not implemented");
+
+  let claimAllowed = false;
+  let claimCalls = 0;
+  const deleted: string[] = [];
+  const claim = () => {
+    claimCalls++;
+    return claimAllowed;
+  };
+  const deletePrevious = (id: string) => {
+    deleted.push(id);
+  };
+
+  const firstAttempt = api.adoptMcpSession!(
+    "mcp-temp-session",
+    "ended-target",
+    claim,
+    deletePrevious
+  );
+  assert.deepEqual(firstAttempt, { sessionId: "mcp-temp-session", adopted: false });
+  assert.equal(claimCalls, 1);
+  assert.deepEqual(deleted, []);
+
+  claimAllowed = true;
+  const retry = api.adoptMcpSession!(
+    firstAttempt.sessionId,
+    "ended-target",
+    claim,
+    deletePrevious
+  );
+  assert.deepEqual(retry, { sessionId: "ended-target", adopted: true });
+  assert.deepEqual(deleted, ["mcp-temp-session"]);
 });
 
 test("MCP lease metadata has one connected generation and timestamp", async () => {

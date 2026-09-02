@@ -101,6 +101,19 @@ export function buildMcpSessionMetadata(input: {
   };
 }
 
+export function adoptMcpSession(
+  currentSessionId: string,
+  targetSessionId: string,
+  claim: () => boolean,
+  deletePrevious: (id: string) => void
+): { sessionId: string; adopted: boolean } {
+  if (currentSessionId === targetSessionId || !claim()) {
+    return { sessionId: currentSessionId, adopted: false };
+  }
+  deletePrevious(currentSessionId);
+  return { sessionId: targetSessionId, adopted: true };
+}
+
 export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
   const config = resolveConfig(opts.scope ?? "global", opts.overrideDataDir);
   const db: DB = openDb(config);
@@ -194,13 +207,21 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
     if (!target) return; // hook hasn't fired yet — retry on the next tick
     if (target.id === sessionId) return;
     const oldId = sessionId;
-    sessionId = target.id;
-    try {
-      claimMcpConnection(db, sessionId, connectionId);
-    } catch {
-      // transient sqlite lock contention — the next lease touch retries
-    }
-    deleteUnreferencedSession(db, oldId); // no-op for referenced/hook rows
+    const adoption = adoptMcpSession(
+      oldId,
+      target.id,
+      () => {
+        try {
+          return claimMcpConnection(db, target.id, connectionId);
+        } catch {
+          // transient sqlite lock contention — retry adoption later
+          return false;
+        }
+      },
+      (previousId) => deleteUnreferencedSession(db, previousId)
+    );
+    if (!adoption.adopted) return;
+    sessionId = adoption.sessionId;
     logger.info({ runtime: identity.runtime, runtimePid: pid, sessionId, oldId }, "mcp adopted hook-registered session");
   };
 
