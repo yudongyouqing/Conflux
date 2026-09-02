@@ -3,6 +3,16 @@ import assert from "node:assert/strict";
 import { makeDb } from "./helpers.js";
 import { registerSession } from "../core/sessions.js";
 
+type StdioEventSource = {
+  on(event: "end" | "close", listener: () => void): void;
+  off(event: "end" | "close", listener: () => void): void;
+};
+
+type StdioCloseableTransport = {
+  close(): Promise<void>;
+  onclose?: () => void;
+};
+
 type Api = {
   createMcpLeaseMetadata?: (connectionId: string, now?: Date) => Record<string, unknown>;
   claimMcpConnection?: (db: unknown, id: string, connectionId: string, now?: Date) => boolean;
@@ -15,7 +25,53 @@ type Api = {
     now?: Date
   ) => boolean;
   expireMcpLeases?: (db: unknown, now?: Date) => { expired: number };
+  installMcpStdioLifecycle?: (
+    stdin: StdioEventSource,
+    transport: StdioCloseableTransport,
+    onClose: (reason: string) => void
+  ) => () => void;
 };
+
+class FakeStdin implements StdioEventSource {
+  private readonly listeners = new Map<string, Set<() => void>>();
+
+  on(event: "end" | "close", listener: () => void): void {
+    const listeners = this.listeners.get(event) ?? new Set<() => void>();
+    listeners.add(listener);
+    this.listeners.set(event, listeners);
+  }
+
+  off(event: "end" | "close", listener: () => void): void {
+    const listeners = this.listeners.get(event);
+    listeners?.delete(listener);
+    if (listeners?.size === 0) this.listeners.delete(event);
+  }
+
+  emit(event: "end" | "close"): void {
+    for (const listener of this.listeners.get(event) ?? []) listener();
+  }
+
+  listenerCount(event: "end" | "close"): number {
+    return this.listeners.get(event)?.size ?? 0;
+  }
+}
+
+class FakeTransport implements StdioCloseableTransport {
+  closeCalls = 0;
+  onclose?: () => void;
+
+  constructor(private readonly closeError?: Error, private readonly invokeOnClose = true) {}
+
+  close(): Promise<void> {
+    this.closeCalls++;
+    if (this.invokeOnClose) this.onclose?.();
+    return this.closeError ? Promise.reject(this.closeError) : Promise.resolve();
+  }
+
+  emitClose(): void {
+    this.onclose?.();
+  }
+}
 
 async function loadApi(): Promise<Api> {
   try {
@@ -97,4 +153,85 @@ test("silent MCP lease expires and records a disconnected state", async (t) => {
   const metadata = JSON.parse(row.metadata) as Record<string, unknown>;
   assert.equal(metadata.mcp_connection_state, "disconnected");
   assert.equal(metadata.mcp_disconnect_reason, "lease-expired");
+});
+
+test("stdin end and close request transport close once and report transport close once", async (t) => {
+  const stdin = new FakeStdin();
+  const transport = new FakeTransport();
+  const reasons: string[] = [];
+  const api = await loadApi();
+  assert.equal(
+    typeof api.installMcpStdioLifecycle,
+    "function",
+    "stdio lifecycle API is not implemented"
+  );
+
+  const dispose = api.installMcpStdioLifecycle!(stdin, transport, (reason) => {
+    reasons.push(reason);
+  });
+  t.after(() => {
+    dispose();
+    assert.equal(stdin.listenerCount("end"), 0);
+    assert.equal(stdin.listenerCount("close"), 0);
+  });
+
+  stdin.emit("end");
+  stdin.emit("close");
+  await Promise.resolve();
+
+  assert.equal(transport.closeCalls, 1);
+  assert.deepEqual(reasons, ["transport-close"]);
+});
+
+test("transport onclose reports transport close once", async (t) => {
+  const stdin = new FakeStdin();
+  const transport = new FakeTransport();
+  let existingCloseCalls = 0;
+  transport.onclose = () => {
+    existingCloseCalls++;
+  };
+  const reasons: string[] = [];
+  const api = await loadApi();
+  assert.equal(
+    typeof api.installMcpStdioLifecycle,
+    "function",
+    "stdio lifecycle API is not implemented"
+  );
+
+  const dispose = api.installMcpStdioLifecycle!(stdin, transport, (reason) => {
+    reasons.push(reason);
+  });
+  t.after(() => {
+    dispose();
+    assert.equal(stdin.listenerCount("end"), 0);
+    assert.equal(stdin.listenerCount("close"), 0);
+  });
+
+  transport.emitClose();
+  transport.emitClose();
+
+  assert.equal(existingCloseCalls, 2);
+  assert.deepEqual(reasons, ["transport-close"]);
+});
+
+test("rejected stdin transport close reports a close failure", async (t) => {
+  const stdin = new FakeStdin();
+  const transport = new FakeTransport(new Error("close failed"), false);
+  const reasons: string[] = [];
+  const api = await loadApi();
+  assert.equal(
+    typeof api.installMcpStdioLifecycle,
+    "function",
+    "stdio lifecycle API is not implemented"
+  );
+
+  const dispose = api.installMcpStdioLifecycle!(stdin, transport, (reason) => {
+    reasons.push(reason);
+  });
+  t.after(dispose);
+
+  stdin.emit("end");
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(reasons, ["stdin-close-failed"]);
 });

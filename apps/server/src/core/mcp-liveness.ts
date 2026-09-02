@@ -5,6 +5,16 @@ export const MCP_LEASE_TTL_MS = 90_000;
 
 export type McpConnectionState = "connected" | "disconnected";
 
+export type StdioEventSource = {
+  on(event: "end" | "close", listener: () => void): void;
+  off(event: "end" | "close", listener: () => void): void;
+};
+
+export type StdioCloseableTransport = {
+  close(): Promise<void>;
+  onclose?: () => void;
+};
+
 interface SessionRow {
   id: string;
   status: string;
@@ -171,4 +181,55 @@ export function expireMcpLeases(db: DB, now: Date = new Date()): { expired: numb
     }
   }
   return { expired };
+}
+
+export function installMcpStdioLifecycle(
+  stdin: StdioEventSource,
+  transport: StdioCloseableTransport,
+  onClose: (reason: "transport-close" | "stdin-close-failed") => void
+): () => void {
+  let closeRequested = false;
+  let closeReported = false;
+  let disposed = false;
+  const existingOnClose = transport.onclose;
+
+  const reportClose = (reason: "transport-close" | "stdin-close-failed"): void => {
+    if (disposed || closeReported) return;
+    closeReported = true;
+    onClose(reason);
+  };
+
+  const handleTransportClose = (): void => {
+    try {
+      existingOnClose?.();
+    } finally {
+      reportClose("transport-close");
+    }
+  };
+
+  const handleStdinClose = (): void => {
+    if (disposed || closeRequested) return;
+    closeRequested = true;
+    try {
+      void transport.close().catch(() => {
+        reportClose("stdin-close-failed");
+      });
+    } catch {
+      reportClose("stdin-close-failed");
+    }
+  };
+
+  transport.onclose = handleTransportClose;
+  stdin.on("end", handleStdinClose);
+  stdin.on("close", handleStdinClose);
+
+  return (): void => {
+    if (disposed) return;
+    disposed = true;
+    stdin.off("end", handleStdinClose);
+    stdin.off("close", handleStdinClose);
+    if (transport.onclose === handleTransportClose) {
+      transport.onclose = existingOnClose;
+    }
+  };
 }
