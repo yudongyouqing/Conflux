@@ -889,7 +889,7 @@ git commit -m "docs: explain MCP session presence"
 
 预期：桌面测试和 release config 测试全部通过。
 
-- [ ] **步骤 3：运行全量构建**
+- [x] **步骤 3：运行全量构建（已执行，桌面打包环境阻塞已记录）**
 
 运行：`npm run build` 和 `npm run build:desktop`
 
@@ -918,7 +918,7 @@ npm run dev:desktop
 4. 完全关闭 Codex MCP 宿主，确认 stdin/transport close 后会话变为 `stale`，不等待完整 TTL。
 5. 重新连接同一会话，确认旧连接的延迟 close 不会覆盖新 token。
 
-- [ ] **步骤 6：最终验证和交接**
+- [x] **步骤 6：最终验证和交接**
 
 运行：`git log --oneline -8; git status --short --branch`
 
