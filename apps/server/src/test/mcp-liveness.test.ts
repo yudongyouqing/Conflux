@@ -32,6 +32,16 @@ type Api = {
   ) => () => void;
 };
 
+type McpServerApi = {
+  buildMcpSessionMetadata?: (input: {
+    connectionId: string;
+    runtime: "claude" | "codex";
+    pid: number | null;
+    agentTag?: Record<string, unknown>;
+    now?: Date;
+  }) => Record<string, unknown>;
+};
+
 class FakeStdin implements StdioEventSource {
   private readonly listeners = new Map<string, Set<() => void>>();
 
@@ -80,6 +90,39 @@ async function loadApi(): Promise<Api> {
     return {};
   }
 }
+
+async function loadMcpServerApi(): Promise<McpServerApi> {
+  try {
+    return (await import("../mcp/server.js")) as unknown as McpServerApi;
+  } catch {
+    return {};
+  }
+}
+
+test("MCP server session metadata builder combines identity and lease metadata", async () => {
+  const api = await loadMcpServerApi();
+  assert.equal(
+    typeof api.buildMcpSessionMetadata,
+    "function",
+    "MCP server metadata builder is not implemented"
+  );
+
+  const now = new Date("2026-09-02T10:00:00.000Z");
+  const metadata = api.buildMcpSessionMetadata!({
+    connectionId: "connection-builder",
+    runtime: "codex",
+    pid: 7401,
+    agentTag: { agent_id: 7 },
+    now,
+  });
+
+  assert.equal(metadata.temp, true);
+  assert.equal(metadata.runtime, "codex");
+  assert.equal(metadata.runtime_pid, 7401);
+  assert.equal(metadata.agent_id, 7);
+  assert.equal(metadata.mcp_connection_id, "connection-builder");
+  assert.equal(metadata.mcp_last_heartbeat_at, now.toISOString());
+});
 
 test("MCP lease metadata has one connected generation and timestamp", async () => {
   const api = await loadApi();
