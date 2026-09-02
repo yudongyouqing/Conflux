@@ -9,6 +9,7 @@ const {
   waitForService,
   stopChild,
   WEB_URL,
+  createServiceRuntimeGuard,
 } = require("./dev-services.cjs");
 const {
   PRODUCTION_HOST,
@@ -21,6 +22,7 @@ const { configureElectronRuntime } = require("./runtime-config.cjs");
 const { createTray } = require("./tray.cjs");
 const { externalLinkDecision } = require("./security.cjs");
 const { createRendererWatchdog } = require("./renderer-watchdog.cjs");
+const { createServiceHealthMonitor, probeHttp } = require("./service-health.cjs");
 
 const repoRoot = path.resolve(__dirname, "../../..");
 const PRODUCTION_URL = `http://${PRODUCTION_HOST}:${PRODUCTION_PORT}/`;
@@ -32,6 +34,9 @@ let servicesStopped = false;
 let focusWhenReady = false;
 let rendererWatchdog;
 let rendererFailureHandled = false;
+let servicesReady = false;
+let runtimeFailureHandled = false;
+let serviceHealthMonitors = [];
 const startupController = new AbortController();
 
 function log(message) {
@@ -72,6 +77,21 @@ function routeNavigation(event, url, appOrigin) {
   if (decision.action === "external") openExternal(decision.url);
 }
 
+function failRuntime(failure) {
+  if (runtimeFailureHandled || isQuitting) return;
+  runtimeFailureHandled = true;
+  const message = `${failure.name} 运行异常：${failure.reason}。请重新启动 Conflux。`;
+  log(message);
+  dialog.showErrorBox("muiltchat 服务异常", message);
+  app.quit();
+}
+
+const serviceRuntimeGuard = createServiceRuntimeGuard({
+  isServicesReady: () => servicesReady,
+  isQuitting: () => isQuitting,
+  onFailure: failRuntime,
+});
+
 function handleRendererCrash(details = {}) {
   if (rendererFailureHandled || isQuitting) return;
   rendererFailureHandled = true;
@@ -109,10 +129,14 @@ function startRendererWatchdog() {
 function recordChild(spec, child) {
   child.stdout?.on("data", (chunk) => process.stderr.write(`[${spec.name}] ${chunk}`));
   child.stderr?.on("data", (chunk) => process.stderr.write(`[${spec.name}] ${chunk}`));
-  child.once("error", (error) => log(`${spec.name} error: ${error.message}`));
-  child.once("exit", (code, signal) =>
-    log(`${spec.name} exit code=${code ?? "null"} signal=${signal ?? "null"}`)
-  );
+  child.once("error", (error) => {
+    log(`${spec.name} error: ${error instanceof Error ? error.message : String(error)}`);
+    serviceRuntimeGuard.handleChildError(spec, error);
+  });
+  child.once("exit", (code, signal) => {
+    log(`${spec.name} exit code=${code ?? "null"} signal=${signal ?? "null"}`);
+    serviceRuntimeGuard.handleChildExit(spec, code, signal);
+  });
 
   const record = {
     name: spec.name,
@@ -123,6 +147,31 @@ function recordChild(spec, child) {
   log(`${record.name} pid=${record.pid ?? "unknown"} startedAt=${record.startedAt}`);
   children.push(record);
   return child;
+}
+
+function stopServiceHealthMonitors() {
+  for (const monitor of serviceHealthMonitors) {
+    monitor.stop();
+  }
+  serviceHealthMonitors = [];
+}
+
+function startServiceHealthMonitors(specs) {
+  stopServiceHealthMonitors();
+  serviceHealthMonitors = specs.map((spec) => {
+    const monitor = createServiceHealthMonitor({
+      name: spec.name,
+      probe: () => probeHttp(spec.url),
+      onStateChange: (snapshot) => {
+        log(
+          `${snapshot.name} health state=${snapshot.state} failures=${snapshot.consecutiveFailures}`
+        );
+        serviceRuntimeGuard.handleHealthState(snapshot);
+      },
+    });
+    monitor.start();
+    return monitor;
+  });
 }
 
 async function startDevServices(signal) {
@@ -154,14 +203,14 @@ async function startProductionServiceOwned(signal) {
   await assertPortAvailable(PRODUCTION_PORT, PRODUCTION_HOST);
   throwIfStartupAborted(signal);
 
-  const { child } = await startProductionService(paths, {
+  const { spec, child } = await startProductionService(paths, {
     signal,
     spawnFn: (command, args, options) => {
       const ownedChild = spawn(command, args, options);
       return recordChild({ name: "server" }, ownedChild);
     },
   });
-  return { webUrl: PRODUCTION_URL, processes: [child] };
+  return { webUrl: PRODUCTION_URL, specs: [spec], processes: [child] };
 }
 
 function createWindow(webUrl) {
@@ -212,8 +261,10 @@ function createWindow(webUrl) {
     mainWindow.hide();
   });
   mainWindow.once("closed", () => {
+    servicesReady = false;
     rendererWatchdog?.stop();
     rendererWatchdog = undefined;
+    stopServiceHealthMonitors();
     mainWindow = undefined;
   });
   mainWindow.once("ready-to-show", () => {
@@ -239,9 +290,11 @@ async function start(signal) {
             waitForService(spec, processes[index], { signal })
           )
         );
-        return { webUrl: WEB_URL };
+        return { webUrl: WEB_URL, specs, processes };
       })();
   throwIfStartupAborted(signal);
+  servicesReady = true;
+  startServiceHealthMonitors(services.specs);
   log(`${runtime.mode} services ready`);
   await createWindow(services.webUrl);
   log("window loaded");
@@ -287,7 +340,9 @@ if (!hasSingleInstanceLock) {
     if (isQuitting) return;
     isQuitting = true;
     startupController.abort();
+    servicesReady = false;
     rendererWatchdog?.stop();
+    stopServiceHealthMonitors();
     stopDevServices();
     tray?.destroy();
     tray = undefined;

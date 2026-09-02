@@ -232,6 +232,61 @@ function stopChild(child, { platform = process.platform, spawnFn = spawn } = {})
   child.kill("SIGTERM");
 }
 
+function createServiceRuntimeGuard({
+  isServicesReady = () => false,
+  isQuitting = () => false,
+  onFailure = () => {},
+} = {}) {
+  let failureHandled = false;
+
+  function report(failure) {
+    if (failureHandled || !isServicesReady() || isQuitting()) {
+      return false;
+    }
+    failureHandled = true;
+    onFailure(failure);
+    return true;
+  }
+
+  function handleChildExit(spec, code, signal) {
+    const reason = signal
+      ? `signal ${signal}`
+      : `code ${code ?? "unknown"}`;
+    return report({
+      type: "child-exit",
+      name: spec.name,
+      reason,
+    });
+  }
+
+  function handleChildError(spec, error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return report({
+      type: "child-error",
+      name: spec.name,
+      reason,
+    });
+  }
+
+  function handleHealthState(snapshot) {
+    if (snapshot?.state !== "unhealthy") {
+      return false;
+    }
+    return report({
+      type: "health",
+      name: snapshot.name,
+      reason: "health state unhealthy",
+    });
+  }
+
+  return {
+    handleChildExit,
+    handleChildError,
+    handleHealthState,
+    hasFailed: () => failureHandled,
+  };
+}
+
 const stoppingChildren = new WeakSet();
 
 module.exports = {
@@ -243,4 +298,5 @@ module.exports = {
   waitForService,
   waitForHttp,
   stopChild,
+  createServiceRuntimeGuard,
 };

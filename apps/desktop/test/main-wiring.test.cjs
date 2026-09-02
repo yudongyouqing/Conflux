@@ -41,3 +41,20 @@ test("stops renderer watchdog during window close and application quit", () => {
     /app\.on\(\s*["']before-quit["'][\s\S]*?rendererWatchdog\?\.stop/
   );
 });
+
+test("monitors owned services only after startup and routes unhealthy state to one failure path", () => {
+  assert.match(mainSource, /createServiceHealthMonitor/);
+  assert.match(mainSource, /probeHttp/);
+  assert.match(mainSource, /createServiceRuntimeGuard/);
+  assert.match(mainSource, /servicesReady/);
+  assert.match(mainSource, /startServiceHealthMonitors/);
+  assert.match(mainSource, /stopServiceHealthMonitors/);
+  assert.match(mainSource, /failRuntime/);
+  assert.match(mainSource, /serviceRuntimeGuard\.handleHealthState/);
+});
+
+test("routes child errors and exits through the runtime guard", () => {
+  assert.match(mainSource, /serviceRuntimeGuard\.handleChildError/);
+  assert.match(mainSource, /serviceRuntimeGuard\.handleChildExit/);
+  assert.match(mainSource, /servicesReady\s*=\s*true/);
+});
