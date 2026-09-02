@@ -12,7 +12,7 @@ import {
   probeClaudePids,
   reconcileLiveness,
 } from "../core/liveness.js";
-import { createMcpLeaseMetadata } from "../core/mcp-liveness.js";
+import { claimMcpConnection, createMcpLeaseMetadata } from "../core/mcp-liveness.js";
 import { registerSession, endSession } from "../core/sessions.js";
 
 const { db, cleanup } = makeDb();
@@ -207,6 +207,71 @@ test("reconcileRuntimeLiveness leaves MCP lease sessions to MCP liveness", () =>
   reconcileRuntimeLiveness(db, { claude: new Set(), codex: new Set() }, now);
   assert.equal(row().status, "active");
   assert.equal(row().last_heartbeat_at, oldHeartbeat);
+});
+
+test("reconcileRuntimeLiveness does not overwrite leases claimed after the PID snapshot", () => {
+  const now = new Date("2030-01-02T03:04:05.000Z");
+  const claimAt = new Date("2030-01-02T03:03:00.000Z");
+  const oldHeartbeat = new Date("2030-01-02T02:04:05.000Z").toISOString();
+  const sessionIds = ["codex-race-live", "codex-race-dead"];
+  for (const [id, pid] of [
+    ["codex-race-live", 7410],
+    ["codex-race-dead", 7420],
+  ] as const) {
+    registerSession(db, {
+      id,
+      name: id,
+      description: "named",
+      metadata: { source: "codex-hook", named: true, runtime: "codex", runtime_pid: pid },
+    });
+  }
+  db.prepare(
+    `UPDATE sessions SET last_heartbeat_at = ? WHERE id IN ('codex-race-live', 'codex-race-dead')`
+  ).run(oldHeartbeat);
+
+  let claimedAfterSnapshot = false;
+  const racingDb = new Proxy(db, {
+    get(target, property, receiver) {
+      if (property !== "prepare") return Reflect.get(target, property, receiver);
+      return (sql: string) => {
+        const statement = target.prepare(sql);
+        if (
+          !claimedAfterSnapshot &&
+          sql.includes("UPDATE sessions") &&
+          sql.includes("SET status = 'active'")
+        ) {
+          claimedAfterSnapshot = true;
+          assert.equal(
+            claimMcpConnection(db, "codex-race-live", "race-live", claimAt),
+            true
+          );
+          assert.equal(
+            claimMcpConnection(db, "codex-race-dead", "race-dead", claimAt),
+            true
+          );
+        }
+        return statement;
+      };
+    },
+  }) as typeof db;
+
+  const result = reconcileRuntimeLiveness(
+    racingDb,
+    { claude: new Set(), codex: new Set([7410]) },
+    now
+  );
+  assert.equal(claimedAfterSnapshot, true);
+  assert.deepEqual(result, { refreshed: 0, reaped: 0 });
+
+  const row = (id: string) =>
+    db.prepare(`SELECT status, last_heartbeat_at FROM sessions WHERE id = ?`).get(id) as {
+      status: string;
+      last_heartbeat_at: string;
+    };
+  assert.equal(row(sessionIds[0]).status, "active");
+  assert.equal(row(sessionIds[0]).last_heartbeat_at, claimAt.toISOString());
+  assert.equal(row(sessionIds[1]).status, "active");
+  assert.equal(row(sessionIds[1]).last_heartbeat_at, claimAt.toISOString());
 });
 
 test("reconcileLiveness never touches the web console", () => {
