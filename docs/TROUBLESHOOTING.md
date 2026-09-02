@@ -89,7 +89,7 @@ npx tsx apps/server/src/index.ts --data-dir .\conflux-recovered data import --fi
 
 修改配置后必须完全退出并重新启动 MCP 宿主（例如 Claude Code 或其他客户端），仅刷新网页不会重新建立 stdio 连接。确认使用的是当前仓库路径，并检查宿主的 stderr 日志；MCP 的 stdout 只应包含 JSON-RPC 数据。
 
-Conflux 中 MCP 会话显示为“在线”，表示对应的 MCP stdio 连接仍在续租租约。Codex 或 Claude CLI 进程仍存在，只能说明进程尚未退出，不能单独证明当前会话仍连接。正常 `stdin` 断开时，会话会立即回收；强制结束宿主或 CLI 进程、以及断电时，服务无法收到正常断开信号，会在租约 TTL（Time to Live）内回收会话。
+Conflux 中 MCP 会话显示为“在线”，表示对应的 MCP stdio 连接仍在续租租约；这不代表终端窗口当前可见或处于焦点，也不代表 Codex 或 Claude CLI 进程仍然存在。反过来，即使 Codex 或 Claude CLI 进程仍存在，也不能单独证明当前会话仍连接。正常 `stdin` 断开时，会话会立即回收；强制结束宿主或 CLI 进程、以及断电时，服务无法收到正常断开信号，会在租约 TTL（Time to Live）内回收会话。
 
 手动验证功能分支前，先关闭主工作树遗留的旧 server 和 MCP 宿主/连接，再启动当前工作树。否则 `dist/` 文件或 SQLite 数据库可能来自错误工作树，导致验证结果反映了错误的代码或数据。
 
@@ -148,7 +148,7 @@ The default data directory is `%USERPROFILE%\.muiltchat` on Windows and `~/.muil
 
 Keep exactly one Conflux server entry in the project `.mcp.json`. New projects should use the `conflux` key; older projects may keep the single `muiltchat` key. Fully exit and restart the MCP host after changing the file. Reloading the web page does not recreate a stdio connection.
 
-When Conflux shows an MCP session as `online`, the MCP stdio connection is still renewing its lease. The existence of a Codex or Claude CLI process alone does not prove that the current session is still connected. A normal `stdin` disconnect reclaims the session immediately. Forced termination of the host or CLI process, or a power loss, cannot send a normal disconnect; the session is reclaimed within the lease TTL.
+When Conflux shows an MCP session as `online`, the MCP stdio connection is still renewing its lease. This does not mean that the terminal window is visible or focused, and it does not mean that the Codex or Claude CLI process still exists. Conversely, an existing Codex or Claude CLI process alone does not prove that the current session is still connected. A normal `stdin` disconnect reclaims the session immediately. Forced termination of the host or CLI process, or a power loss, cannot send a normal disconnect; the session is reclaimed within the lease TTL.
 
 Before manually verifying a feature branch, stop the old server and MCP host/connection from the main worktree, then start the current worktree. Otherwise the `dist/` files or SQLite database may come from the wrong worktree, so the verification may reflect the wrong code or data.
 
