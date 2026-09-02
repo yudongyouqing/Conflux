@@ -12,6 +12,7 @@ import {
   probeClaudePids,
   reconcileLiveness,
 } from "../core/liveness.js";
+import { createMcpLeaseMetadata } from "../core/mcp-liveness.js";
 import { registerSession, endSession } from "../core/sessions.js";
 
 const { db, cleanup } = makeDb();
@@ -172,6 +173,40 @@ test("reconcileRuntimeLiveness refreshes live Codex and reaps dead Codex immedia
   assert.equal(row("codex-dead-proc").status, "stale");
   assert.equal(row("claude-idle-open").status, "active");
   assert.equal(row("claude-idle-open").last_heartbeat_at, now.toISOString());
+});
+
+test("reconcileRuntimeLiveness leaves MCP lease sessions to MCP liveness", () => {
+  const now = new Date("2030-01-02T03:04:05.000Z");
+  const oldHeartbeat = new Date("2030-01-02T02:04:05.000Z").toISOString();
+  registerSession(db, {
+    id: "codex-mcp-pid-boundary",
+    name: "codex-mcp-pid-boundary",
+    description: "named",
+    metadata: {
+      source: "codex-hook",
+      named: true,
+      runtime: "codex",
+      runtime_pid: 7310,
+      ...createMcpLeaseMetadata("mcp-pid-boundary", new Date("2030-01-02T02:04:05.000Z")),
+    },
+  });
+  db.prepare(`UPDATE sessions SET last_heartbeat_at = ? WHERE id = ?`).run(
+    oldHeartbeat,
+    "codex-mcp-pid-boundary"
+  );
+
+  const row = () =>
+    db.prepare(`SELECT status, last_heartbeat_at FROM sessions WHERE id = ?`).get(
+      "codex-mcp-pid-boundary"
+    ) as { status: string; last_heartbeat_at: string };
+
+  reconcileRuntimeLiveness(db, { claude: new Set(), codex: new Set([7310]) }, now);
+  assert.equal(row().status, "active");
+  assert.equal(row().last_heartbeat_at, oldHeartbeat);
+
+  reconcileRuntimeLiveness(db, { claude: new Set(), codex: new Set() }, now);
+  assert.equal(row().status, "active");
+  assert.equal(row().last_heartbeat_at, oldHeartbeat);
 });
 
 test("reconcileLiveness never touches the web console", () => {
