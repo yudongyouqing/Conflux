@@ -186,14 +186,14 @@ export function expireMcpLeases(db: DB, now: Date = new Date()): { expired: numb
 export function installMcpStdioLifecycle(
   stdin: StdioEventSource,
   transport: StdioCloseableTransport,
-  onClose: (reason: "transport-close" | "stdin-close-failed") => void
+  onClose: (reason: string) => void
 ): () => void {
   let closeRequested = false;
   let closeReported = false;
   let disposed = false;
   const existingOnClose = transport.onclose;
 
-  const reportClose = (reason: "transport-close" | "stdin-close-failed"): void => {
+  const reportClose = (reason: string): void => {
     if (disposed || closeReported) return;
     closeReported = true;
     onClose(reason);
@@ -211,9 +211,10 @@ export function installMcpStdioLifecycle(
     if (disposed || closeRequested) return;
     closeRequested = true;
     try {
-      void transport.close().catch(() => {
-        reportClose("stdin-close-failed");
-      });
+      void transport.close().then(
+        () => reportClose("stdin-close"),
+        () => reportClose("stdin-close-failed")
+      );
     } catch {
       reportClose("stdin-close-failed");
     }
