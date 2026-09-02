@@ -8,9 +8,11 @@ import { hasMcpConnection } from "./mcp-liveness.js";
 const execFileAsync = promisify(execFile);
 
 /**
- * Liveness by PROCESS PROBING (AgentRecall's approach): a conversation is
- * alive iff an OS process is running it. Heartbeats drift (idle windows go
- * stale, dead processes linger a TTL); the process list is ground truth.
+ * Liveness for legacy sessions uses PROCESS PROBING (AgentRecall's approach):
+ * a legacy session without an MCP lease is alive iff an OS process is running
+ * it. Heartbeats drift (idle windows go stale, dead processes linger a TTL);
+ * the process list is ground truth. Sessions with a new-style MCP lease are
+ * managed by MCP heartbeats and lease TTL.
  *
  * We don't need to parse conversation ids out of command lines like
  * AgentRecall does — our hooks/MCP registration record the runtime pid in
@@ -158,25 +160,34 @@ export function reconcileRuntimeLiveness(
   let reaped = 0;
   const nowIso = now.toISOString();
   const refresh = db.prepare(
-    `UPDATE sessions SET status = 'active', last_heartbeat_at = ? WHERE id = ?`
+    `UPDATE sessions
+     SET status = 'active', last_heartbeat_at = ?
+     WHERE id = ? AND metadata NOT LIKE '%"mcp_connection_id"%'`
   );
-  const reap = db.prepare(`UPDATE sessions SET status = 'stale' WHERE id = ? AND status = 'active'`);
+  const reap = db.prepare(
+    `UPDATE sessions
+     SET status = 'stale'
+     WHERE id = ? AND status = 'active'
+       AND metadata NOT LIKE '%"mcp_connection_id"%'`
+  );
 
   for (const row of rows) {
     if (row.id === "web-console") continue;
     try {
-      const metadata = JSON.parse(row.metadata ?? "{}") as Record<string, unknown>;
+      const parsed: unknown = JSON.parse(row.metadata ?? "{}");
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+      const metadata = parsed as Record<string, unknown>;
       // MCP lease sessions are managed by MCP heartbeats and lease TTL, not PID probing.
       if (hasMcpConnection(metadata)) continue;
       const identity = metadataRuntimePid(metadata);
       if (!identity) continue;
       if (livePids[identity.runtime].has(identity.pid)) {
-        refresh.run(nowIso, row.id);
-        refreshed++;
+        const result = refresh.run(nowIso, row.id);
+        if (result.changes === 1) refreshed++;
       } else if (row.status === "active") {
         // the process is gone — the conversation is dead, regardless of TTL
-        reap.run(row.id);
-        reaped++;
+        const result = reap.run(row.id);
+        if (result.changes === 1) reaped++;
       }
     } catch {
       continue;
