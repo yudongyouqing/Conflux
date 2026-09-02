@@ -82,7 +82,12 @@ import {
   setAutoWake,
 } from "../core/app-settings.js";
 import { openInTerminal, resumeCommand, terminalOptions } from "../core/terminal.js";
-import { probeRuntimePids, reconcileRuntimeLiveness } from "../core/liveness.js";
+import {
+  probeRuntimePids,
+  reconcileRuntimeLiveness,
+  type RuntimePidSnapshot,
+} from "../core/liveness.js";
+import { expireMcpLeases } from "../core/mcp-liveness.js";
 import type { TerminalSettings } from "@muiltchat/shared";
 import { logger } from "../log.js";
 import { exportData, importData, type ImportConflictStrategy } from "../core/data-transfer.js";
@@ -92,6 +97,20 @@ export interface HttpServerOptions {
   port?: number;
   scope?: Scope;
   overrideDataDir?: string;
+}
+
+export type RuntimePidProbe = () => Promise<RuntimePidSnapshot | null>;
+
+export async function reconcileRuntimeState(
+  db: DB,
+  probe: RuntimePidProbe = probeRuntimePids,
+  now: Date = new Date()
+): Promise<{ expired: number; refreshed: number; reaped: number }> {
+  const { expired } = expireMcpLeases(db, now);
+  const livePids = await probe();
+  if (!livePids) return { expired, refreshed: 0, reaped: 0 };
+  const { refreshed, reaped } = reconcileRuntimeLiveness(db, livePids, now);
+  return { expired, refreshed, reaped };
 }
 
 export async function startHttpServer(opts: HttpServerOptions = {}): Promise<FastifyInstance> {
@@ -156,8 +175,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   // still applies.
   const livenessTick = async () => {
     try {
-      const livePids = await probeRuntimePids();
-      if (livePids) reconcileRuntimeLiveness(db, livePids);
+      await reconcileRuntimeState(db);
     } catch {
       // transient — next tick retries
     }
