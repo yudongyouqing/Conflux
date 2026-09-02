@@ -226,6 +226,33 @@ test("stdin end and close request transport close once and report transport clos
   assert.deepEqual(reasons, ["transport-close"]);
 });
 
+test("successful stdin transport close reports stdin close without transport onclose", async (t) => {
+  const stdin = new FakeStdin();
+  const transport = new FakeTransport(undefined, false);
+  const reasons: string[] = [];
+  const api = await loadApi();
+  assert.equal(
+    typeof api.installMcpStdioLifecycle,
+    "function",
+    "stdio lifecycle API is not implemented"
+  );
+
+  const dispose = api.installMcpStdioLifecycle!(stdin, transport, (reason) => {
+    reasons.push(reason);
+  });
+  t.after(() => {
+    dispose();
+    assert.equal(stdin.listenerCount("end"), 0);
+    assert.equal(stdin.listenerCount("close"), 0);
+  });
+
+  stdin.emit("end");
+  await Promise.resolve();
+
+  assert.equal(transport.closeCalls, 1);
+  assert.deepEqual(reasons, ["stdin-close"]);
+});
+
 test("transport onclose reports transport close once", async (t) => {
   const stdin = new FakeStdin();
   const transport = new FakeTransport();
