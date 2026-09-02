@@ -25,6 +25,20 @@
 
 不要同时运行 `npm run dev:desktop` 和 `npm run dev:all`，它们会竞争 `5173`、`9527` 和同一个 SQLite 数据目录。停止当前开发命令后再切换入口。
 
+### Electron 桌面壳状态与 MCP 会话在线
+
+Electron 桌面壳使用 Main 与 Renderer 之间的私有 ping/pong 检查 UI 是否响应：
+
+| 状态 | 含义 |
+| --- | --- |
+| `responsive` | 最近一次 ping 在超时窗口内收到合法 pong，Renderer 正常响应。 |
+| `unknown` | 暂时没有收到 pong，或 Electron 报告 Renderer 无响应；不等同于崩溃。 |
+| `crashed` | Electron 明确报告 Renderer 进程已退出，桌面实例会提示并退出。 |
+
+这组状态只描述 Electron 桌面壳，不写入会话数据库，也不改变 Agent 会话状态。桌面实例启动的 server/web 服务还会独立进行 HTTP 健康检查；连续两次失败会结束桌面实例，但不会回收 MCP 会话。
+
+MCP 会话显示为 `connected` 或“在线”，才表示 MCP stdio 连接仍在通过 lease 续租。PID 探测、终端窗口可见性和窗口聚焦只用于辅助查找进程与 Resume，不能作为 Agent 会话存活的依据。遇到状态不一致时，先分别检查 Electron 日志、本地服务健康端点和 MCP 宿主连接。
+
 ### 端口已被占用
 
 启动失败时如果看到 `PORT_IN_USE`，先查看占用者：
@@ -131,6 +145,20 @@ Use the endpoint that matches the command you started:
 In browser development mode, `5173` serves Vite and `9527` serves the API. `VITE ready` confirms only the Vite process; `http server listening` confirms only the API. Check both endpoints with the PowerShell commands above. Prefer `127.0.0.1` when `localhost` resolves unexpectedly.
 
 Do not run `npm run dev:desktop` and `npm run dev:all` at the same time. They share ports and the SQLite data directory.
+
+### Electron shell health and MCP session liveness
+
+The Electron shell uses a private Main-to-Renderer ping/pong check to determine whether the UI responds:
+
+| State | Meaning |
+| --- | --- |
+| `responsive` | A valid pong arrived within the timeout window; the Renderer responds normally. |
+| `unknown` | No pong arrived temporarily, or Electron reported an unresponsive Renderer; this is not a crash. |
+| `crashed` | Electron explicitly reported that the Renderer process exited; the desktop instance shows an error and quits. |
+
+These states describe only the Electron shell. They are not written to the session database and do not change Agent session state. The server/web processes owned by the desktop instance also have independent HTTP health checks; two consecutive failures end the desktop instance without reclaiming an MCP session.
+
+An MCP session is live only while the MCP stdio connection is shown as `connected` or `online` and continues renewing its lease. PID detection, terminal visibility, and window focus are only helpers for locating a process and handling Resume; they are not proof that an Agent session is alive. When states disagree, check the Electron log, the local service health endpoints, and the MCP host connection separately.
 
 ### A port is already in use
 
