@@ -29,7 +29,7 @@
 - 创建：`apps/server/src/test/mcp-liveness.test.ts`
 - 创建：`apps/server/src/core/mcp-liveness.ts`
 
-- [ ] **步骤 1：编写失败测试**
+- [x] **步骤 1：编写失败测试**
 
 先创建隔离数据库和动态模块加载，确保模块缺失时测试以明确断言失败，而不是因为测试导入拼写错误直接崩溃。测试覆盖 token 创建、续租、连接代际保护和 TTL 回收：
 
@@ -140,13 +140,13 @@ test("silent MCP lease expires and records a disconnected state", async () => {
 });
 ```
 
-- [ ] **步骤 2：运行测试确认红灯**
+- [x] **步骤 2：运行测试确认红灯**
 
 运行：`npm test -w apps/server -- --test-name-pattern="MCP lease"`
 
 预期：失败，至少包含 `lease API is not implemented`；失败原因是待实现行为缺失，不是测试文件加载错误。
 
-- [ ] **步骤 3：实现最少租约 API**
+- [x] **步骤 3：实现最少租约 API**
 
 创建 `apps/server/src/core/mcp-liveness.ts`，使用 metadata 原值条件更新保护连接代际。实现以下完整接口和常量：
 
@@ -314,13 +314,13 @@ export function expireMcpLeases(
 }
 ```
 
-- [ ] **步骤 4：运行租约测试确认绿灯**
+- [x] **步骤 4：运行租约测试确认绿灯**
 
 运行：`npm test -w apps/server -- --test-name-pattern="MCP lease"`
 
 预期：3 个租约测试通过，输出无异常堆栈。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add apps/server/src/core/mcp-liveness.ts apps/server/src/test/mcp-liveness.test.ts
@@ -333,7 +333,7 @@ git commit -m "feat: add MCP connection lease helpers"
 - 修改：`apps/server/src/core/liveness.ts`
 - 修改：`apps/server/src/test/liveness.test.ts`
 
-- [ ] **步骤 1：先增加有租约会话的失败测试**
+- [x] **步骤 1：先增加有租约会话的失败测试**
 
 在 `liveness.test.ts` 增加 helper import 和测试：
 
@@ -381,13 +381,13 @@ test("reconcileRuntimeLiveness does not refresh or reap an MCP-leased session", 
 });
 ```
 
-- [ ] **步骤 2：运行测试确认红灯**
+- [x] **步骤 2：运行测试确认红灯**
 
 运行：`npm test -w apps/server -- --test-name-pattern="MCP-leased session"`
 
 预期：失败，现有 `reconcileRuntimeLiveness()` 会把 heartbeat 刷新为 `leaseTime`，第二次调用还会把会话标记为 `stale`。
 
-- [ ] **步骤 3：实现 PID 边界**
+- [x] **步骤 3：实现 PID 边界**
 
 在 `liveness.ts` 引入 `hasMcpConnection`，解析 metadata 后在 `metadataRuntimePid()` 之后增加以下分支；有 token 的会话完全交给 MCP lease controller：
 
@@ -403,13 +403,13 @@ if (!identity) continue;
 
 同时更新函数注释，明确“有 MCP 租约的会话由连接心跳/TTL 管理；无租约行保留现有 PID reconcile”。不改变 `probeRuntimePids()`、旧 `claude_pid` 解析或 `reconcileLiveness()` 兼容包装。
 
-- [ ] **步骤 4：运行 liveness 回归测试确认绿灯**
+- [x] **步骤 4：运行 liveness 回归测试确认绿灯**
 
 运行：`npm test -w apps/server -- --test-name-pattern="liveness|MCP-leased"`
 
 预期：新增边界测试和既有 Claude/Codex PID 测试全部通过。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add apps/server/src/core/liveness.ts apps/server/src/test/liveness.test.ts
@@ -422,7 +422,7 @@ git commit -m "fix: keep PID probing out of MCP lease state"
 - 修改：`apps/server/src/core/mcp-liveness.ts`
 - 修改：`apps/server/src/test/mcp-liveness.test.ts`
 
-- [ ] **步骤 1：编写 fake stdin/transport 失败测试**
+- [x] **步骤 1：编写 fake stdin/transport 失败测试**
 
 追加以下测试类型和用例，验证 stdin 的两个事件只请求一次 close，transport 的 close 回调只通知一次：
 
@@ -483,13 +483,13 @@ test("repeated transport close notifications are idempotent", async () => {
 });
 ```
 
-- [ ] **步骤 2：运行测试确认红灯**
+- [x] **步骤 2：运行测试确认红灯**
 
 运行：`npm test -w apps/server -- --test-name-pattern="stdin EOF|transport close notifications"`
 
 预期：失败，错误信息为 `stdio lifecycle API is not implemented`。
 
-- [ ] **步骤 3：实现 stdio 生命周期绑定**
+- [x] **步骤 3：实现 stdio 生命周期绑定**
 
 在 `mcp-liveness.ts` 追加以下结构。该函数在 `server.connect(transport)` 之前调用，保留 SDK 连接时包装 `onclose` 的行为：
 
@@ -541,13 +541,13 @@ export function installMcpStdioLifecycle(
 }
 ```
 
-- [ ] **步骤 4：运行 stdio 测试确认绿灯**
+- [x] **步骤 4：运行 stdio 测试确认绿灯**
 
 运行：`npm test -w apps/server -- --test-name-pattern="MCP lease|stdin EOF|transport close notifications"`
 
 预期：租约测试和两个 stdio 幂等测试全部通过。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add apps/server/src/core/mcp-liveness.ts apps/server/src/test/mcp-liveness.test.ts
@@ -560,7 +560,7 @@ git commit -m "feat: handle MCP stdio disconnects"
 - 修改：`apps/server/src/mcp/server.ts`
 - 修改：`apps/server/src/test/mcp-liveness.test.ts`
 
-- [ ] **步骤 1：增加 MCP metadata builder 的失败测试**
+- [x] **步骤 1：增加 MCP metadata builder 的失败测试**
 
 使用动态 import 测试 `mcp/server.ts` 暴露的纯函数，先固定自动注册必须包含连接 token、运行时和 PID：
 
@@ -595,13 +595,13 @@ test("MCP session metadata includes the lease and runtime identity", async () =>
 });
 ```
 
-- [ ] **步骤 2：运行测试确认红灯**
+- [x] **步骤 2：运行测试确认红灯**
 
 运行：`npm test -w apps/server -- --test-name-pattern="MCP session metadata"`
 
 预期：失败，错误信息为 `MCP metadata builder is not implemented`。
 
-- [ ] **步骤 3：实现 builder、adoption 续租和 close 清理**
+- [x] **步骤 3：实现 builder、adoption 续租和 close 清理**
 
 在 `mcp/server.ts` 增加 imports 和纯 builder，并移除原来仅用于通用会话探活的 `heartbeat` import：
 
@@ -705,13 +705,13 @@ logger.info({ sessionId }, "mcp connected via stdio");
 
 `installMcpStdioLifecycle()` 必须位于 `server.connect()` 之前，因为 MCP SDK 的 `Protocol.connect()` 会捕获并包装已有的 `transport.onclose`。
 
-- [ ] **步骤 4：运行 MCP 相关测试和构建确认绿灯**
+- [x] **步骤 4：运行 MCP 相关测试和构建确认绿灯**
 
 运行：`npm test -w apps/server -- --test-name-pattern="MCP|liveness"` 和 `npm run build -w apps/server`
 
 预期：MCP metadata、租约、stdio、PID 边界及既有服务器测试通过，TypeScript 构建退出码为 0。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add apps/server/src/mcp/server.ts apps/server/src/test/mcp-liveness.test.ts
@@ -724,7 +724,7 @@ git commit -m "feat: bind MCP sessions to connection leases"
 - 修改：`apps/server/src/http/server.ts`
 - 创建：`apps/server/src/test/http-liveness.test.ts`
 
-- [ ] **步骤 1：编写可注入探针的失败测试**
+- [x] **步骤 1：编写可注入探针的失败测试**
 
 测试直接调用将要导出的 `reconcileRuntimeState()`，使用固定时间和 fake PID 探针，不等待真实 30 秒定时器：
 
@@ -782,13 +782,13 @@ test("HTTP liveness tick expires MCP leases without losing legacy PID reconcile"
 });
 ```
 
-- [ ] **步骤 2：运行测试确认红灯**
+- [x] **步骤 2：运行测试确认红灯**
 
 运行：`npm test -w apps/server -- --test-name-pattern="HTTP liveness tick"`
 
 预期：失败，错误信息为 `HTTP liveness tick is not implemented`。
 
-- [ ] **步骤 3：抽出统一 liveness tick 并接入定时器**
+- [x] **步骤 3：抽出统一 liveness tick 并接入定时器**
 
 在 `http/server.ts` 导入 `RuntimePidSnapshot` 和 `expireMcpLeases`，增加以下可测试函数；探针返回 `null` 时只跳过 PID reconcile，仍然执行 MCP TTL 回收：
 
@@ -829,13 +829,13 @@ const livenessTick = async () => {
 
 定时器仍保持 30 秒间隔并调用 `unref()`；MCP 心跳不依赖 HTTP 定时器。
 
-- [ ] **步骤 4：运行 HTTP liveness 测试确认绿灯**
+- [x] **步骤 4：运行 HTTP liveness 测试确认绿灯**
 
 运行：`npm test -w apps/server -- --test-name-pattern="HTTP liveness tick|MCP lease|liveness"`
 
 预期：过期 MCP 会话被回收，旧 Claude PID 会话仍被刷新，所有相关测试通过。
 
-- [ ] **步骤 5：Commit**
+- [x] **步骤 5：Commit**
 
 ```bash
 git add apps/server/src/http/server.ts apps/server/src/test/http-liveness.test.ts
@@ -847,7 +847,7 @@ git commit -m "feat: expire MCP leases from liveness tick"
 **文件：**
 - 修改：`docs/TROUBLESHOOTING.md`
 
-- [ ] **步骤 1：增加在线状态说明**
+- [x] **步骤 1：增加在线状态说明**
 
 在现有 MCP/会话排查章节加入以下明确内容，避免用户把进程存在误解为窗口存活：
 
@@ -861,7 +861,7 @@ Conflux 中 MCP 会话显示“在线”表示当前 MCP stdio 连接仍在续�
 手动验证功能分支时，先关闭主工作树启动的 server 和旧 MCP，再从当前分支执行启动命令。否则正在运行的 `apps/server/dist/index.js` 可能来自另一份工作树，页面和数据库看到的行为不会对应当前源码。
 ```
 
-- [ ] **步骤 2：检查文档空白和提交**
+- [x] **步骤 2：检查文档空白和提交**
 
 运行：`git diff --check -- docs/TROUBLESHOOTING.md`
 
@@ -877,13 +877,13 @@ git commit -m "docs: explain MCP session presence"
 **文件：**
 - 无新增代码文件；检查所有任务提交和工作树状态。
 
-- [ ] **步骤 1：运行服务器全量测试**
+- [x] **步骤 1：运行服务器全量测试**
 
 运行：`npm test -w apps/server`
 
 预期：所有测试通过，退出码为 0。
 
-- [ ] **步骤 2：运行桌面与发布配置回归测试**
+- [x] **步骤 2：运行桌面与发布配置回归测试**
 
 运行：`npm run test:desktop` 和 `node --test scripts/release-config.test.cjs`
 
@@ -895,13 +895,13 @@ git commit -m "docs: explain MCP session presence"
 
 预期：shared、server、web 和 desktop 均构建成功，退出码为 0。
 
-- [ ] **步骤 4：检查改动范围与工作树**
+- [x] **步骤 4：检查改动范围与工作树**
 
 运行：`git status --short --branch; git diff --check origin/feature/conflux-productization..HEAD`
 
 预期：只有本计划列出的 Core、MCP、HTTP、测试和故障排查文档发生变化；没有生成数据库、日志或构建产物被加入 Git。
 
-- [ ] **步骤 5：手动验证当前分支的运行实例**
+- [x] **步骤 5：手动验证当前分支的运行实例**
 
 在不复用主工作树进程的前提下，从 `C:\Project folder\项目\muiltchat\.worktrees\conflux-productization` 执行：
 
@@ -923,6 +923,15 @@ npm run dev:desktop
 运行：`git log --oneline -8; git status --short --branch`
 
 预期：每个任务有独立 Conventional Commit，功能分支工作树干净；向用户报告实际命令、退出码和仍需手动验证的外部状态，不把主工作树旧进程当作本分支验证结果。
+
+## 执行记录（2026-09-02）
+
+- 服务端全量测试：`148 pass / 0 fail`。
+- 桌面回归测试：`30 pass / 0 fail`；release 配置测试：`3 pass / 0 fail`。
+- 根目录 `npm run build`：退出码 `0`。
+- `npm run build:desktop`：前端资源构建成功；`electron-builder` 在 `better-sqlite3` 原生重编译阶段因当前路径包含空格且本机没有 Visual Studio C++ 工具链退出码 `1`。这项环境阻塞未改动源码。
+- 当前分支 Electron 开发实例已启动并加载窗口；MCP 协议握手暴露 13 个工具。空闲 17 秒后租约心跳更新，stdin 关闭后会话由 `active/connected` 变为 `stale/disconnected`，原因 `transport-close`。
+- 真实 Codex 宿主的 MCP 配置重载仍需用户侧完全重启 Codex 后确认；本次验证使用的是当前 worktree 的 MCP 子进程，不复用主工作树实例。
 
 ## 规格覆盖检查
 
