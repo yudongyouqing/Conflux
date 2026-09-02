@@ -20,6 +20,7 @@ const { resolveRuntimePaths } = require("./runtime-paths.cjs");
 const { configureElectronRuntime } = require("./runtime-config.cjs");
 const { createTray } = require("./tray.cjs");
 const { externalLinkDecision } = require("./security.cjs");
+const { createRendererWatchdog } = require("./renderer-watchdog.cjs");
 
 const repoRoot = path.resolve(__dirname, "../../..");
 const PRODUCTION_URL = `http://${PRODUCTION_HOST}:${PRODUCTION_PORT}/`;
@@ -29,6 +30,8 @@ let tray;
 let isQuitting = false;
 let servicesStopped = false;
 let focusWhenReady = false;
+let rendererWatchdog;
+let rendererFailureHandled = false;
 const startupController = new AbortController();
 
 function log(message) {
@@ -67,6 +70,40 @@ function routeNavigation(event, url, appOrigin) {
 
   event.preventDefault();
   if (decision.action === "external") openExternal(decision.url);
+}
+
+function handleRendererCrash(details = {}) {
+  if (rendererFailureHandled || isQuitting) return;
+  rendererFailureHandled = true;
+  const reason = details.reason ?? "unknown";
+  const exitCode = details.exitCode ?? "unknown";
+  const message = `Renderer 进程已退出（reason=${reason}, exitCode=${exitCode}）。请重新启动 Conflux。`;
+  log(message);
+  dialog.showErrorBox("muiltchat 页面进程异常", message);
+  app.quit();
+}
+
+function startRendererWatchdog() {
+  rendererWatchdog = createRendererWatchdog({
+    sendPing: (payload) => {
+      if (
+        !mainWindow ||
+        mainWindow.isDestroyed() ||
+        mainWindow.webContents.isDestroyed()
+      ) {
+        return;
+      }
+      try {
+        mainWindow.webContents.send("conflux:renderer-ping", payload);
+      } catch (error) {
+        log(`renderer ping failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
+    onStateChange: ({ state, reason }) => {
+      log(`renderer watchdog state=${state} reason=${reason ?? "none"}`);
+    },
+  });
+  rendererWatchdog.start();
 }
 
 function recordChild(spec, child) {
@@ -148,6 +185,22 @@ function createWindow(webUrl) {
   mainWindow.webContents.on("will-redirect", (event, url) =>
     routeNavigation(event, url, appOrigin)
   );
+  mainWindow.webContents.on("unresponsive", () => {
+    if (rendererWatchdog) {
+      rendererWatchdog.markUnresponsive({ reason: "unresponsive" });
+    }
+  });
+  mainWindow.webContents.on("responsive", () => {
+    if (rendererWatchdog) {
+      rendererWatchdog.markResponsive({ reason: "responsive" });
+    }
+  });
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    if (rendererWatchdog) {
+      rendererWatchdog.markCrashed(details);
+    }
+    handleRendererCrash(details);
+  });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     const decision = externalLinkDecision(url, appOrigin);
     if (decision.action === "external") openExternal(decision.url);
@@ -159,6 +212,8 @@ function createWindow(webUrl) {
     mainWindow.hide();
   });
   mainWindow.once("closed", () => {
+    rendererWatchdog?.stop();
+    rendererWatchdog = undefined;
     mainWindow = undefined;
   });
   mainWindow.once("ready-to-show", () => {
@@ -169,6 +224,7 @@ function createWindow(webUrl) {
     }
     mainWindow.show();
   });
+  startRendererWatchdog();
   return mainWindow.loadURL(webUrl);
 }
 
@@ -204,6 +260,13 @@ if (!hasSingleInstanceLock) {
 } else {
   app.on("second-instance", () => focusMainWindow());
   ipcMain.on("conflux:show-window", focusMainWindow);
+  ipcMain.on("conflux:renderer-pong", (event, payload) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) return;
+    if (!payload || !Number.isInteger(payload.nonce) || payload.nonce <= 0) return;
+    if (rendererWatchdog) {
+      rendererWatchdog.handlePong(payload);
+    }
+  });
 
   app.whenReady().then(() => {
     log("app ready");
@@ -224,6 +287,7 @@ if (!hasSingleInstanceLock) {
     if (isQuitting) return;
     isQuitting = true;
     startupController.abort();
+    rendererWatchdog?.stop();
     stopDevServices();
     tray?.destroy();
     tray = undefined;
