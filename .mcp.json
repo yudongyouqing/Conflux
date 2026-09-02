@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "muiltchat": {
+    "conflux": {
       "command": "npx",
       "args": ["tsx", "apps/server/src/index.ts", "mcp"]
     }

@@ -54,6 +54,44 @@ test("getGraph shows active MCP placeholders but hides stale ones", () => {
   assert.ok(!g.nodes.some((n) => n.id === "graph-codex-stale-temp"));
 });
 
+test("getGraph returns explicit session identity fields", () => {
+  registerSession(db, {
+    id: "graph-explicit-identity",
+    name: "codex worker",
+    runtime: "codex",
+    identity_source: "mcp",
+    runtime_pid: 4321,
+    metadata: { temp: true },
+  });
+
+  const node = getGraph(db, { status: "all" }).nodes.find(
+    (candidate) => candidate.id === "graph-explicit-identity"
+  )!;
+  assert.equal(node.runtime, "codex");
+  assert.equal(node.identity_source, "mcp");
+  assert.equal(node.runtime_pid, 4321);
+});
+
+test("getGraph normalizes malformed explicit identity columns", () => {
+  registerSession(db, {
+    id: "graph-malformed-identity",
+    name: "malformed identity",
+    runtime: "codex",
+    identity_source: "mcp",
+    runtime_pid: 4321,
+  });
+  db.prepare(
+    `UPDATE sessions SET runtime = ?, identity_source = ?, runtime_pid = ? WHERE id = ?`
+  ).run("unknown-runtime", "unknown-source", 0, "graph-malformed-identity");
+
+  const node = getGraph(db, { status: "all" }).nodes.find(
+    (candidate) => candidate.id === "graph-malformed-identity"
+  )!;
+  assert.equal(node.runtime, null);
+  assert.equal(node.identity_source, null);
+  assert.equal(node.runtime_pid, null);
+});
+
 test("agent node carries conversation_count", () => {
   createConversation(db, { agent_id: agent.id, initiated_by: "test", title: "t" });
   const g = getGraph(db, { status: "all" });
