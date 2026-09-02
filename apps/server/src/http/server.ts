@@ -169,10 +169,9 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   scheduleTimer.unref();
 
   // ---- liveness probe (AgentRecall-style process scan) ----
-  // Source of truth for session status: a conversation is alive iff its
-  // Claude or Codex process exists. Refreshes idle-but-open terminals and
-  // reaps dead processes immediately; on probe failure the heartbeat TTL
-  // still applies.
+  // MCP lease sessions are governed by connection heartbeats and lease TTL;
+  // legacy rows without a lease are reconciled by runtime PID probing. If the
+  // probe fails, the legacy heartbeat TTL remains the fallback.
   const livenessTick = async () => {
     try {
       await reconcileRuntimeState(db);
