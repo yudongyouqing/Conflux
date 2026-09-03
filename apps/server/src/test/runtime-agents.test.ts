@@ -202,20 +202,20 @@ test("wakeSessionForMail: guards, dedup and command shape", () => {
     { woke: false, reason: "busy — the running turn will surface the mail" }
   );
 
-  // active + IDLE → resumes the REAL conversation with full context (the
-  // reply lands in the actual history); busy is the only gated window
+  // active + IDLE → the open TUI holds the thread lock, so a FRESH
+  // headless run answers (digest-seeded; resume is codex-impossible here)
   registerSession(db, {
     id: "wake-alive",
     name: "alive",
     description: "d",
     metadata: { source: "claude-hook", named: true, claude_pid: 424242 },
   });
-  makeTranscript("wake-alive", "C:/Project folder/项目/muiltchat");
   const idle = wakeSessionForMail(db, "wake-alive", { dryRun: true, claudeHome: FAKE_HOME });
   assert.equal(idle.woke, true);
   if (idle.woke) {
-    assert.ok(idle.command.includes("--resume wake-alive"), "resumes the real conversation");
     assert.ok(idle.command.includes("-p "), "headless prompt");
+    assert.ok(!idle.command.includes("--resume "), "must not resume a TUI-locked thread");
+    assert.ok(idle.command.includes("check_inbox"), "wake prompt drives the inbox flow");
   }
 
   // offline claude session → dry-run returns the full wake command
