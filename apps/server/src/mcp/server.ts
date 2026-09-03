@@ -43,6 +43,7 @@ import {
   deleteUnreferencedSession,
 } from "../core/live.js";
 import { wakeOfflineSession } from "../core/runtime-agents.js";
+import { refreshCodexSessionTitles } from "../core/codex-titles.js";
 import { logger } from "../log.js";
 
 const INSTRUCTIONS = `
@@ -242,6 +243,8 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
     try {
       tryAdopt();
       touchLease();
+      // Codex has no hooks: keep the display title in sync with its rollouts.
+      if (identity.runtime === "codex") refreshCodexSessionTitles(db, { onlySessionId: sessionId });
     } catch {
       // transient sqlite lock contention — next tick retries
     }

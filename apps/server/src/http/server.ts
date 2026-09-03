@@ -88,6 +88,7 @@ import {
   type RuntimePidSnapshot,
 } from "../core/liveness.js";
 import { expireMcpLeases } from "../core/mcp-liveness.js";
+import { refreshCodexSessionTitles } from "../core/codex-titles.js";
 import type { TerminalSettings } from "@muiltchat/shared";
 import { logger } from "../log.js";
 import { exportData, importData, type ImportConflictStrategy } from "../core/data-transfer.js";
@@ -175,6 +176,8 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   const livenessTick = async () => {
     try {
       await reconcileRuntimeState(db);
+      // covers codex rows whose MCP child died but whose process still runs
+      refreshCodexSessionTitles(db);
     } catch {
       // transient — next tick retries
     }
