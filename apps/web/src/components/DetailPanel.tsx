@@ -400,7 +400,9 @@ function InitiateConversation({
         </div>
       )}
       <MentionComposer
-        initialTarget={session}
+        // the web console is the SENDER — preselecting it would address
+        // ourselves; require an explicit @ target instead
+        initialTarget={session.id === WEB_CONSOLE_ID ? null : session}
         onSent={(_t, message) => {
           // jump straight into the channel this question created
           if (message?.edge_id != null) {
