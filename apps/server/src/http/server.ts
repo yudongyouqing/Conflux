@@ -22,6 +22,7 @@ import {
 import {
   registerSession,
   listSessions,
+  sessionBusy,
   heartbeat,
   getSession,
   markStaleSessions,
@@ -73,7 +74,7 @@ import {
   listRuntimeAgentsWithLiveness,
   startRuntimeAgent,
   tickScheduledAgents,
-  wakeOfflineSession,
+  wakeSessionForMail,
 } from "../core/runtime-agents.js";
 import {
   getAutoWake,
@@ -88,6 +89,7 @@ import {
   type RuntimePidSnapshot,
 } from "../core/liveness.js";
 import { expireMcpLeases } from "../core/mcp-liveness.js";
+import { refreshCodexSessionTitles } from "../core/codex-titles.js";
 import type { TerminalSettings } from "@muiltchat/shared";
 import { logger } from "../log.js";
 import { exportData, importData, type ImportConflictStrategy } from "../core/data-transfer.js";
@@ -175,6 +177,8 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   const livenessTick = async () => {
     try {
       await reconcileRuntimeState(db);
+      // covers codex rows whose MCP child died but whose process still runs
+      refreshCodexSessionTitles(db);
     } catch {
       // transient — next tick retries
     }
@@ -332,7 +336,10 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   app.get<{ Querystring: { status?: string } }>("/sessions", {}, async (req, reply) => {
     try {
       const status = (req.query.status as "active" | "stale" | "ended" | "all" | undefined) ?? "active";
-      const sessions = listSessions(db, { status });
+      const sessions = listSessions(db, { status }).map((s) => ({
+        ...s,
+        busy: sessionBusy(s.metadata),
+      }));
       return reply.send({ sessions });
     } catch (err) {
       return sendError(reply, err);
@@ -460,7 +467,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
       });
       let wake: { woke: boolean; reason?: string } = { woke: false, reason: "skipped" };
       try {
-        wake = wakeOfflineSession(db, req.body.to_session);
+        wake = wakeSessionForMail(db, req.body.to_session);
       } catch {
         // best-effort auto-answer
       }
@@ -922,7 +929,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
       });
       let wake: { woke: boolean; reason?: string } = { woke: false, reason: "skipped" };
       try {
-        wake = wakeOfflineSession(db, edge.to_session);
+        wake = wakeSessionForMail(db, edge.to_session);
       } catch {
         // best-effort auto-answer
       }
@@ -1012,8 +1019,10 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
     }
   });
 
-  // POST /web/ask — ask a session from the web console (Drawer input box)
-  app.post<{ Body: { to_session: string; question: string } }>("/web/ask", {
+  // POST /web/ask — ask a session from the web console (Drawer input box).
+  // Optional from_session lets the UI speak AS a CLI session ("let A ask B");
+  // omitted, the sender is the web console itself.
+  app.post<{ Body: { to_session: string; question: string; from_session?: string } }>("/web/ask", {
     schema: {
       body: {
         type: "object",
@@ -1021,29 +1030,40 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
         properties: {
           to_session: { type: "string" },
           question: { type: "string", maxLength: 20000 },
+          from_session: { type: "string" },
         },
       },
     },
   }, async (req, reply) => {
     try {
-      heartbeat(db, WEB_CONSOLE_ID);
+      let from = WEB_CONSOLE_ID;
+      if (req.body.from_session && req.body.from_session !== WEB_CONSOLE_ID) {
+        const sender = getSession(db, req.body.from_session);
+        if (!sender) throw httpError(400, "from_session not found");
+        if (sender.id === req.body.to_session) {
+          throw httpError(400, "from_session and to_session must differ");
+        }
+        from = sender.id; // speak AS this session; do NOT heartbeat it (no fake liveness)
+      } else {
+        heartbeat(db, WEB_CONSOLE_ID);
+      }
       const msg = askSession(db, {
-        from_session: WEB_CONSOLE_ID,
+        from_session: from,
         to_session: req.body.to_session,
         question: req.body.question,
       });
       // true auto-answer: if the addressee is offline, wake its conversation
       let wake: { woke: boolean; reason?: string } = { woke: false, reason: "skipped" };
       try {
-        wake = wakeOfflineSession(db, req.body.to_session);
+        wake = wakeSessionForMail(db, req.body.to_session);
       } catch {
         // best-effort — the mail is still delivered by the notice/forwarding paths
       }
       logAudit(db, {
-        caller_session: WEB_CONSOLE_ID,
+        caller_session: from,
         interface: "http",
         action: "web_ask",
-        args: { to_session: req.body.to_session },
+        args: { to_session: req.body.to_session, from_session: from },
         result: { message_id: msg.id, wake },
       });
       return reply.send({ message: msg, wake });

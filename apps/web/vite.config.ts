@@ -10,6 +10,7 @@ export default defineConfig({
     proxy: {
       "/graph": API_TARGET,
       "/messages": API_TARGET,
+      "/edges": API_TARGET,
       "/sessions": API_TARGET,
       "/context": API_TARGET,
       "/agents": API_TARGET,

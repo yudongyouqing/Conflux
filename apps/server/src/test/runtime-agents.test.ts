@@ -11,7 +11,7 @@ import {
   tickScheduledAgents,
   createRuntimeAgent,
   listRuntimeAgentsWithLiveness,
-  wakeOfflineSession,
+  wakeSessionForMail,
 } from "../core/runtime-agents.js";
 import { getAutoWake, setAutoWake, setSetting } from "../core/app-settings.js";
 import { registerSession, mergeSessionMeta } from "../core/sessions.js";
@@ -181,23 +181,41 @@ test("listRuntimeAgentsWithLiveness derives live from spawned session heartbeats
 
 // ---- auto-answer wake ----
 
-test("wakeOfflineSession: guards, dedup and command shape", () => {
+test("wakeSessionForMail: guards, dedup and command shape", () => {
   // not a CLI conversation
   registerSession(db, { id: "web-console", name: "Web 控制台" });
-  assert.equal(wakeOfflineSession(db, "web-console", { dryRun: true }).woke, false);
+  assert.equal(wakeSessionForMail(db, "web-console", { dryRun: true }).woke, false);
   assert.deepEqual(
-    wakeOfflineSession(db, "agent-1", { dryRun: true }),
+    wakeSessionForMail(db, "agent-1", { dryRun: true }),
     { woke: false, reason: "not a CLI conversation" }
   );
 
-  // active sessions rely on the notice hook instead
+  // active + BUSY → the running turn will surface the mail itself
+  registerSession(db, {
+    id: "wake-busy",
+    name: "busy",
+    description: "d",
+    metadata: { source: "claude-hook", named: true, claude_pid: 424242, busy: true },
+  });
+  assert.deepEqual(
+    wakeSessionForMail(db, "wake-busy", { dryRun: true }),
+    { woke: false, reason: "busy — the running turn will surface the mail" }
+  );
+
+  // active + IDLE → the open TUI holds the thread lock, so a FRESH
+  // headless run answers (digest-seeded; resume is codex-impossible here)
   registerSession(db, {
     id: "wake-alive",
     name: "alive",
     description: "d",
     metadata: { source: "claude-hook", named: true, claude_pid: 424242 },
   });
-  assert.equal(wakeOfflineSession(db, "wake-alive", { dryRun: true }).woke, false);
+  const idle = wakeSessionForMail(db, "wake-alive", { dryRun: true, claudeHome: FAKE_HOME });
+  assert.equal(idle.woke, true);
+  if (idle.woke) {
+    assert.ok(idle.command.includes("-p "), "headless prompt (delivered via stdin)");
+    assert.ok(!idle.command.includes("--resume "), "must not resume a TUI-locked thread");
+  }
 
   // offline claude session → dry-run returns the full wake command
   registerSession(db, {
@@ -208,25 +226,55 @@ test("wakeOfflineSession: guards, dedup and command shape", () => {
   });
   db.prepare(`UPDATE sessions SET status = 'stale' WHERE id = 'wake-dead'`).run();
   assert.deepEqual(
-    wakeOfflineSession(db, "wake-dead", { dryRun: true }),
+    wakeSessionForMail(db, "wake-dead", { dryRun: true }),
     { woke: false, reason: "no transcript (zero-turn conversation)" },
     "no transcript → cannot resume"
   );
   makeTranscript("wake-dead", "C:/Project folder/项目/muiltchat");
-  const w = wakeOfflineSession(db, "wake-dead", { dryRun: true, claudeHome: FAKE_HOME });
+  const w = wakeSessionForMail(db, "wake-dead", { dryRun: true, claudeHome: FAKE_HOME });
   assert.equal(w.woke, true);
   if (w.woke) {
     assert.ok(w.command.includes("--resume wake-dead"), "resumes the conversation");
-    assert.ok(w.command.includes("-p "), "headless wake prompt");
+    assert.ok(w.command.trimEnd().endsWith("-p"), "headless prompt via stdin");
   }
 
   // global opt-out
   setAutoWake(db, false);
-  assert.equal(wakeOfflineSession(db, "wake-dead", { dryRun: true }).woke, false);
+  assert.equal(wakeSessionForMail(db, "wake-dead", { dryRun: true }).woke, false);
   setAutoWake(db, true);
 });
 
-test("wakeOfflineSession dedups within the window", () => {
+test("wakeSessionForMail: codex wakes headlessly via exec resume", () => {
+  // no rollout binding → cannot resume
+  registerSession(db, {
+    id: "wake-codex-unbound",
+    name: "cu",
+    description: "d",
+    metadata: { runtime: "codex", runtime_pid: 313131 },
+  });
+  db.prepare(`UPDATE sessions SET status = 'stale' WHERE id = 'wake-codex-unbound'`).run();
+  assert.deepEqual(
+    wakeSessionForMail(db, "wake-codex-unbound", { dryRun: true }),
+    { woke: false, reason: "no codex_session_id (rollout binding missing)" }
+  );
+
+  // bound uuid → codex exec resume command (no transcript requirement)
+  registerSession(db, {
+    id: "wake-codex",
+    name: "cw",
+    description: "d",
+    metadata: { runtime: "codex", runtime_pid: 323232, codex_session_id: "01c0d3x-uuid" },
+  });
+  db.prepare(`UPDATE sessions SET status = 'stale' WHERE id = 'wake-codex'`).run();
+  const w = wakeSessionForMail(db, "wake-codex", { dryRun: true });
+  assert.equal(w.woke, true);
+  if (w.woke) {
+    assert.ok(w.command.includes("exec resume 01c0d3x-uuid"), "resumes the codex conversation");
+    assert.ok(!w.command.includes("--resume "), "not the claude resume flag");
+  }
+});
+
+test("wakeSessionForMail dedups within the window", () => {
   registerSession(db, {
     id: "wake-dedup",
     name: "dd",
@@ -237,21 +285,21 @@ test("wakeOfflineSession dedups within the window", () => {
   makeTranscript("wake-dedup", "C:/Project folder/项目/muiltchat");
   // dryRun is a pure preview (no side effects), so simulate the dedup key a
   // real wake would have stamped
-  const first = wakeOfflineSession(db, "wake-dedup", {
+  const first = wakeSessionForMail(db, "wake-dedup", {
     dryRun: true,
     now: new Date("2026-08-16T11:59:00Z"),
     claudeHome: FAKE_HOME,
   });
   assert.equal(first.woke, true, "no in-flight wake → wakeable");
   setSetting(db, "auto-wake:wake-dedup", "2026-08-16T12:00:00Z");
-  const second = wakeOfflineSession(db, "wake-dedup", {
+  const second = wakeSessionForMail(db, "wake-dedup", {
     dryRun: true,
     now: new Date("2026-08-16T12:01:00Z"),
     claudeHome: FAKE_HOME,
   });
   assert.deepEqual(second, { woke: false, reason: "wake already in flight" });
   // past the dedup window it may wake again
-  const third = wakeOfflineSession(db, "wake-dedup", {
+  const third = wakeSessionForMail(db, "wake-dedup", {
     dryRun: true,
     now: new Date("2026-08-16T12:05:00Z"),
     claudeHome: FAKE_HOME,

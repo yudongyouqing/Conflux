@@ -234,6 +234,10 @@ Hooks 会把会话生命周期事件与会话身份关联起来，并持续更�
 
 Hooks 还会维护自定义标题、`/resume` 会话继承关系以及未投递消息。Claude Code 使用自定义配置目录时，可以通过 `CLAUDE_CONFIG_DIR` 指定该目录。
 
+### Codex 会话标题
+
+Codex 没有 Hooks 机制，标题由服务端维护：每 30 秒随 MCP 心跳和进程存活探测扫描 `~/.codex/sessions` 下的 rollout 记录与 `~/.codex/session_index.jsonl`，优先采用 Codex 自己维护的会话标题（thread_name），没有时回退到首条用户指令的摘要。会话发出首条指令后约 30 秒内即可获得标题；通过 `register_session` 或界面手动命名的会话不会被自动覆盖。
+
 ## 内置智能体
 
 内置智能体是保存在本地数据库中的模型智能体。可以在 Agents 标签页创建智能体，配置名称、系统提示词、提供商和模型，然后直接在工作空间中与其对话。

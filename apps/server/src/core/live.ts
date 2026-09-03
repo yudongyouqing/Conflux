@@ -337,6 +337,7 @@ export function handleHookEvent(
       const title = readCustomTitle(id, payload.cwd ?? existing.project_dir, claudeHome);
       if (title && title !== existing.name) renameSession(db, id, title);
       heartbeat(db, id);
+      mergeSessionMeta(db, id, { busy: false }); // Stop: the turn finished
       const pid = refreshClaudePid(
         db,
         id,
@@ -366,6 +367,8 @@ export function handleHookEvent(
       project_dir: payload.cwd ?? existing?.project_dir ?? null,
       metadata: { source: "claude-hook", ...meta, ...agentTag, ...(title ? { custom_title: true } : {}), claude_pid: claudePid },
     });
+    // a fresh start is by definition not mid-turn (clears a stuck busy)
+    mergeSessionMeta(db, id, { busy: false });
     // This process previously ran another conversation id that was abandoned
     // by /resume or /clear before receiving any prompt — reap it now.
     if (claudePid !== null) {
@@ -402,6 +405,7 @@ export function handleHookEvent(
       typeof meta.claude_pid === "number" ? meta.claude_pid : null
     );
     if (pid !== null) setSetting(db, `claude-current:${pid}`, id);
+    mergeSessionMeta(db, id, { busy: true }); // UserPromptSubmit: a turn began
     return;
   }
   registerSession(db, {
@@ -409,7 +413,7 @@ export function handleHookEvent(
     name: title ?? excerpt ?? (existing?.name ?? "claude"),
     description: excerpt ?? (existing?.description ?? "Claude Code session (hook)"),
     project_dir: payload.cwd ?? existing?.project_dir ?? null,
-    metadata: { source: "claude-hook", ...meta, ...agentTag, ...(title ? { custom_title: true } : {}), named: true },
+    metadata: { source: "claude-hook", ...meta, ...agentTag, ...(title ? { custom_title: true } : {}), named: true, busy: true },
   });
 }
 
