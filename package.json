@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "description": "Cross-session context query and conversation system for AI coding assistants (monorepo root)",
+  "author": "Conflux contributors",
+  "license": "MIT",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -10,12 +12,24 @@
   "scripts": {
     "setup": "npm install",
     "build": "npm run build -w packages/shared && npm run build -w apps/server && npm run build -w apps/web",
+    "build:desktop": "npm run build && npm run build -w apps/desktop",
+    "package:desktop": "npm run build:desktop && electron-builder --projectDir apps/desktop --config electron-builder.yml",
+    "package:desktop:dir": "npm run build:desktop && electron-builder --projectDir apps/desktop --config electron-builder.yml --dir",
+    "test:desktop": "node --test apps/desktop/test/*.test.cjs",
+    "ci:test": "npm test -w apps/server && npm run test:desktop && node --test scripts/release-config.test.cjs",
+    "ci:build": "npm run build",
+    "verify:desktop-package": "node apps/desktop/test/package-smoke.cjs",
+    "check:secrets": "node scripts/check-secrets.cjs",
     "dev:server": "npm run dev -w apps/server",
     "dev:web": "npm run dev -w apps/web",
+    "dev:desktop": "npm run dev -w apps/desktop",
     "dev:all": "concurrently -n server,web -c blue,green \"npm run serve -w apps/server\" \"npm run dev -w apps/web\"",
     "serve": "npm run serve -w apps/server",
     "mcp": "npm run mcp -w apps/server",
     "start": "npm run build && npm run serve"
+  },
+  "dependencies": {
+    "muiltchat": "file:apps/server"
   },
   "devDependencies": {
     "concurrently": "^10.0.4"

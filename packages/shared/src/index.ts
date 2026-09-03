@@ -10,6 +10,10 @@ export type SessionStatus = "active" | "stale" | "ended";
 
 export type NodeType = "session" | "agent";
 
+export type SessionRuntime = "claude" | "codex" | "internal" | "web";
+
+export type IdentitySource = "hook" | "mcp" | "http" | "cli" | "internal";
+
 /**
  * Message lifecycle: pending (unseen by addressee) -> seen (read but not
  * yet answered) -> replied (answer written) -> read (asker consumed the
@@ -27,6 +31,9 @@ export interface Session {
   created_at: string;
   last_heartbeat_at: string;
   metadata: string | null;
+  runtime: SessionRuntime | null;
+  identity_source: IdentitySource | null;
+  runtime_pid: number | null;
 }
 
 export interface SessionSummary extends Session {
@@ -137,8 +144,12 @@ export interface GraphNode {
   last_heartbeat_at?: string;
   /** Runtime-agent definition this session was spawned from (if any). */
   agent_id?: number | null;
-  /** CLI runtime identifier, e.g. "claude" | "codex" (runtime-agent sessions). */
-  runtime?: string | null;
+  /** Session runtime identifier, e.g. "claude" | "codex" | "internal" | "web". */
+  runtime?: SessionRuntime | null;
+  /** Source that established the session identity. */
+  identity_source?: IdentitySource | null;
+  /** PID of the owning CLI runtime, when known. */
+  runtime_pid?: number | null;
   /** Agent Card: capability self-description (register_session skills). */
   skills?: string[];
 }
@@ -192,4 +203,26 @@ export interface Turn {
   role: "user" | "assistant" | "system";
   content: string;
   created_at: string;
+}
+
+export type DataBundleScope = "global" | "project";
+
+/** Runtime preset shape used by portable exports; secrets never leave the database. */
+export interface ExportedRuntimeAgent extends Omit<RuntimeAgent, "api_key" | "live" | "last_seen"> {
+  api_key_configured: boolean;
+}
+
+export interface ConfluxDataBundle {
+  format: "conflux-data";
+  version: 1;
+  exported_at: string;
+  scope: DataBundleScope;
+  sessions: Session[];
+  context_entries: ContextEntry[];
+  messages: Message[];
+  edges: GraphEdge[];
+  agents: Agent[];
+  conversations: Conversation[];
+  turns: Turn[];
+  runtime_agents: ExportedRuntimeAgent[];
 }

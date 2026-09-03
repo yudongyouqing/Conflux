@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  windows:
+    name: Build Windows release
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify tag matches package version
+        shell: pwsh
+        run: |
+          $package = Get-Content package.json -Raw | ConvertFrom-Json
+          $expected = "v$($package.version)"
+          if ($env:GITHUB_REF_NAME -ne $expected) {
+            throw "Release tag '$env:GITHUB_REF_NAME' does not match package version '$expected'."
+          }
+
+      - name: Scan source for credentials
+        run: npm run check:secrets
+
+      - name: Run server tests
+        run: npm test -w apps/server
+
+      - name: Build application resources
+        run: npm run build
+
+      - name: Run desktop module tests
+        run: npm run test:desktop
+
+      - name: Build unsigned NSIS installer
+        run: npx electron-builder --projectDir apps/desktop --config electron-builder.yml --win nsis --publish never
+
+      - name: Build unsigned unpacked directory
+        run: npx electron-builder --projectDir apps/desktop --config electron-builder.yml --win dir --publish never
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: conflux-windows-${{ github.ref_name }}
+          path: |
+            release/*.exe
+            release/win-unpacked/**
+          if-no-files-found: error
