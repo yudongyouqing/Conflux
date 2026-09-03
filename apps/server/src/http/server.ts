@@ -74,8 +74,8 @@ import {
   listRuntimeAgentsWithLiveness,
   startRuntimeAgent,
   tickScheduledAgents,
-  wakeSessionForMail,
 } from "../core/runtime-agents.js";
+import { wakeSessionForMail } from "../core/wake/index.js";
 import {
   getAutoWake,
   getTerminalSettings,

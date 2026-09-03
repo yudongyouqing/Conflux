@@ -42,7 +42,7 @@ import {
   findSessionByRuntimePid,
   deleteUnreferencedSession,
 } from "../core/live.js";
-import { wakeSessionForMail } from "../core/runtime-agents.js";
+import { wakeSessionForMail } from "../core/wake/index.js";
 import { refreshCodexSessionTitles } from "../core/codex-titles.js";
 import { logger } from "../log.js";
 

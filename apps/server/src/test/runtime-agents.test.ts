@@ -11,8 +11,8 @@ import {
   tickScheduledAgents,
   createRuntimeAgent,
   listRuntimeAgentsWithLiveness,
-  wakeSessionForMail,
 } from "../core/runtime-agents.js";
+import { wakeSessionForMail } from "../core/wake/index.js";
 import { getAutoWake, setAutoWake, setSetting } from "../core/app-settings.js";
 import { registerSession, mergeSessionMeta } from "../core/sessions.js";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
@@ -210,11 +210,14 @@ test("wakeSessionForMail: guards, dedup and command shape", () => {
     description: "d",
     metadata: { source: "claude-hook", named: true, claude_pid: 424242 },
   });
+  makeTranscript("wake-alive", "C:/Project folder/项目/muiltchat");
   const idle = wakeSessionForMail(db, "wake-alive", { dryRun: true, claudeHome: FAKE_HOME });
   assert.equal(idle.woke, true);
   if (idle.woke) {
-    assert.ok(idle.command.includes("-p "), "headless prompt (delivered via stdin)");
-    assert.ok(!idle.command.includes("--resume "), "must not resume a TUI-locked thread");
+    // claude has NO thread lock, so idle wake resumes the real conversation
+    // (full context, reply in actual history) whenever a transcript exists
+    assert.ok(idle.command.includes("--resume wake-alive"), "resumes the real conversation");
+    assert.ok(idle.command.trimEnd().endsWith("-p"), "headless prompt via stdin");
   }
 
   // offline claude session → dry-run returns the full wake command
