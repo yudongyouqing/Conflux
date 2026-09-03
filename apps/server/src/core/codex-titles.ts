@@ -21,7 +21,8 @@ import { renameSession, setSessionDescription } from "./sessions.js";
  * records under ~/.codex: one rollout-*.jsonl per conversation (first line
  * is session_meta with the conversation uuid and cwd) plus session_index.jsonl
  * (thread_name entries Codex maintains itself, refreshed as the conversation
- * progresses).
+ * progresses). A rollout is written when the FIRST user instruction arrives,
+ * which can be hours after the codex process launched.
  *
  * Correlating a muiltchat row to a rollout cannot rely on cwd alone: when
  * the MCP server is configured globally with a fixed working directory
@@ -31,15 +32,14 @@ import { renameSession, setSessionDescription } from "./sessions.js";
  *   1. the codex_session_id we stamped on a previous pass — absolute: a
  *      stamped row never rebinds, and if its rollout is gone the row is
  *      skipped (falling through would let it steal a sibling's rollout);
- *   2. an unclaimed rollout whose cwd matches project_dir exactly;
- *   3. an unclaimed rollout that started after the session row was created
- *      (Codex launches → MCP child registers → first prompt writes the
- *      rollout, so rollout start ≥ row creation, give or take clock skew).
- * Each rollout is claimed by at most one row per pass; ties resolve to the
- * earliest-started rollout. Concurrent same-directory sessions started
- * within seconds of each other can still cross-assign — the titles remain
- * real titles of real sibling conversations, which beats three rows all
- * named after the directory.
+ *   2. unstamped rows and unclaimed rollouts are matched greedily by
+ *      tightest |rollout.start − row.created| (cwd-exact pairs rank first).
+ *      Prompt latency is unbounded, so gap SIZE only ranks candidates —
+ *      a row opened this morning can still claim a rollout written tonight.
+ * Each rollout belongs to at most one row; rollouts stamped on other rows
+ * are never candidates. Sibling sessions launched within seconds of each
+ * other can still cross-assign — the titles remain real titles of real
+ * sibling conversations, which beats three rows all named "server".
  *
  * Title priority: a name set via register_session (or any external rename)
  * is never overridden; otherwise Codex's thread_name; otherwise an excerpt
@@ -52,12 +52,6 @@ const AUTO_REGISTERED_DESCRIPTION = "Codex session (auto-registered)";
 // A rollout may start slightly BEFORE its MCP row exists (Codex writes the
 // meta line, then spawns MCP children) — allow this much skew.
 const ROLLOUT_SKEW_MS = 120_000;
-
-// Tier 3 (cwd-blind) matching only trusts rollouts that started within this
-// lag after the row was created: a first prompt usually follows launch by
-// minutes. Beyond it, binding confidence is too low — a placeholder name is
-// better than a wrong title stolen from a younger sibling session.
-const TIER3_MAX_LAG_MS = 15 * 60_000;
 
 // Synthetic user-role texts Codex injects into the rollout — none of them
 // are the human's instruction, so none may become a title.
@@ -83,6 +77,12 @@ interface SessionRow {
   project_dir: string | null;
   created_at: string;
   metadata: string | null;
+}
+
+export interface MatchRow {
+  id: string;
+  projectDir: string;
+  createdMs: number;
 }
 
 function parseMeta(row: { metadata: string | null }): Record<string, unknown> {
@@ -251,53 +251,50 @@ export function readCodexThreadNames(codexHome: string): Map<string, string> {
   return names;
 }
 
-export interface FindRolloutOptions {
-  projectDir: string;
-  createdMs: number | null;
-  /** Rollout paths already claimed by other rows in this pass. */
-  claimed?: Set<string>;
-  /** codex session ids already stamped on OTHER rows — never re-match them. */
-  ownedSessionIds?: Set<string>;
-}
-
 /**
- * Pick the rollout belonging to a muiltchat session (see the tiered strategy
- * in the module docblock). Returns null when nothing credible matches.
+ * Greedy bipartite match of unstamped session rows to unclaimed rollouts by
+ * tightest |rollout.start − row.created|, cwd-exact pairs ranking first.
+ * Ties resolve to the older row so the pass is deterministic. A rollout is
+ * only eligible for rows that already existed when it started (minus skew).
  */
-export function findRolloutFor(rollouts: CodexRollout[], opts: FindRolloutOptions): CodexRollout | null {
-  const claimed = opts.claimed ?? new Set<string>();
-  const isFree = (r: CodexRollout) =>
-    !claimed.has(r.path) &&
-    !(r.codexSessionId && opts.ownedSessionIds?.has(r.codexSessionId));
+export function matchCodexRollouts(
+  rows: MatchRow[],
+  rollouts: CodexRollout[],
+  ownedSessionIds: Set<string>
+): Map<string, CodexRollout> {
+  const matches = new Map<string, CodexRollout>();
+  const cands = rollouts.filter(
+    (r) => r.codexSessionId !== null && r.startedAtMs !== null && !ownedSessionIds.has(r.codexSessionId!)
+  );
+  if (rows.length === 0 || cands.length === 0) return matches;
 
-  const startedAfter = (r: CodexRollout) =>
-    r.startedAtMs !== null &&
-    opts.createdMs !== null &&
-    r.startedAtMs >= opts.createdMs - ROLLOUT_SKEW_MS;
-
-  // Tier 2: exact cwd match — the MCP cwd and the Codex cwd agree (typical
-  // for .mcp.json-discovered local servers). Strong signal, no lag cap.
-  const wanted = normalizeDir(opts.projectDir);
-  const strong = rollouts
-    .filter((r) => r.cwd !== null && normalizeDir(r.cwd) === wanted && isFree(r) && startedAfter(r))
-    .sort((a, b) => a.startedAtMs! - b.startedAtMs!);
-  if (strong.length > 0) return strong[0];
-
-  // Tier 3: any recent-enough rollout — covers globally-configured MCP
-  // servers whose cwd is fixed elsewhere.
-  const weak = rollouts
-    .filter(
-      (r) =>
-        isFree(r) &&
-        r.startedAtMs !== null &&
-        opts.createdMs !== null &&
-        r.startedAtMs >= opts.createdMs - ROLLOUT_SKEW_MS &&
-        r.startedAtMs <= opts.createdMs + TIER3_MAX_LAG_MS
-    )
-    .sort((a, b) => a.startedAtMs! - b.startedAtMs!);
-  if (weak.length > 0) return weak[0];
-
-  return null;
+  interface Pair {
+    row: MatchRow;
+    rollout: CodexRollout;
+    cwdMatch: boolean;
+    gap: number;
+  }
+  const pairs: Pair[] = [];
+  for (const row of rows) {
+    for (const r of cands) {
+      if (r.startedAtMs! < row.createdMs - ROLLOUT_SKEW_MS) continue; // row didn't exist yet
+      const cwdMatch = r.cwd !== null && normalizeDir(r.cwd) === normalizeDir(row.projectDir);
+      pairs.push({ row, rollout: r, cwdMatch, gap: Math.abs(r.startedAtMs! - row.createdMs) });
+    }
+  }
+  pairs.sort(
+    (a, b) =>
+      Number(b.cwdMatch) - Number(a.cwdMatch) || // cwd agreement is decisive
+      a.gap - b.gap || // then tightest launch-to-prompt gap
+      a.row.createdMs - b.row.createdMs // deterministic tie-break
+  );
+  const takenRollouts = new Set<string>();
+  for (const p of pairs) {
+    if (matches.has(p.row.id) || takenRollouts.has(p.rollout.path)) continue;
+    matches.set(p.row.id, p.rollout);
+    takenRollouts.add(p.rollout.path);
+  }
+  return matches;
 }
 
 export interface CodexTitleRefreshOptions {
@@ -355,29 +352,31 @@ export function refreshCodexSessionTitles(db: DB, opts: CodexTitleRefreshOptions
   if (rollouts.length === 0) return 0;
   const threadNames = readCodexThreadNames(home);
 
-  // Oldest row claims its rollout first: launch order is monotone with
-  // first-prompt order often enough, and the pass is deterministic.
-  const claimed = new Set<string>();
+  // Stamped rows bind absolutely; unstamped rows go through the matcher.
+  const stamped = new Map<string, CodexRollout>();
+  const matchRows: MatchRow[] = [];
+  for (const row of eligible) {
+    if (!row.project_dir) continue;
+    const meta = parseMeta(row);
+    const stamp = typeof meta.codex_session_id === "string" ? meta.codex_session_id : null;
+    if (stamp) {
+      // Previously bound: the stamp is absolute. Rollout gone (archived,
+      // pruned) → skip — re-guessing would steal a sibling's rollout.
+      const own = rollouts.find((r) => r.codexSessionId === stamp);
+      if (own) stamped.set(row.id, own);
+      continue;
+    }
+    const createdMs = Date.parse(row.created_at);
+    if (Number.isFinite(createdMs)) {
+      matchRows.push({ id: row.id, projectDir: row.project_dir, createdMs });
+    }
+  }
+  const matches = matchCodexRollouts(matchRows, rollouts, ownedSessionIds);
+
   let updated = 0;
-  for (const row of [...eligible].sort((a, b) => a.created_at.localeCompare(b.created_at))) {
+  for (const row of eligible) {
     try {
-      const meta = parseMeta(row);
-      if (!row.project_dir) continue;
-      const createdMs = Date.parse(row.created_at);
-      let rollout: CodexRollout | null;
-      const stamp = typeof meta.codex_session_id === "string" ? meta.codex_session_id : null;
-      if (stamp) {
-        // Previously bound: the stamp is absolute. Rollout gone (archived,
-        // pruned) → skip — re-guessing would steal a sibling's rollout.
-        rollout = rollouts.find((r) => r.codexSessionId === stamp) ?? null;
-      } else {
-        rollout = findRolloutFor(rollouts, {
-          projectDir: row.project_dir,
-          createdMs: Number.isFinite(createdMs) ? createdMs : null,
-          claimed,
-          ownedSessionIds,
-        });
-      }
+      const rollout = stamped.get(row.id) ?? matches.get(row.id);
       if (!rollout || !rollout.codexSessionId) continue;
       const prompts = readCodexUserPrompts(rollout.path);
       if (prompts.length === 0) continue; // conversation not started yet
@@ -387,12 +386,12 @@ export function refreshCodexSessionTitles(db: DB, opts: CodexTitleRefreshOptions
       if (!title) continue;
       const lastExcerpt = promptExcerpt(prompts[prompts.length - 1]) ?? title;
 
-      claimed.add(rollout.path);
       ownedSessionIds.add(rollout.codexSessionId);
       if (title !== row.name) renameSession(db, row.id, title);
       if (lastExcerpt !== row.description) setSessionDescription(db, row.id, lastExcerpt);
       // Rewrite metadata wholesale to drop `temp` (a titled session is an
       // adopted identity, not a placeholder that hides when stale).
+      const meta = parseMeta(row);
       const { temp: _drop, ...rest } = meta;
       db.prepare(`UPDATE sessions SET metadata = ? WHERE id = ?`).run(
         JSON.stringify({
