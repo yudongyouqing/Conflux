@@ -1,6 +1,7 @@
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
+import type { RuntimeId } from "@muiltchat/shared";
 import type { DB } from "./db.js";
 import {
   registerSession,
@@ -14,6 +15,7 @@ import {
 } from "./sessions.js";
 import { forwardInboxFromPid } from "./messages.js";
 import { setSetting } from "./app-settings.js";
+import { isRuntimeCommand } from "./liveness.js";
 
 /**
  * Hook-driven liveness + identity for Claude Code sessions.
@@ -30,51 +32,77 @@ import { setSetting } from "./app-settings.js";
 
 // ---- ancestor walk: find the Claude Code process pid --------------------
 
-const PS_SCRIPT = `param([int]$StartPid)
+const PS_SCRIPT = `param([int]$StartPid, [string]$Runtime)
+$pattern = if ($Runtime -eq "codex") {
+  '(^|[\\\\/])codex(\\.exe|\\.cmd)?(\\s|$)|@openai[\\\\/]codex|codex-cli'
+} else {
+  '(^|[\\\\/])claude(\\.exe|\\.cmd)?(\\s|$)|@anthropic-ai[\\\\/]claude-code|claude-code'
+}
 $p = $StartPid
 while ($p -and $p -gt 4) {
   $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$p" -ErrorAction SilentlyContinue
   if (-not $proc) { break }
-  if ($proc.CommandLine -match 'claude') { Write-Output $p; exit 0 }
+  if ($proc.CommandLine -and $proc.CommandLine -match $pattern) { Write-Output $p; exit 0 }
   $p = [int]$proc.ParentProcessId
 }
 exit 1
 `;
 
-let claudePidValue: number | null = null;
-let claudePidResolved = false;
-let claudePidAttempts = 0;
+interface RuntimeProcess {
+  pid: number;
+  command: string;
+}
+
+interface RuntimePidState {
+  value: RuntimeProcess | null;
+  resolved: boolean;
+  attempts: number;
+}
+
+const runtimePidStates: Record<RuntimeId, RuntimePidState> = {
+  claude: { value: null, resolved: false, attempts: 0 },
+  codex: { value: null, resolved: false, attempts: 0 },
+};
+
+const runtimePidEnv: Record<RuntimeId, string> = {
+  claude: "MUILTCHAT_CLAUDE_PID",
+  codex: "MUILTCHAT_CODEX_PID",
+};
 
 /**
- * Walk the parent process chain and return the pid of the Claude Code
- * process, or null. Success is cached; failure retries for a bounded
- * number of calls (the hook may fire slightly after the MCP server) and
- * then gives up so we stop paying the walk cost.
+ * Walk the parent process chain and return the selected runtime process.
+ * Success is cached; failure retries for a bounded number of calls (the
+ * hook/MCP process may start slightly before its CLI parent) and then gives
+ * up so we stop paying the walk cost.
  */
-export function getClaudePid(): number | null {
-  if (claudePidResolved) return claudePidValue;
-  if (process.env.MUILTCHAT_CLAUDE_PID) {
-    claudePidValue = Number(process.env.MUILTCHAT_CLAUDE_PID) || null;
-    claudePidResolved = true;
-    return claudePidValue;
+export function getRuntimeProcess(runtime: RuntimeId): RuntimeProcess | null {
+  const state = runtimePidStates[runtime];
+  if (state.resolved) return state.value;
+  const configured = process.env[runtimePidEnv[runtime]];
+  if (configured) {
+    const pid = Number(configured);
+    state.value = Number.isInteger(pid) && pid > 0 ? { pid, command: runtime } : null;
+    state.resolved = true;
+    return state.value;
   }
-  if (++claudePidAttempts > 10) return null;
+  if (++state.attempts > 10) return null;
   try {
     if (process.platform === "win32") {
       const home = join(process.env.USERPROFILE || process.env.HOME || ".", ".muiltchat");
       if (!existsSync(home)) mkdirSync(home, { recursive: true });
-      const ps1 = join(home, "find-claude.ps1");
+      const ps1 = join(home, "find-runtime.ps1");
       if (!existsSync(ps1)) writeFileSync(ps1, PS_SCRIPT, "utf8");
       const out = execSync(
-        `powershell -NoProfile -ExecutionPolicy Bypass -File "${ps1}" -StartPid ${process.ppid}`,
+        `powershell -NoProfile -ExecutionPolicy Bypass -File "${ps1}" -StartPid ${process.ppid} -Runtime ${runtime}`,
         { timeout: 5000, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
       ).trim();
-      if (out && /^\d+$/.test(out)) {
-        claudePidValue = Number(out);
-        claudePidResolved = true;
+      const match = /\b(\d+)\b/.exec(out);
+      if (match) {
+        state.value = { pid: Number(match[1]), command: runtime };
+        state.resolved = true;
       }
     } else {
-      // POSIX: walk ppid chain, match 'claude' in the command line
+      // POSIX: walk ppid chain and use the same token matcher as liveness.
       let ppid = process.ppid;
       for (let i = 0; i < 12 && ppid > 1; i++) {
         const line = execSync(`ps -o command= -p ${ppid}`, {
@@ -82,10 +110,10 @@ export function getClaudePid(): number | null {
           encoding: "utf8",
           stdio: ["ignore", "pipe", "ignore"],
         }).trim();
-        if (/claude/i.test(line)) {
-          claudePidValue = ppid;
-          claudePidResolved = true;
-          return claudePidValue;
+        if (isRuntimeCommand(line, runtime)) {
+          state.value = { pid: ppid, command: line };
+          state.resolved = true;
+          return state.value;
         }
         const next = execSync(`ps -o ppid= -p ${ppid}`, {
           timeout: 3000,
@@ -98,7 +126,16 @@ export function getClaudePid(): number | null {
   } catch {
     // unresolved — retry on the next call until the attempt budget runs out
   }
-  return claudePidResolved ? claudePidValue : null;
+  return state.resolved ? state.value : null;
+}
+
+export function getRuntimePid(runtime: RuntimeId): number | null {
+  return getRuntimeProcess(runtime)?.pid ?? null;
+}
+
+/** Find the Claude Code ancestor (compatibility wrapper). */
+export function getClaudePid(): number | null {
+  return getRuntimePid("claude");
 }
 
 // ---- hook event handling --------------------------------------------------
@@ -408,18 +445,39 @@ function refreshClaudePid(db: DB, id: string, stored: number | null): number | n
  * Find the hook-registered session owned by the given Claude Code process.
  * LIKE prefilter + exact JSON check (avoid 123 matching 1234).
  */
-export function findSessionByClaudePid(db: DB, pid: number): Session | null {
+export function findSessionByRuntimePid(
+  db: DB,
+  runtime: RuntimeId,
+  pid: number,
+  excludeId?: string
+): Session | null {
   const rows = db
     .prepare(
       `SELECT * FROM sessions
-       WHERE metadata LIKE ? AND status = 'active'
-       ORDER BY last_heartbeat_at DESC LIMIT 8`
+       WHERE status = 'active'
+         AND (metadata LIKE '%"runtime_pid":%' OR metadata LIKE '%"claude_pid":%')
+       ORDER BY last_heartbeat_at DESC LIMIT 50`
     )
-    .all(`%"claude_pid":${pid}%`) as Session[];
+    .all() as Session[];
   for (const row of rows) {
-    if (parseMeta(row).claude_pid === pid) return row;
+    if (row.id === excludeId) continue;
+    const meta = parseMeta(row);
+    if (
+      meta.runtime_pid === pid &&
+      meta.runtime === runtime
+    ) {
+      return row;
+    }
+    if (runtime === "claude" && meta.claude_pid === pid && (meta.runtime === undefined || meta.runtime === "claude")) {
+      return row;
+    }
   }
   return null;
+}
+
+/** Find the Claude Code session (compatibility wrapper). */
+export function findSessionByClaudePid(db: DB, pid: number): Session | null {
+  return findSessionByRuntimePid(db, "claude", pid);
 }
 
 /**
@@ -433,6 +491,7 @@ export function deleteUnreferencedSession(db: DB, id: string): boolean {
     .prepare(
       `DELETE FROM sessions WHERE id = ? AND
        COALESCE(metadata, '') NOT LIKE '%"source":"claude-hook"%' AND
+       COALESCE(metadata, '') NOT LIKE '%"source":"codex-hook"%' AND
        (SELECT COUNT(*) FROM messages WHERE from_session = ? OR to_session = ?) = 0 AND
        (SELECT COUNT(*) FROM edges WHERE from_session = ? OR to_session = ?) = 0 AND
        (SELECT COUNT(*) FROM context_entries WHERE session_id = ?) = 0`

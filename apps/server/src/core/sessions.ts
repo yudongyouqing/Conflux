@@ -1,7 +1,12 @@
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 import { STALE_AFTER_MS } from "../config.js";
-import type { Session, SessionSummary } from "@muiltchat/shared";
+import type { IdentitySource, Session, SessionRuntime, SessionSummary } from "@muiltchat/shared";
+import {
+  parseIdentitySource,
+  parseRuntimePid,
+  parseSessionRuntime,
+} from "./session-identity.js";
 
 export type { Session, SessionSummary };
 
@@ -11,28 +16,79 @@ export interface RegisterInput {
   description?: string | null;
   project_dir?: string | null;
   metadata?: Record<string, unknown> | null;
+  runtime?: SessionRuntime | null;
+  identity_source?: IdentitySource | null;
+  runtime_pid?: number | null;
 }
 
 export function registerSession(db: DB, input: RegisterInput): Session {
   const now = nowIso();
   const meta = input.metadata ? JSON.stringify(input.metadata) : null;
+  const metadataIdentity = readMetadataIdentity(input.metadata);
+  const runtime = parseSessionRuntime(input.runtime) ?? metadataIdentity.runtime;
+  const identitySource = parseIdentitySource(input.identity_source) ?? metadataIdentity.identity_source;
+  const runtimePid = parseRuntimePid(input.runtime_pid) ?? metadataIdentity.runtime_pid;
   db.prepare(
-    `INSERT INTO sessions (id, name, description, project_dir, status, created_at, last_heartbeat_at, metadata)
-     VALUES (?, ?, ?, ?, 'active', ?, ?, ?)
+    `INSERT INTO sessions (
+       id, name, description, project_dir, status, created_at, last_heartbeat_at,
+       metadata, runtime, identity_source, runtime_pid
+     )
+     VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
        name = excluded.name,
        description = excluded.description,
        project_dir = COALESCE(excluded.project_dir, sessions.project_dir),
        metadata = COALESCE(excluded.metadata, sessions.metadata),
+       runtime = COALESCE(excluded.runtime, sessions.runtime),
+       identity_source = COALESCE(excluded.identity_source, sessions.identity_source),
+       runtime_pid = COALESCE(excluded.runtime_pid, sessions.runtime_pid),
        status = 'active',
        last_heartbeat_at = excluded.last_heartbeat_at`
-  ).run(input.id, input.name, input.description ?? null, input.project_dir ?? null, now, now, meta);
+  ).run(
+    input.id,
+    input.name,
+    input.description ?? null,
+    input.project_dir ?? null,
+    now,
+    now,
+    meta,
+    runtime,
+    identitySource,
+    runtimePid
+  );
   return getSession(db, input.id)!;
 }
 
+function readMetadataIdentity(metadata: Record<string, unknown> | null | undefined): {
+  runtime: SessionRuntime | null;
+  identity_source: IdentitySource | null;
+  runtime_pid: number | null;
+} {
+  const legacyClaudePid = parseRuntimePid(metadata?.claude_pid);
+  const runtime = parseSessionRuntime(metadata?.runtime) ?? (legacyClaudePid !== null ? "claude" : null);
+  const metadataRuntimePid = parseRuntimePid(metadata?.runtime_pid);
+  return {
+    runtime,
+    identity_source: parseIdentitySource(metadata?.identity_source),
+    runtime_pid: metadataRuntimePid ?? (runtime === "claude" ? legacyClaudePid : null),
+  };
+}
+
 export function getSession(db: DB, id: string): Session | null {
-  const row = db.prepare(`SELECT * FROM sessions WHERE id = ?`).get(id);
-  return (row as Session | undefined) ?? null;
+  const row = db.prepare(`SELECT * FROM sessions WHERE id = ?`).get(id) as
+    | Record<string, unknown>
+    | undefined;
+  if (!row) return null;
+  return normalizeSession(row);
+}
+
+function normalizeSession(row: Record<string, unknown>): Session {
+  return {
+    ...(row as unknown as Session),
+    runtime: parseSessionRuntime(row.runtime),
+    identity_source: parseIdentitySource(row.identity_source),
+    runtime_pid: parseRuntimePid(row.runtime_pid),
+  };
 }
 
 export function heartbeat(db: DB, id: string): void {
@@ -70,11 +126,13 @@ export function listSessions(
 ): SessionSummary[] {
   markStaleSessions(db);
   const status = opts.status ?? "active";
-  // MCP placeholder (temp) nodes are UUID noise — hidden from every listing.
+  // Active MCP placeholders represent live Codex/Claude sessions. Hide only
+  // stale or ended placeholders, which are UUID noise after their process exits.
+  const tempVisibility = `(COALESCE(s.metadata, '') NOT LIKE '%"temp":true%' OR s.status = 'active')`;
   const where =
     status === "all"
-      ? `WHERE COALESCE(s.metadata, '') NOT LIKE '%"temp":true%'`
-      : `WHERE s.status = ? AND COALESCE(s.metadata, '') NOT LIKE '%"temp":true%'`;
+      ? `WHERE ${tempVisibility}`
+      : `WHERE s.status = ? AND ${tempVisibility}`;
   const params: string[] = status === "all" ? [] : [status];
   const rows = db
     .prepare(
@@ -85,8 +143,8 @@ export function listSessions(
        ${where}
        ORDER BY s.last_heartbeat_at DESC`
     )
-    .all(...params) as SessionSummary[];
-  return rows;
+    .all(...params) as Record<string, unknown>[];
+  return rows.map((row) => normalizeSession(row) as SessionSummary);
 }
 
 export function endSession(db: DB, id: string): void {

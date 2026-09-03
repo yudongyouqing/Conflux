@@ -1,0 +1,42 @@
+appId: com.conflux.desktop
+productName: Conflux
+copyright: Copyright (c) 2026 Conflux contributors
+
+directories:
+  app: ../..
+  output: ../../release
+  buildResources: build
+
+extraMetadata:
+  main: apps/desktop/src/main.cjs
+
+artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
+
+files:
+  - apps/desktop/**/*
+  - apps/server/dist/**/*
+  - apps/web/dist/**/*
+
+asar: true
+asarUnpack:
+  - "**/better-sqlite3/**"
+npmRebuild: true
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+
+mac:
+  target:
+    - dir
+
+linux:
+  target:
+    - dir

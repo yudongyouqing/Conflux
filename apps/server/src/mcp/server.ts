@@ -2,15 +2,23 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { v4 as uuidv4 } from "uuid";
+import type { RuntimeId } from "@muiltchat/shared";
 
 import { resolveConfig, type Scope } from "../config.js";
 import { openDb, type DB } from "../core/db.js";
 import {
   registerSession,
   listSessions,
-  heartbeat,
   getSession,
 } from "../core/sessions.js";
+import {
+  MCP_HEARTBEAT_INTERVAL_MS,
+  claimMcpConnection,
+  createMcpLeaseMetadata,
+  installMcpStdioLifecycle,
+  markMcpDisconnected,
+  touchMcpConnection,
+} from "../core/mcp-liveness.js";
 import { getSetting } from "../core/app-settings.js";
 import {
   publishContext,
@@ -29,7 +37,11 @@ import {
 import { getGraph } from "../core/graph.js";
 import { mergeSessionMeta } from "../core/sessions.js";
 import { logAudit } from "../core/audit.js";
-import { getClaudePid, findSessionByClaudePid, deleteUnreferencedSession } from "../core/live.js";
+import {
+  getRuntimePid,
+  findSessionByRuntimePid,
+  deleteUnreferencedSession,
+} from "../core/live.js";
 import { wakeOfflineSession } from "../core/runtime-agents.js";
 import { logger } from "../log.js";
 
@@ -63,11 +75,52 @@ export interface McpServerOptions {
   overrideDataDir?: string;
 }
 
+function detectMcpRuntime(): { runtime: RuntimeId; pid: number | null } {
+  const configured = process.env.MUILTCHAT_AGENT_RUNTIME;
+  if (configured === "claude" || configured === "codex") {
+    return { runtime: configured, pid: getRuntimePid(configured) };
+  }
+  const codexPid = getRuntimePid("codex");
+  if (codexPid !== null) return { runtime: "codex", pid: codexPid };
+  return { runtime: "claude", pid: getRuntimePid("claude") };
+}
+
+export function buildMcpSessionMetadata(input: {
+  connectionId: string;
+  runtime: RuntimeId;
+  pid: number | null;
+  agentTag?: Record<string, unknown>;
+  now?: Date;
+}): Record<string, unknown> {
+  return {
+    temp: true,
+    ...input.agentTag,
+    runtime: input.runtime,
+    ...(input.pid !== null ? { runtime_pid: input.pid } : {}),
+    ...createMcpLeaseMetadata(input.connectionId, input.now),
+  };
+}
+
+export function adoptMcpSession(
+  currentSessionId: string,
+  targetSessionId: string,
+  claim: () => boolean,
+  deletePrevious: (id: string) => void
+): { sessionId: string; adopted: boolean } {
+  if (currentSessionId === targetSessionId || !claim()) {
+    return { sessionId: currentSessionId, adopted: false };
+  }
+  deletePrevious(currentSessionId);
+  return { sessionId: targetSessionId, adopted: true };
+}
+
 export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
   const config = resolveConfig(opts.scope ?? "global", opts.overrideDataDir);
   const db: DB = openDb(config);
+  const connectionId = uuidv4();
   let sessionId = uuidv4();
   const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  let identity = detectMcpRuntime();
 
   // Auto-register immediately so the session is visible in the graph
   // and available for cross-session communication without waiting for
@@ -89,16 +142,25 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
   registerSession(db, {
     id: sessionId,
     name: dirName,
-    description: "Claude Code session (auto-registered)",
+    description: `${identity.runtime === "codex" ? "Codex" : "Claude Code"} session (auto-registered)`,
     project_dir: projectDir,
-    metadata: { temp: true, ...agentTag },
+    identity_source: "mcp",
+    metadata: buildMcpSessionMetadata({
+      connectionId,
+      runtime: identity.runtime,
+      pid: identity.pid,
+      agentTag,
+    }),
   });
 
-  logger.info({ sessionId, dataDir: config.dataDir, scope: config.scope }, "mcp starting");
+  logger.info(
+    { sessionId, runtime: identity.runtime, runtimePid: identity.pid, dataDir: config.dataDir, scope: config.scope },
+    "mcp starting"
+  );
 
-  // If the Claude Code hooks integration registered a session for this same
-  // Claude Code process (matched by pid), adopt it: our tools then act as
-  // that conversation-id-keyed session, and the temp uuid node is removed.
+  // If the CLI integration registered a session for this same runtime
+  // process (matched by pid), adopt it: our tools then act as that
+  // conversation-id-keyed session, and the temp uuid node is removed.
   // Best-effort — without hooks installed we keep the temp node.
   //
   // Re-resolved on every beat AND every tool call (no one-shot latch): a
@@ -106,37 +168,84 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
   // pins the authoritative current id under claude-current:<pid> — read
   // that first; heartbeat-order guessing is only the fallback (it lags and
   // can flap between the old and new rows).
+  let beat: NodeJS.Timeout | undefined;
+  let disposeStdio: (() => void) | undefined;
+  let disconnected = false;
+
+  const disconnect = (reason: string): void => {
+    if (disconnected) return;
+    disconnected = true;
+    if (beat) clearInterval(beat);
+    disposeStdio?.();
+    try {
+      markMcpDisconnected(db, sessionId, connectionId, reason);
+    } catch {
+      // transient sqlite lock contention must not prevent database cleanup
+    }
+    try {
+      if (db.open) db.close();
+    } catch {
+      // the database may already be closed by an outer shutdown path
+    }
+  };
+
   const tryAdopt = () => {
     // Explicit identity first: a headless auto-answer wake tells us which
     // conversation it is answering FOR (newer claude versions don't fire
     // registering hooks in -p mode, so pid/pin adoption may find nothing).
+    if (identity.pid === null) identity = detectMcpRuntime();
     const assume = process.env.MUILTCHAT_ASSUME_SESSION;
-    const pid = getClaudePid();
-    const pinned = pid === null ? null : getSetting(db, `claude-current:${pid}`);
+    const pid = getRuntimePid(identity.runtime);
+    const pinned = pid === null ? null : getSetting(db, `${identity.runtime}-current:${pid}`);
+    if (pid !== null) {
+      mergeSessionMeta(db, sessionId, { runtime: identity.runtime, runtime_pid: pid });
+    }
     const target =
       (assume ? getSession(db, assume) : null) ??
       (pinned ? getSession(db, pinned) : null) ??
-      (pid === null ? null : findSessionByClaudePid(db, pid));
+      (pid === null ? null : findSessionByRuntimePid(db, identity.runtime, pid, sessionId));
     if (!target) return; // hook hasn't fired yet — retry on the next tick
     if (target.id === sessionId) return;
     const oldId = sessionId;
-    sessionId = target.id;
-    deleteUnreferencedSession(db, oldId); // no-op for referenced/hook rows
-    logger.info({ claudePid: pid, sessionId, oldId }, "mcp adopted hook-registered session");
+    const adoption = adoptMcpSession(
+      oldId,
+      target.id,
+      () => {
+        try {
+          return claimMcpConnection(db, target.id, connectionId);
+        } catch {
+          // transient sqlite lock contention — retry adoption later
+          return false;
+        }
+      },
+      (previousId) => deleteUnreferencedSession(db, previousId)
+    );
+    if (!adoption.adopted) return;
+    sessionId = adoption.sessionId;
+    logger.info({ runtime: identity.runtime, runtimePid: pid, sessionId, oldId }, "mcp adopted hook-registered session");
   };
+
+  const touchLease = (): void => {
+    try {
+      touchMcpConnection(db, sessionId, connectionId);
+    } catch {
+      // transient sqlite lock contention — next tick or tool call retries
+    }
+  };
+
   tryAdopt();
 
   // Keep this session marked active for as long as the MCP process lives,
-  // even when no tool calls happen. Process exit stops the heartbeat and the
-  // session goes stale after STALE_AFTER_MS (4 missed 30s beats).
-  const beat = setInterval(() => {
+  // even when no tool calls happen. Process exit stops the lease and it
+  // expires after MCP_LEASE_TTL_MS.
+  beat = setInterval(() => {
     try {
       tryAdopt();
-      heartbeat(db, sessionId);
+      touchLease();
     } catch {
       // transient sqlite lock contention — next tick retries
     }
-  }, 30_000);
+  }, MCP_HEARTBEAT_INTERVAL_MS);
   beat.unref();
 
   const server = new McpServer(
@@ -152,14 +261,14 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
     }
   );
 
-  /** Wrapper that auto-adopts + heartbeats + audits + standardises errors. */
+  /** Wrapper that auto-adopts + touches the lease + audits + standardises errors. */
   async function withAudit<T>(
     action: string,
     args: Record<string, unknown>,
     fn: () => T | Promise<T>
   ): Promise<{ ok: true; result: T } | { ok: false; error: string }> {
     tryAdopt(); // pick up /resume id changes instantly, not on the next 30s beat
-    heartbeat(db, sessionId);
+    touchLease();
     try {
       const result = await fn();
       logAudit(db, {
@@ -494,11 +603,16 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
   );
 
   const transport = new StdioServerTransport();
-  await server.connect(transport);
+  disposeStdio = installMcpStdioLifecycle(process.stdin, transport, disconnect);
+  try {
+    await server.connect(transport);
+  } catch (err) {
+    disconnect("connect-failed");
+    throw err;
+  }
   logger.info({ sessionId }, "mcp connected via stdio");
 
-  // Stale sessions clean up naturally via heartbeat timeout; nothing to do on
-  // process exit (process termination is the heartbeat-loss signal).
+  // Abrupt process termination still relies on the MCP lease TTL.
 }
 
 function json(value: unknown) {

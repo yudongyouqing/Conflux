@@ -31,6 +31,67 @@ test("getGraph unions sessions and agents, no duplicate agent nodes", () => {
   assert.ok(!sessionTyped.some((n) => n.id.startsWith("agent-")), "agent-% filtered out of session nodes");
 });
 
+test("getGraph shows active MCP placeholders but hides stale ones", () => {
+  registerSession(db, {
+    id: "graph-codex-live-temp",
+    name: "muiltchat",
+    description: "Codex session (auto-registered)",
+    metadata: { temp: true, runtime: "codex", runtime_pid: 22345 },
+  });
+  registerSession(db, {
+    id: "graph-codex-stale-temp",
+    name: "muiltchat",
+    description: "Codex session (auto-registered)",
+    metadata: { temp: true, runtime: "codex", runtime_pid: 22346 },
+  });
+  db.prepare(`UPDATE sessions SET last_heartbeat_at = ? WHERE id = ?`).run(
+    new Date(Date.now() - 3600_000).toISOString(),
+    "graph-codex-stale-temp"
+  );
+
+  const g = getGraph(db, { status: "all" });
+  assert.ok(g.nodes.some((n) => n.id === "graph-codex-live-temp"));
+  assert.ok(!g.nodes.some((n) => n.id === "graph-codex-stale-temp"));
+});
+
+test("getGraph returns explicit session identity fields", () => {
+  registerSession(db, {
+    id: "graph-explicit-identity",
+    name: "codex worker",
+    runtime: "codex",
+    identity_source: "mcp",
+    runtime_pid: 4321,
+    metadata: { temp: true },
+  });
+
+  const node = getGraph(db, { status: "all" }).nodes.find(
+    (candidate) => candidate.id === "graph-explicit-identity"
+  )!;
+  assert.equal(node.runtime, "codex");
+  assert.equal(node.identity_source, "mcp");
+  assert.equal(node.runtime_pid, 4321);
+});
+
+test("getGraph normalizes malformed explicit identity columns", () => {
+  registerSession(db, {
+    id: "graph-malformed-identity",
+    name: "malformed identity",
+    runtime: "codex",
+    identity_source: "mcp",
+    runtime_pid: 4321,
+  });
+  db.prepare(
+    `UPDATE sessions SET runtime = ?, identity_source = ?, runtime_pid = ? WHERE id = ?`
+  ).run("unknown-runtime", "unknown-source", 0, "graph-malformed-identity");
+
+  const node = getGraph(db, { status: "all" }).nodes.find(
+    (candidate) => candidate.id === "graph-malformed-identity"
+  )!;
+  assert.equal(node.runtime, null);
+  assert.equal(node.identity_source, null);
+  assert.equal(node.runtime_pid, null);
+});
+
 test("agent node carries conversation_count", () => {
   createConversation(db, { agent_id: agent.id, initiated_by: "test", title: "t" });
   const g = getGraph(db, { status: "all" });

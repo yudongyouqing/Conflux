@@ -4,6 +4,7 @@
   "description": "Cross-session context query and conversation system for AI coding assistants",
   "type": "commonjs",
   "bin": {
+    "conflux": "dist/index.js",
     "muiltchat": "dist/index.js"
   },
   "files": [
