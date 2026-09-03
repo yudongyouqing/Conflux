@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 
 import type { DB } from "./db.js";
@@ -421,7 +421,7 @@ function wakeExe(db: DB, runtime: "claude" | "codex"): string {
 function launchWake(
   db: DB,
   session: { id: string; project_dir: string | null },
-  opts: { dryRun?: boolean; now?: Date },
+  opts: { dryRun?: boolean; now?: Date; pinRuntime?: "claude" | "codex" },
   command: string
 ): { woke: true; command: string } | { woke: false; reason: string } {
   const now = (opts.now ?? new Date()).getTime();
@@ -430,8 +430,14 @@ function launchWake(
     return { woke: false, reason: "wake already in flight" };
   }
   if (opts.dryRun) return { woke: true, command };
-  // Assume the target's identity: headless runs may not fire registering
-  // hooks, so the run's MCP adopts the target session via env.
+
+  // Identity, two channels (either suffices):
+  //  1. env MUILTCHAT_ASSUME_SESSION — claude passes a full env to MCP
+  //     children; codex SCRUBS it (verified empirically), so for codex:
+  //  2. pid pin — the codex-spawned MCP adopts via its ancestor codex pid
+  //     looking up `<runtime>-current:<pid>`. Spawn first, pin immediately
+  //     (the npm/tsx MCP chain takes seconds to boot — the pin always lands
+  //     before the first tryAdopt), and the wake run acts as the target.
   const env = cleanTerminalEnv();
   env.MUILTCHAT_ASSUME_SESSION = session.id;
   const child = spawn(process.env.comspec ?? "cmd.exe", ["/d", "/s", "/c", command], {
@@ -443,9 +449,54 @@ function launchWake(
     windowsHide: true,
   });
   child.unref();
+  if (opts.pinRuntime === "codex" && typeof child.pid === "number") {
+    pinCodexDescendant(db, child.pid, session.id);
+  }
   setSetting(db, `auto-wake:${session.id}`, new Date(now).toISOString());
-  logger.info({ sessionId: session.id }, "auto-wake launched");
+  logger.info({ sessionId: session.id, wakePid: child.pid }, "auto-wake launched");
   return { woke: true, command };
+}
+
+/**
+ * The wake spawns via cmd.exe, so our child.pid is the LAUNCHER's — the MCP
+ * adoption walk keys off the codex.exe GRANDCHILD. Poll briefly for it and
+ * pin that pid to the target session. Fire-and-forget: tryAdopt re-runs on
+ * every MCP beat, so even a late pin converges.
+ */
+/**
+ * The wake spawns via cmd.exe and `codex` resolves through npm shims, so
+ * the codex process the MCP adoption walk will match (codex.exe, the
+ * codex.cmd shim, or an @openai/codex node wrapper) is a DESCENDANT several
+ * levels deep. BFS the launcher's descendants briefly and pin every codex
+ * match to the target session. Fire-and-forget: tryAdopt re-runs on every
+ * MCP beat, so a late pin still converges.
+ */
+/**
+ * The wake spawns via cmd.exe and `codex` resolves through npm shims, so
+ * every codex-shaped process in the subtree (codex.exe, the codex.cmd shim,
+ * @openai/codex node wrappers) may be the one the MCP ancestor walk matches
+ * first. BFS the launcher's descendants, collect ALL matches at every depth
+ * (never stop at the first level), and pin each to the target session.
+ * Fire-and-forget: tryAdopt re-runs on every MCP beat, so a late pin still
+ * converges.
+ */
+function pinCodexDescendant(db: DB, launcherPid: number, sessionId: string): void {
+  const ps = ["$ErrorActionPreference='SilentlyContinue'","$deadline=(Get-Date).AddSeconds(12)","$all=@()","while((Get-Date) -lt $deadline -and $all.Count -eq 0){","  $frontier=@(LAUNCHER_PID)","  foreach($i in 1..6){","    $kids=@($frontier | ForEach-Object { Get-CimInstance Win32_Process -Filter \"ParentProcessId=$_\" })","    if($kids.Count -eq 0){ break }","    $all+=@($kids | Where-Object { $_.Name -eq 'codex.exe' -or $_.CommandLine -like '*codex.cmd*' -or $_.CommandLine -like '*@openai*codex*' })","    $frontier=@($kids.ProcessId)","  }","  if($all.Count -eq 0){ Start-Sleep -Milliseconds 300 }","}","if($all.Count -gt 0){ $all.ProcessId }"].join(String.fromCharCode(10)).replace("LAUNCHER_PID", String(launcherPid));
+  execFile(
+    "powershell.exe",
+    ["-NoProfile", "-Command", ps],
+    { timeout: 16_000, windowsHide: true },
+    (err, stdout) => {
+      const pids = String(stdout)
+        .split(/[^0-9]+/)
+        .filter((x) => x.length > 0)
+        .map(Number);
+      if (!err && pids.length > 0) {
+        for (const pid of pids) setSetting(db, `codex-current:${pid}`, sessionId);
+        logger.info({ sessionId, pids }, "codex wake pid(s) pinned");
+      }
+    }
+  );
 }
 
 /**
@@ -482,7 +533,7 @@ export function wakeSessionForMail(
     if (meta?.busy === true) {
       return { woke: false, reason: "busy — the running turn will surface the mail" };
     }
-    return launchWake(db, session, opts, idleWakeCommand(runtime, wakeExe(db, runtime)));
+    return launchWake(db, session, { ...opts, pinRuntime: runtime }, idleWakeCommand(runtime, wakeExe(db, runtime)));
   }
 
   // Offline: resume the real conversation. Codex resumes by the uuid that
@@ -497,5 +548,10 @@ export function wakeSessionForMail(
   if (runtime === "claude" && !hasTranscript(sessionId, session.project_dir, opts.claudeHome)) {
     return { woke: false, reason: "no transcript (zero-turn conversation)" };
   }
-  return launchWake(db, session, opts, wakeCommand(runtime, codexSessionId ?? sessionId, wakeExe(db, runtime)));
+  return launchWake(
+    db,
+    session,
+    { ...opts, pinRuntime: runtime },
+    wakeCommand(runtime, codexSessionId ?? sessionId, wakeExe(db, runtime))
+  );
 }
