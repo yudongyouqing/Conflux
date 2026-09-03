@@ -19,7 +19,6 @@ import { SessionNode, type SessionNodeData } from "./SessionNode";
 import { StaleCluster, type StaleClusterData } from "./StaleCluster";
 import { DirLabelNode, type DirLabelData } from "./DirLabelNode";
 import { CurvedPairEdge } from "./CurvedPairEdge";
-import { MentionComposer } from "./MentionComposer";
 
 const nodeTypes = { session: SessionNode, cluster: StaleCluster, dirLabel: DirLabelNode };
 const edgeTypes = { curved: CurvedPairEdge };
@@ -422,11 +421,6 @@ export function GraphTab({
       proOptions={{ hideAttribution: true }}
       className="bg-gray-50"
     >
-      {/* floating @-composer: ask any session without leaving the graph;
-          sending selects the target so the right drawer shows its channel */}
-      <Panel position="top-center" className="!m-2 w-96 max-w-[60%]">
-        <MentionComposer onSent={(t) => onSelectSession(t.id)} />
-      </Panel>
       <Panel position="top-left" className="!m-2">
         <div className="flex bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden text-xs">
           {(Object.keys(VIEW_LABELS) as ViewMode[]).map((m) => (
