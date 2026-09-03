@@ -23,13 +23,15 @@ interface MentionComposerProps {
   /** Called after a successful ask with the created message (edge jump etc). */
   onSent?: (target: ComposerTarget, message: Message | null) => void;
   className?: string;
+  /** Speak AS this session ("let A ask B"); omitted → the web console asks. */
+  sender?: { id: string; name: string } | null;
 }
 
 /**
  * @-mention ask box: pick an active CLI session by typing @ (ASCII or
  * fullwidth), then ask it a question as the web console.
  */
-export function MentionComposer({ onSent, className }: MentionComposerProps) {
+export function MentionComposer({ onSent, className, sender }: MentionComposerProps) {
   const sessions = useSessions("active");
   const queryClient = useQueryClient();
 
@@ -88,12 +90,21 @@ export function MentionComposer({ onSent, className }: MentionComposerProps) {
       return;
     }
     if (!question) return;
-    ask.mutate({ to_session: target.id, question });
+    ask.mutate({
+      to_session: target.id,
+      question,
+      ...(sender && sender.id !== "web-console" ? { from_session: sender.id } : {}),
+    });
   };
 
   return (
     <div className={`p-3 bg-white border border-gray-200 rounded-lg shadow-sm ${className ?? ""}`}>
       <div className="flex items-center gap-2">
+        {sender && sender.id !== "web-console" && (
+          <span className="text-xs text-gray-500 whitespace-nowrap truncate max-w-32" title={`以 ${sender.name} 的身份发送`}>
+            {sender.name} →
+          </span>
+        )}
         {target ? (
           <span className="inline-flex items-center gap-1.5 text-xs bg-blue-50 text-blue-700 border border-blue-200 rounded-full pl-2 pr-1 py-1">
             <StatusDot status={target.status} busy={target.busy} />

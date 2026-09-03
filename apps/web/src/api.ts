@@ -132,7 +132,7 @@ export const api = {
   saveTerminalSettings: (body: Partial<TerminalSettings>) =>
     put<{ terminal: TerminalSettings }>("/settings/terminal", body),
 
-  webAsk: (body: { to_session: string; question: string }) =>
+  webAsk: (body: { to_session: string; question: string; from_session?: string }) =>
     post<{ message: Message }>("/web/ask", body),
 
   getContext: (params?: { query?: string; session_id?: string; limit?: number }) => {

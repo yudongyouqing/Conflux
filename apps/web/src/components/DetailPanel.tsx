@@ -400,10 +400,15 @@ function InitiateConversation({
         </div>
       )}
       <MentionComposer
+        sender={session.id === WEB_CONSOLE_ID ? null : { id: session.id, name: session.name }}
         onSent={(_t, message) => {
           // jump straight into the channel this question created
           if (message?.edge_id != null) {
-            onOpenEdge({ id: message.edge_id, from: WEB_CONSOLE_ID, to: message.to_session });
+            onOpenEdge({
+              id: message.edge_id,
+              from: message.from_session ?? WEB_CONSOLE_ID,
+              to: message.to_session,
+            });
           }
         }}
       />

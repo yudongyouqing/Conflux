@@ -1019,8 +1019,10 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
     }
   });
 
-  // POST /web/ask — ask a session from the web console (Drawer input box)
-  app.post<{ Body: { to_session: string; question: string } }>("/web/ask", {
+  // POST /web/ask — ask a session from the web console (Drawer input box).
+  // Optional from_session lets the UI speak AS a CLI session ("let A ask B");
+  // omitted, the sender is the web console itself.
+  app.post<{ Body: { to_session: string; question: string; from_session?: string } }>("/web/ask", {
     schema: {
       body: {
         type: "object",
@@ -1028,14 +1030,25 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
         properties: {
           to_session: { type: "string" },
           question: { type: "string", maxLength: 20000 },
+          from_session: { type: "string" },
         },
       },
     },
   }, async (req, reply) => {
     try {
-      heartbeat(db, WEB_CONSOLE_ID);
+      let from = WEB_CONSOLE_ID;
+      if (req.body.from_session && req.body.from_session !== WEB_CONSOLE_ID) {
+        const sender = getSession(db, req.body.from_session);
+        if (!sender) throw httpError(400, "from_session not found");
+        if (sender.id === req.body.to_session) {
+          throw httpError(400, "from_session and to_session must differ");
+        }
+        from = sender.id; // speak AS this session; do NOT heartbeat it (no fake liveness)
+      } else {
+        heartbeat(db, WEB_CONSOLE_ID);
+      }
       const msg = askSession(db, {
-        from_session: WEB_CONSOLE_ID,
+        from_session: from,
         to_session: req.body.to_session,
         question: req.body.question,
       });
@@ -1047,10 +1060,10 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
         // best-effort — the mail is still delivered by the notice/forwarding paths
       }
       logAudit(db, {
-        caller_session: WEB_CONSOLE_ID,
+        caller_session: from,
         interface: "http",
         action: "web_ask",
-        args: { to_session: req.body.to_session },
+        args: { to_session: req.body.to_session, from_session: from },
         result: { message_id: msg.id, wake },
       });
       return reply.send({ message: msg, wake });
