@@ -6,7 +6,7 @@ import { nowIso } from "./db.js";
 import { STALE_AFTER_MS } from "../config.js";
 import { logger } from "../log.js";
 import type { RuntimeAgent, RuntimeId } from "@muiltchat/shared";
-import { cleanTerminalEnv, cmdQuote, HEADLESS_ALLOWED_TOOLS, idleWakeCommand, openInTerminal, wakeCommand } from "./terminal.js";
+import { cleanTerminalEnv, cmdQuote, HEADLESS_ALLOWED_TOOLS, openInTerminal, wakeCommand } from "./terminal.js";
 import { getAutoWake, getSetting, getTerminalSettings, setSetting } from "./app-settings.js";
 import { getSession } from "./sessions.js";
 import { hasTranscript } from "./live.js";
@@ -500,13 +500,15 @@ function pinCodexDescendant(db: DB, launcherPid: number, sessionId: string): voi
 }
 
 /**
- * Wake a session so it processes its inbox:
+ * Wake a session so it processes its inbox — always by RESUMING the real
+ * conversation (full context; the reply lands in the actual history, so the
+ * CLI shows it):
  *   - active + busy  → skip: the running turn will surface the mail itself
- *   - active + idle  → FRESH headless run adopting the session's identity.
- *     Never --resume here — the open TUI owns the transcript and a second
- *     writer could corrupt it. The waker answers from mail + project dir.
- *   - offline        → resume wake (the TUI is closed, the transcript is
- *     free to continue with full conversation context).
+ *     (also the only real double-writer risk window, hence the gate)
+ *   - active + idle or offline → headless `--resume` run that adopts the
+ *     session's muiltchat identity and answers from its own context. While
+ *     the interactive TUI stays open it will not live-refresh; the turns
+ *     appear after reopening/resuming the conversation there.
  */
 export function wakeSessionForMail(
   db: DB,
@@ -529,14 +531,11 @@ export function wakeSessionForMail(
     // default runtime
   }
 
-  if (session.status === "active") {
-    if (meta?.busy === true) {
-      return { woke: false, reason: "busy — the running turn will surface the mail" };
-    }
-    return launchWake(db, session, { ...opts, pinRuntime: runtime }, idleWakeCommand(runtime, wakeExe(db, runtime)));
+  if (session.status === "active" && meta?.busy === true) {
+    return { woke: false, reason: "busy — the running turn will surface the mail" };
   }
 
-  // Offline: resume the real conversation. Codex resumes by the uuid that
+  // Resume the real conversation. Codex resumes by the uuid that
   // codex-titles stamped from its rollout; claude's uuid is the session id.
   const codexSessionId = typeof meta?.codex_session_id === "string" ? meta.codex_session_id : null;
   if (runtime === "codex" && !codexSessionId) {

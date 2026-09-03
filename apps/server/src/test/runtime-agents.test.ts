@@ -202,19 +202,20 @@ test("wakeSessionForMail: guards, dedup and command shape", () => {
     { woke: false, reason: "busy — the running turn will surface the mail" }
   );
 
-  // active + IDLE → fresh headless wake adopting the identity (no --resume:
-  // the open TUI owns the transcript)
+  // active + IDLE → resumes the REAL conversation with full context (the
+  // reply lands in the actual history); busy is the only gated window
   registerSession(db, {
     id: "wake-alive",
     name: "alive",
     description: "d",
     metadata: { source: "claude-hook", named: true, claude_pid: 424242 },
   });
-  const idle = wakeSessionForMail(db, "wake-alive", { dryRun: true });
+  makeTranscript("wake-alive", "C:/Project folder/项目/muiltchat");
+  const idle = wakeSessionForMail(db, "wake-alive", { dryRun: true, claudeHome: FAKE_HOME });
   assert.equal(idle.woke, true);
   if (idle.woke) {
+    assert.ok(idle.command.includes("--resume wake-alive"), "resumes the real conversation");
     assert.ok(idle.command.includes("-p "), "headless prompt");
-    assert.ok(!idle.command.includes("--resume"), "must not resume an open conversation");
   }
 
   // offline claude session → dry-run returns the full wake command

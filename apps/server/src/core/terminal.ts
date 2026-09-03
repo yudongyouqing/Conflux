@@ -303,9 +303,13 @@ export function terminalOptions(
   }));
 }
 
-/** Wake-up prompt for auto-answer: asker's message is waiting in the inbox. */
+/**
+ * Wake-up prompt for auto-answer. Fixed framing: another session asked you
+ * something — read the mail, answer FROM your real conversation context
+ * (the wake resumes this very conversation), send it back via reply_ask.
+ */
 export const AUTO_WAKE_PROMPT =
-  "你收到一条新消息:请立即调用 muiltchat 的 check_inbox 查看收件箱,用 reply_ask 认真回复每条,然后结束本轮,不要做其他事。";
+  "你收到一条来自其他会话的消息:请立即调用 muiltchat 的 check_inbox 查看收件箱,结合本会话已有的工作上下文,用 reply_ask 把回复发给提问方,然后结束本轮,不要做其他事。";
 
 /** Pre-authorized tools for headless runs (-p cannot show permission prompts). */
 export const HEADLESS_ALLOWED_TOOLS = "mcp__muiltchat__*";
@@ -318,15 +322,6 @@ export const HEADLESS_ALLOWED_TOOLS = "mcp__muiltchat__*";
  * text, and the run's cwd is the session's project dir.
  */
 const CODEX_WAKE_FLAGS = "--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check";
-
-/** Headless wake for an ACTIVE-but-idle session: a FRESH run (never
- * --resume — the open TUI owns the transcript) that adopts the session's
- * muiltchat identity via env and answers from the mail + project dir. */
-export function idleWakeCommand(runtime: "claude" | "codex", executable: string): string {
-  const exe = cmdQuote(executable);
-  if (runtime === "codex") return `${exe} exec ${CODEX_WAKE_FLAGS} ${cmdQuote(AUTO_WAKE_PROMPT)}`;
-  return `${exe} -p ${cmdQuote(AUTO_WAKE_PROMPT)} --allowedTools ${cmdQuote(HEADLESS_ALLOWED_TOOLS)}`;
-}
 
 /** Full headless wake command: resume the conversation and drive the reply. */
 export function wakeCommand(
