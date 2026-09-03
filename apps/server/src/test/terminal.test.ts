@@ -18,7 +18,7 @@ after(cleanup);
 
 test("getTerminalSettings returns defaults on a fresh db", () => {
   assert.deepEqual(getTerminalSettings(db), {
-    terminal: "wt",
+    terminal: process.platform === "darwin" ? "terminal" : "wt",
     claude_path: "claude",
     codex_path: "codex",
   });
@@ -42,26 +42,29 @@ test("saveTerminalSettings merges partials and validates the choice", () => {
 
 test("buildLaunchPlan: wt first with fallback, cmd-only for cmd choice", () => {
   const base = { command: '"claude" --resume abc', cwd: "C:/work/dir", title: "muiltchat · x" };
-  const wt = buildLaunchPlan({ terminal: "wt" }, base);
+  const win32 = { platform: "win32" as NodeJS.Platform };
+  const wt = buildLaunchPlan({ terminal: "wt" }, base, win32);
   assert.equal(wt[0].file, "wt.exe");
   assert.deepEqual(wt[0].args.slice(0, 2), ["-d", "C:/work/dir"]);
   assert.ok(wt[0].args.includes("cmd.exe"));
   assert.ok(wt.some((s) => s.file.endsWith("cmd.exe") && s.verbatim), "cmd start fallback present");
 
-  const wez = buildLaunchPlan({ terminal: "wezterm" }, base);
+  const wez = buildLaunchPlan({ terminal: "wezterm" }, base, win32);
   assert.equal(wez[0].file, "wezterm.exe");
   assert.deepEqual(wez[0].args.slice(0, 3), ["start", "--cwd", "C:/work/dir"]);
 
-  const cmd = buildLaunchPlan({ terminal: "cmd" }, base);
+  const cmd = buildLaunchPlan({ terminal: "cmd" }, base, win32);
   assert.equal(cmd.length, 1);
   assert.equal(cmd[0].verbatim, true);
   assert.ok(cmd[0].args.join(" ").includes("start"));
 });
 
 test("buildLaunchPlan: powershell runs the command directly with pwsh fallback chain", () => {
+  const win32 = { platform: "win32" as NodeJS.Platform };
   const plan = buildLaunchPlan(
     { terminal: "powershell" },
-    { command: "claude --resume abc", cwd: "C:/work/dir", title: "t" }
+    { command: "claude --resume abc", cwd: "C:/work/dir", title: "t" },
+    win32
   );
   assert.equal(plan[0].file, "pwsh.exe");
   assert.deepEqual(plan[0].args.slice(0, 4), ["-NoLogo", "-NoProfile", "-NoExit", "-Command"]);
