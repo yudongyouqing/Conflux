@@ -32,6 +32,11 @@ import { isRuntimeCommand } from "./liveness.js";
 
 // ---- ancestor walk: find the Claude Code process pid --------------------
 
+// NOTE: the runtime tokens below duplicate runtime-identity.ts (single
+// source of truth). This ancestor-walk script is battle-tested and
+// disk-cached (find-runtime.ps1), so it keeps its embedded copy until
+// the next deliberate touch of this machinery — keep both in sync.
+
 const PS_SCRIPT = `param([int]$StartPid, [string]$Runtime)
 $pattern = if ($Runtime -eq "codex") {
   '(^|[\\\\/])codex(\\.exe|\\.cmd)?(\\s|$)|@openai[\\\\/]codex|codex-cli'
