@@ -226,6 +226,36 @@ test("wakeOfflineSession: guards, dedup and command shape", () => {
   setAutoWake(db, true);
 });
 
+test("wakeOfflineSession: codex wakes headlessly via exec resume", () => {
+  // no rollout binding → cannot resume
+  registerSession(db, {
+    id: "wake-codex-unbound",
+    name: "cu",
+    description: "d",
+    metadata: { runtime: "codex", runtime_pid: 313131 },
+  });
+  db.prepare(`UPDATE sessions SET status = 'stale' WHERE id = 'wake-codex-unbound'`).run();
+  assert.deepEqual(
+    wakeOfflineSession(db, "wake-codex-unbound", { dryRun: true }),
+    { woke: false, reason: "no codex_session_id (rollout binding missing)" }
+  );
+
+  // bound uuid → codex exec resume command (no transcript requirement)
+  registerSession(db, {
+    id: "wake-codex",
+    name: "cw",
+    description: "d",
+    metadata: { runtime: "codex", runtime_pid: 323232, codex_session_id: "01c0d3x-uuid" },
+  });
+  db.prepare(`UPDATE sessions SET status = 'stale' WHERE id = 'wake-codex'`).run();
+  const w = wakeOfflineSession(db, "wake-codex", { dryRun: true });
+  assert.equal(w.woke, true);
+  if (w.woke) {
+    assert.ok(w.command.includes("exec resume 01c0d3x-uuid"), "resumes the codex conversation");
+    assert.ok(!w.command.includes("--resume "), "not the claude resume flag");
+  }
+});
+
 test("wakeOfflineSession dedups within the window", () => {
   registerSession(db, {
     id: "wake-dedup",

@@ -425,19 +425,25 @@ export function wakeOfflineSession(
     return { woke: false, reason: "active — hook notice will surface it" };
   }
   let runtime: "claude" | "codex" = "claude";
+  let meta: Record<string, unknown> | null = null;
   try {
-    const meta = session.metadata ? (JSON.parse(session.metadata) as Record<string, unknown>) : null;
+    meta = session.metadata ? (JSON.parse(session.metadata) as Record<string, unknown>) : null;
     if (meta?.runtime === "codex") runtime = "codex";
   } catch {
     // default runtime
   }
-  if (runtime === "codex") {
-    return { woke: false, reason: "codex headless wake not supported yet" };
+  // The conversation id each runtime needs to resume: claude's equals the
+  // muiltchat session id; codex resumes by the conversation uuid that
+  // codex-titles stamped from its rollout
+  const codexSessionId = typeof meta?.codex_session_id === "string" ? meta.codex_session_id : null;
+  if (runtime === "codex" && !codexSessionId) {
+    return { woke: false, reason: "no codex_session_id (rollout binding missing)" };
   }
   // `claude --resume` needs the transcript file — claude only writes it on
   // the first turn, so zero-turn conversations cannot be woken (they have
-  // no context to answer from anyway)
-  if (!hasTranscript(sessionId, session.project_dir, opts.claudeHome)) {
+  // no context to answer from anyway). Codex resume reads its rollout by
+  // uuid and fails harmlessly if the file is gone.
+  if (runtime === "claude" && !hasTranscript(sessionId, session.project_dir, opts.claudeHome)) {
     return { woke: false, reason: "no transcript (zero-turn conversation)" };
   }
 
@@ -449,8 +455,11 @@ export function wakeOfflineSession(
   }
 
   const settings = getTerminalSettings(db);
-  const exe = process.env.CLAUDE_PATH || settings.claude_path;
-  const command = wakeCommand("claude", sessionId, exe);
+  const exe =
+    runtime === "codex"
+      ? process.env.CODEX_PATH || settings.codex_path
+      : process.env.CLAUDE_PATH || settings.claude_path;
+  const command = wakeCommand(runtime, codexSessionId ?? sessionId, exe);
 
   if (opts.dryRun) return { woke: true, command };
 

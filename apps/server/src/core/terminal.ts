@@ -311,8 +311,17 @@ export const AUTO_WAKE_PROMPT =
 export const HEADLESS_ALLOWED_TOOLS = "mcp__muiltchat__*";
 
 /** Full headless wake command: resume the conversation and drive the reply. */
-export function wakeCommand(runtime: "claude", sessionId: string, executable: string): string {
-  return `${resumeCommand(runtime, sessionId, executable)} --allowedTools ${cmdQuote(
+export function wakeCommand(
+  runtime: "claude" | "codex",
+  sessionId: string,
+  executable: string
+): string {
+  if (runtime === "codex") {
+    // `codex exec resume <uuid> "<prompt>"` — exec is non-interactive by
+    // design; MCP tools (check_inbox/reply_ask) need no approval flags
+    return `${cmdQuote(executable)} exec resume ${sessionId} ${cmdQuote(AUTO_WAKE_PROMPT)}`;
+  }
+  return `${resumeCommand("claude", sessionId, executable)} --allowedTools ${cmdQuote(
     HEADLESS_ALLOWED_TOOLS
   )} -p ${cmdQuote(AUTO_WAKE_PROMPT)}`;
 }
