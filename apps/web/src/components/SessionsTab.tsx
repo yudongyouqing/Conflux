@@ -104,7 +104,7 @@ export function SessionsTab({ onSelectSession, selectedSessionId }: SessionsTabP
                       }`}
                     >
                       <div className="flex items-center gap-2">
-                        <StatusDot status={s.status} />
+                        <StatusDot status={s.status} busy={s.busy} />
                         <span className="text-xs font-medium text-gray-900 truncate flex-1">
                           {s.name}
                         </span>

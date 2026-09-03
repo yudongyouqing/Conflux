@@ -74,6 +74,16 @@ function readMetadataIdentity(metadata: Record<string, unknown> | null | undefin
   };
 }
 
+/** Derived busy flag: a turn is in progress on this session. */
+export function sessionBusy(metadata: string | null): boolean {
+  if (!metadata) return false;
+  try {
+    return JSON.parse(metadata)?.busy === true;
+  } catch {
+    return false;
+  }
+}
+
 export function getSession(db: DB, id: string): Session | null {
   const row = db.prepare(`SELECT * FROM sessions WHERE id = ?`).get(id) as
     | Record<string, unknown>

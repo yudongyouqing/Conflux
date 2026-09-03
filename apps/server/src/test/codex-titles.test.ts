@@ -379,6 +379,28 @@ describe("refreshCodexSessionTitles", () => {
     disposeHome(home);
   });
 
+  it("toggles busy from the rollout's mtime freshness", () => {
+    const home = fakeCodexHome();
+    const cwd = "C:WorkSvc Busy";
+    const uuid = "3f3f3f3f-4e4e-5d5d-6c6c-7b7b7b7b7b7b";
+    writeRollout(home, { uuid, cwd, startedAtMs: Date.now() - 60_000, prompts: ["busy work task"] });
+    registerCodexSession("codex-busy", cwd, {});
+    refreshCodexSessionTitles(db, { codexHome: home, onlySessionId: "codex-busy" });
+    // rollout was just written — fresh mtime means mid-turn
+    assert.equal(JSON.parse(getSession(db, "codex-busy")!.metadata!).busy, true);
+
+    // mtime pushed 5 minutes back — idle again
+    const p2 = (n: number) => String(n).padStart(2, "0");
+    const d = new Date(Date.now() - 60_000);
+    const dayDir = join(home, "sessions", String(d.getFullYear()), p2(d.getMonth() + 1), p2(d.getDate()));
+    const file = readdirSync(dayDir).find((f) => f.endsWith(".jsonl"))!;
+    const stale = new Date(Date.now() - 5 * 60_000);
+    utimesSync(join(dayDir, file), stale, stale);
+    refreshCodexSessionTitles(db, { codexHome: home, onlySessionId: "codex-busy" });
+    assert.equal(JSON.parse(getSession(db, "codex-busy")!.metadata!).busy, false);
+    disposeHome(home);
+  });
+
   it("keeps managing a row it titled, following thread_name updates", () => {
     const home = fakeCodexHome();
     const cwd = "C:\\Work\\Svc Zeta";
