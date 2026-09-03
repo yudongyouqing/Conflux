@@ -9,6 +9,15 @@ export function useGraph() {
   });
 }
 
+/** Active sessions for the @-mention picker (and their busy/status). */
+export function useSessions(status: "active" | "all" = "active") {
+  return useQuery({
+    queryKey: ["sessions", status],
+    queryFn: () => api.getSessions(status),
+    refetchInterval: 5000,
+  });
+}
+
 export function useMessages(filters?: { status?: string; limit?: number }) {
   return useQuery({
     queryKey: ["messages", filters],
