@@ -310,12 +310,21 @@ export const AUTO_WAKE_PROMPT =
 /** Pre-authorized tools for headless runs (-p cannot show permission prompts). */
 export const HEADLESS_ALLOWED_TOOLS = "mcp__muiltchat__*";
 
+/**
+ * codex exec defaults to approval policy "never", under which MCP tool
+ * calls are REJECTED headlessly ("MCP tool call requires approval") — the
+ * wake could never reach check_inbox. The bypass flag is the only way to
+ * let a headless run use MCP tools; the wake prompt is our own trusted
+ * text, and the run's cwd is the session's project dir.
+ */
+const CODEX_WAKE_FLAGS = "--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check";
+
 /** Headless wake for an ACTIVE-but-idle session: a FRESH run (never
  * --resume — the open TUI owns the transcript) that adopts the session's
  * muiltchat identity via env and answers from the mail + project dir. */
 export function idleWakeCommand(runtime: "claude" | "codex", executable: string): string {
   const exe = cmdQuote(executable);
-  if (runtime === "codex") return `${exe} exec ${cmdQuote(AUTO_WAKE_PROMPT)}`;
+  if (runtime === "codex") return `${exe} exec ${CODEX_WAKE_FLAGS} ${cmdQuote(AUTO_WAKE_PROMPT)}`;
   return `${exe} -p ${cmdQuote(AUTO_WAKE_PROMPT)} --allowedTools ${cmdQuote(HEADLESS_ALLOWED_TOOLS)}`;
 }
 
@@ -326,9 +335,7 @@ export function wakeCommand(
   executable: string
 ): string {
   if (runtime === "codex") {
-    // `codex exec resume <uuid> "<prompt>"` — exec is non-interactive by
-    // design; MCP tools (check_inbox/reply_ask) need no approval flags
-    return `${cmdQuote(executable)} exec resume ${sessionId} ${cmdQuote(AUTO_WAKE_PROMPT)}`;
+    return `${cmdQuote(executable)} exec resume ${sessionId} ${CODEX_WAKE_FLAGS} ${cmdQuote(AUTO_WAKE_PROMPT)}`;
   }
   return `${resumeCommand("claude", sessionId, executable)} --allowedTools ${cmdQuote(
     HEADLESS_ALLOWED_TOOLS
