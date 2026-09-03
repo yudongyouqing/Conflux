@@ -1,28 +1,25 @@
-import {
-  closeSync,
-  existsSync,
-  openSync,
-  readdirSync,
-  readFileSync,
-  readSync,
-  statSync,
-} from "node:fs";
 import { join } from "node:path";
 import type { DB } from "./db.js";
 import { logger } from "../log.js";
 import { promptExcerpt } from "./live.js";
 import { mergeSessionMeta, renameSession, setSessionDescription } from "./sessions.js";
+import {
+  listCodexRollouts,
+  normalizeDir,
+  readCodexThreadNames,
+  readCodexUserPrompts,
+  type CodexRollout,
+} from "./codex-rollout.js";
 
 /**
- * Rollout-derived titles for Codex sessions.
+ * Rollout-derived TITLES for Codex sessions — the policy half. The rollout
+ * reading itself lives in codex-rollout.ts; this module decides which
+ * rollout belongs to which session and what display name it yields.
  *
  * Codex has no hook system, so — unlike Claude Code — nothing tells us what
- * a conversation is about while it runs. But Codex writes its own session
- * records under ~/.codex: one rollout-*.jsonl per conversation (first line
- * is session_meta with the conversation uuid and cwd) plus session_index.jsonl
- * (thread_name entries Codex maintains itself, refreshed as the conversation
- * progresses). A rollout is written when the FIRST user instruction arrives,
- * which can be hours after the codex process launched.
+ * a conversation is about while it runs. Titles therefore come from Codex's
+ * own records: the thread_name it maintains itself, or an excerpt of the
+ * first real user instruction.
  *
  * Correlating a muiltchat row to a rollout cannot rely on cwd alone: when
  * the MCP server is configured globally with a fixed working directory
@@ -47,8 +44,8 @@ import { mergeSessionMeta, renameSession, setSessionDescription } from "./sessio
  *
  * Title priority: a name set via register_session (or any external rename)
  * is never overridden; otherwise Codex's thread_name; otherwise an excerpt
- * of the first real user instruction (synthetic blobs like
- * <environment_context> are skipped).
+ * of the first real user instruction (synthetic blobs are skipped by the
+ * IO layer).
  */
 
 const AUTO_REGISTERED_DESCRIPTION = "Codex session (auto-registered)";
@@ -69,23 +66,6 @@ const RESUME_ACTIVE_MS = 30 * 60_000;
 // every few seconds. Sampled on the 30s tick, so allow a generous window —
 // long tool runs can go a minute without emitting anything.
 const CODEX_BUSY_FRESH_MS = 90_000;
-
-// Synthetic user-role texts Codex injects into the rollout — none of them
-// are the human's instruction, so none may become a title.
-const SYNTHETIC_PROMPT_PREFIXES = [
-  "<environment_context>",
-  "<user_instructions>",
-  "# AGENTS.md instructions",
-  "Another language model started to solve", // resume/fork handoff blob
-];
-
-export interface CodexRollout {
-  path: string;
-  codexSessionId: string | null;
-  cwd: string | null;
-  startedAtMs: number | null;
-  mtimeMs: number;
-}
 
 interface SessionRow {
   id: string;
@@ -109,202 +89,6 @@ function parseMeta(row: { metadata: string | null }): Record<string, unknown> {
   } catch {
     return {};
   }
-}
-
-/** Case-insensitive on Windows only, matching how the OS treats paths. */
-function normalizeDir(p: string): string {
-  const s = p.replace(/\\/g, "/").replace(/\/+$/, "");
-  return process.platform === "win32" ? s.toLowerCase() : s;
-}
-
-/**
- * Read only the first line of a file. The session_meta line can be large
- * (it embeds base instructions), so grow in 64KB chunks up to 256KB.
- */
-function readFirstLine(path: string): string | null {
-  const CHUNK = 64 * 1024;
-  let fd: number | undefined;
-  try {
-    fd = openSync(path, "r");
-    const buf = Buffer.alloc(CHUNK);
-    let acc = Buffer.alloc(0);
-    for (let i = 0; i < 4; i++) {
-      const n = readSync(fd, buf, 0, CHUNK, null);
-      if (n <= 0) break;
-      acc = Buffer.concat([acc, buf.subarray(0, n)]);
-      const nl = acc.indexOf(10);
-      if (nl !== -1) return acc.subarray(0, nl).toString("utf8");
-      if (n < CHUNK) break;
-    }
-    return acc.length > 0 ? acc.toString("utf8") : null;
-  } catch {
-    return null;
-  } finally {
-    if (fd !== undefined) closeSync(fd);
-  }
-}
-
-function localDayKey(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())}`;
-}
-
-/** sessions/ dir keys covering [fromMs, toMs] (rollout dirs use local dates). */
-function dayKeysBetween(fromMs: number, toMs: number): string[] {
-  const keys = new Set<string>();
-  for (let t = fromMs; t <= toMs + 86_400_000; t += 86_400_000) {
-    keys.add(localDayKey(new Date(t)));
-  }
-  return [...keys];
-}
-
-/**
- * Rollouts whose day-dir falls in the window (2 days of slack for clock
- * skew). Only the first line of each file is parsed, so this stays cheap
- * even with months of history on disk.
- */
-export function listCodexRollouts(codexHome: string, sinceMs: number): CodexRollout[] {
-  const root = join(codexHome, "sessions");
-  if (!existsSync(root)) return [];
-  const rollouts: CodexRollout[] = [];
-  for (const key of dayKeysBetween(sinceMs - 2 * 86_400_000, Date.now())) {
-    const dir = join(root, key);
-    let files: string[];
-    try {
-      files = readdirSync(dir);
-    } catch {
-      continue; // day dir doesn't exist — normal for gaps
-    }
-    for (const f of files) {
-      if (!f.startsWith("rollout-") || !f.endsWith(".jsonl")) continue;
-      const path = join(dir, f);
-      const line = readFirstLine(path);
-      if (!line) continue;
-      try {
-        const j = JSON.parse(line) as {
-          type?: string;
-          payload?: { id?: unknown; session_id?: unknown; cwd?: unknown; timestamp?: unknown };
-        };
-        if (j.type !== "session_meta" || !j.payload) continue;
-        const id =
-          typeof j.payload.id === "string"
-            ? j.payload.id
-            : typeof j.payload.session_id === "string"
-              ? j.payload.session_id
-              : null;
-        const ts = typeof j.payload.timestamp === "string" ? Date.parse(j.payload.timestamp) : NaN;
-        rollouts.push({
-          path,
-          codexSessionId: id,
-          cwd: typeof j.payload.cwd === "string" ? j.payload.cwd : null,
-          startedAtMs: Number.isFinite(ts) ? ts : null,
-          mtimeMs: statSync(path).mtimeMs,
-        });
-      } catch {
-        continue; // malformed meta line — skip the file
-      }
-    }
-  }
-  return rollouts;
-}
-
-/** All human-authored user prompts in a rollout, synthetic blobs filtered out. */
-export function readCodexUserPrompts(rolloutPath: string): string[] {
-  let text: string;
-  try {
-    text = readFileSync(rolloutPath, "utf8");
-  } catch {
-    return [];
-  }
-  const prompts: string[] = [];
-  for (const line of text.split("\n")) {
-    if (!line.includes('"role":"user"')) continue; // cheap prefilter
-    try {
-      const j = JSON.parse(line) as {
-        type?: string;
-        payload?: {
-          type?: string;
-          role?: string;
-          content?: Array<{ type?: string; text?: unknown }>;
-        };
-      };
-      if (j.type !== "response_item" || j.payload?.type !== "message" || j.payload.role !== "user") {
-        continue;
-      }
-      for (const c of j.payload.content ?? []) {
-        if (c.type !== "input_text" || typeof c.text !== "string") continue;
-        const t = c.text.trim();
-        if (!t || SYNTHETIC_PROMPT_PREFIXES.some((p) => t.startsWith(p))) continue;
-        prompts.push(t);
-      }
-    } catch {
-      continue; // malformed line — keep scanning
-    }
-  }
-  return prompts;
-}
-
-/** Map of codex conversation uuid → latest thread_name (later entries win). */
-export function readCodexThreadNames(codexHome: string): Map<string, string> {
-  const names = new Map<string, string>();
-  let text: string;
-  try {
-    text = readFileSync(join(codexHome, "session_index.jsonl"), "utf8");
-  } catch {
-    return names; // no index — fall back to prompt excerpts
-  }
-  for (const line of text.split("\n")) {
-    const l = line.trim();
-    if (!l) continue;
-    try {
-      const j = JSON.parse(l) as { id?: unknown; thread_name?: unknown };
-      if (typeof j.id !== "string" || typeof j.thread_name !== "string") continue;
-      const name = j.thread_name.replace(/\s+/g, " ").trim().slice(0, 64);
-      if (name) names.set(j.id, name);
-    } catch {
-      continue;
-    }
-  }
-  return names;
-}
-
-/**
- * Tail digest of a rollout's real conversation (user asks + assistant
- * answers), for injecting context into a wake run that cannot resume the
- * locked thread. Returns "" when the file is unreadable.
- */
-export function codexRolloutDigest(rolloutPath: string, maxChars = 1500): string {
-  const BS = String.fromCharCode(92); // backslash, shell-transport-safe
-  let text: string;
-  try {
-    text = readFileSync(rolloutPath, "utf8");
-  } catch {
-    return "";
-  }
-  const turns: string[] = [];
-  const NL = String.fromCharCode(10); // shell-transport-safe newline
-  for (const line of text.split(NL)) {
-    if (!line.includes('"response_item"')) continue;
-    try {
-      const j = JSON.parse(line) as {
-        payload?: { type?: string; role?: string; content?: Array<{ type?: string; text?: unknown }> };
-      };
-      const p = j.payload;
-      if (p?.type !== "message" || (p.role !== "user" && p.role !== "assistant")) continue;
-      const parts = (p.content ?? [])
-        .filter((c) => (c.type === "input_text" || c.type === "output_text") && typeof c.text === "string")
-        .map((c) => c.text as string);
-      if (parts.length === 0) continue;
-      const t = parts.join(" ").replace(new RegExp(BS + "s+", "g"), " ").trim();
-      if (!t) continue;
-      if (p.role === "user" && SYNTHETIC_PROMPT_PREFIXES.some((x) => t.startsWith(x))) continue;
-      turns.push(`${p.role === "user" ? "用户" : "助手"}: ${t.slice(0, 300)}`);
-    } catch {
-      continue;
-    }
-  }
-  const digest = turns.slice(-12).join(NL);
-  return digest.length > maxChars ? digest.slice(digest.length - maxChars) : digest;
 }
 
 /**
@@ -361,9 +145,10 @@ export interface CodexTitleRefreshOptions {
 
 /**
  * Retitle active Codex sessions from their rollouts. A row is managed only
- * while it is an untouched auto-registered placeholder or still carries the
- * exact name we applied last time — any other name means register_session
- * (or a user rename) claimed it, and we never touch it again.
+ * while it is an untouched auto-registered placeholder or still carrying
+ * the exact name we applied last time — any other name means
+ * register_session (or a user rename) claimed it, and we never touch it
+ * again.
  * Returns how many rows were updated.
  */
 export function refreshCodexSessionTitles(db: DB, opts: CodexTitleRefreshOptions = {}): number {
@@ -499,6 +284,7 @@ export function refreshCodexSessionTitles(db: DB, opts: CodexTitleRefreshOptions
       continue; // one bad row must not block the rest
     }
   }
+
   // Busy flag for ALL active codex rows (not just title-managed ones):
   // rollout written to recently = a turn is in progress. Write only on
   // change — a merge every 30s would be pointless WAL churn.
