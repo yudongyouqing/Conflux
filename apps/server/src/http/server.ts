@@ -37,7 +37,6 @@ import {
 } from "../core/context.js";
 import { queryContext } from "../core/search.js";
 import {
-  askSession,
   checkInbox,
   replyAsk,
   checkReplies,
@@ -47,6 +46,7 @@ import {
   listEdgeMessages,
   getEdge,
 } from "../core/messages.js";
+import { askAndMaybeWake } from "../core/ask.js";
 import { getGraph } from "../core/graph.js";
 import {
   createAgent,
@@ -460,17 +460,12 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   }, async (req, reply) => {
     const sid = requireSession(req);
     try {
-      const msg = askSession(db, {
+
+      const { message: msg, wake } = askAndMaybeWake(db, {
         from_session: sid,
         to_session: req.body.to_session,
         question: req.body.question,
       });
-      let wake: { woke: boolean; reason?: string } = { woke: false, reason: "skipped" };
-      try {
-        wake = wakeSessionForMail(db, req.body.to_session);
-      } catch {
-        // best-effort auto-answer
-      }
       audit(sid, "ask_session", { to_session: req.body.to_session }, { message_id: msg.id, wake });
       return reply.send({ message: msg, wake });
     } catch (err) {
@@ -921,18 +916,13 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
           `只读通道:${edge.from_session} 发起的对话只能由该会话发言`
         );
       }
+
       heartbeat(db, WEB_CONSOLE_ID);
-      const msg = askSession(db, {
+      const { message: msg, wake } = askAndMaybeWake(db, {
         from_session: WEB_CONSOLE_ID,
         to_session: edge.to_session,
         question: req.body.question,
       });
-      let wake: { woke: boolean; reason?: string } = { woke: false, reason: "skipped" };
-      try {
-        wake = wakeSessionForMail(db, edge.to_session);
-      } catch {
-        // best-effort auto-answer
-      }
       logAudit(db, {
         caller_session: WEB_CONSOLE_ID,
         interface: "http",
@@ -1047,18 +1037,11 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
       } else {
         heartbeat(db, WEB_CONSOLE_ID);
       }
-      const msg = askSession(db, {
+      const { message: msg, wake } = askAndMaybeWake(db, {
         from_session: from,
         to_session: req.body.to_session,
         question: req.body.question,
       });
-      // true auto-answer: if the addressee is offline, wake its conversation
-      let wake: { woke: boolean; reason?: string } = { woke: false, reason: "skipped" };
-      try {
-        wake = wakeSessionForMail(db, req.body.to_session);
-      } catch {
-        // best-effort — the mail is still delivered by the notice/forwarding paths
-      }
       logAudit(db, {
         caller_session: from,
         interface: "http",

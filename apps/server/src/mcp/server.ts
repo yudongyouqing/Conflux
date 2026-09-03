@@ -28,7 +28,6 @@ import {
 } from "../core/context.js";
 import { queryContext } from "../core/search.js";
 import {
-  askSession,
   checkInbox,
   replyAsk,
   checkReplies,
@@ -43,6 +42,7 @@ import {
   deleteUnreferencedSession,
 } from "../core/live.js";
 import { wakeSessionForMail } from "../core/wake/index.js";
+import { askAndMaybeWake } from "../core/ask.js";
 import { refreshCodexSessionTitles } from "../core/codex-titles.js";
 import { logger } from "../log.js";
 
@@ -473,22 +473,13 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
         question: z.string().min(1).max(20_000).describe("The question"),
       },
     },
+
     async ({ to_session, question }) => {
-      const r = await withAudit(
-        "ask_session",
-        { to_session, questionLen: question.length },
-        () => askSession(db, { from_session: sessionId, to_session, question })
+      // unified ask path: delivery + auto-answer wake in one audited action
+      const r = await withAudit("ask_session", { to_session, questionLen: question.length }, () =>
+        askAndMaybeWake(db, { from_session: sessionId, to_session, question })
       );
-      // true auto-answer: offline addressees get headlessly woken to reply
-      let wake: { woke: boolean; reason?: string } = { woke: false, reason: "ask failed" };
-      if (r.ok) {
-        try {
-          wake = wakeSessionForMail(db, to_session);
-        } catch {
-          // best-effort
-        }
-      }
-      return json(r.ok ? { message: r.result, wake } : { error: r.error });
+      return json(r.ok ? { message: r.result.message, wake: r.result.wake } : { error: r.error });
     }
   );
 
