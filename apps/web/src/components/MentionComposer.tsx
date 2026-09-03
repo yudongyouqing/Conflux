@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useMemo, useState, useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSessions } from "../hooks";
 import { api } from "../api";
@@ -23,35 +23,27 @@ interface MentionComposerProps {
   /** Called after a successful ask with the created message (edge jump etc). */
   onSent?: (target: ComposerTarget, message: Message | null) => void;
   className?: string;
-  /** Pre-selected target (e.g. the session whose drawer is open); @ retargets. */
-  initialTarget?: ComposerTarget | null;
 }
 
 /**
  * @-mention ask box: pick an active CLI session by typing @ (ASCII or
  * fullwidth), then ask it a question as the web console.
  */
-export function MentionComposer({ onSent, className, initialTarget }: MentionComposerProps) {
+export function MentionComposer({ onSent, className }: MentionComposerProps) {
   const sessions = useSessions("active");
   const queryClient = useQueryClient();
 
   const [text, setText] = useState("");
   const [target, setTarget] = useState<ComposerTarget | null>(null);
+  const [needTarget, setNeedTarget] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // follow the drawer's session; removing the chip lets @ retarget freely
-  useEffect(() => {
-    setTarget(initialTarget ?? null);
-    setText("");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialTarget?.id]);
-
-  // typing "@..." with no target yet → mention picker; query = chars after @
+  // typing "@..." → mention picker; a new @ REPLACES the current target,
+  // so a send can never carry zero or multiple mentions
   const mentionQuery = useMemo(() => {
-    if (target) return null;
     const m = /[@＠]([^\s@＠]*)$/.exec(text);
     return m ? m[1].toLowerCase() : null;
-  }, [text, target]);
+  }, [text]);
 
   const candidates = useMemo(() => {
     if (mentionQuery === null) return [];
@@ -71,7 +63,7 @@ export function MentionComposer({ onSent, className, initialTarget }: MentionCom
       const sent = target;
       const message = (data as { message?: Message } | undefined)?.message ?? null;
       setText("");
-      if (!initialTarget) setTarget(null);
+      setTarget(null);
       inputRef.current?.focus();
       queryClient.invalidateQueries({ queryKey: ["peer-messages"] });
       queryClient.invalidateQueries({ queryKey: ["messages"] });
@@ -89,7 +81,13 @@ export function MentionComposer({ onSent, className, initialTarget }: MentionCom
 
   const send = () => {
     const question = text.trim();
-    if (!target || !question || ask.isPending) return;
+    if (ask.isPending) return;
+    if (!target) {
+      setNeedTarget(true); // zero mentions — reject with a visible hint
+      setTimeout(() => setNeedTarget(false), 2500);
+      return;
+    }
+    if (!question) return;
     ask.mutate({ to_session: target.id, question });
   };
 
@@ -158,6 +156,9 @@ export function MentionComposer({ onSent, className, initialTarget }: MentionCom
           </div>
         )}
       </div>
+      {needTarget && (
+        <div className="text-xs text-amber-600 mt-1">请先 @ 选择一个目标会话（每次对话只能有一个目标）</div>
+      )}
       {ask.isError && (
         <div className="text-xs text-red-500 mt-1">发送失败: {(ask.error as Error).message}</div>
       )}
