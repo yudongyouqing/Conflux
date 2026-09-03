@@ -1,33 +1,50 @@
-import { useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSessions } from "../hooks";
 import { api } from "../api";
 import { StatusDot } from "./StatusDot";
-import type { SessionSummary } from "@muiltchat/shared";
+import type { Message, SessionStatus } from "@muiltchat/shared";
 
-function targetBadge(s: SessionSummary): { text: string; color: string } {
+/** Minimal session identity the composer needs (GraphNode and SessionSummary both satisfy it). */
+export interface ComposerTarget {
+  id: string;
+  name: string;
+  status: SessionStatus;
+  busy?: boolean;
+}
+
+function targetBadge(s: ComposerTarget): { text: string; color: string } {
   if (s.status !== "active") return { text: "离线 · 异步投递", color: "text-gray-400" };
   if (s.busy) return { text: "在线 · 正在回复", color: "text-amber-600" };
   return { text: "在线", color: "text-emerald-600" };
 }
 
 interface MentionComposerProps {
-  /** Called after a successful ask — e.g. open a thread or the target's drawer. */
-  onSent?: (target: SessionSummary) => void;
+  /** Called after a successful ask with the created message (edge jump etc). */
+  onSent?: (target: ComposerTarget, message: Message | null) => void;
   className?: string;
+  /** Pre-selected target (e.g. the session whose drawer is open); @ retargets. */
+  initialTarget?: ComposerTarget | null;
 }
 
 /**
  * @-mention ask box: pick an active CLI session by typing @ (ASCII or
  * fullwidth), then ask it a question as the web console.
  */
-export function MentionComposer({ onSent, className }: MentionComposerProps) {
+export function MentionComposer({ onSent, className, initialTarget }: MentionComposerProps) {
   const sessions = useSessions("active");
   const queryClient = useQueryClient();
 
   const [text, setText] = useState("");
-  const [target, setTarget] = useState<SessionSummary | null>(null);
+  const [target, setTarget] = useState<ComposerTarget | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // follow the drawer's session; removing the chip lets @ retarget freely
+  useEffect(() => {
+    setTarget(initialTarget ?? null);
+    setText("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTarget?.id]);
 
   // typing "@..." with no target yet → mention picker; query = chars after @
   const mentionQuery = useMemo(() => {
@@ -50,20 +67,21 @@ export function MentionComposer({ onSent, className }: MentionComposerProps) {
 
   const ask = useMutation({
     mutationFn: (body: { to_session: string; question: string }) => api.webAsk(body),
-    onSuccess: (_data, vars) => {
+    onSuccess: (data, vars) => {
       const sent = target;
+      const message = (data as { message?: Message } | undefined)?.message ?? null;
       setText("");
-      setTarget(null);
+      if (!initialTarget) setTarget(null);
       inputRef.current?.focus();
       queryClient.invalidateQueries({ queryKey: ["peer-messages"] });
       queryClient.invalidateQueries({ queryKey: ["messages"] });
       queryClient.invalidateQueries({ queryKey: ["graph"] });
-      if (sent) onSent?.(sent);
+      if (sent) onSent?.(sent, message);
       void vars;
     },
   });
 
-  const pickTarget = (s: SessionSummary) => {
+  const pickTarget = (s: ComposerTarget) => {
     setTarget(s);
     setText((t) => t.replace(/[@＠]([^\s@＠]*)$/, ""));
     inputRef.current?.focus();
