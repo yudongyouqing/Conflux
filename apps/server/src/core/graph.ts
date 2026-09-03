@@ -83,6 +83,7 @@ export function getGraph(
     let identitySource = parseIdentitySource(n.identity_source);
     let runtimePid = parseRuntimePid(n.runtime_pid);
     let ownName = false;
+    let busy = false;
     let skills: string[] | undefined;
     try {
       const meta = n.metadata ? (JSON.parse(n.metadata) as Record<string, unknown>) : null;
@@ -100,6 +101,7 @@ export function getGraph(
         runtimePid = metadataRuntimePid ?? (runtime === "claude" ? legacyClaudePid : null);
       }
       ownName = !!(meta && (meta.named === true || meta.custom_title === true));
+      busy = !!(meta && meta.busy === true);
       // Agent Card: capability self-description written by register_session
       const card = meta?.agent_card;
       if (card && typeof card === "object" && Array.isArray((card as { skills?: unknown }).skills)) {
@@ -121,6 +123,7 @@ export function getGraph(
       identity_source: identitySource,
       runtime_pid: runtimePid,
       skills,
+      busy,
     };
   };
 

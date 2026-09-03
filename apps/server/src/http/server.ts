@@ -22,6 +22,7 @@ import {
 import {
   registerSession,
   listSessions,
+  sessionBusy,
   heartbeat,
   getSession,
   markStaleSessions,
@@ -335,7 +336,10 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   app.get<{ Querystring: { status?: string } }>("/sessions", {}, async (req, reply) => {
     try {
       const status = (req.query.status as "active" | "stale" | "ended" | "all" | undefined) ?? "active";
-      const sessions = listSessions(db, { status });
+      const sessions = listSessions(db, { status }).map((s) => ({
+        ...s,
+        busy: sessionBusy(s.metadata),
+      }));
       return reply.send({ sessions });
     } catch (err) {
       return sendError(reply, err);

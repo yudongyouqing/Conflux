@@ -268,7 +268,7 @@ function SessionDetail({
     <div className="p-5 space-y-5 overflow-y-auto h-full">
       <div>
         <div className="flex items-center gap-2 mb-1.5">
-          <StatusDot status={session.status} />
+          <StatusDot status={session.status} busy={session.busy} />
           <h2 className="text-gray-900 font-semibold text-[15px] break-all">
             {session.name}
           </h2>

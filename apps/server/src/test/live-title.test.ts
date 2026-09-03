@@ -43,6 +43,27 @@ function disposeHome(home: string): void {
   }
 }
 
+describe("busy flag from hook event pair", () => {
+  const SID = "88888888-8888-8888-8888-888888888888";
+
+  it("prompt marks busy, stop clears it, session-start resets a stuck flag", () => {
+    const home = fakeHome();
+    handleHookEvent(db, "session-start", { session_id: SID, cwd: "C:workusy demo" }, home);
+    handleHookEvent(db, "prompt", { session_id: SID, cwd: "C:workusy demo", prompt: "do things" }, home);
+    assert.equal(JSON.parse(getSession(db, SID)!.metadata!).busy, true);
+
+    handleHookEvent(db, "stop", { session_id: SID, cwd: "C:workusy demo" }, home);
+    assert.equal(JSON.parse(getSession(db, SID)!.metadata!).busy, false);
+
+    // stuck busy on an old row is cleared by a fresh session-start
+    handleHookEvent(db, "prompt", { session_id: SID, cwd: "C:workusy demo", prompt: "more" }, home);
+    assert.equal(JSON.parse(getSession(db, SID)!.metadata!).busy, true);
+    handleHookEvent(db, "session-start", { session_id: SID, cwd: "C:workusy demo", source: "resume" }, home);
+    assert.equal(JSON.parse(getSession(db, SID)!.metadata!).busy, false);
+    disposeHome(home);
+  });
+});
+
 describe("readCustomTitle", () => {
   const SID = "11111111-2222-3333-4444-555555555555";
 

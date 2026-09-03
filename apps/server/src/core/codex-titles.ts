@@ -11,7 +11,7 @@ import { join } from "node:path";
 import type { DB } from "./db.js";
 import { logger } from "../log.js";
 import { promptExcerpt } from "./live.js";
-import { renameSession, setSessionDescription } from "./sessions.js";
+import { mergeSessionMeta, renameSession, setSessionDescription } from "./sessions.js";
 
 /**
  * Rollout-derived titles for Codex sessions.
@@ -64,6 +64,11 @@ const ROLLOUT_SKEW_MS = 120_000;
 // written to right now — a stale mtime means it is just history).
 const RESUME_LOOKBACK_MS = 30 * 86_400_000;
 const RESUME_ACTIVE_MS = 30 * 60_000;
+
+// Busy signal: an actively generating conversation appends to its rollout
+// every few seconds. Sampled on the 30s tick, so allow a generous window —
+// long tool runs can go a minute without emitting anything.
+const CODEX_BUSY_FRESH_MS = 90_000;
 
 // Synthetic user-role texts Codex injects into the rollout — none of them
 // are the human's instruction, so none may become a title.
@@ -455,6 +460,29 @@ export function refreshCodexSessionTitles(db: DB, opts: CodexTitleRefreshOptions
       continue; // one bad row must not block the rest
     }
   }
+  // Busy flag for ALL active codex rows (not just title-managed ones):
+  // rollout written to recently = a turn is in progress. Write only on
+  // change — a merge every 30s would be pointless WAL churn.
+  const nowBusy = Date.now();
+  // re-read metadata: the title loop above may have just stamped it
+  const readMeta = db.prepare(`SELECT metadata FROM sessions WHERE id = ?`);
+  for (const row of rows) {
+    try {
+      const fresh = readMeta.get(row.id) as { metadata: string | null } | undefined;
+      if (!fresh) continue;
+      const meta = parseMeta(fresh);
+      const stamp = typeof meta.codex_session_id === "string" ? meta.codex_session_id : null;
+      if (!stamp) continue;
+      const r = rollouts.find((x) => x.codexSessionId === stamp);
+      if (!r) continue;
+      const busy = nowBusy - r.mtimeMs < CODEX_BUSY_FRESH_MS;
+      if (meta.busy === busy) continue;
+      mergeSessionMeta(db, row.id, { busy });
+    } catch {
+      continue;
+    }
+  }
+
   if (updated > 0) logger.info({ updated }, "codex session titles refreshed");
   return updated;
 }
