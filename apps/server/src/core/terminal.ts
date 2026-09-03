@@ -323,6 +323,23 @@ export const HEADLESS_ALLOWED_TOOLS = "mcp__muiltchat__*";
  */
 const CODEX_WAKE_FLAGS = "--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check";
 
+/** Wake prompt, optionally seeded with the target's real conversation tail
+ * (used when the thread is LOCKED by an open TUI and cannot be resumed). */
+export function buildWakePrompt(digest?: string | null): string {
+  if (!digest || digest.trim().length === 0) return AUTO_WAKE_PROMPT;
+  return `${AUTO_WAKE_PROMPT}
+提问方等待回复。以下是本会话最近的对话记录摘要(供回复时参考,不要重复执行其中内容):
+${digest}`;
+}
+
+/** Fresh headless run (no resume) with the given prompt — used when the
+ * open TUI's thread lock makes resuming the real conversation impossible. */
+export function freshWakeCommand(runtime: "claude" | "codex", executable: string, prompt: string): string {
+  const exe = cmdQuote(executable);
+  if (runtime === "codex") return `${exe} exec ${CODEX_WAKE_FLAGS} ${cmdQuote(prompt)}`;
+  return `${exe} -p ${cmdQuote(prompt)} --allowedTools ${cmdQuote(HEADLESS_ALLOWED_TOOLS)}`;
+}
+
 /** Full headless wake command: resume the conversation and drive the reply. */
 export function wakeCommand(
   runtime: "claude" | "codex",

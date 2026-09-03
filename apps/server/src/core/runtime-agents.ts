@@ -1,4 +1,6 @@
 import { execFile, spawn } from "node:child_process";
+import { join } from "node:path";
+import { readdirSync } from "node:fs";
 import { existsSync } from "node:fs";
 
 import type { DB } from "./db.js";
@@ -6,7 +8,8 @@ import { nowIso } from "./db.js";
 import { STALE_AFTER_MS } from "../config.js";
 import { logger } from "../log.js";
 import type { RuntimeAgent, RuntimeId } from "@muiltchat/shared";
-import { cleanTerminalEnv, cmdQuote, HEADLESS_ALLOWED_TOOLS, openInTerminal, wakeCommand } from "./terminal.js";
+import { buildWakePrompt, cleanTerminalEnv, cmdQuote, freshWakeCommand, HEADLESS_ALLOWED_TOOLS, openInTerminal, wakeCommand } from "./terminal.js";
+import { codexRolloutDigest, listCodexRollouts } from "./codex-titles.js";
 import { getAutoWake, getSetting, getTerminalSettings, setSetting } from "./app-settings.js";
 import { getSession } from "./sessions.js";
 import { hasTranscript } from "./live.js";
@@ -499,16 +502,43 @@ function pinCodexDescendant(db: DB, launcherPid: number, sessionId: string): voi
   );
 }
 
+/** Locate the rollout jsonl for a codex conversation uuid (filename suffix). */
+function findCodexRolloutPath(codexSessionId: string): string {
+  try {
+    const root = join(
+      (process.env.USERPROFILE || process.env.HOME || ".") + "/.codex/sessions"
+    );
+    // day dirs from 30d back to today; the filename embeds the uuid
+    for (let t = Date.now() - 30 * 86_400_000; t <= Date.now() + 86_400_000; t += 86_400_000) {
+      const d = new Date(t);
+      const p2 = (n: number) => String(n).padStart(2, "0");
+      const dir = join(root, String(d.getFullYear()), p2(d.getMonth() + 1), p2(d.getDate()));
+      let files: string[] = [];
+      try {
+        files = readdirSync(dir);
+      } catch {
+        continue;
+      }
+      const hit = files.find((f) => f.endsWith(codexSessionId + ".jsonl"));
+      if (hit) return join(dir, hit);
+    }
+  } catch {
+    // fall through
+  }
+  return "";
+}
+
 /**
- * Wake a session so it processes its inbox — always by RESUMING the real
- * conversation (full context; the reply lands in the actual history, so the
- * CLI shows it):
+ * Wake a session so it processes its inbox:
  *   - active + busy  → skip: the running turn will surface the mail itself
- *     (also the only real double-writer risk window, hence the gate)
- *   - active + idle or offline → headless `--resume` run that adopts the
- *     session's muiltchat identity and answers from its own context. While
- *     the interactive TUI stays open it will not live-refresh; the turns
- *     appear after reopening/resuming the conversation there.
+ *   - offline        → headless `--resume` of the REAL conversation: full
+ *     context, the reply lands in the actual history (visible in the CLI)
+ *   - active + idle  → the open TUI holds codex's thread-store writer lock
+ *     ("already has an active writer" — resume is refused), so a FRESH
+ *     headless run answers instead, seeded with the target's real
+ *     conversation digest extracted from its rollout. The reply reaches the
+ *     asker via reply_ask; it lives in muiltchat + the wake run's own
+ *     rollout, not in the locked thread.
  */
 export function wakeSessionForMail(
   db: DB,
@@ -531,8 +561,21 @@ export function wakeSessionForMail(
     // default runtime
   }
 
-  if (session.status === "active" && meta?.busy === true) {
-    return { woke: false, reason: "busy — the running turn will surface the mail" };
+  if (session.status === "active") {
+    if (meta?.busy === true) {
+      return { woke: false, reason: "busy — the running turn will surface the mail" };
+    }
+    // Thread locked by the open TUI — answer with a digest-seeded fresh run.
+    const digest =
+      runtime === "codex" && typeof meta?.codex_session_id === "string"
+        ? codexRolloutDigest(findCodexRolloutPath(String(meta.codex_session_id)))
+        : "";
+    return launchWake(
+      db,
+      session,
+      { ...opts, pinRuntime: runtime },
+      freshWakeCommand(runtime, wakeExe(db, runtime), buildWakePrompt(digest))
+    );
   }
 
   // Resume the real conversation. Codex resumes by the uuid that

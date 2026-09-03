@@ -269,6 +269,45 @@ export function readCodexThreadNames(codexHome: string): Map<string, string> {
 }
 
 /**
+ * Tail digest of a rollout's real conversation (user asks + assistant
+ * answers), for injecting context into a wake run that cannot resume the
+ * locked thread. Returns "" when the file is unreadable.
+ */
+export function codexRolloutDigest(rolloutPath: string, maxChars = 1500): string {
+  const BS = String.fromCharCode(92); // backslash, shell-transport-safe
+  let text: string;
+  try {
+    text = readFileSync(rolloutPath, "utf8");
+  } catch {
+    return "";
+  }
+  const turns: string[] = [];
+  const NL = String.fromCharCode(10); // shell-transport-safe newline
+  for (const line of text.split(NL)) {
+    if (!line.includes('"response_item"')) continue;
+    try {
+      const j = JSON.parse(line) as {
+        payload?: { type?: string; role?: string; content?: Array<{ type?: string; text?: unknown }> };
+      };
+      const p = j.payload;
+      if (p?.type !== "message" || (p.role !== "user" && p.role !== "assistant")) continue;
+      const parts = (p.content ?? [])
+        .filter((c) => (c.type === "input_text" || c.type === "output_text") && typeof c.text === "string")
+        .map((c) => c.text as string);
+      if (parts.length === 0) continue;
+      const t = parts.join(" ").replace(new RegExp(BS + "s+", "g"), " ").trim();
+      if (!t) continue;
+      if (p.role === "user" && SYNTHETIC_PROMPT_PREFIXES.some((x) => t.startsWith(x))) continue;
+      turns.push(`${p.role === "user" ? "用户" : "助手"}: ${t.slice(0, 300)}`);
+    } catch {
+      continue;
+    }
+  }
+  const digest = turns.slice(-12).join(NL);
+  return digest.length > maxChars ? digest.slice(digest.length - maxChars) : digest;
+}
+
+/**
  * Greedy bipartite match of unstamped session rows to unclaimed rollouts by
  * tightest |rollout.start − row.created|, cwd-exact pairs ranking first.
  * Ties resolve to the older row so the pass is deterministic. A rollout is
