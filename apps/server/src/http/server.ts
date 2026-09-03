@@ -74,7 +74,7 @@ import {
   listRuntimeAgentsWithLiveness,
   startRuntimeAgent,
   tickScheduledAgents,
-  wakeOfflineSession,
+  wakeSessionForMail,
 } from "../core/runtime-agents.js";
 import {
   getAutoWake,
@@ -467,7 +467,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
       });
       let wake: { woke: boolean; reason?: string } = { woke: false, reason: "skipped" };
       try {
-        wake = wakeOfflineSession(db, req.body.to_session);
+        wake = wakeSessionForMail(db, req.body.to_session);
       } catch {
         // best-effort auto-answer
       }
@@ -929,7 +929,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
       });
       let wake: { woke: boolean; reason?: string } = { woke: false, reason: "skipped" };
       try {
-        wake = wakeOfflineSession(db, edge.to_session);
+        wake = wakeSessionForMail(db, edge.to_session);
       } catch {
         // best-effort auto-answer
       }
@@ -1055,7 +1055,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
       // true auto-answer: if the addressee is offline, wake its conversation
       let wake: { woke: boolean; reason?: string } = { woke: false, reason: "skipped" };
       try {
-        wake = wakeOfflineSession(db, req.body.to_session);
+        wake = wakeSessionForMail(db, req.body.to_session);
       } catch {
         // best-effort — the mail is still delivered by the notice/forwarding paths
       }
