@@ -310,6 +310,15 @@ export const AUTO_WAKE_PROMPT =
 /** Pre-authorized tools for headless runs (-p cannot show permission prompts). */
 export const HEADLESS_ALLOWED_TOOLS = "mcp__muiltchat__*";
 
+/** Headless wake for an ACTIVE-but-idle session: a FRESH run (never
+ * --resume — the open TUI owns the transcript) that adopts the session's
+ * muiltchat identity via env and answers from the mail + project dir. */
+export function idleWakeCommand(runtime: "claude" | "codex", executable: string): string {
+  const exe = cmdQuote(executable);
+  if (runtime === "codex") return `${exe} exec ${cmdQuote(AUTO_WAKE_PROMPT)}`;
+  return `${exe} -p ${cmdQuote(AUTO_WAKE_PROMPT)} --allowedTools ${cmdQuote(HEADLESS_ALLOWED_TOOLS)}`;
+}
+
 /** Full headless wake command: resume the conversation and drive the reply. */
 export function wakeCommand(
   runtime: "claude" | "codex",

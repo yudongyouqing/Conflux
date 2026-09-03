@@ -6,7 +6,7 @@ import { nowIso } from "./db.js";
 import { STALE_AFTER_MS } from "../config.js";
 import { logger } from "../log.js";
 import type { RuntimeAgent, RuntimeId } from "@muiltchat/shared";
-import { cleanTerminalEnv, cmdQuote, HEADLESS_ALLOWED_TOOLS, openInTerminal, wakeCommand } from "./terminal.js";
+import { cleanTerminalEnv, cmdQuote, HEADLESS_ALLOWED_TOOLS, idleWakeCommand, openInTerminal, wakeCommand } from "./terminal.js";
 import { getAutoWake, getSetting, getTerminalSettings, setSetting } from "./app-settings.js";
 import { getSession } from "./sessions.js";
 import { hasTranscript } from "./live.js";
@@ -404,13 +404,60 @@ export function tickScheduledAgents(
  * (The resume lineage forwarding re-addresses the pending mail to the run's
  * new conversation id, so the wake finds the question.)
  *
- * Skips: active sessions (the notice hook already covers them), web console,
+ * Skips: busy sessions (their turn surfaces the mail), web console,
  * internal agents, codex runtimes (no headless resume-with-prompt), and
  * repeats within DEDUP_MS. dryRun returns the command without spawning.
  */
 const AUTO_WAKE_DEDUP_MS = 90_000;
 
-export function wakeOfflineSession(
+function wakeExe(db: DB, runtime: "claude" | "codex"): string {
+  const settings = getTerminalSettings(db);
+  return runtime === "codex"
+    ? process.env.CODEX_PATH || settings.codex_path
+    : process.env.CLAUDE_PATH || settings.claude_path;
+}
+
+/** Dedup + spawn one headless wake run acting as the session's identity. */
+function launchWake(
+  db: DB,
+  session: { id: string; project_dir: string | null },
+  opts: { dryRun?: boolean; now?: Date },
+  command: string
+): { woke: true; command: string } | { woke: false; reason: string } {
+  const now = (opts.now ?? new Date()).getTime();
+  const last = getSetting(db, `auto-wake:${session.id}`);
+  if (last && now - Date.parse(last) < AUTO_WAKE_DEDUP_MS) {
+    return { woke: false, reason: "wake already in flight" };
+  }
+  if (opts.dryRun) return { woke: true, command };
+  // Assume the target's identity: headless runs may not fire registering
+  // hooks, so the run's MCP adopts the target session via env.
+  const env = cleanTerminalEnv();
+  env.MUILTCHAT_ASSUME_SESSION = session.id;
+  const child = spawn(process.env.comspec ?? "cmd.exe", ["/d", "/s", "/c", command], {
+    detached: process.platform !== "win32",
+    stdio: "ignore",
+    env,
+    cwd: session.project_dir ?? undefined,
+    windowsVerbatimArguments: process.platform === "win32",
+    windowsHide: true,
+  });
+  child.unref();
+  setSetting(db, `auto-wake:${session.id}`, new Date(now).toISOString());
+  logger.info({ sessionId: session.id }, "auto-wake launched");
+  return { woke: true, command };
+}
+
+/**
+ * Wake a session so it processes its inbox:
+ *   - active + busy  → skip: the running turn will surface the mail itself
+ *   - active + idle  → FRESH headless run adopting the session's identity.
+ *     Never --resume here — the open TUI owns the transcript and a second
+ *     writer could corrupt it. The waker answers from mail + project dir.
+ *   - offline        → resume wake (the TUI is closed, the transcript is
+ *     free to continue with full conversation context).
+ */
+export function wakeSessionForMail(
   db: DB,
   sessionId: string,
   opts: { dryRun?: boolean; now?: Date; claudeHome?: string } = {}
@@ -421,9 +468,7 @@ export function wakeOfflineSession(
   }
   const session = getSession(db, sessionId);
   if (!session) return { woke: false, reason: "session not found" };
-  if (session.status === "active") {
-    return { woke: false, reason: "active — hook notice will surface it" };
-  }
+
   let runtime: "claude" | "codex" = "claude";
   let meta: Record<string, unknown> | null = null;
   try {
@@ -432,52 +477,25 @@ export function wakeOfflineSession(
   } catch {
     // default runtime
   }
-  // The conversation id each runtime needs to resume: claude's equals the
-  // muiltchat session id; codex resumes by the conversation uuid that
-  // codex-titles stamped from its rollout
+
+  if (session.status === "active") {
+    if (meta?.busy === true) {
+      return { woke: false, reason: "busy — the running turn will surface the mail" };
+    }
+    return launchWake(db, session, opts, idleWakeCommand(runtime, wakeExe(db, runtime)));
+  }
+
+  // Offline: resume the real conversation. Codex resumes by the uuid that
+  // codex-titles stamped from its rollout; claude's uuid is the session id.
   const codexSessionId = typeof meta?.codex_session_id === "string" ? meta.codex_session_id : null;
   if (runtime === "codex" && !codexSessionId) {
     return { woke: false, reason: "no codex_session_id (rollout binding missing)" };
   }
   // `claude --resume` needs the transcript file — claude only writes it on
   // the first turn, so zero-turn conversations cannot be woken (they have
-  // no context to answer from anyway). Codex resume reads its rollout by
-  // uuid and fails harmlessly if the file is gone.
+  // no context to answer from anyway).
   if (runtime === "claude" && !hasTranscript(sessionId, session.project_dir, opts.claudeHome)) {
     return { woke: false, reason: "no transcript (zero-turn conversation)" };
   }
-
-  // dedup: an in-flight wake (or a recent one) must not stack
-  const now = (opts.now ?? new Date()).getTime();
-  const last = getSetting(db, `auto-wake:${sessionId}`);
-  if (last && now - Date.parse(last) < AUTO_WAKE_DEDUP_MS) {
-    return { woke: false, reason: "wake already in flight" };
-  }
-
-  const settings = getTerminalSettings(db);
-  const exe =
-    runtime === "codex"
-      ? process.env.CODEX_PATH || settings.codex_path
-      : process.env.CLAUDE_PATH || settings.claude_path;
-  const command = wakeCommand(runtime, codexSessionId ?? sessionId, exe);
-
-  if (opts.dryRun) return { woke: true, command };
-
-  // Assume the target's identity: newer claude versions don't fire
-  // registering hooks headlessly, so the run's MCP adopts the target
-  // conversation via env (mail never needs forwarding to reach it).
-  const env = cleanTerminalEnv();
-  env.MUILTCHAT_ASSUME_SESSION = sessionId;
-  const child = spawn(process.env.comspec ?? "cmd.exe", ["/d", "/s", "/c", command], {
-    detached: process.platform !== "win32",
-    stdio: "ignore",
-    env,
-    cwd: session.project_dir ?? undefined,
-    windowsVerbatimArguments: process.platform === "win32",
-    windowsHide: true,
-  });
-  child.unref();
-  setSetting(db, `auto-wake:${sessionId}`, new Date(now).toISOString());
-  logger.info({ sessionId }, "auto-wake launched for offline session");
-  return { woke: true, command };
+  return launchWake(db, session, opts, wakeCommand(runtime, codexSessionId ?? sessionId, wakeExe(db, runtime)));
 }
