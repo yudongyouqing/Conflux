@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useSessionContext, useWebAsk, useEdgeMessages, useEdgeAsk, useOpenSessionTerminal } from "../hooks";
+import { useSessionContext, useEdgeMessages, useEdgeAsk, useOpenSessionTerminal } from "../hooks";
+import { MentionComposer } from "./MentionComposer";
 import type { Message, GraphNode, SessionStatus } from "@muiltchat/shared";
 import { StatusDot } from "./StatusDot";
 import { FileText, Clock, ArrowRight, FolderOpen, Send, Loader2, ArrowLeftRight, TerminalSquare } from "lucide-react";
@@ -338,7 +339,7 @@ function SessionDetail({
         </div>
       )}
 
-      {isSession && <InitiateConversation sessionId={session.id} status={session.status} onOpenEdge={onOpenEdge} />}
+      {isSession && <InitiateConversation session={session} onOpenEdge={onOpenEdge} />}
 
       <div>
         <h3 className="text-xs text-gray-500 font-medium mb-2 flex items-center gap-1">
@@ -382,66 +383,31 @@ function SessionDetail({
 
 /** Ask/message flow between the web console and one session. */
 function InitiateConversation({
-  sessionId,
-  status,
+  session,
   onOpenEdge,
 }: {
-  sessionId: string;
-  status: SessionStatus;
+  session: GraphNode;
   onOpenEdge: (edge: { id: number; from: string; to: string }) => void;
 }) {
-  const ask = useWebAsk();
-  const [text, setText] = useState("");
-
-  const initiate = () => {
-    const question = text.trim();
-    if (!question || ask.isPending) return;
-    ask.mutate(
-      { to_session: sessionId, question },
-      {
-        onSuccess: (r) => {
-          setText("");
-          // jump straight into the channel this question created
-          if (r.message.edge_id != null) {
-            onOpenEdge({ id: r.message.edge_id, from: WEB_CONSOLE_ID, to: sessionId });
-          }
-        },
-      }
-    );
-  };
-
   return (
     <div>
       <h3 className="text-xs text-gray-500 font-medium mb-2 flex items-center gap-1">
         <ArrowRight size={12} /> 发起对话通道
       </h3>
-      {status !== "active" && (
+      {session.status !== "active" && (
         <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mb-2">
-          ⚠ 对方当前{status === "ended" ? "已结束" : "离线"}。发送后将尝试自动唤醒它回复。
+          ⚠ 对方当前{session.status === "ended" ? "已结束" : "离线"}。发送后将尝试自动唤醒它回复。
         </div>
       )}
-      <div className="flex gap-1.5">
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.nativeEvent.isComposing) initiate();
-          }}
-          placeholder="发起对话:Web 控制台 → 该会话…"
-          className="flex-1 min-w-0 text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-300"
-        />
-        <button
-          onClick={initiate}
-          disabled={!text.trim() || ask.isPending}
-          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-blue-700 transition-colors flex-shrink-0"
-        >
-          {ask.isPending ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
-          发起
-        </button>
-      </div>
-      {ask.isError && (
-        <p className="text-[10px] text-red-500 mt-1">{(ask.error as Error).message}</p>
-      )}
+      <MentionComposer
+        initialTarget={session}
+        onSent={(_t, message) => {
+          // jump straight into the channel this question created
+          if (message?.edge_id != null) {
+            onOpenEdge({ id: message.edge_id, from: WEB_CONSOLE_ID, to: message.to_session });
+          }
+        }}
+      />
     </div>
   );
 }
