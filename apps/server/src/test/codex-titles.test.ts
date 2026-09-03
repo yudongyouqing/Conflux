@@ -286,6 +286,53 @@ describe("refreshCodexSessionTitles", () => {
     disposeHome(home);
   });
 
+  it("claims a rollout written hours after the row was created (long-idle window)", () => {
+    const home = fakeCodexHome();
+    registerCodexSession("codex-idle", "C:WorkSvc Idle", {});
+    db.prepare(
+      `UPDATE sessions SET created_at = ? WHERE id = 'codex-idle'`
+    ).run(new Date(Date.now() - 3 * 3_600_000).toISOString());
+    writeRollout(home, {
+      uuid: "d0d0d0d0-c3c3-b4b4-a5a5-e6e6e6e6e6e6",
+      cwd: "C:SomewhereElse",
+      startedAtMs: Date.now() - 30_000,
+      prompts: ["evening task after long idle"],
+    });
+
+    const updated = refreshCodexSessionTitles(db, { codexHome: home, onlySessionId: "codex-idle" });
+    const s = getSession(db, "codex-idle")!;
+    assert.equal(updated, 1);
+    assert.equal(s.name, "evening task after long idle");
+    disposeHome(home);
+  });
+
+  it("prefers the row with the tighter launch gap over an older idle sibling", () => {
+    const home = fakeCodexHome();
+    const cwd = "C:WorkSvc Race";
+    registerCodexSession("codex-old-idle", cwd, {});
+    db.prepare(
+      `UPDATE sessions SET created_at = ? WHERE id = 'codex-old-idle'`
+    ).run(new Date(Date.now() - 3 * 3_600_000).toISOString());
+    registerCodexSession("codex-fresh", cwd, {});
+    db.prepare(
+      `UPDATE sessions SET created_at = ? WHERE id = 'codex-fresh'`
+    ).run(new Date(Date.now() - 60_000).toISOString());
+    writeRollout(home, {
+      uuid: "e1e1e1e1-f2f2-a3a3-b4b4-c5c5c5c5c5c5",
+      cwd,
+      startedAtMs: Date.now() - 10_000,
+      prompts: ["fresh session prompt"],
+    });
+
+    const updated = refreshCodexSessionTitles(db, { codexHome: home });
+    assert.equal(updated, 1);
+    assert.equal(getSession(db, "codex-fresh")!.name, "fresh session prompt");
+    const placeholder = cwd.replace(/[\/]+/g, "/").split("/").pop()!;
+    assert.equal(getSession(db, "codex-old-idle")!.name, placeholder); // placeholder kept
+    db.prepare("DELETE FROM sessions WHERE id IN ('codex-old-idle', 'codex-fresh')").run();
+    disposeHome(home);
+  });
+
   it("keeps managing a row it titled, following thread_name updates", () => {
     const home = fakeCodexHome();
     const cwd = "C:\\Work\\Svc Zeta";
