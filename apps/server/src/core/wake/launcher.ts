@@ -1,6 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import { cleanTerminalEnv } from "../terminal.js";
 import { setSetting } from "../app-settings.js";
+import { psMatchClauses } from "../runtime-identity.js";
 import { logger } from "../../log.js";
 import type { DB } from "../db.js";
 
@@ -78,7 +79,7 @@ export function pinCodexDescendants(db: DB, launcherPid: number, sessionId: stri
     "  foreach($i in 1..6){",
     "    $kids=@($frontier | ForEach-Object { Get-CimInstance Win32_Process -Filter \"ParentProcessId=$_\" })",
     "    if($kids.Count -eq 0){ break }",
-    "    $all+=@($kids | Where-Object { $_.Name -eq 'codex.exe' -or $_.CommandLine -like '*codex.cmd*' -or $_.CommandLine -like '*@openai*codex*' })",
+    "$all+=@($kids | Where-Object { __RUNTIME_MATCH__ })",
     "    $frontier=@($kids.ProcessId)",
     "  }",
     "  if($all.Count -eq 0){ Start-Sleep -Milliseconds 300 }",
@@ -86,6 +87,7 @@ export function pinCodexDescendants(db: DB, launcherPid: number, sessionId: stri
     "if($all.Count -gt 0){ $all.ProcessId }",
   ]
     .join("\n")
+    .replace("__RUNTIME_MATCH__", psMatchClauses("codex"))
     .replace("LAUNCHER_PID", String(launcherPid));
   execFile(
     "powershell.exe",

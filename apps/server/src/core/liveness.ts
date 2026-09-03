@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import type { RuntimeId } from "@muiltchat/shared";
 import type { DB } from "./db.js";
 import { logger } from "../log.js";
+import { isRuntimeCommand } from "./runtime-identity.js";
 import { hasMcpConnection } from "./mcp-liveness.js";
 
 const execFileAsync = promisify(execFile);
@@ -39,31 +40,9 @@ export function parseProcessLines(output: string): ProcessEntry[] {
   return entries;
 }
 
-/** Does this command line belong to the selected runtime process? */
-export function isRuntimeCommand(command: string, runtime: RuntimeId): boolean {
-  const tokens = command.match(/"[^"]+"|\S+/g) ?? [];
-  return tokens.some((t) => {
-    const token = t.toLowerCase().replace(/^"|"$/g, "");
-    const normalized = token.replace(/\\/g, "/");
-    const basename = normalized.split("/").pop() ?? "";
-    if (runtime === "claude") {
-      return (
-        basename === "claude" ||
-        basename === "claude.exe" ||
-        basename === "claude.cmd" ||
-        /(?:^|\/)@anthropic-ai\/claude-code(?:\/|$)/.test(normalized) ||
-        /(?:^|\/)claude-code(?:\/|$)/.test(normalized)
-      );
-    }
-    return (
-      basename === "codex" ||
-      basename === "codex.exe" ||
-      basename === "codex.cmd" ||
-      /(?:^|\/)@openai\/codex(?:\/|$)/.test(normalized) ||
-      /(?:^|\/)codex-cli(?:\/|$)/.test(normalized)
-    );
-  });
-}
+// token matching lives in runtime-identity.ts (single source of truth);
+// re-exported here for the existing importers
+export { isRuntimeCommand } from "./runtime-identity.js";
 
 /** Does this command line belong to Claude Code? (compatibility wrapper) */
 export function isClaudeCommand(command: string): boolean {
