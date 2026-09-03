@@ -213,9 +213,8 @@ test("wakeSessionForMail: guards, dedup and command shape", () => {
   const idle = wakeSessionForMail(db, "wake-alive", { dryRun: true, claudeHome: FAKE_HOME });
   assert.equal(idle.woke, true);
   if (idle.woke) {
-    assert.ok(idle.command.includes("-p "), "headless prompt");
+    assert.ok(idle.command.includes("-p "), "headless prompt (delivered via stdin)");
     assert.ok(!idle.command.includes("--resume "), "must not resume a TUI-locked thread");
-    assert.ok(idle.command.includes("check_inbox"), "wake prompt drives the inbox flow");
   }
 
   // offline claude session → dry-run returns the full wake command
@@ -236,7 +235,7 @@ test("wakeSessionForMail: guards, dedup and command shape", () => {
   assert.equal(w.woke, true);
   if (w.woke) {
     assert.ok(w.command.includes("--resume wake-dead"), "resumes the conversation");
-    assert.ok(w.command.includes("-p "), "headless wake prompt");
+    assert.ok(w.command.trimEnd().endsWith("-p"), "headless prompt via stdin");
   }
 
   // global opt-out

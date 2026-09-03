@@ -336,12 +336,18 @@ export function buildWakePrompt(digest?: string | null): string {
 ${digest}`;
 }
 
-/** Fresh headless run (no resume) with the given prompt — used when the
- * open TUI's thread lock makes resuming the real conversation impossible. */
-export function freshWakeCommand(runtime: "claude" | "codex", executable: string, prompt: string): string {
+/**
+ * Wake prompts are delivered via STDIN (codex `exec -`, claude `-p` with
+ * no arg reads the pipe) — the conversation digest contains quotes and
+ * newlines that no amount of cmd.exe quoting survives inline.
+ *
+ * Fresh headless run (no resume) — used when the open TUI's thread lock
+ * makes resuming the real conversation impossible.
+ */
+export function freshWakeCommand(runtime: "claude" | "codex", executable: string): string {
   const exe = cmdQuote(executable);
-  if (runtime === "codex") return `${exe} exec ${CODEX_WAKE_FLAGS} ${cmdQuote(prompt)}`;
-  return `${exe} -p ${cmdQuote(prompt)} --allowedTools ${cmdQuote(HEADLESS_ALLOWED_TOOLS)}`;
+  if (runtime === "codex") return `${exe} exec ${CODEX_WAKE_FLAGS} -`;
+  return `${exe} -p --allowedTools ${cmdQuote(HEADLESS_ALLOWED_TOOLS)}`;
 }
 
 /** Full headless wake command: resume the conversation and drive the reply. */
@@ -351,11 +357,11 @@ export function wakeCommand(
   executable: string
 ): string {
   if (runtime === "codex") {
-    return `${cmdQuote(executable)} exec resume ${sessionId} ${CODEX_WAKE_FLAGS} ${cmdQuote(AUTO_WAKE_PROMPT)}`;
+    return `${cmdQuote(executable)} exec resume ${sessionId} ${CODEX_WAKE_FLAGS} -`;
   }
   return `${resumeCommand("claude", sessionId, executable)} --allowedTools ${cmdQuote(
     HEADLESS_ALLOWED_TOOLS
-  )} -p ${cmdQuote(AUTO_WAKE_PROMPT)}`;
+  )} -p`;
 }
 
 /**

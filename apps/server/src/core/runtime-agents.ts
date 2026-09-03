@@ -8,7 +8,7 @@ import { nowIso } from "./db.js";
 import { STALE_AFTER_MS } from "../config.js";
 import { logger } from "../log.js";
 import type { RuntimeAgent, RuntimeId } from "@muiltchat/shared";
-import { buildWakePrompt, cleanTerminalEnv, cmdQuote, freshWakeCommand, HEADLESS_ALLOWED_TOOLS, openInTerminal, wakeCommand } from "./terminal.js";
+import { AUTO_WAKE_PROMPT, buildWakePrompt, cleanTerminalEnv, cmdQuote, freshWakeCommand, HEADLESS_ALLOWED_TOOLS, openInTerminal, wakeCommand } from "./terminal.js";
 import { codexRolloutDigest, listCodexRollouts } from "./codex-titles.js";
 import { getAutoWake, getSetting, getTerminalSettings, setSetting } from "./app-settings.js";
 import { getSession } from "./sessions.js";
@@ -425,7 +425,8 @@ function launchWake(
   db: DB,
   session: { id: string; project_dir: string | null },
   opts: { dryRun?: boolean; now?: Date; pinRuntime?: "claude" | "codex" },
-  command: string
+  command: string,
+  prompt: string
 ): { woke: true; command: string } | { woke: false; reason: string } {
   const now = (opts.now ?? new Date()).getTime();
   const last = getSetting(db, `auto-wake:${session.id}`);
@@ -445,12 +446,15 @@ function launchWake(
   env.MUILTCHAT_ASSUME_SESSION = session.id;
   const child = spawn(process.env.comspec ?? "cmd.exe", ["/d", "/s", "/c", command], {
     detached: process.platform !== "win32",
-    stdio: "ignore",
+    stdio: ["pipe", "ignore", "ignore"],
     env,
     cwd: session.project_dir ?? undefined,
     windowsVerbatimArguments: process.platform === "win32",
     windowsHide: true,
   });
+  // deliver the wake prompt via stdin — see freshWakeCommand docblock
+  child.stdin?.on("error", () => {});
+  child.stdin?.end(prompt);
   child.unref();
   if (opts.pinRuntime === "codex" && typeof child.pid === "number") {
     pinCodexDescendant(db, child.pid, session.id);
@@ -574,7 +578,8 @@ export function wakeSessionForMail(
       db,
       session,
       { ...opts, pinRuntime: runtime },
-      freshWakeCommand(runtime, wakeExe(db, runtime), buildWakePrompt(digest))
+      freshWakeCommand(runtime, wakeExe(db, runtime)),
+      buildWakePrompt(digest)
     );
   }
 
@@ -594,6 +599,7 @@ export function wakeSessionForMail(
     db,
     session,
     { ...opts, pinRuntime: runtime },
-    wakeCommand(runtime, codexSessionId ?? sessionId, wakeExe(db, runtime))
+    wakeCommand(runtime, codexSessionId ?? sessionId, wakeExe(db, runtime)),
+    AUTO_WAKE_PROMPT
   );
 }
