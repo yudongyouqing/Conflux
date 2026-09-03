@@ -1,6 +1,6 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { refreshCodexSessionTitles } from "../core/codex-titles.js";
@@ -330,6 +330,52 @@ describe("refreshCodexSessionTitles", () => {
     const placeholder = cwd.replace(/[\/]+/g, "/").split("/").pop()!;
     assert.equal(getSession(db, "codex-old-idle")!.name, placeholder); // placeholder kept
     db.prepare("DELETE FROM sessions WHERE id IN ('codex-old-idle', 'codex-fresh')").run();
+    disposeHome(home);
+  });
+
+  it("claims a resumed conversation appending to an old rollout (codex resume)", () => {
+    const home = fakeCodexHome();
+    const cwd = "C:WorkSvc Resume";
+    // original conversation started 5 days ago; the user resumed it today
+    // and typed "你好" — new turns were APPENDED to the old file
+    writeRollout(home, {
+      uuid: "ab12ab12-cd34cd34-ef56ef56-01-0123456789ab".replace(/[^a-f0-9]/g, "").slice(0, 8) + "-aaaa-bbbb-cccc-dddddddddddd",
+      cwd,
+      startedAtMs: Date.now() - 5 * 86_400_000,
+      prompts: ["fix the missing session bug", "帮我启动一下", "你好"],
+    });
+    registerCodexSession("codex-resume", cwd, {});
+
+    const updated = refreshCodexSessionTitles(db, { codexHome: home, onlySessionId: "codex-resume" });
+    const s = getSession(db, "codex-resume")!;
+    assert.equal(updated, 1);
+    assert.equal(s.name, "fix the missing session bug"); // thread identity = original task
+    assert.equal(s.description, "你好"); // latest activity = today's prompt
+    disposeHome(home);
+  });
+
+  it("ignores old rollouts whose mtime is stale (just history, not a resume)", () => {
+    const home = fakeCodexHome();
+    const cwd = "C:WorkSvc Hist";
+    writeRollout(home, {
+      uuid: "99887766-5544-3322-1100-aabbccddeeff",
+      cwd,
+      startedAtMs: Date.now() - 5 * 86_400_000,
+      prompts: ["ancient task"],
+    });
+    // push mtime 2h back — no one has written to this thread for a while
+    const d = new Date(Date.now() - 5 * 86_400_000);
+    const p2 = (n: number) => String(n).padStart(2, "0");
+    const dayDir = join(home, "sessions", String(d.getFullYear()), p2(d.getMonth() + 1), p2(d.getDate()));
+    const file = readdirSync(dayDir).find((f) => f.endsWith(".jsonl"))!;
+    const stale = new Date(Date.now() - 2 * 3_600_000);
+    utimesSync(join(dayDir, file), stale, stale);
+    registerCodexSession("codex-hist", cwd, {});
+
+    const updated = refreshCodexSessionTitles(db, { codexHome: home, onlySessionId: "codex-hist" });
+    assert.equal(updated, 0);
+    const placeholder = cwd.replace(/[\/]+/g, "/").split("/").pop()!;
+    assert.equal(getSession(db, "codex-hist")!.name, placeholder);
     disposeHome(home);
   });
 

@@ -36,6 +36,10 @@ import { renameSession, setSessionDescription } from "./sessions.js";
  *      tightest |rollout.start − row.created| (cwd-exact pairs rank first).
  *      Prompt latency is unbounded, so gap SIZE only ranks candidates —
  *      a row opened this morning can still claim a rollout written tonight.
+ *   3. resumed conversations: `codex resume` appends to the ORIGINAL
+ *      rollout, so its start predates the row. A rollout that started
+ *      before the row existed AND was modified in the last half hour is
+ *      the live continuation — claim it (cwd-exact ranks first).
  * Each rollout belongs to at most one row; rollouts stamped on other rows
  * are never candidates. Sibling sessions launched within seconds of each
  * other can still cross-assign — the titles remain real titles of real
@@ -52,6 +56,14 @@ const AUTO_REGISTERED_DESCRIPTION = "Codex session (auto-registered)";
 // A rollout may start slightly BEFORE its MCP row exists (Codex writes the
 // meta line, then spawns MCP children) — allow this much skew.
 const ROLLOUT_SKEW_MS = 120_000;
+
+// `codex resume` appends new turns to the ORIGINAL rollout file, which can
+// predate the session row by days. Scan day-dirs back this far so resumed
+// threads stay visible, and treat an old-start rollout as the live
+// continuation only while its mtime is this fresh (the old thread is being
+// written to right now — a stale mtime means it is just history).
+const RESUME_LOOKBACK_MS = 30 * 86_400_000;
+const RESUME_ACTIVE_MS = 30 * 60_000;
 
 // Synthetic user-role texts Codex injects into the rollout — none of them
 // are the human's instruction, so none may become a title.
@@ -348,7 +360,11 @@ export function refreshCodexSessionTitles(db: DB, opts: CodexTitleRefreshOptions
   const createdStamps = eligible
     .map((r) => Date.parse(r.created_at))
     .filter((t) => Number.isFinite(t));
-  const rollouts = listCodexRollouts(home, createdStamps.length > 0 ? Math.min(...createdStamps) : Date.now());
+  const scanSince = Math.min(
+    createdStamps.length > 0 ? Math.min(...createdStamps) : Date.now(),
+    Date.now() - RESUME_LOOKBACK_MS
+  );
+  const rollouts = listCodexRollouts(home, scanSince);
   if (rollouts.length === 0) return 0;
   const threadNames = readCodexThreadNames(home);
 
@@ -372,6 +388,37 @@ export function refreshCodexSessionTitles(db: DB, opts: CodexTitleRefreshOptions
     }
   }
   const matches = matchCodexRollouts(matchRows, rollouts, ownedSessionIds);
+
+  // Phase 2 — resumed conversations (see tier 3 in the module docblock):
+  // rows left unmatched pair with old-start rollouts whose mtime says the
+  // thread is being written to right now. Rows go oldest-first so the pass
+  // is deterministic.
+  const claimedPaths = new Set([...matches.values()].map((r) => r.path));
+  const nowMs = Date.now();
+  const activeResumes = rollouts.filter(
+    (r) =>
+      r.codexSessionId !== null &&
+      r.startedAtMs !== null &&
+      r.mtimeMs >= nowMs - RESUME_ACTIVE_MS &&
+      !ownedSessionIds.has(r.codexSessionId!) &&
+      !claimedPaths.has(r.path)
+  );
+  const unmatched = matchRows
+    .filter((r) => !matches.has(r.id))
+    .sort((a, b) => a.createdMs - b.createdMs);
+  for (const row of unmatched) {
+    const cands = activeResumes.filter(
+      (r) => !claimedPaths.has(r.path) && r.startedAtMs! < row.createdMs - ROLLOUT_SKEW_MS
+    );
+    if (cands.length === 0) continue;
+    cands.sort((a, b) => {
+      const am = a.cwd !== null && normalizeDir(a.cwd) === normalizeDir(row.projectDir);
+      const bm = b.cwd !== null && normalizeDir(b.cwd) === normalizeDir(row.projectDir);
+      return Number(bm) - Number(am) || b.mtimeMs - a.mtimeMs;
+    });
+    matches.set(row.id, cands[0]);
+    claimedPaths.add(cands[0].path);
+  }
 
   let updated = 0;
   for (const row of eligible) {
