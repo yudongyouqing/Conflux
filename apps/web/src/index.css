@@ -31,3 +31,15 @@ body {
 .react-flow__handle {
   border: none !important;
 }
+
+/* Dify/n8n-style animated dot-flow on edges (see CurvedPairEdge) */
+@keyframes edge-flow {
+  to {
+    stroke-dashoffset: -8.5;
+  }
+}
+.rf-flow-dots {
+  stroke-dasharray: 0.5 8;
+  stroke-linecap: round;
+  animation: edge-flow 0.9s linear infinite;
+}
