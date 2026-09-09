@@ -141,7 +141,7 @@ function EdgeFlowView({
   const [text, setText] = useState("");
   const messages = (data?.messages ?? []).slice().reverse();
   const nameOf = (id: string) => sessionNameLookup(id) ?? id.slice(0, 8);
-  const speakable = from === WEB_CONSOLE_ID;
+  // every channel is speakable — the UI continues it on the initiator's behalf
   const targetOffline = sessionStatusLookup(to) && sessionStatusLookup(to) !== "active";
 
   const send = () => {
@@ -174,41 +174,35 @@ function EdgeFlowView({
         </div>
       </div>
 
-      {speakable ? (
-        <div>
-          {targetOffline && (
-            <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mb-1.5">
-              ⚠ {nameOf(to)} 当前离线。发送后将自动 headless 唤醒它回复(若可恢复)。
-            </div>
-          )}
-          <div className="flex gap-1.5">
-            <input
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.nativeEvent.isComposing) send();
-              }}
-              placeholder={`以 Web 控制台身份在通道 #${edge.id} 发言…`}
-              className="flex-1 min-w-0 text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-300"
-            />
-            <button
-              onClick={send}
-              disabled={!text.trim() || ask.isPending}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-blue-700 transition-colors flex-shrink-0"
-            >
-              {ask.isPending ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
-              发送
-            </button>
+      <div>
+        {targetOffline && (
+          <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mb-1.5">
+            ⚠ {nameOf(to)} 当前离线。发送后将自动 headless 唤醒它回复(若可恢复)。
           </div>
-          {ask.isError && (
-            <p className="text-[10px] text-red-500 mt-1">{(ask.error as Error).message}</p>
-          )}
+        )}
+        <div className="flex gap-1.5">
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) send();
+            }}
+            placeholder={`以 ${nameOf(from)} 身份在通道 #${edge.id} 发言…`}
+            className="flex-1 min-w-0 text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-300"
+          />
+          <button
+            onClick={send}
+            disabled={!text.trim() || ask.isPending}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-blue-700 transition-colors flex-shrink-0"
+          >
+            {ask.isPending ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+            发送
+          </button>
         </div>
-      ) : (
-        <div className="text-[10px] text-gray-500 bg-gray-50 border border-gray-200 rounded-md px-2 py-1.5">
-          只读通道:由 {nameOf(from)} 发起,只有它能在本通道发问;{nameOf(to)} 的回复会显示在这里。
-        </div>
-      )}
+        {ask.isError && (
+          <p className="text-[10px] text-red-500 mt-1">{(ask.error as Error).message}</p>
+        )}
+      </div>
 
       {messages.length === 0 ? (
         <p className="text-xs text-gray-400">通道还没有消息。</p>

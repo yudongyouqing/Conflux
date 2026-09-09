@@ -167,8 +167,8 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
     }
   });
 
-  // POST /edges/:id/ask — speak ON the channel (web console may only use
-  // channels it initiated: edge.from === web-console)
+  // POST /edges/:id/ask — speak ON the channel as its initiator (the
+  // console for its own channels; on A's behalf for A→B channels)
   app.post<{ Params: { id: string }; Body: { question: string } }>(
     "/edges/:id/ask",
     {
@@ -185,22 +185,20 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
         const edgeId = Number(req.params.id);
         const edge = getEdge(db, edgeId);
         if (!edge) return sendHttpError(reply, 404, "edge not found");
-        if (edge.from_session !== WEB_CONSOLE_ID) {
-          return sendHttpError(
-            reply,
-            403,
-            `只读通道:${edge.from_session} 发起的对话只能由该会话发言`,
-          );
-        }
-
-        heartbeat(db, WEB_CONSOLE_ID);
+        // Speak AS the channel's initiator — a web-console channel means
+        // the console itself; an A→B channel lets the UI continue the
+        // conversation on A's behalf ("let A ask B", same semantics as
+        // /web/ask from_session). No heartbeat for CLI senders: speaking
+        // for them must not fake their liveness.
+        const from = edge.from_session;
+        if (from === WEB_CONSOLE_ID) heartbeat(db, WEB_CONSOLE_ID);
         const { message: msg, wake } = askAndMaybeWake(db, {
-          from_session: WEB_CONSOLE_ID,
+          from_session: from,
           to_session: edge.to_session,
           question: req.body.question,
         });
         logAudit(db, {
-          caller_session: WEB_CONSOLE_ID,
+          caller_session: from,
           interface: "http",
           action: "edge_ask",
           args: { edge: edgeId },
@@ -208,7 +206,7 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
         });
         return reply.send({ message: msg, wake });
       } catch (err) {
-        return sendError(reply, err, WEB_CONSOLE_ID, "edge_ask");
+        return sendError(reply, err, undefined, "edge_ask");
       }
     },
   );
