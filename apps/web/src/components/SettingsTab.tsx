@@ -34,7 +34,7 @@ export function SettingsTab() {
       {
         onSuccess: () => setNotice("已保存"),
         onError: (e) => setNotice(`保存失败: ${(e as Error).message}`),
-      }
+      },
     );
   };
 
@@ -93,14 +93,14 @@ export function SettingsTab() {
       ];
       const summary = counts.map(([label, count]) => `${label} ${count}`).join(", ");
       const confirmed = window.confirm(
-        `导入 ${bundle.format ?? "未知格式"} v${bundle.version ?? "?"}（${summary}）？\n冲突策略：${importConflict}`
+        `导入 ${bundle.format ?? "未知格式"} v${bundle.version ?? "?"}（${summary}）？\n冲突策略：${importConflict}`,
       );
       if (!confirmed) return;
 
       const result = await api.importData(bundle as ConfluxDataBundle, importConflict);
       refreshWorkspace();
       setTransferNotice(
-        `导入完成: 新增 ${result.imported}, 覆盖 ${result.overwritten}, 复制 ${result.copied}, 跳过 ${result.skipped}`
+        `导入完成: 新增 ${result.imported}, 覆盖 ${result.overwritten}, 复制 ${result.copied}, 跳过 ${result.skipped}`,
       );
     } catch (e) {
       setTransferNotice(`导入失败: ${(e as Error).message}`);
@@ -140,9 +140,7 @@ export function SettingsTab() {
 
         <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-4 shadow-sm">
           <label className="block">
-            <span className="block text-xs font-medium text-gray-700 mb-1.5">
-              终端打开方式
-            </span>
+            <span className="block text-xs font-medium text-gray-700 mb-1.5">终端打开方式</span>
             <select
               value={terminal}
               onChange={(e) => setTerminal(e.target.value as TerminalChoice)}
@@ -165,9 +163,7 @@ export function SettingsTab() {
 
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
-              <span className="block text-[11px] text-gray-500 mb-1">
-                claude 可执行文件
-              </span>
+              <span className="block text-[11px] text-gray-500 mb-1">claude 可执行文件</span>
               <input
                 value={claudePath}
                 onChange={(e) => setClaudePath(e.target.value)}
@@ -176,9 +172,7 @@ export function SettingsTab() {
               />
             </label>
             <label className="block">
-              <span className="block text-[11px] text-gray-500 mb-1">
-                codex 可执行文件
-              </span>
+              <span className="block text-[11px] text-gray-500 mb-1">codex 可执行文件</span>
               <input
                 value={codexPath}
                 onChange={(e) => setCodexPath(e.target.value)}
@@ -226,7 +220,11 @@ export function SettingsTab() {
                 title="导出数据"
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 text-xs hover:bg-gray-50 disabled:opacity-50"
               >
-                {transferPending ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                {transferPending ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : (
+                  <Download size={13} />
+                )}
                 导出
               </button>
               <button

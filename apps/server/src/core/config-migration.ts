@@ -19,11 +19,7 @@ export const MIGRATION_TEMP_PREFIX = ".conflux-migration-";
 
 // Keep migration bounded to files owned by the current SQLite store. Config
 // values live in the app_settings table, so there is no config sidecar to copy.
-export const MIGRATION_FILE_NAMES = [
-  "data.db",
-  "data.db-wal",
-  "data.db-shm",
-] as const;
+export const MIGRATION_FILE_NAMES = ["data.db", "data.db-wal", "data.db-shm"] as const;
 
 export interface DataHomeOptions {
   /** Explicit --data-dir/override value. */
@@ -126,9 +122,7 @@ export function migrateDataDir(options: MigrateDataDirOptions): MigrationResult 
   }
 
   const destinationExists = existsSync(destination);
-  const conflicts = initialFiles.filter((file) =>
-    existsSync(join(destination, file))
-  );
+  const conflicts = initialFiles.filter((file) => existsSync(join(destination, file)));
   if (existsSync(join(destination, MIGRATION_MARKER_FILENAME))) {
     conflicts.push(MIGRATION_MARKER_FILENAME);
   }
@@ -151,7 +145,9 @@ export function migrateDataDir(options: MigrateDataDirOptions): MigrationResult 
   // SQLite cleaned up its own sidecars.
   const files = listMigrationFiles(source);
   if (files.length === 0) {
-    throw new Error(`migration source contains no supported data files after checkpoint: ${source}`);
+    throw new Error(
+      `migration source contains no supported data files after checkpoint: ${source}`,
+    );
   }
 
   const parent = dirname(destination);
@@ -160,15 +156,19 @@ export function migrateDataDir(options: MigrateDataDirOptions): MigrationResult 
   let staged = tempDir;
   const createdDestinationFiles: string[] = [];
 
-  const copy = options.copyFile ?? ((from: string, to: string) => {
-    copyFileSync(from, to, fsConstants.COPYFILE_EXCL);
-  });
-  const writeMarker = options.writeMarker ?? ((markerPath: string, marker: MigrationMarker) => {
-    writeFileSync(markerPath, `${JSON.stringify(marker, null, 2)}\n`, {
-      encoding: "utf8",
-      flag: "wx",
+  const copy =
+    options.copyFile ??
+    ((from: string, to: string) => {
+      copyFileSync(from, to, fsConstants.COPYFILE_EXCL);
     });
-  });
+  const writeMarker =
+    options.writeMarker ??
+    ((markerPath: string, marker: MigrationMarker) => {
+      writeFileSync(markerPath, `${JSON.stringify(marker, null, 2)}\n`, {
+        encoding: "utf8",
+        flag: "wx",
+      });
+    });
 
   try {
     for (const file of files) {
@@ -194,11 +194,7 @@ export function migrateDataDir(options: MigrateDataDirOptions): MigrationResult 
         createdDestinationFiles.push(target);
       }
       const markerPath = join(destination, MIGRATION_MARKER_FILENAME);
-      copyFileSync(
-        join(tempDir, MIGRATION_MARKER_FILENAME),
-        markerPath,
-        fsConstants.COPYFILE_EXCL
-      );
+      copyFileSync(join(tempDir, MIGRATION_MARKER_FILENAME), markerPath, fsConstants.COPYFILE_EXCL);
       createdDestinationFiles.push(markerPath);
       rmSync(tempDir, { recursive: true, force: true });
       staged = "";

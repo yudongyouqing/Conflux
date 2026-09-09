@@ -6,11 +6,7 @@ import type { RuntimeId } from "@muiltchat/shared";
 
 import { resolveConfig, type Scope } from "../config.js";
 import { openDb, type DB } from "../core/db.js";
-import {
-  registerSession,
-  listSessions,
-  getSession,
-} from "../core/sessions.js";
+import { registerSession, listSessions, getSession } from "../core/sessions.js";
 import {
   MCP_HEARTBEAT_INTERVAL_MS,
   claimMcpConnection,
@@ -20,29 +16,15 @@ import {
   touchMcpConnection,
 } from "../core/mcp-liveness.js";
 import { getSetting } from "../core/app-settings.js";
-import {
-  publishContext,
-  updateContext,
-  deleteContext,
-  listMyContext,
-} from "../core/context.js";
+import { publishContext, updateContext, deleteContext, listMyContext } from "../core/context.js";
 import { queryContext } from "../core/search.js";
-import {
-  askSession,
-  checkInbox,
-  replyAsk,
-  checkReplies,
-  recordExchange,
-} from "../core/messages.js";
+import { checkInbox, replyAsk, checkReplies, recordExchange } from "../core/messages.js";
 import { getGraph } from "../core/graph.js";
 import { mergeSessionMeta } from "../core/sessions.js";
 import { logAudit } from "../core/audit.js";
-import {
-  getRuntimePid,
-  findSessionByRuntimePid,
-  deleteUnreferencedSession,
-} from "../core/live.js";
-import { wakeOfflineSession } from "../core/runtime-agents.js";
+import { getRuntimePid, findSessionByRuntimePid, deleteUnreferencedSession } from "../core/live.js";
+import { askAndMaybeWake } from "../core/ask.js";
+import { refreshCodexSessionTitles } from "../core/codex-titles.js";
 import { logger } from "../log.js";
 
 const INSTRUCTIONS = `
@@ -105,7 +87,7 @@ export function adoptMcpSession(
   currentSessionId: string,
   targetSessionId: string,
   claim: () => boolean,
-  deletePrevious: (id: string) => void
+  deletePrevious: (id: string) => void,
 ): { sessionId: string; adopted: boolean } {
   if (currentSessionId === targetSessionId || !claim()) {
     return { sessionId: currentSessionId, adopted: false };
@@ -154,8 +136,14 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
   });
 
   logger.info(
-    { sessionId, runtime: identity.runtime, runtimePid: identity.pid, dataDir: config.dataDir, scope: config.scope },
-    "mcp starting"
+    {
+      sessionId,
+      runtime: identity.runtime,
+      runtimePid: identity.pid,
+      dataDir: config.dataDir,
+      scope: config.scope,
+    },
+    "mcp starting",
   );
 
   // If the CLI integration registered a session for this same runtime
@@ -218,11 +206,14 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
           return false;
         }
       },
-      (previousId) => deleteUnreferencedSession(db, previousId)
+      (previousId) => deleteUnreferencedSession(db, previousId),
     );
     if (!adoption.adopted) return;
     sessionId = adoption.sessionId;
-    logger.info({ runtime: identity.runtime, runtimePid: pid, sessionId, oldId }, "mcp adopted hook-registered session");
+    logger.info(
+      { runtime: identity.runtime, runtimePid: pid, sessionId, oldId },
+      "mcp adopted hook-registered session",
+    );
   };
 
   const touchLease = (): void => {
@@ -242,6 +233,8 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
     try {
       tryAdopt();
       touchLease();
+      // Codex has no hooks: keep the display title in sync with its rollouts.
+      if (identity.runtime === "codex") refreshCodexSessionTitles(db, { onlySessionId: sessionId });
     } catch {
       // transient sqlite lock contention — next tick retries
     }
@@ -258,14 +251,14 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
         tools: {},
       },
       instructions: INSTRUCTIONS,
-    }
+    },
   );
 
   /** Wrapper that auto-adopts + touches the lease + audits + standardises errors. */
   async function withAudit<T>(
     action: string,
     args: Record<string, unknown>,
-    fn: () => T | Promise<T>
+    fn: () => T | Promise<T>,
   ): Promise<{ ok: true; result: T } | { ok: false; error: string }> {
     tryAdopt(); // pick up /resume id changes instantly, not on the next 30s beat
     touchLease();
@@ -310,30 +303,26 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
           .max(20)
           .optional()
           .describe(
-            "Agent Card: what this session is good at (e.g. ['typescript','sql']) — shown on the graph so peers can route questions"
+            "Agent Card: what this session is good at (e.g. ['typescript','sql']) — shown on the graph so peers can route questions",
           ),
       },
     },
     async ({ name, description, skills }) => {
-      const r = await withAudit(
-        "register_session",
-        { name, description, skills },
-        () => {
-          const session = registerSession(db, {
-            id: sessionId,
-            name,
-            description: description ?? null,
-            project_dir: projectDir,
-          });
-          // Merge (not replace) so hook metadata (claude_pid, named, …) survives.
-          if (skills && skills.length > 0) {
-            mergeSessionMeta(db, sessionId, { agent_card: { skills } });
-          }
-          return session;
+      const r = await withAudit("register_session", { name, description, skills }, () => {
+        const session = registerSession(db, {
+          id: sessionId,
+          name,
+          description: description ?? null,
+          project_dir: projectDir,
+        });
+        // Merge (not replace) so hook metadata (claude_pid, named, …) survives.
+        if (skills && skills.length > 0) {
+          mergeSessionMeta(db, sessionId, { agent_card: { skills } });
         }
-      );
+        return session;
+      });
       return json(r.ok ? { session_id: sessionId, session: r.result } : { error: r.error });
-    }
+    },
   );
 
   // 2. list_sessions
@@ -351,10 +340,10 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
     },
     async ({ status }) => {
       const r = await withAudit("list_sessions", { status }, () =>
-        listSessions(db, { status: status ?? "active" })
+        listSessions(db, { status: status ?? "active" }),
       );
       return json(r.ok ? { sessions: r.result } : { error: r.error });
-    }
+    },
   );
 
   // 3. publish_context
@@ -377,10 +366,10 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
       const r = await withAudit(
         "publish_context",
         { title, tags, contentLen: content.length },
-        () => publishContext(db, { session_id: sessionId, title, content, tags: tags ?? null })
+        () => publishContext(db, { session_id: sessionId, title, content, tags: tags ?? null }),
       );
       return json(r.ok ? { entry: r.result } : { error: r.error });
-    }
+    },
   );
 
   // 4. update_context
@@ -396,11 +385,13 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
       },
     },
     async ({ entry_id, title, content, tags }) => {
-      const r = await withAudit("update_context", { entry_id, title, tags, contentLen: content?.length }, () =>
-        updateContext(db, entry_id, sessionId, { title, content, tags })
+      const r = await withAudit(
+        "update_context",
+        { entry_id, title, tags, contentLen: content?.length },
+        () => updateContext(db, entry_id, sessionId, { title, content, tags }),
       );
       return json(r.ok ? { entry: r.result } : { error: r.error });
-    }
+    },
   );
 
   // 5. delete_context
@@ -414,10 +405,10 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
     },
     async ({ entry_id }) => {
       const r = await withAudit("delete_context", { entry_id }, () =>
-        deleteContext(db, entry_id, sessionId)
+        deleteContext(db, entry_id, sessionId),
       );
       return json(r.ok ? { deleted: r.result } : { error: r.error });
-    }
+    },
   );
 
   // 6. list_my_context
@@ -430,7 +421,7 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
     async () => {
       const r = await withAudit("list_my_context", {}, () => listMyContext(db, sessionId));
       return json(r.ok ? { entries: r.result } : { error: r.error });
-    }
+    },
   );
 
   // 7. query_context
@@ -441,22 +432,17 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
         "Full-text search across all sessions' published context (or a specific session). Empty query returns most recent entries.",
       inputSchema: {
         query: z.string().max(2000).optional().describe("FTS query string"),
-        session_id: z
-          .string()
-          .optional()
-          .describe("Restrict to a specific session"),
+        session_id: z.string().optional().describe("Restrict to a specific session"),
         tags: z.array(z.string().min(1).max(60)).max(20).optional(),
         limit: z.number().int().min(1).max(500).optional(),
       },
     },
     async ({ query, session_id, tags, limit }) => {
-      const r = await withAudit(
-        "query_context",
-        { query, session_id, tags, limit },
-        () => queryContext(db, { query, session_id, tags, limit })
+      const r = await withAudit("query_context", { query, session_id, tags, limit }, () =>
+        queryContext(db, { query, session_id, tags, limit }),
       );
       return json(r.ok ? { entries: r.result } : { error: r.error });
-    }
+    },
   );
 
   // 8. ask_session
@@ -470,23 +456,14 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
         question: z.string().min(1).max(20_000).describe("The question"),
       },
     },
+
     async ({ to_session, question }) => {
-      const r = await withAudit(
-        "ask_session",
-        { to_session, questionLen: question.length },
-        () => askSession(db, { from_session: sessionId, to_session, question })
+      // unified ask path: delivery + auto-answer wake in one audited action
+      const r = await withAudit("ask_session", { to_session, questionLen: question.length }, () =>
+        askAndMaybeWake(db, { from_session: sessionId, to_session, question }),
       );
-      // true auto-answer: offline addressees get headlessly woken to reply
-      let wake: { woke: boolean; reason?: string } = { woke: false, reason: "ask failed" };
-      if (r.ok) {
-        try {
-          wake = wakeOfflineSession(db, to_session);
-        } catch {
-          // best-effort
-        }
-      }
-      return json(r.ok ? { message: r.result, wake } : { error: r.error });
-    }
+      return json(r.ok ? { message: r.result.message, wake: r.result.wake } : { error: r.error });
+    },
   );
 
   // 9. check_inbox
@@ -500,7 +477,7 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
     async () => {
       const r = await withAudit("check_inbox", {}, () => checkInbox(db, sessionId));
       return json(r.ok ? { inbox: r.result } : { error: r.error });
-    }
+    },
   );
 
   // 10. reply_ask
@@ -514,34 +491,28 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
       },
     },
     async ({ message_id, reply }) => {
-      const r = await withAudit(
-        "reply_ask",
-        { message_id, replyLen: reply.length },
-        () => replyAsk(db, message_id, sessionId, reply)
+      const r = await withAudit("reply_ask", { message_id, replyLen: reply.length }, () =>
+        replyAsk(db, message_id, sessionId, reply),
       );
       return json(r.ok ? { message: r.result } : { error: r.error });
-    }
+    },
   );
 
   // 11. check_replies
   server.registerTool(
     "check_replies",
     {
-      description:
-        "Check replies to questions your session has asked. Marks them read.",
+      description: "Check replies to questions your session has asked. Marks them read.",
       inputSchema: {
-        since: z
-          .string()
-          .optional()
-          .describe("ISO timestamp; only replies after this"),
+        since: z.string().optional().describe("ISO timestamp; only replies after this"),
       },
     },
     async ({ since }) => {
       const r = await withAudit("check_replies", { since }, () =>
-        checkReplies(db, sessionId, since)
+        checkReplies(db, sessionId, since),
       );
       return json(r.ok ? { replies: r.result } : { error: r.error });
-    }
+    },
   );
 
   // 12. log_exchange — archive a native-channel exchange (see INSTRUCTIONS)
@@ -553,32 +524,22 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
       inputSchema: {
         to_session: z.string().min(1).describe("Peer the exchange was with"),
         question: z.string().min(1).max(20_000).describe("What was asked/sent"),
-        reply: z
-          .string()
-          .max(20_000)
-          .optional()
-          .describe("Their answer, if already received"),
-        occurred_at: z
-          .string()
-          .optional()
-          .describe("ISO timestamp of the exchange; default now"),
+        reply: z.string().max(20_000).optional().describe("Their answer, if already received"),
+        occurred_at: z.string().optional().describe("ISO timestamp of the exchange; default now"),
       },
     },
     async ({ to_session, question, reply, occurred_at }) => {
-      const r = await withAudit(
-        "log_exchange",
-        { to_session, questionLen: question.length },
-        () =>
-          recordExchange(db, {
-            from_session: sessionId,
-            to_session,
-            question,
-            reply: reply ?? null,
-            occurred_at,
-          })
+      const r = await withAudit("log_exchange", { to_session, questionLen: question.length }, () =>
+        recordExchange(db, {
+          from_session: sessionId,
+          to_session,
+          question,
+          reply: reply ?? null,
+          occurred_at,
+        }),
       );
       return json(r.ok ? { message: r.result } : { error: r.error });
-    }
+    },
   );
 
   // 13. get_graph
@@ -596,10 +557,10 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
     },
     async ({ status }) => {
       const r = await withAudit("get_graph", { status }, () =>
-        getGraph(db, { status: status ?? "active" })
+        getGraph(db, { status: status ?? "active" }),
       );
       return json(r.ok ? { graph: r.result } : { error: r.error });
-    }
+    },
   );
 
   const transport = new StdioServerTransport();

@@ -57,7 +57,7 @@ export function RuntimesTab() {
           setNotice(null);
         },
         onError: (e) => setNotice(`创建失败: ${(e as Error).message}`),
-      }
+      },
     );
   };
 
@@ -221,9 +221,7 @@ export function RuntimesTab() {
               </button>
             </div>
             {create.isError && (
-              <div className="text-xs text-red-600">
-                {(create.error as Error)?.message}
-              </div>
+              <div className="text-xs text-red-600">{(create.error as Error)?.message}</div>
             )}
           </div>
         )}
@@ -316,16 +314,12 @@ function KanbanColumn({
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-gray-900 truncate">
-                    {a.name}
-                  </span>
+                  <span className="text-sm font-medium text-gray-900 truncate">{a.name}</span>
                   <span className="text-[10px] px-1.5 py-px rounded bg-cyan-50 text-cyan-700 border border-cyan-200 font-medium">
                     {runtimeLabel(a.runtime)}
                   </span>
                   {a.model && (
-                    <span className="text-[10px] text-gray-400 font-mono truncate">
-                      {a.model}
-                    </span>
+                    <span className="text-[10px] text-gray-400 font-mono truncate">{a.model}</span>
                   )}
                   {(a.interval_min ?? 0) > 0 && (
                     <span
@@ -336,8 +330,7 @@ function KanbanColumn({
                           : "尚未自动运行"
                       }
                     >
-                      <Clock size={9} />
-                      每 {a.interval_min} 分钟
+                      <Clock size={9} />每 {a.interval_min} 分钟
                     </span>
                   )}
                 </div>

@@ -39,10 +39,12 @@ export interface ImportDataResult {
   copied: number;
 }
 
-const isoTimestamp = z.string().refine(
-  (value) => value.length > 0 && !Number.isNaN(Date.parse(value)),
-  "must be an ISO timestamp"
-);
+const isoTimestamp = z
+  .string()
+  .refine(
+    (value) => value.length > 0 && !Number.isNaN(Date.parse(value)),
+    "must be an ISO timestamp",
+  );
 const nullableString = z.string().nullable();
 const modelConfigSchema = z
   .object({
@@ -181,22 +183,22 @@ type RuntimeAgentRow = Omit<RuntimeAgent, "runtime" | "live" | "last_seen"> & {
   runtime: string;
 };
 
-export function exportData(
-  db: DB,
-  options: ExportDataOptions = {}
-): ConfluxDataBundle {
+export function exportData(db: DB, options: ExportDataOptions = {}): ConfluxDataBundle {
   const scope = options.scope ?? "global";
-  const allSessions = db.prepare("SELECT * FROM sessions ORDER BY created_at ASC, id ASC").all() as SessionRow[];
-  const sessionRows = scope === "project"
-    ? allSessions.filter((session) => isProjectSession(session, options.projectDir))
-    : allSessions;
+  const allSessions = db
+    .prepare("SELECT * FROM sessions ORDER BY created_at ASC, id ASC")
+    .all() as SessionRow[];
+  const sessionRows =
+    scope === "project"
+      ? allSessions.filter((session) => isProjectSession(session, options.projectDir))
+      : allSessions;
   const sessionIds = new Set(sessionRows.map((session) => session.id));
   const placeholders = [...sessionIds].map(() => "?").join(",");
 
   const contexts = placeholders
     ? (db
         .prepare(
-          `SELECT * FROM context_entries WHERE session_id IN (${placeholders}) ORDER BY id ASC`
+          `SELECT * FROM context_entries WHERE session_id IN (${placeholders}) ORDER BY id ASC`,
         )
         .all(...sessionIds) as ContextRow[])
     : [];
@@ -205,7 +207,7 @@ export function exportData(
         .prepare(
           `SELECT * FROM messages
            WHERE from_session IN (${placeholders}) AND to_session IN (${placeholders})
-           ORDER BY id ASC`
+           ORDER BY id ASC`,
         )
         .all(...sessionIds, ...sessionIds) as Message[])
     : [];
@@ -216,7 +218,7 @@ export function exportData(
              weight, last_interact_at
            FROM edges
            WHERE from_session IN (${placeholders}) AND to_session IN (${placeholders})
-           ORDER BY rowid ASC`
+           ORDER BY rowid ASC`,
         )
         .all(...sessionIds, ...sessionIds) as GraphEdge[])
     : [];
@@ -224,40 +226,44 @@ export function exportData(
   const allConversations = db
     .prepare("SELECT * FROM conversations ORDER BY id ASC")
     .all() as Conversation[];
-  const conversations = scope === "project"
-    ? allConversations.filter(
-        (conversation) => conversation.initiated_by !== null && sessionIds.has(conversation.initiated_by)
-      )
-    : allConversations;
+  const conversations =
+    scope === "project"
+      ? allConversations.filter(
+          (conversation) =>
+            conversation.initiated_by !== null && sessionIds.has(conversation.initiated_by),
+        )
+      : allConversations;
   const conversationIds = new Set(conversations.map((conversation) => conversation.id));
   const turns = conversationIds.size
     ? (db
         .prepare(
-          `SELECT * FROM turns WHERE conversation_id IN (${[...conversationIds].map(() => "?").join(",")}) ORDER BY id ASC`
+          `SELECT * FROM turns WHERE conversation_id IN (${[...conversationIds].map(() => "?").join(",")}) ORDER BY id ASC`,
         )
         .all(...conversationIds) as Turn[])
     : [];
   const agentIds = new Set(conversations.map((conversation) => conversation.agent_id));
-  const agents = scope === "project"
-    ? (agentIds.size
+  const agents =
+    scope === "project"
+      ? agentIds.size
         ? (db
             .prepare(
-              `SELECT * FROM agents WHERE id IN (${[...agentIds].map(() => "?").join(",")}) ORDER BY id ASC`
+              `SELECT * FROM agents WHERE id IN (${[...agentIds].map(() => "?").join(",")}) ORDER BY id ASC`,
             )
             .all(...agentIds) as AgentRow[])
-        : [])
-    : (db.prepare("SELECT * FROM agents ORDER BY id ASC").all() as AgentRow[]);
+        : []
+      : (db.prepare("SELECT * FROM agents ORDER BY id ASC").all() as AgentRow[]);
   const runtimeRows = db
     .prepare(
       `SELECT id, name, runtime, workdir, model, base_url, extra_env, instructions,
          interval_min, last_scheduled_run, created_at, updated_at,
          CASE WHEN api_key IS NOT NULL AND length(api_key) > 0 THEN 1 ELSE 0 END AS api_key_configured
-       FROM runtime_agents ORDER BY id ASC`
+       FROM runtime_agents ORDER BY id ASC`,
     )
     .all() as (RuntimeAgentRow & { api_key_configured: number })[];
-  const runtimeAgents = (scope === "project"
-    ? runtimeRows.filter((agent) => isProjectPath(agent.workdir, options.projectDir))
-    : runtimeRows
+  const runtimeAgents = (
+    scope === "project"
+      ? runtimeRows.filter((agent) => isProjectPath(agent.workdir, options.projectDir))
+      : runtimeRows
   ).map((agent) => {
     const { api_key_configured, ...portable } = agent;
     return { ...portable, api_key_configured: api_key_configured === 1 } as ExportedRuntimeAgent;
@@ -299,7 +305,7 @@ export function parseDataBundle(input: unknown): ConfluxDataBundle {
 export function importData(
   db: DB,
   input: unknown,
-  options: ImportDataOptions = {}
+  options: ImportDataOptions = {},
 ): ImportDataResult {
   const bundle = parseDataBundle(input);
   const conflict = options.conflict ?? "skip";
@@ -327,7 +333,7 @@ export function importData(
       sessionMap,
       agentMap,
       conflict,
-      result
+      result,
     );
     importTurns(db, bundle.turns, conversationMap, conflict, result);
     importMessages(db, bundle.messages, sessionMap, edgeMap, conflict, result);
@@ -337,14 +343,38 @@ export function importData(
 }
 
 function validateReferences(bundle: z.infer<typeof bundleSchema>): void {
-  assertUnique(bundle.sessions.map((row) => row.id), "session id");
-  assertUnique(bundle.context_entries.map((row) => row.id), "context id");
-  assertUnique(bundle.messages.map((row) => row.id), "message id");
-  assertUnique(bundle.edges.map((row) => row.id), "edge id");
-  assertUnique(bundle.agents.map((row) => row.id), "agent id");
-  assertUnique(bundle.conversations.map((row) => row.id), "conversation id");
-  assertUnique(bundle.turns.map((row) => row.id), "turn id");
-  assertUnique(bundle.runtime_agents.map((row) => row.id), "runtime agent id");
+  assertUnique(
+    bundle.sessions.map((row) => row.id),
+    "session id",
+  );
+  assertUnique(
+    bundle.context_entries.map((row) => row.id),
+    "context id",
+  );
+  assertUnique(
+    bundle.messages.map((row) => row.id),
+    "message id",
+  );
+  assertUnique(
+    bundle.edges.map((row) => row.id),
+    "edge id",
+  );
+  assertUnique(
+    bundle.agents.map((row) => row.id),
+    "agent id",
+  );
+  assertUnique(
+    bundle.conversations.map((row) => row.id),
+    "conversation id",
+  );
+  assertUnique(
+    bundle.turns.map((row) => row.id),
+    "turn id",
+  );
+  assertUnique(
+    bundle.runtime_agents.map((row) => row.id),
+    "runtime agent id",
+  );
 
   const sessions = new Set(bundle.sessions.map((row) => row.id));
   const edges = new Set(bundle.edges.map((row) => row.id));
@@ -375,7 +405,7 @@ function importSessions(
   rows: Session[],
   conflict: ImportConflictStrategy,
   result: ImportDataResult,
-  agentMap: Map<number, number>
+  agentMap: Map<number, number>,
 ): Map<string, string> {
   const map = new Map<string, string>();
   for (const row of rows) {
@@ -411,7 +441,7 @@ function importAgents(
   db: DB,
   rows: Agent[],
   conflict: ImportConflictStrategy,
-  result: ImportDataResult
+  result: ImportDataResult,
 ): Map<number, number> {
   const map = new Map<number, number>();
   const sourceIds = new Set(rows.map((row) => row.id));
@@ -445,7 +475,7 @@ function importRuntimeAgents(
   db: DB,
   rows: ExportedRuntimeAgent[],
   conflict: ImportConflictStrategy,
-  result: ImportDataResult
+  result: ImportDataResult,
 ): void {
   for (const row of rows) {
     const existing = db.prepare("SELECT id FROM runtime_agents WHERE id = ?").get(row.id);
@@ -473,7 +503,7 @@ function importEdges(
   rows: GraphEdge[],
   sessionMap: Map<string, string>,
   conflict: ImportConflictStrategy,
-  result: ImportDataResult
+  result: ImportDataResult,
 ): Map<number, number> {
   const map = new Map<number, number>();
   for (const row of rows) {
@@ -487,16 +517,18 @@ function importEdges(
       if (conflict === "skip" || conflict === "copy") {
         result.skipped++;
       } else {
-        db.prepare(
-          "UPDATE edges SET weight = ?, last_interact_at = ? WHERE rowid = ?"
-        ).run(row.weight, row.last_interact_at, existing.id);
+        db.prepare("UPDATE edges SET weight = ?, last_interact_at = ? WHERE rowid = ?").run(
+          row.weight,
+          row.last_interact_at,
+          existing.id,
+        );
         result.overwritten++;
       }
       continue;
     }
     const inserted = db
       .prepare(
-        "INSERT INTO edges (from_session, to_session, weight, last_interact_at) VALUES (?, ?, ?, ?)"
+        "INSERT INTO edges (from_session, to_session, weight, last_interact_at) VALUES (?, ?, ?, ?)",
       )
       .run(from, to, row.weight, row.last_interact_at);
     map.set(row.id, Number(inserted.lastInsertRowid));
@@ -511,7 +543,7 @@ function importContexts(
   rows: ContextEntry[],
   sessionMap: Map<string, string>,
   conflict: ImportConflictStrategy,
-  result: ImportDataResult
+  result: ImportDataResult,
 ): void {
   for (const row of rows) {
     const existing = db.prepare("SELECT id FROM context_entries WHERE id = ?").get(row.id);
@@ -539,14 +571,13 @@ function importConversations(
   sessionMap: Map<string, string>,
   agentMap: Map<number, number>,
   conflict: ImportConflictStrategy,
-  result: ImportDataResult
+  result: ImportDataResult,
 ): Map<number, number> {
   const map = new Map<number, number>();
   for (const row of rows) {
     const agentId = mapped(agentMap, row.agent_id);
-    const initiatedBy = row.initiated_by === null
-      ? null
-      : sessionMap.get(row.initiated_by) ?? row.initiated_by;
+    const initiatedBy =
+      row.initiated_by === null ? null : (sessionMap.get(row.initiated_by) ?? row.initiated_by);
     const existing = db.prepare("SELECT id FROM conversations WHERE id = ?").get(row.id);
     if (!existing) {
       const id = insertConversation(db, row, agentId, initiatedBy, row.id);
@@ -576,7 +607,7 @@ function importTurns(
   rows: Turn[],
   conversationMap: Map<number, number>,
   conflict: ImportConflictStrategy,
-  result: ImportDataResult
+  result: ImportDataResult,
 ): void {
   for (const row of rows) {
     const conversationId = mapped(conversationMap, row.conversation_id);
@@ -589,7 +620,7 @@ function importTurns(
       result.skipped++;
     } else if (conflict === "overwrite") {
       db.prepare(
-        "UPDATE turns SET conversation_id = ?, role = ?, content = ?, created_at = ? WHERE id = ?"
+        "UPDATE turns SET conversation_id = ?, role = ?, content = ?, created_at = ? WHERE id = ?",
       ).run(conversationId, row.role, row.content, row.created_at, row.id);
       result.overwritten++;
     } else {
@@ -605,7 +636,7 @@ function importMessages(
   sessionMap: Map<string, string>,
   edgeMap: Map<number, number>,
   conflict: ImportConflictStrategy,
-  result: ImportDataResult
+  result: ImportDataResult,
 ): void {
   for (const row of rows) {
     const from = mapped(sessionMap, row.from_session);
@@ -633,7 +664,7 @@ function insertSession(db: DB, row: Session, id: string): void {
     `INSERT INTO sessions (
        id, name, description, project_dir, status, created_at, last_heartbeat_at,
        metadata, runtime, identity_source, runtime_pid
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     row.name,
@@ -645,7 +676,7 @@ function insertSession(db: DB, row: Session, id: string): void {
     row.metadata,
     row.runtime,
     row.identity_source,
-    row.runtime_pid
+    row.runtime_pid,
   );
 }
 
@@ -653,7 +684,7 @@ function updateSession(db: DB, row: Session, id: string): void {
   db.prepare(
     `UPDATE sessions SET name = ?, description = ?, project_dir = ?, status = ?,
        created_at = ?, last_heartbeat_at = ?, metadata = ?, runtime = ?,
-       identity_source = ?, runtime_pid = ? WHERE id = ?`
+       identity_source = ?, runtime_pid = ? WHERE id = ?`,
   ).run(
     row.name,
     row.description,
@@ -665,24 +696,40 @@ function updateSession(db: DB, row: Session, id: string): void {
     row.runtime,
     row.identity_source,
     row.runtime_pid,
-    id
+    id,
   );
 }
 
 function insertAgent(db: DB, row: Agent, id?: number): number {
-  const result = id === undefined
-    ? db
-        .prepare(
-          `INSERT INTO agents (name, system_prompt, model_config, description, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?)`
-        )
-        .run(row.name, row.system_prompt, JSON.stringify(row.model_config), row.description, row.created_at, row.updated_at)
-    : db
-        .prepare(
-          `INSERT INTO agents (id, name, system_prompt, model_config, description, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run(id, row.name, row.system_prompt, JSON.stringify(row.model_config), row.description, row.created_at, row.updated_at);
+  const result =
+    id === undefined
+      ? db
+          .prepare(
+            `INSERT INTO agents (name, system_prompt, model_config, description, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            row.name,
+            row.system_prompt,
+            JSON.stringify(row.model_config),
+            row.description,
+            row.created_at,
+            row.updated_at,
+          )
+      : db
+          .prepare(
+            `INSERT INTO agents (id, name, system_prompt, model_config, description, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            id,
+            row.name,
+            row.system_prompt,
+            JSON.stringify(row.model_config),
+            row.description,
+            row.created_at,
+            row.updated_at,
+          );
   return Number(result.lastInsertRowid);
 }
 
@@ -708,8 +755,16 @@ function nextAgentId(db: DB): number {
 function updateAgent(db: DB, row: Agent, id: number): void {
   db.prepare(
     `UPDATE agents SET name = ?, system_prompt = ?, model_config = ?, description = ?,
-       created_at = ?, updated_at = ? WHERE id = ?`
-  ).run(row.name, row.system_prompt, JSON.stringify(row.model_config), row.description, row.created_at, row.updated_at, id);
+       created_at = ?, updated_at = ? WHERE id = ?`,
+  ).run(
+    row.name,
+    row.system_prompt,
+    JSON.stringify(row.model_config),
+    row.description,
+    row.created_at,
+    row.updated_at,
+    id,
+  );
 }
 
 function insertRuntimeAgent(db: DB, row: ExportedRuntimeAgent, id?: number): number {
@@ -727,23 +782,24 @@ function insertRuntimeAgent(db: DB, row: ExportedRuntimeAgent, id?: number): num
     row.created_at,
     row.updated_at,
   ];
-  const result = id === undefined
-    ? db
-        .prepare(
-          `INSERT INTO runtime_agents
+  const result =
+    id === undefined
+      ? db
+          .prepare(
+            `INSERT INTO runtime_agents
              (name, runtime, workdir, model, base_url, api_key, extra_env, instructions,
               interval_min, last_scheduled_run, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run(...values)
-    : db
-        .prepare(
-          `INSERT INTO runtime_agents
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(...values)
+      : db
+          .prepare(
+            `INSERT INTO runtime_agents
              (id, name, runtime, workdir, model, base_url, api_key, extra_env, instructions,
               interval_min, last_scheduled_run, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run(id, ...values);
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(id, ...values);
   return Number(result.lastInsertRowid);
 }
 
@@ -751,7 +807,7 @@ function updateRuntimeAgent(db: DB, row: ExportedRuntimeAgent, id: number): void
   db.prepare(
     `UPDATE runtime_agents SET name = ?, runtime = ?, workdir = ?, model = ?, base_url = ?,
        extra_env = ?, instructions = ?, interval_min = ?, last_scheduled_run = ?,
-       created_at = ?, updated_at = ? WHERE id = ?`
+       created_at = ?, updated_at = ? WHERE id = ?`,
   ).run(
     row.name,
     row.runtime,
@@ -764,7 +820,7 @@ function updateRuntimeAgent(db: DB, row: ExportedRuntimeAgent, id: number): void
     row.last_scheduled_run,
     row.created_at,
     row.updated_at,
-    id
+    id,
   );
 }
 
@@ -780,20 +836,20 @@ function insertContext(db: DB, row: ContextEntry, sessionId: string, id?: number
   if (id === undefined) {
     db.prepare(
       `INSERT INTO context_entries (session_id, title, content, tags, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?)`,
     ).run(...values);
     return;
   }
   db.prepare(
     `INSERT INTO context_entries (id, session_id, title, content, tags, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(id, ...values);
 }
 
 function updateContext(db: DB, row: ContextEntry, id: number, sessionId: string): void {
   db.prepare(
     `UPDATE context_entries SET session_id = ?, title = ?, content = ?, tags = ?,
-       created_at = ?, updated_at = ? WHERE id = ?`
+       created_at = ?, updated_at = ? WHERE id = ?`,
   ).run(
     sessionId,
     row.title,
@@ -801,7 +857,7 @@ function updateContext(db: DB, row: ContextEntry, id: number, sessionId: string)
     row.tags === null ? null : JSON.stringify(row.tags),
     row.created_at,
     row.updated_at,
-    id
+    id,
   );
 }
 
@@ -810,22 +866,23 @@ function insertConversation(
   row: Conversation,
   agentId: number,
   initiatedBy: string | null,
-  id?: number
+  id?: number,
 ): number {
   const values = [agentId, initiatedBy, row.title, row.created_at, row.updated_at];
-  const result = id === undefined
-    ? db
-        .prepare(
-          `INSERT INTO conversations (agent_id, initiated_by, title, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?)`
-        )
-        .run(...values)
-    : db
-        .prepare(
-          `INSERT INTO conversations (id, agent_id, initiated_by, title, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?)`
-        )
-        .run(id, ...values);
+  const result =
+    id === undefined
+      ? db
+          .prepare(
+            `INSERT INTO conversations (agent_id, initiated_by, title, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?)`,
+          )
+          .run(...values)
+      : db
+          .prepare(
+            `INSERT INTO conversations (id, agent_id, initiated_by, title, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          )
+          .run(id, ...values);
   return Number(result.lastInsertRowid);
 }
 
@@ -834,23 +891,23 @@ function updateConversation(
   row: Conversation,
   id: number,
   agentId: number,
-  initiatedBy: string | null
+  initiatedBy: string | null,
 ): void {
   db.prepare(
     `UPDATE conversations SET agent_id = ?, initiated_by = ?, title = ?, created_at = ?,
-       updated_at = ? WHERE id = ?`
+       updated_at = ? WHERE id = ?`,
   ).run(agentId, initiatedBy, row.title, row.created_at, row.updated_at, id);
 }
 
 function insertTurn(db: DB, row: Turn, conversationId: number, id?: number): void {
   if (id === undefined) {
     db.prepare(
-      "INSERT INTO turns (conversation_id, role, content, created_at) VALUES (?, ?, ?, ?)"
+      "INSERT INTO turns (conversation_id, role, content, created_at) VALUES (?, ?, ?, ?)",
     ).run(conversationId, row.role, row.content, row.created_at);
     return;
   }
   db.prepare(
-    "INSERT INTO turns (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)"
+    "INSERT INTO turns (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
   ).run(id, conversationId, row.role, row.content, row.created_at);
 }
 
@@ -860,24 +917,34 @@ function insertMessage(
   from: string,
   to: string,
   edgeId: number | null,
-  id?: number
+  id?: number,
 ): number {
-  const values = [from, to, row.question, row.reply, row.status, row.created_at, row.replied_at, edgeId];
-  const result = id === undefined
-    ? db
-        .prepare(
-          `INSERT INTO messages
+  const values = [
+    from,
+    to,
+    row.question,
+    row.reply,
+    row.status,
+    row.created_at,
+    row.replied_at,
+    edgeId,
+  ];
+  const result =
+    id === undefined
+      ? db
+          .prepare(
+            `INSERT INTO messages
              (from_session, to_session, question, reply, status, created_at, replied_at, edge_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run(...values)
-    : db
-        .prepare(
-          `INSERT INTO messages
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(...values)
+      : db
+          .prepare(
+            `INSERT INTO messages
              (id, from_session, to_session, question, reply, status, created_at, replied_at, edge_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run(id, ...values);
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(id, ...values);
   return Number(result.lastInsertRowid);
 }
 
@@ -887,11 +954,11 @@ function updateMessage(
   id: number,
   from: string,
   to: string,
-  edgeId: number | null
+  edgeId: number | null,
 ): void {
   db.prepare(
     `UPDATE messages SET from_session = ?, to_session = ?, question = ?, reply = ?,
-       status = ?, created_at = ?, replied_at = ?, edge_id = ? WHERE id = ?`
+       status = ?, created_at = ?, replied_at = ?, edge_id = ? WHERE id = ?`,
   ).run(from, to, row.question, row.reply, row.status, row.created_at, row.replied_at, edgeId, id);
 }
 
@@ -903,10 +970,7 @@ function copyId(db: DB, table: string, original: string): string {
   return candidate;
 }
 
-function canonicalAgentSessionId(
-  sessionId: string,
-  agentMap: Map<number, number>
-): string | null {
+function canonicalAgentSessionId(sessionId: string, agentMap: Map<number, number>): string | null {
   const match = /^agent-(\d+)$/.exec(sessionId);
   if (!match) return null;
   const sourceAgentId = Number(match[1]);
@@ -931,7 +995,8 @@ function assertReference<T>(values: Set<T>, value: T, label: string): void {
 function parseObject(value: string, label: string): Record<string, unknown> {
   try {
     const parsed: unknown = JSON.parse(value);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      throw new Error("not an object");
     return parsed as Record<string, unknown>;
   } catch {
     throw new Error(`invalid ${label}`);

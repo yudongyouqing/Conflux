@@ -26,12 +26,19 @@
     "dev:all": "concurrently -n server,web -c blue,green \"npm run serve -w apps/server\" \"npm run dev -w apps/web\"",
     "serve": "npm run serve -w apps/server",
     "mcp": "npm run mcp -w apps/server",
-    "start": "npm run build && npm run serve"
+    "start": "npm run build && npm run serve",
+    "lint": "eslint apps/server/src apps/web/src packages/shared/src",
+    "format": "prettier --write \"apps/server/src/**/*.ts\" \"apps/web/src/**/*.{ts,tsx,css}\" \"packages/shared/src/**/*.ts\""
   },
   "dependencies": {
     "muiltchat": "file:apps/server"
   },
   "devDependencies": {
-    "concurrently": "^10.0.4"
+    "@eslint/js": "^10.0.1",
+    "concurrently": "^10.0.4",
+    "eslint": "^10.10.0",
+    "playwright": "^1.63.0",
+    "prettier": "^3.9.6",
+    "typescript-eslint": "^8.70.0"
   }
 }

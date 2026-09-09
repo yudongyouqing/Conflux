@@ -39,6 +39,8 @@ export interface Session {
 export interface SessionSummary extends Session {
   context_count: number;
   pending_inbox: number;
+  /** Derived: a turn is in progress (hook event pair for Claude, rollout mtime freshness for Codex). */
+  busy?: boolean;
 }
 
 export interface ContextEntry {
@@ -150,6 +152,8 @@ export interface GraphNode {
   identity_source?: IdentitySource | null;
   /** PID of the owning CLI runtime, when known. */
   runtime_pid?: number | null;
+  /** Derived: a turn is in progress (hook event pair for Claude, rollout mtime freshness for Codex). */
+  busy?: boolean;
   /** Agent Card: capability self-description (register_session skills). */
   skills?: string[];
 }

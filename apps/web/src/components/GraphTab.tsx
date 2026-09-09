@@ -27,8 +27,8 @@ const CLUSTER_ID = "__orphan_cluster__";
 const dirLabelId = (dir: string) => `__dirlabel:${dir}`;
 
 // Grid geometry for orphan children inside the expanded cluster container.
-const CELL_W = 176;
-const CELL_H = 64;
+const CELL_W = 216;
+const CELL_H = 100;
 const GRID_COLS = 3;
 const GRID_PAD_X = 16;
 const GRID_PAD_TOP = 34; // room for the container title bar
@@ -37,9 +37,9 @@ const GRID_PAD_TOP = 34; // room for the container title bar
 // cannot be told about directory grouping). Rows are sorted newest-first.
 const START_X = 40;
 const START_Y = 24;
-const ROW_H = 130;
+const ROW_H = 150;
 const DIR_LABEL_SPAN = 190; // dir caption + breathing room before first card
-const COL_W = 210;
+const COL_W = 224;
 
 type ViewMode = "active" | "dirs" | "all";
 
@@ -80,9 +80,18 @@ export function GraphTab({
       } catch {
         return {};
       }
-    })()
+    })(),
   );
 
+  // Reframe when the composition itself changes — dagre/grid/rows swap
+  // positions wholesale and the initial fitView never reruns on its own.
+  const rfInstance = useRef<{
+    fitView: (opts?: { padding?: number; duration?: number }) => void;
+  } | null>(null);
+  useEffect(() => {
+    const t = setTimeout(() => rfInstance.current?.fitView({ padding: 0.2, duration: 400 }), 350);
+    return () => clearTimeout(t);
+  }, [viewMode, orphanExpanded]);
   const handleOffsetChange = useCallback(
     (key: string, offset: number | null) => {
       if (offset === null) delete manualOffsets.current[key];
@@ -95,15 +104,14 @@ export function GraphTab({
       setEdges((eds) =>
         eds.map((e) => {
           const d = e.data as
-            | { offsetKey?: string; offset?: number; autoOffset?: number }
-            | undefined;
+            { offsetKey?: string; offset?: number; autoOffset?: number } | undefined;
           if (d?.offsetKey !== key) return e;
           const auto = d.autoOffset ?? 0;
           return { ...e, data: { ...d, offset: offset === null ? auto : Math.round(offset) } };
-        })
+        }),
       );
     },
-    [setEdges]
+    [setEdges],
   );
 
   // Sync polled data into state. Node positions the user dragged to are
@@ -119,12 +127,8 @@ export function GraphTab({
   useEffect(() => {
     if (!data) return;
 
-    const live = data.nodes.filter(
-      (n) => n.status === "active" || n.type === "agent"
-    );
-    const offline = data.nodes.filter(
-      (n) => n.status !== "active" && n.type === "session"
-    );
+    const live = data.nodes.filter((n) => n.status === "active" || n.type === "agent");
+    const offline = data.nodes.filter((n) => n.status !== "active" && n.type === "session");
 
     const toSessionNode = (n: (typeof data.nodes)[number]): Node<SessionNodeData> => ({
       id: n.id,
@@ -255,7 +259,7 @@ export function GraphTab({
       const allNodes = [...live, ...offline];
       const { nodes: layouted } = layoutGraph(
         allNodes.map((n) => toSessionNode(n) as unknown as Node),
-        rawEdges as never
+        rawEdges as never,
       );
       outNodes = layouted;
     } else {
@@ -266,11 +270,20 @@ export function GraphTab({
         .map((e, i) => mkEdge(e, i));
       const { nodes: layouted } = layoutGraph(
         live.map((n) => toSessionNode(n) as unknown as Node),
-        rawEdges as never
+        rawEdges as never,
       );
       outNodes = layouted;
     }
 
+    // Fan-out: parallel edges leaving the SAME source would stack into one
+    // bundle (the web-console spoke mess). Spread them by per-source index.
+    const srcTotal = new Map<string, number>();
+    const srcIndex = new Map<string, number>();
+    for (const e of rawEdges) {
+      const d0 = e.data as { from: string; to: string };
+      srcIndex.set(d0.from + ">" + d0.to, srcTotal.get(d0.from) ?? 0);
+      srcTotal.set(d0.from, (srcTotal.get(d0.from) ?? 0) + 1);
+    }
     // Reciprocal separation: count edges per unordered node pair, then bend
     // both directions of a two-way pair by the same perpendicular offset —
     // the reversed direction vector flips the bow to the opposite side, so
@@ -287,7 +300,10 @@ export function GraphTab({
       const pairKey = d.from < d.to ? `${d.from}|${d.to}` : `${d.to}|${d.from}`;
       const twoWay = (pairCount.get(pairKey) ?? 0) > 1;
       const dirKey = `${d.from}->${d.to}`;
-      const auto = twoWay ? 34 : 0;
+      const n = srcTotal.get(d.from) ?? 1;
+      const idx = srcIndex.get(d.from + ">" + d.to) ?? 0;
+      const fan = n > 1 ? (idx - (n - 1) / 2) * 48 : 0;
+      const auto = (twoWay ? 34 : 0) + fan;
       return {
         ...e,
         type: "curved" as const,
@@ -324,7 +340,11 @@ export function GraphTab({
           },
         };
       }
-      if (!selKey && selectedSessionId && (d.from === selectedSessionId || d.to === selectedSessionId)) {
+      if (
+        !selKey &&
+        selectedSessionId &&
+        (d.from === selectedSessionId || d.to === selectedSessionId)
+      ) {
         return {
           ...e,
           style: { ...e.style, stroke: "#3b82f6" },
@@ -353,7 +373,16 @@ export function GraphTab({
       }));
     });
     setEdges(styledEdges);
-  }, [data, selectedSessionId, selectedEdge, viewMode, orphanExpanded, handleOffsetChange, setNodes, setEdges]);
+  }, [
+    data,
+    selectedSessionId,
+    selectedEdge,
+    viewMode,
+    orphanExpanded,
+    handleOffsetChange,
+    setNodes,
+    setEdges,
+  ]);
 
   const onNodeClick: NodeMouseHandler = useCallback(
     (_, node) => {
@@ -364,7 +393,7 @@ export function GraphTab({
       if (node.type === "dirLabel") return;
       onSelectSession(node.id);
     },
-    [onSelectSession]
+    [onSelectSession],
   );
 
   const onEdgeClick: EdgeMouseHandler = useCallback(
@@ -374,7 +403,7 @@ export function GraphTab({
         onSelectEdge(d);
       }
     },
-    [onSelectEdge]
+    [onSelectEdge],
   );
 
   if (isLoading)
@@ -395,8 +424,7 @@ export function GraphTab({
     return (
       <div className="flex items-center justify-center h-full text-gray-400 text-sm text-center px-8">
         暂无会话。
-        <br />
-        用 CLI 注册一个会话:
+        <br />用 CLI 注册一个会话:
         <code className="text-gray-500 ml-1 bg-gray-100 px-1 rounded">
           muiltchat sessions register --name "test"
         </code>
@@ -414,6 +442,9 @@ export function GraphTab({
       onNodeClick={onNodeClick}
       onEdgeClick={onEdgeClick}
       nodesConnectable={false}
+      onInit={(instance) => {
+        rfInstance.current = instance;
+      }}
       minZoom={0.2}
       maxZoom={2}
       fitView
@@ -428,9 +459,7 @@ export function GraphTab({
               key={m}
               onClick={() => setViewMode(m)}
               className={`px-3 py-1.5 transition-colors ${
-                viewMode === m
-                  ? "bg-gray-800 text-white"
-                  : "text-gray-600 hover:bg-gray-50"
+                viewMode === m ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-50"
               }`}
             >
               {VIEW_LABELS[m]}
@@ -438,7 +467,15 @@ export function GraphTab({
           ))}
         </div>
       </Panel>
-      <Background color="#d0d5dd" gap={20} />
+      {/* no edges in view: say WHY instead of looking like a broken graph */}
+      {edges.length === 0 && nodes.length > 0 && (
+        <Panel position="bottom-center" className="!mb-4">
+          <div className="text-[11px] text-gray-400 bg-white/85 border border-gray-100 rounded-full px-3 py-1 shadow-sm">
+            当前视图暂无会话间消息通道 —— 发起一次对话即可建立连线
+          </div>
+        </Panel>
+      )}
+      <Background color="#cbd5e1" gap={24} />
       <Controls className="!bg-white !border !border-gray-200 !rounded-lg !shadow-sm [&_button]:!bg-white [&_button]:!border-gray-200 [&_button]:!text-gray-600 [&_button:hover]:!bg-gray-50" />
     </ReactFlow>
   );

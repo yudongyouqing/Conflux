@@ -14,7 +14,9 @@ export default function App() {
   const [tab, setTab] = useState<TabId>("graph");
   const [selectedSession, setSelectedSession] = useState<GraphNode | null>(null);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
-  const [selectedEdge, setSelectedEdge] = useState<{ id: number; from: string; to: string } | null>(null);
+  const [selectedEdge, setSelectedEdge] = useState<{ id: number; from: string; to: string } | null>(
+    null,
+  );
   const graph = useGraph();
 
   const nodeMap = useMemo(() => {
@@ -23,15 +25,9 @@ export default function App() {
     return m;
   }, [graph.data]);
 
-  const sessionNameLookup = useCallback(
-    (id: string) => nodeMap.get(id)?.name,
-    [nodeMap]
-  );
+  const sessionNameLookup = useCallback((id: string) => nodeMap.get(id)?.name, [nodeMap]);
 
-  const sessionStatusLookup = useCallback(
-    (id: string) => nodeMap.get(id)?.status,
-    [nodeMap]
-  );
+  const sessionStatusLookup = useCallback((id: string) => nodeMap.get(id)?.status, [nodeMap]);
 
   const handleSelectSession = useCallback(
     (sid: string | null) => {
@@ -44,7 +40,7 @@ export default function App() {
       const node = graph.data?.nodes.find((n) => n.id === sid);
       setSelectedSession(node ?? null);
     },
-    [graph.data]
+    [graph.data],
   );
 
   const handleSelectMessage = useCallback((msg: Message | null) => {
@@ -53,14 +49,11 @@ export default function App() {
     setSelectedMessage(msg);
   }, []);
 
-  const handleSelectEdge = useCallback(
-    (edge: { id: number; from: string; to: string } | null) => {
-      setSelectedSession(null);
-      setSelectedMessage(null);
-      setSelectedEdge(edge);
-    },
-    []
-  );
+  const handleSelectEdge = useCallback((edge: { id: number; from: string; to: string } | null) => {
+    setSelectedSession(null);
+    setSelectedMessage(null);
+    setSelectedEdge(edge);
+  }, []);
 
   return (
     <div className="flex h-full bg-gray-100">

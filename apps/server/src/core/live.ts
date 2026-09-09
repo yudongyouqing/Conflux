@@ -32,6 +32,11 @@ import { isRuntimeCommand } from "./liveness.js";
 
 // ---- ancestor walk: find the Claude Code process pid --------------------
 
+// NOTE: the runtime tokens below duplicate runtime-identity.ts (single
+// source of truth). This ancestor-walk script is battle-tested and
+// disk-cached (find-runtime.ps1), so it keeps its embedded copy until
+// the next deliberate touch of this machinery — keep both in sync.
+
 const PS_SCRIPT = `param([int]$StartPid, [string]$Runtime)
 $pattern = if ($Runtime -eq "codex") {
   '(^|[\\\\/])codex(\\.exe|\\.cmd)?(\\s|$)|@openai[\\\\/]codex|codex-cli'
@@ -94,7 +99,7 @@ export function getRuntimeProcess(runtime: RuntimeId): RuntimeProcess | null {
       if (!existsSync(ps1)) writeFileSync(ps1, PS_SCRIPT, "utf8");
       const out = execSync(
         `powershell -NoProfile -ExecutionPolicy Bypass -File "${ps1}" -StartPid ${process.ppid} -Runtime ${runtime}`,
-        { timeout: 5000, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+        { timeout: 5000, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
       ).trim();
       const match = /\b(\d+)\b/.exec(out);
       if (match) {
@@ -160,11 +165,7 @@ function parseMeta(s: Session): Record<string, unknown> {
 /** First line of the prompt, squeezed to a short display name. */
 export function promptExcerpt(prompt: string | undefined): string | null {
   if (!prompt) return null;
-  const first = prompt
-    .split("\n")[0]
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 42);
+  const first = prompt.split("\n")[0].replace(/\s+/g, " ").trim().slice(0, 42);
   return first.length > 0 ? first : null;
 }
 
@@ -185,7 +186,7 @@ function mungeProjectDir(cwd: string): string {
 export function readCustomTitle(
   sessionId: string,
   cwd?: string | null,
-  claudeHome?: string
+  claudeHome?: string,
 ): string | null {
   for (const p of findTranscriptPaths(sessionId, cwd, claudeHome)) {
     try {
@@ -195,7 +196,11 @@ export function readCustomTitle(
         if (!line.includes('"custom-title"')) continue;
         try {
           const j = JSON.parse(line) as { type?: string; customTitle?: unknown };
-          if (j.type === "custom-title" && typeof j.customTitle === "string" && j.customTitle.trim()) {
+          if (
+            j.type === "custom-title" &&
+            typeof j.customTitle === "string" &&
+            j.customTitle.trim()
+          ) {
             return j.customTitle.replace(/\s+/g, " ").trim().slice(0, 64);
           }
         } catch {
@@ -213,7 +218,7 @@ export function readCustomTitle(
 function findTranscriptPaths(
   sessionId: string,
   cwd?: string | null,
-  claudeHome?: string
+  claudeHome?: string,
 ): string[] {
   const home = claudeHome ?? join(process.env.USERPROFILE || process.env.HOME || ".", ".claude");
   const projectsDir = join(home, "projects");
@@ -239,7 +244,7 @@ function findTranscriptPaths(
 export function hasTranscript(
   sessionId: string,
   cwd?: string | null,
-  claudeHome?: string
+  claudeHome?: string,
 ): boolean {
   return findTranscriptPaths(sessionId, cwd, claudeHome).length > 0;
 }
@@ -248,7 +253,7 @@ export function hasTranscript(
 function readTranscriptText(
   sessionId: string,
   cwd?: string | null,
-  claudeHome?: string
+  claudeHome?: string,
 ): string | null {
   for (const p of findTranscriptPaths(sessionId, cwd, claudeHome)) {
     try {
@@ -274,7 +279,7 @@ export function forwardStrandedInboxByTranscript(
   db: DB,
   successorId: string,
   cwd?: string | null,
-  claudeHome?: string
+  claudeHome?: string,
 ): number {
   const text = readTranscriptText(successorId, cwd, claudeHome);
   if (!text) return 0;
@@ -286,7 +291,7 @@ export function forwardStrandedInboxByTranscript(
        WHERE s.id != ? AND s.status IN ('stale','ended')
          AND EXISTS (SELECT 1 FROM messages m
                      WHERE m.to_session = s.id AND m.status IN ('pending','seen'))
-       ORDER BY s.last_heartbeat_at DESC LIMIT 20`
+       ORDER BY s.last_heartbeat_at DESC LIMIT 20`,
     )
     .all(successorId) as { id: string; name: string }[];
 
@@ -301,7 +306,7 @@ export function forwardStrandedInboxByTranscript(
   return db
     .prepare(
       `UPDATE messages SET to_session = ?
-       WHERE status IN ('pending','seen') AND to_session IN (${placeholders})`
+       WHERE status IN ('pending','seen') AND to_session IN (${placeholders})`,
     )
     .run(successorId, ...matched).changes;
 }
@@ -314,7 +319,7 @@ export function handleHookEvent(
   db: DB,
   event: "session-start" | "prompt" | "stop",
   payload: HookPayload,
-  claudeHome?: string
+  claudeHome?: string,
 ): void {
   if (!payload.session_id) return;
   const id = payload.session_id;
@@ -328,7 +333,9 @@ export function handleHookEvent(
     if (!aid || Number.isNaN(Number(aid))) return {};
     return {
       agent_id: Number(aid),
-      ...(process.env.MUILTCHAT_AGENT_RUNTIME ? { runtime: process.env.MUILTCHAT_AGENT_RUNTIME } : {}),
+      ...(process.env.MUILTCHAT_AGENT_RUNTIME
+        ? { runtime: process.env.MUILTCHAT_AGENT_RUNTIME }
+        : {}),
     };
   })();
 
@@ -337,10 +344,11 @@ export function handleHookEvent(
       const title = readCustomTitle(id, payload.cwd ?? existing.project_dir, claudeHome);
       if (title && title !== existing.name) renameSession(db, id, title);
       heartbeat(db, id);
+      mergeSessionMeta(db, id, { busy: false }); // Stop: the turn finished
       const pid = refreshClaudePid(
         db,
         id,
-        typeof meta.claude_pid === "number" ? meta.claude_pid : null
+        typeof meta.claude_pid === "number" ? meta.claude_pid : null,
       );
       if (pid !== null) setSetting(db, `claude-current:${pid}`, id);
     }
@@ -354,7 +362,8 @@ export function handleHookEvent(
     // session-start is the one place the process identity may have CHANGED
     // (resume in a new terminal): trust the actual ancestor walk over the
     // stored pid — liveness probing keys off this value.
-    const claudePid = getClaudePid() ?? (typeof meta.claude_pid === "number" ? meta.claude_pid : null);
+    const claudePid =
+      getClaudePid() ?? (typeof meta.claude_pid === "number" ? meta.claude_pid : null);
     registerSession(db, {
       id,
       name:
@@ -364,8 +373,16 @@ export function handleHookEvent(
           : basename(payload.cwd || "") || "claude"),
       description: meta.named && existing ? existing.description : "Claude Code session (hook)",
       project_dir: payload.cwd ?? existing?.project_dir ?? null,
-      metadata: { source: "claude-hook", ...meta, ...agentTag, ...(title ? { custom_title: true } : {}), claude_pid: claudePid },
+      metadata: {
+        source: "claude-hook",
+        ...meta,
+        ...agentTag,
+        ...(title ? { custom_title: true } : {}),
+        claude_pid: claudePid,
+      },
     });
+    // a fresh start is by definition not mid-turn (clears a stuck busy)
+    mergeSessionMeta(db, id, { busy: false });
     // This process previously ran another conversation id that was abandoned
     // by /resume or /clear before receiving any prompt — reap it now.
     if (claudePid !== null) {
@@ -399,17 +416,25 @@ export function handleHookEvent(
     const pid = refreshClaudePid(
       db,
       id,
-      typeof meta.claude_pid === "number" ? meta.claude_pid : null
+      typeof meta.claude_pid === "number" ? meta.claude_pid : null,
     );
     if (pid !== null) setSetting(db, `claude-current:${pid}`, id);
+    mergeSessionMeta(db, id, { busy: true }); // UserPromptSubmit: a turn began
     return;
   }
   registerSession(db, {
     id,
-    name: title ?? excerpt ?? (existing?.name ?? "claude"),
-    description: excerpt ?? (existing?.description ?? "Claude Code session (hook)"),
+    name: title ?? excerpt ?? existing?.name ?? "claude",
+    description: excerpt ?? existing?.description ?? "Claude Code session (hook)",
     project_dir: payload.cwd ?? existing?.project_dir ?? null,
-    metadata: { source: "claude-hook", ...meta, ...agentTag, ...(title ? { custom_title: true } : {}), named: true },
+    metadata: {
+      source: "claude-hook",
+      ...meta,
+      ...agentTag,
+      ...(title ? { custom_title: true } : {}),
+      named: true,
+      busy: true,
+    },
   });
 }
 
@@ -449,26 +474,27 @@ export function findSessionByRuntimePid(
   db: DB,
   runtime: RuntimeId,
   pid: number,
-  excludeId?: string
+  excludeId?: string,
 ): Session | null {
   const rows = db
     .prepare(
       `SELECT * FROM sessions
        WHERE status = 'active'
          AND (metadata LIKE '%"runtime_pid":%' OR metadata LIKE '%"claude_pid":%')
-       ORDER BY last_heartbeat_at DESC LIMIT 50`
+       ORDER BY last_heartbeat_at DESC LIMIT 50`,
     )
     .all() as Session[];
   for (const row of rows) {
     if (row.id === excludeId) continue;
     const meta = parseMeta(row);
-    if (
-      meta.runtime_pid === pid &&
-      meta.runtime === runtime
-    ) {
+    if (meta.runtime_pid === pid && meta.runtime === runtime) {
       return row;
     }
-    if (runtime === "claude" && meta.claude_pid === pid && (meta.runtime === undefined || meta.runtime === "claude")) {
+    if (
+      runtime === "claude" &&
+      meta.claude_pid === pid &&
+      (meta.runtime === undefined || meta.runtime === "claude")
+    ) {
       return row;
     }
   }
@@ -494,7 +520,7 @@ export function deleteUnreferencedSession(db: DB, id: string): boolean {
        COALESCE(metadata, '') NOT LIKE '%"source":"codex-hook"%' AND
        (SELECT COUNT(*) FROM messages WHERE from_session = ? OR to_session = ?) = 0 AND
        (SELECT COUNT(*) FROM edges WHERE from_session = ? OR to_session = ?) = 0 AND
-       (SELECT COUNT(*) FROM context_entries WHERE session_id = ?) = 0`
+       (SELECT COUNT(*) FROM context_entries WHERE session_id = ?) = 0`,
     )
     .run(id, id, id, id, id, id);
   return res.changes > 0;

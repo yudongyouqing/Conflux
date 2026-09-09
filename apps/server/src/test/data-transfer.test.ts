@@ -210,10 +210,12 @@ test("exports and imports pending messages with a null reply timestamp", () => {
     assert.equal(bundle.messages[0]?.replied_at, null);
     assert.doesNotThrow(() => importData(target.db, bundle));
     assert.equal(
-      (target.db.prepare("SELECT replied_at FROM messages WHERE id = 1").get() as {
-        replied_at: string | null;
-      }).replied_at,
-      null
+      (
+        target.db.prepare("SELECT replied_at FROM messages WHERE id = 1").get() as {
+          replied_at: string | null;
+        }
+      ).replied_at,
+      null,
     );
   } finally {
     source.cleanup();
@@ -238,10 +240,13 @@ test("project export keeps only sessions and related conversation resources", ()
     });
 
     const bundle = exportData(db, { scope: "project", projectDir: "C:/project" });
-    assert.deepEqual(bundle.sessions.map((session) => session.id), ["project-session"]);
+    assert.deepEqual(
+      bundle.sessions.map((session) => session.id),
+      ["project-session"],
+    );
     assert.deepEqual(
       bundle.context_entries.map((entry) => entry.session_id),
-      ["project-session"]
+      ["project-session"],
     );
   } finally {
     cleanup();
@@ -251,10 +256,12 @@ test("project export keeps only sessions and related conversation resources", ()
 test("rejects an invalid bundle before changing the database", () => {
   const { db, cleanup } = makeDb();
   try {
-    const before = (db.prepare("SELECT COUNT(*) AS count FROM sessions").get() as { count: number }).count;
+    const before = (db.prepare("SELECT COUNT(*) AS count FROM sessions").get() as { count: number })
+      .count;
     const invalid = { ...bundleWithResources(), format: "wrong" } as unknown;
     assert.throws(() => importData(db, invalid), /invalid|format|bundle/i);
-    const after = (db.prepare("SELECT COUNT(*) AS count FROM sessions").get() as { count: number }).count;
+    const after = (db.prepare("SELECT COUNT(*) AS count FROM sessions").get() as { count: number })
+      .count;
     assert.equal(after, before);
   } finally {
     cleanup();
@@ -275,15 +282,17 @@ test("imports with skip, overwrite, and copy while preserving foreign keys", () 
     const skipped = importData(db, changed, { conflict: "skip" });
     assert.ok(skipped.skipped > 0);
     assert.equal(
-      (db.prepare("SELECT name FROM sessions WHERE id = 'session-a'").get() as { name: string }).name,
-      "Session A"
+      (db.prepare("SELECT name FROM sessions WHERE id = 'session-a'").get() as { name: string })
+        .name,
+      "Session A",
     );
 
     const overwritten = importData(db, changed, { conflict: "overwrite" });
     assert.ok(overwritten.overwritten > 0);
     assert.equal(
-      (db.prepare("SELECT name FROM sessions WHERE id = 'session-a'").get() as { name: string }).name,
-      "new name"
+      (db.prepare("SELECT name FROM sessions WHERE id = 'session-a'").get() as { name: string })
+        .name,
+      "new name",
     );
 
     const copied = importData(db, changed, { conflict: "copy" });
@@ -308,20 +317,21 @@ test("imports with skip, overwrite, and copy while preserving foreign keys", () 
     assert.ok(copiedEdge);
     const copiedMessage = db
       .prepare("SELECT edge_id, from_session, to_session FROM messages WHERE edge_id = ?")
-      .get(copiedEdge.id) as {
-      edge_id: number;
-      from_session: string;
-      to_session: string;
-    } | undefined;
+      .get(copiedEdge.id) as
+      | {
+          edge_id: number;
+          from_session: string;
+          to_session: string;
+        }
+      | undefined;
     assert.deepEqual(copiedMessage, {
       edge_id: copiedEdge.id,
       from_session: copiedSession.id,
       to_session: copiedPeer.id,
     });
 
-    const copiedAgent = db
-      .prepare("SELECT id FROM agents WHERE id <> 1 ORDER BY id DESC")
-      .get() as { id: number } | undefined;
+    const copiedAgent = db.prepare("SELECT id FROM agents WHERE id <> 1 ORDER BY id DESC").get() as
+      { id: number } | undefined;
     assert.ok(copiedAgent);
     const copiedConversation = db
       .prepare("SELECT id, agent_id FROM conversations WHERE id <> 1 ORDER BY id DESC")
@@ -377,28 +387,30 @@ test("copy remaps internal agent resources to the new canonical agent session", 
     const copiedSessionId = `agent-${copiedAgent.id}`;
     assert.ok(getSession(db, copiedSessionId));
     assert.equal(
-      db
-        .prepare("SELECT id FROM sessions WHERE id LIKE ?")
-        .get(`agent-${agent.id}-copy-%`),
-      undefined
+      db.prepare("SELECT id FROM sessions WHERE id LIKE ?").get(`agent-${agent.id}-copy-%`),
+      undefined,
     );
     assert.equal(
-      (db
-        .prepare("SELECT session_id FROM context_entries WHERE session_id = ?")
-        .get(copiedSessionId) as { session_id: string } | undefined)?.session_id,
-      copiedSessionId
+      (
+        db
+          .prepare("SELECT session_id FROM context_entries WHERE session_id = ?")
+          .get(copiedSessionId) as { session_id: string } | undefined
+      )?.session_id,
+      copiedSessionId,
     );
     assert.equal(
-      (db
-        .prepare("SELECT to_session FROM messages WHERE to_session = ?")
-        .get(copiedSessionId) as { to_session: string } | undefined)?.to_session,
-      copiedSessionId
+      (
+        db.prepare("SELECT to_session FROM messages WHERE to_session = ?").get(copiedSessionId) as
+          { to_session: string } | undefined
+      )?.to_session,
+      copiedSessionId,
     );
     assert.equal(
-      (db
-        .prepare("SELECT agent_id FROM conversations WHERE agent_id = ?")
-        .get(copiedAgent.id) as { agent_id: number } | undefined)?.agent_id,
-      copiedAgent.id
+      (
+        db.prepare("SELECT agent_id FROM conversations WHERE agent_id = ?").get(copiedAgent.id) as
+          { agent_id: number } | undefined
+      )?.agent_id,
+      copiedAgent.id,
     );
   } finally {
     cleanup();
@@ -417,13 +429,20 @@ test("rolls back the complete import when a later resource insert fails", () => 
     `);
     assert.throws(
       () => importData(db, bundleWithResources(), { conflict: "overwrite" }),
-      /forced transfer failure/
+      /forced transfer failure/,
     );
-    assert.equal((db.prepare("SELECT COUNT(*) AS count FROM sessions").get() as { count: number }).count, 0);
-    assert.equal((db.prepare("SELECT COUNT(*) AS count FROM agents").get() as { count: number }).count, 0);
     assert.equal(
-      (db.prepare("SELECT COUNT(*) AS count FROM context_entries").get() as { count: number }).count,
-      0
+      (db.prepare("SELECT COUNT(*) AS count FROM sessions").get() as { count: number }).count,
+      0,
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS count FROM agents").get() as { count: number }).count,
+      0,
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS count FROM context_entries").get() as { count: number })
+        .count,
+      0,
     );
   } finally {
     cleanup();
