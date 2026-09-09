@@ -26,7 +26,7 @@ export interface ServerContext {
     sid?: string,
     action?: string,
     args?: Record<string, unknown>,
-    statusOverride?: number
+    statusOverride?: number,
   ): FastifyReply;
   sendHttpError(reply: FastifyReply, status: number, message: string): FastifyReply;
 }
@@ -35,7 +35,10 @@ export function httpError(code: number, message: string): { statusCode: number; 
   return { statusCode: code, message };
 }
 
-export function createServerContext(db: DB, opts: { dataDir: string; port: number }): ServerContext {
+export function createServerContext(
+  db: DB,
+  opts: { dataDir: string; port: number },
+): ServerContext {
   const { dataDir, port } = opts;
 
   /** Resolve X-Session-Id header (or query) + ensure session exists in DB. */
@@ -66,7 +69,7 @@ export function createServerContext(db: DB, opts: { dataDir: string; port: numbe
     sid?: string,
     action?: string,
     args?: Record<string, unknown>,
-    statusOverride?: number
+    statusOverride?: number,
   ): FastifyReply {
     const mapped = publicError(err, { dataDir, port });
     const status = statusOverride ?? publicStatus(err, mapped.code);

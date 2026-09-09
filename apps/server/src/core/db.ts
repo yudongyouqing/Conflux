@@ -3,11 +3,7 @@ import { existsSync, statSync } from "fs";
 import { join } from "path";
 import { Config } from "../config.js";
 import { logger } from "../log.js";
-import {
-  parseIdentitySource,
-  parseRuntimePid,
-  parseSessionRuntime,
-} from "./session-identity.js";
+import { parseIdentitySource, parseRuntimePid, parseSessionRuntime } from "./session-identity.js";
 
 export type DB = Database.Database;
 
@@ -33,10 +29,7 @@ export interface PublicErrorContext {
 }
 
 /** Convert internal failures into a stable, non-sensitive public response. */
-export function publicError(
-  error: unknown,
-  context: PublicErrorContext = {}
-): PublicError {
+export function publicError(error: unknown, context: PublicErrorContext = {}): PublicError {
   const value = isRecord(error) ? error : {};
   const rawCode = typeof value.code === "string" ? value.code : "";
   const rawStatus = typeof value.statusCode === "number" ? value.statusCode : undefined;
@@ -284,7 +277,10 @@ export function openDb(config: Config): DB {
     try {
       if (db.open) db.close();
     } catch (closeError) {
-      logger.warn({ err: closeError, dataDir: config.dataDir }, "failed to close database after startup error");
+      logger.warn(
+        { err: closeError, dataDir: config.dataDir },
+        "failed to close database after startup error",
+      );
     }
     throw err;
   }
@@ -301,7 +297,7 @@ export function collapseReplyEdges(db: DB): number {
       `DELETE FROM edges WHERE NOT EXISTS (
          SELECT 1 FROM messages m
          WHERE m.from_session = edges.from_session AND m.to_session = edges.to_session
-       )`
+       )`,
     )
     .run();
   return res.changes;
@@ -360,7 +356,7 @@ function backfillSessionIdentity(db: DB): void {
        runtime = ?,
        identity_source = ?,
        runtime_pid = ?
-     WHERE id = ?`
+     WHERE id = ?`,
   );
 
   for (const row of rows) {
@@ -382,7 +378,7 @@ function backfillSessionIdentity(db: DB): void {
       } catch (err) {
         logger.warn(
           { err, sessionId: row.id },
-          "skipping malformed session metadata during identity migration"
+          "skipping malformed session metadata during identity migration",
         );
         if (
           row.runtime !== runtime ||
@@ -434,7 +430,7 @@ function scheduleWalCheckpoint(config: Config, db: DB): void {
           db.pragma("wal_checkpoint(TRUNCATE)");
           logger.debug(
             { walBytesBefore: size, ms: Date.now() - before },
-            "wal checkpoint triggered"
+            "wal checkpoint triggered",
           );
         }
       }

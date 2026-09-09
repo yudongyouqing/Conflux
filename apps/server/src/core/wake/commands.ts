@@ -51,12 +51,12 @@ export function freshWakeCommand(runtime: "claude" | "codex", executable: string
 export function wakeCommand(
   runtime: "claude" | "codex",
   sessionId: string,
-  executable: string
+  executable: string,
 ): string {
   if (runtime === "codex") {
     return `${cmdQuote(executable)} exec resume ${sessionId} ${CODEX_WAKE_FLAGS} -`;
   }
   return `${resumeCommand("claude", sessionId, executable)} --allowedTools ${cmdQuote(
-    HEADLESS_ALLOWED_TOOLS
+    HEADLESS_ALLOWED_TOOLS,
   )} -p`;
 }

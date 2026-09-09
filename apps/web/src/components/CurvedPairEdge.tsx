@@ -1,9 +1,4 @@
-import {
-  BaseEdge,
-  EdgeLabelRenderer,
-  useReactFlow,
-  type EdgeProps,
-} from "@xyflow/react";
+import { BaseEdge, EdgeLabelRenderer, useReactFlow, type EdgeProps } from "@xyflow/react";
 
 /**
  * Quadratic-arc edge whose bow is a signed perpendicular offset supplied via
@@ -20,18 +15,8 @@ import {
  * clears the manual override in GraphTab's persisted map).
  */
 export function CurvedPairEdge(props: EdgeProps) {
-  const {
-    id,
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    data,
-    label,
-    labelStyle,
-    markerEnd,
-    style,
-  } = props;
+  const { id, sourceX, sourceY, targetX, targetY, data, label, labelStyle, markerEnd, style } =
+    props;
   const { screenToFlowPosition } = useReactFlow();
 
   const d = (data ?? {}) as {
@@ -108,7 +93,9 @@ export function CurvedPairEdge(props: EdgeProps) {
                     : "bg-white border-gray-200 text-gray-500"
                 }${manual ? " cursor-grab active:cursor-grabbing hover:border-blue-300" : ""}`
               : `w-2.5 h-2.5 rounded-full border ${
-                  manual ? "border-gray-300 bg-gray-100 opacity-0 hover:opacity-100 cursor-grab active:cursor-grabbing" : "hidden"
+                  manual
+                    ? "border-gray-300 bg-gray-100 opacity-0 hover:opacity-100 cursor-grab active:cursor-grabbing"
+                    : "hidden"
                 } transition-opacity`
           }`}
           onPointerDown={(ev) => {

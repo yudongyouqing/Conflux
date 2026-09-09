@@ -1,13 +1,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { makeDb } from "./helpers.js";
-import {
-  createAgent,
-  getAgent,
-  listAgents,
-  updateAgent,
-  deleteAgent,
-} from "../core/agents.js";
+import { createAgent, getAgent, listAgents, updateAgent, deleteAgent } from "../core/agents.js";
 import { getSession } from "../core/sessions.js";
 
 const { db, cleanup } = makeDb();
@@ -55,4 +49,3 @@ test("deleteAgent removes row and ends its session", () => {
   assert.equal(getAgent(db, a.id), null);
   assert.equal(getSession(db, sid)!.status, "ended");
 });
-

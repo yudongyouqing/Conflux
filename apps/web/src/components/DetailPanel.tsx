@@ -3,7 +3,17 @@ import { useSessionContext, useEdgeMessages, useEdgeAsk, useOpenSessionTerminal 
 import { MentionComposer } from "./MentionComposer";
 import type { Message, GraphNode, SessionStatus } from "@muiltchat/shared";
 import { StatusDot } from "./StatusDot";
-import { FileText, Clock, ArrowRight, FolderOpen, Send, Loader2, ArrowLeftRight, TerminalSquare, MousePointerClick } from "lucide-react";
+import {
+  FileText,
+  Clock,
+  ArrowRight,
+  FolderOpen,
+  Send,
+  Loader2,
+  ArrowLeftRight,
+  TerminalSquare,
+  MousePointerClick,
+} from "lucide-react";
 
 const WEB_CONSOLE_ID = "web-console";
 const DEFAULT_DESC = "Claude Code session (hook)";
@@ -30,11 +40,7 @@ export function DetailPanel({
 
   if (session) {
     return (
-      <SessionDetail
-        session={session}
-        contextEntries={contextEntries}
-        onOpenEdge={onOpenEdge}
-      />
+      <SessionDetail session={session} contextEntries={contextEntries} onOpenEdge={onOpenEdge} />
     );
   }
 
@@ -53,8 +59,7 @@ export function DetailPanel({
       <div className="p-5 space-y-4 overflow-y-auto h-full">
         <div className="flex items-center gap-2 text-xs">
           <span className="text-gray-700 font-medium">
-            {sessionNameLookup(message.from_session) ??
-              message.from_session.slice(0, 8)}
+            {sessionNameLookup(message.from_session) ?? message.from_session.slice(0, 8)}
           </span>
           <ArrowRight size={12} className="text-gray-400" />
           <span className="text-gray-700 font-medium">
@@ -106,7 +111,9 @@ export function DetailPanel({
           <MousePointerClick size={20} className="text-gray-300" />
         </div>
         <div className="text-sm text-gray-500 font-medium">选择一个对象查看详情</div>
-        <div className="text-xs text-gray-400 mt-1">点击图节点、图谱连线或消息条目，详情会显示在这里</div>
+        <div className="text-xs text-gray-400 mt-1">
+          点击图节点、图谱连线或消息条目，详情会显示在这里
+        </div>
       </div>
       点击图节点或消息条目查看详情
     </div>
@@ -140,10 +147,7 @@ function EdgeFlowView({
   const send = () => {
     const question = text.trim();
     if (!question || ask.isPending) return;
-    ask.mutate(
-      { edgeId: edge.id, question },
-      { onSuccess: () => setText("") }
-    );
+    ask.mutate({ edgeId: edge.id, question }, { onSuccess: () => setText("") });
   };
 
   return (
@@ -213,10 +217,7 @@ function EdgeFlowView({
           {messages.map((m) => {
             const outgoing = m.from_session === from;
             return (
-              <div
-                key={m.id}
-                className={`flex flex-col ${outgoing ? "items-end" : "items-start"}`}
-              >
+              <div key={m.id} className={`flex flex-col ${outgoing ? "items-end" : "items-start"}`}>
                 <div className="text-[10px] text-gray-400 mb-0.5">
                   {nameOf(m.from_session)} → {nameOf(m.to_session)} ·{" "}
                   {new Date(m.created_at).toLocaleString()}
@@ -260,9 +261,7 @@ function SessionDetail({
   const openTerminal = useOpenSessionTerminal();
   const [openNote, setOpenNote] = useState<string | null>(null);
   const activity =
-    session.description && session.description !== DEFAULT_DESC
-      ? session.description
-      : null;
+    session.description && session.description !== DEFAULT_DESC ? session.description : null;
 
   const handleOpenTerminal = () => {
     setOpenNote(null);
@@ -277,20 +276,22 @@ function SessionDetail({
       <div>
         <div className="flex items-center gap-2 mb-1.5">
           <StatusDot status={session.status} busy={session.busy} />
-          <h2 className="text-gray-900 font-semibold text-[15px] break-all">
-            {session.name}
-          </h2>
+          <h2 className="text-gray-900 font-semibold text-[15px] break-all">{session.name}</h2>
         </div>
         {activity && (
-          <div className="text-xs text-blue-600 bg-blue-50 border border-blue-100 rounded-lg px-2 py-1 mb-1.5 truncate" title={activity}>
+          <div
+            className="text-xs text-blue-600 bg-blue-50 border border-blue-100 rounded-lg px-2 py-1 mb-1.5 truncate"
+            title={activity}
+          >
             正在: {activity}
           </div>
         )}
-        <div className="text-[10px] text-gray-400 font-mono break-all">
-          {session.id}
-        </div>
+        <div className="text-[10px] text-gray-400 font-mono break-all">{session.id}</div>
         {session.project_dir && (
-          <div className="text-[11px] text-gray-500 mt-1 flex items-center gap-1 min-w-0" title={session.project_dir}>
+          <div
+            className="text-[11px] text-gray-500 mt-1 flex items-center gap-1 min-w-0"
+            title={session.project_dir}
+          >
             <FolderOpen size={11} className="flex-shrink-0" />
             <span className="truncate">{session.project_dir}</span>
           </div>
@@ -357,16 +358,9 @@ function SessionDetail({
         ) : (
           <div className="space-y-2">
             {contextEntries.entries.map((e) => (
-              <div
-                key={e.id}
-                className="p-3 rounded-xl bg-gray-50 border border-gray-200"
-              >
-                <div className="text-xs text-gray-800 font-medium">
-                  {e.title}
-                </div>
-                <div className="text-[11px] text-gray-500 mt-1 line-clamp-3">
-                  {e.content}
-                </div>
+              <div key={e.id} className="p-3 rounded-xl bg-gray-50 border border-gray-200">
+                <div className="text-xs text-gray-800 font-medium">{e.title}</div>
+                <div className="text-[11px] text-gray-500 mt-1 line-clamp-3">{e.content}</div>
                 {e.tags && e.tags.length > 0 && (
                   <div className="flex gap-1 mt-1.5 flex-wrap">
                     {e.tags.map((t) => (
@@ -422,4 +416,3 @@ function InitiateConversation({
     </div>
   );
 }
-

@@ -60,7 +60,7 @@ export function createRuntimeAgent(
     extra_env?: string | null;
     instructions?: string | null;
     interval_min?: number | null;
-  }
+  },
 ): RuntimeAgent {
   if (!input.name?.trim()) throw new Error("name is required");
   if (!isRuntimeId(input.runtime)) {
@@ -73,7 +73,7 @@ export function createRuntimeAgent(
         throw new Error("not an object");
       }
     } catch {
-      throw new Error("extra_env must be a JSON object, e.g. {\"FOO\":\"bar\"}");
+      throw new Error('extra_env must be a JSON object, e.g. {"FOO":"bar"}');
     }
   }
   const interval =
@@ -87,7 +87,7 @@ export function createRuntimeAgent(
   const res = db
     .prepare(
       `INSERT INTO runtime_agents (name, runtime, workdir, model, base_url, api_key, extra_env, instructions, interval_min, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.name.trim(),
@@ -100,22 +100,21 @@ export function createRuntimeAgent(
       input.instructions?.trim() || null,
       interval,
       now,
-      now
+      now,
     );
   return getRuntimeAgent(db, Number(res.lastInsertRowid))!;
 }
 
 export function getRuntimeAgent(db: DB, id: number): RuntimeAgent | null {
-  const row = db
-    .prepare(`SELECT * FROM runtime_agents WHERE id = ?`)
-    .get(id) as RuntimeAgentRow | undefined;
+  const row = db.prepare(`SELECT * FROM runtime_agents WHERE id = ?`).get(id) as
+    RuntimeAgentRow | undefined;
   return row ? toAgent(row) : null;
 }
 
 export function listRuntimeAgents(db: DB): RuntimeAgent[] {
-  return (db
-    .prepare(`SELECT * FROM runtime_agents ORDER BY updated_at DESC`)
-    .all() as RuntimeAgentRow[]).map(toAgent);
+  return (
+    db.prepare(`SELECT * FROM runtime_agents ORDER BY updated_at DESC`).all() as RuntimeAgentRow[]
+  ).map(toAgent);
 }
 
 /**
@@ -128,7 +127,7 @@ export function listRuntimeAgentsWithLiveness(db: DB): RuntimeAgent[] {
   const threshold = Date.now() - STALE_AFTER_MS;
   const tagged = db
     .prepare(
-      `SELECT id, last_heartbeat_at, metadata FROM sessions WHERE metadata LIKE '%"agent_id":%'`
+      `SELECT id, last_heartbeat_at, metadata FROM sessions WHERE metadata LIKE '%"agent_id":%'`,
     )
     .all() as { id: string; last_heartbeat_at: string; metadata: string | null }[];
   const byPreset = new Map<number, string[]>(); // preset id -> heartbeats
@@ -172,7 +171,7 @@ export function deleteRuntimeAgent(db: DB, id: number): boolean {
  */
 export function buildRuntimeEnv(
   agent: Pick<RuntimeAgent, "runtime" | "base_url" | "api_key" | "model" | "extra_env" | "id">,
-  baseEnv: NodeJS.ProcessEnv = process.env
+  baseEnv: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...baseEnv };
 
@@ -215,7 +214,9 @@ export const RUNTIME_OPERATOR_PROMPT = [
 ].join("");
 
 /** CLI arguments for the runtime (model / system prompt presets). */
-export function buildRuntimeArgs(agent: Pick<RuntimeAgent, "runtime" | "model" | "instructions">): string[] {
+export function buildRuntimeArgs(
+  agent: Pick<RuntimeAgent, "runtime" | "model" | "instructions">,
+): string[] {
   if (agent.runtime === "claude") {
     const args: string[] = [];
     if (agent.model) args.push("--model", agent.model);
@@ -242,14 +243,16 @@ export function buildRuntimeArgs(agent: Pick<RuntimeAgent, "runtime" | "model" |
 export function startRuntimeAgent(
   db: DB,
   id: number,
-  opts: { platform?: NodeJS.Platform; comspec?: string } = {}
+  opts: { platform?: NodeJS.Platform; comspec?: string } = {},
 ): { started: true } {
   const agent = getRuntimeAgent(db, id);
   if (!agent) throw new Error(`runtime agent not found: ${id}`);
 
   const platform = opts.platform ?? process.platform;
   if (platform !== "win32" && platform !== "darwin") {
-    throw new Error("starting a runtime agent needs Windows (wt/cmd) or macOS (Terminal.app/iTerm2/tmux)");
+    throw new Error(
+      "starting a runtime agent needs Windows (wt/cmd) or macOS (Terminal.app/iTerm2/tmux)",
+    );
   }
   if (agent.workdir && !existsSync(agent.workdir)) {
     throw new Error(`workdir does not exist: ${agent.workdir}`);
@@ -257,8 +260,7 @@ export function startRuntimeAgent(
 
   const settings = getTerminalSettings(db);
   const def = RUNTIMES[agent.runtime];
-  const defaultExe =
-    agent.runtime === "claude" ? settings.claude_path : settings.codex_path;
+  const defaultExe = agent.runtime === "claude" ? settings.claude_path : settings.codex_path;
   const executable = process.env[def.executableEnv] || defaultExe;
   const args = buildRuntimeArgs(agent);
   const command = [cmdQuote(executable), ...args.map(cmdQuote)].join(" ");
@@ -271,7 +273,7 @@ export function startRuntimeAgent(
       title: `muiltchat · ${agent.name}`,
       env: buildRuntimeEnv(agent, cleanTerminalEnv()),
     },
-    opts
+    opts,
   );
   logger.info({ agentId: id, runtime: agent.runtime, name: agent.name }, "runtime agent launched");
   return { started: true };
@@ -285,7 +287,7 @@ export const SCHEDULED_WAKE_PROMPT = "定时唤醒:请按系统指令检查并�
 /** Args for a one-shot headless run (claude -p / codex exec). */
 export function buildHeadlessArgs(
   agent: Pick<RuntimeAgent, "runtime" | "model" | "instructions">,
-  prompt: string = SCHEDULED_WAKE_PROMPT
+  prompt: string = SCHEDULED_WAKE_PROMPT,
 ): string[] {
   if (agent.runtime === "codex") {
     return ["exec", ...(agent.model ? ["--model", agent.model] : []), "--", prompt];
@@ -299,7 +301,7 @@ export function hasActiveRun(db: DB, agentId: number): boolean {
   const rows = db
     .prepare(
       `SELECT id, metadata FROM sessions
-       WHERE status = 'active' AND metadata LIKE ?`
+       WHERE status = 'active' AND metadata LIKE ?`,
     )
     .all(`%"agent_id":${agentId},%`) as { id: string; metadata: string | null }[];
   return rows.some((r) => {
@@ -314,7 +316,7 @@ export function hasActiveRun(db: DB, agentId: number): boolean {
 /** Due when an interval is set and it elapsed since the last scheduled run. */
 export function isDue(
   agent: Pick<RuntimeAgent, "interval_min" | "last_scheduled_run">,
-  now: Date = new Date()
+  now: Date = new Date(),
 ): boolean {
   if (!agent.interval_min || agent.interval_min < 1) return false;
   if (!agent.last_scheduled_run) return true;
@@ -330,7 +332,7 @@ export function isDue(
 export function runScheduledAgent(
   db: DB,
   id: number,
-  opts: { platform?: NodeJS.Platform } = {}
+  opts: { platform?: NodeJS.Platform } = {},
 ): { launched: true } {
   const agent = getRuntimeAgent(db, id);
   if (!agent) throw new Error(`runtime agent not found: ${id}`);
@@ -363,10 +365,7 @@ export function runScheduledAgent(
   });
   child.unref();
 
-  db.prepare(`UPDATE runtime_agents SET last_scheduled_run = ? WHERE id = ?`).run(
-    nowIso(),
-    id
-  );
+  db.prepare(`UPDATE runtime_agents SET last_scheduled_run = ? WHERE id = ?`).run(nowIso(), id);
   logger.info({ agentId: id, name: agent.name }, "scheduled runtime agent run launched");
   return { launched: true };
 }
@@ -377,7 +376,7 @@ export function runScheduledAgent(
  */
 export function tickScheduledAgents(
   db: DB,
-  launcher: (db: DB, id: number) => unknown = runScheduledAgent
+  launcher: (db: DB, id: number) => unknown = runScheduledAgent,
 ): number {
   let launched = 0;
   for (const agent of listRuntimeAgents(db)) {
@@ -388,7 +387,7 @@ export function tickScheduledAgents(
     } catch (err) {
       logger.warn(
         { agentId: agent.id, err: err instanceof Error ? err.message : String(err) },
-        "scheduled run failed"
+        "scheduled run failed",
       );
     }
   }
@@ -396,4 +395,3 @@ export function tickScheduledAgents(
 }
 
 // (auto-wake moved to core/wake/ — see wake/index.ts)
-

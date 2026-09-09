@@ -30,7 +30,7 @@ export type WakeResult = { woke: true; command: string } | { woke: false; reason
 export function wakeSessionForMail(
   db: DB,
   sessionId: string,
-  opts: { dryRun?: boolean; now?: Date; claudeHome?: string } = {}
+  opts: { dryRun?: boolean; now?: Date; claudeHome?: string } = {},
 ): WakeResult {
   if (!getAutoWake(db)) return { woke: false, reason: "auto_wake disabled" };
   if (sessionId === "web-console" || sessionId.startsWith("agent-")) {

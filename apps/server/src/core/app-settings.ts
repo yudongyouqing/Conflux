@@ -20,16 +20,15 @@ const TERMINAL_CHOICES: TerminalChoice[] = [
 ];
 
 export function getSetting(db: DB, key: string): string | null {
-  const row = db
-    .prepare(`SELECT value FROM app_settings WHERE key = ?`)
-    .get(key) as { value: string } | undefined;
+  const row = db.prepare(`SELECT value FROM app_settings WHERE key = ?`).get(key) as
+    { value: string } | undefined;
   return row?.value ?? null;
 }
 
 export function setSetting(db: DB, key: string, value: string): void {
   db.prepare(
     `INSERT INTO app_settings (key, value) VALUES (?, ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
   ).run(key, value);
 }
 
@@ -58,10 +57,7 @@ export function getTerminalSettings(db: DB): TerminalSettings {
 }
 
 /** Validate + persist a partial terminal config, returning the merged result. */
-export function saveTerminalSettings(
-  db: DB,
-  input: Partial<TerminalSettings>
-): TerminalSettings {
+export function saveTerminalSettings(db: DB, input: Partial<TerminalSettings>): TerminalSettings {
   const merged = getTerminalSettings(db);
   if (input.terminal !== undefined) {
     if (!TERMINAL_CHOICES.includes(input.terminal)) {

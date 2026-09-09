@@ -28,7 +28,10 @@ test("getGraph unions sessions and agents, no duplicate agent nodes", () => {
   assert.equal(agentTyped.length, 1, "agent appears exactly once");
   assert.equal(agentTyped[0].type, "agent");
   const sessionTyped = g.nodes.filter((n) => n.type === "session");
-  assert.ok(!sessionTyped.some((n) => n.id.startsWith("agent-")), "agent-% filtered out of session nodes");
+  assert.ok(
+    !sessionTyped.some((n) => n.id.startsWith("agent-")),
+    "agent-% filtered out of session nodes",
+  );
 });
 
 test("getGraph shows active MCP placeholders but hides stale ones", () => {
@@ -46,7 +49,7 @@ test("getGraph shows active MCP placeholders but hides stale ones", () => {
   });
   db.prepare(`UPDATE sessions SET last_heartbeat_at = ? WHERE id = ?`).run(
     new Date(Date.now() - 3600_000).toISOString(),
-    "graph-codex-stale-temp"
+    "graph-codex-stale-temp",
   );
 
   const g = getGraph(db, { status: "all" });
@@ -65,7 +68,7 @@ test("getGraph returns explicit session identity fields", () => {
   });
 
   const node = getGraph(db, { status: "all" }).nodes.find(
-    (candidate) => candidate.id === "graph-explicit-identity"
+    (candidate) => candidate.id === "graph-explicit-identity",
   )!;
   assert.equal(node.runtime, "codex");
   assert.equal(node.identity_source, "mcp");
@@ -81,11 +84,11 @@ test("getGraph normalizes malformed explicit identity columns", () => {
     runtime_pid: 4321,
   });
   db.prepare(
-    `UPDATE sessions SET runtime = ?, identity_source = ?, runtime_pid = ? WHERE id = ?`
+    `UPDATE sessions SET runtime = ?, identity_source = ?, runtime_pid = ? WHERE id = ?`,
   ).run("unknown-runtime", "unknown-source", 0, "graph-malformed-identity");
 
   const node = getGraph(db, { status: "all" }).nodes.find(
-    (candidate) => candidate.id === "graph-malformed-identity"
+    (candidate) => candidate.id === "graph-malformed-identity",
   )!;
   assert.equal(node.runtime, null);
   assert.equal(node.identity_source, null);
@@ -121,7 +124,13 @@ test("runtime-agent preset name is a fallback, never masks the session's own nam
     id: "spawn-renamed",
     name: "test2",
     description: "working",
-    metadata: { source: "claude-hook", agent_id: ra.id, runtime: "claude", named: true, custom_title: true },
+    metadata: {
+      source: "claude-hook",
+      agent_id: ra.id,
+      runtime: "claude",
+      named: true,
+      custom_title: true,
+    },
   });
   const g = getGraph(db, { status: "all" });
   const idle = g.nodes.find((n) => n.id === "spawn-idle")!;
@@ -130,7 +139,6 @@ test("runtime-agent preset name is a fallback, never masks the session's own nam
   assert.equal(idle.agent_id, ra.id);
   assert.equal(renamed.name, "test2", "custom title / prompt name wins over the preset name");
 });
-
 
 test("agent card skills surface on graph nodes", () => {
   registerSession(db, { id: "card-a", name: "card-a" });
@@ -145,7 +153,11 @@ test("agent card skills surface on graph nodes", () => {
 test("channels: a reply stays on the channel, no reverse edge is created", () => {
   registerSession(db, { id: "dl-web", name: "web" });
   registerSession(db, { id: "dl-test2", name: "test2" });
-  const m = askSession(db, { from_session: "dl-web", to_session: "dl-test2", question: "问一下test1他在做什么" });
+  const m = askSession(db, {
+    from_session: "dl-web",
+    to_session: "dl-test2",
+    question: "问一下test1他在做什么",
+  });
   replyAsk(db, m.id, "dl-test2", "test1在讨论mac端接入");
 
   const g = getGraph(db, { status: "all" });
@@ -156,7 +168,7 @@ test("channels: a reply stays on the channel, no reverse edge is created", () =>
   assert.equal(
     g.edges.find((e) => e.from === "dl-test2" && e.to === "dl-web"),
     undefined,
-    "a reply never creates a reverse channel"
+    "a reply never creates a reverse channel",
   );
   // the exchange history lives on the channel
   assert.equal(listEdgeMessages(db, channel.id).length, 1);
@@ -168,16 +180,19 @@ test("collapseReplyEdges removes question-less edges, keeps real channels", () =
   askSession(db, { from_session: "cr-a", to_session: "cr-b", question: "real channel" });
   // a reply-created reverse edge (legacy bookkeeping): no question ever traveled b→a
   db.prepare(
-    `INSERT INTO edges (from_session, to_session, weight, last_interact_at) VALUES ('cr-b', 'cr-a', 1, '2026-01-01T00:00:00Z')`
+    `INSERT INTO edges (from_session, to_session, weight, last_interact_at) VALUES ('cr-b', 'cr-a', 1, '2026-01-01T00:00:00Z')`,
   ).run();
 
   const removed = collapseReplyEdges(db);
   assert.ok(removed >= 1);
   const g = getGraph(db, { status: "all" });
-  assert.ok(g.edges.some((e) => e.from === "cr-a" && e.to === "cr-b"), "real channel kept");
+  assert.ok(
+    g.edges.some((e) => e.from === "cr-a" && e.to === "cr-b"),
+    "real channel kept",
+  );
   assert.equal(
     g.edges.find((e) => e.from === "cr-b" && e.to === "cr-a"),
     undefined,
-    "reply-only reverse edge collapsed"
+    "reply-only reverse edge collapsed",
   );
 });

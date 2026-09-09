@@ -34,7 +34,7 @@ export function createAgent(db: DB, input: CreateAgentInput): Agent {
   const res = db
     .prepare(
       `INSERT INTO agents (name, system_prompt, model_config, description, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.name,
@@ -42,7 +42,7 @@ export function createAgent(db: DB, input: CreateAgentInput): Agent {
       JSON.stringify(input.model_config),
       input.description ?? null,
       now,
-      now
+      now,
     );
   const agent = getAgent(db, Number(res.lastInsertRowid))!;
   // Register as a session so the agent is visible in the graph and can
@@ -57,16 +57,12 @@ export function createAgent(db: DB, input: CreateAgentInput): Agent {
 }
 
 export function getAgent(db: DB, id: number): Agent | null {
-  const row = db.prepare(`SELECT * FROM agents WHERE id = ?`).get(id) as
-    | AgentRow
-    | undefined;
+  const row = db.prepare(`SELECT * FROM agents WHERE id = ?`).get(id) as AgentRow | undefined;
   return row ? toAgent(row) : null;
 }
 
 export function listAgents(db: DB): Agent[] {
-  const rows = db
-    .prepare(`SELECT * FROM agents ORDER BY updated_at DESC`)
-    .all() as AgentRow[];
+  const rows = db.prepare(`SELECT * FROM agents ORDER BY updated_at DESC`).all() as AgentRow[];
   return rows.map(toAgent);
 }
 
@@ -88,14 +84,14 @@ export function updateAgent(db: DB, id: number, input: UpdateAgentInput): Agent 
        model_config = ?,
        description = ?,
        updated_at = ?
-     WHERE id = ?`
+     WHERE id = ?`,
   ).run(
     input.name ?? existing.name,
     input.system_prompt ?? existing.system_prompt,
     input.model_config ? JSON.stringify(input.model_config) : JSON.stringify(existing.model_config),
     input.description !== undefined ? (input.description ?? null) : existing.description,
     now,
-    id
+    id,
   );
   return getAgent(db, id);
 }

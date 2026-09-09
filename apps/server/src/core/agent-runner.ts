@@ -30,7 +30,7 @@ export type AgentStreamEvent =
 export async function* runAgentChat(
   db: DB,
   agent: Agent,
-  history: { role: "user" | "assistant"; content: string }[]
+  history: { role: "user" | "assistant"; content: string }[],
 ): AsyncGenerator<AgentStreamEvent, void, unknown> {
   // Register agent as a session so it appears in the graph and can
   // participate in cross-session communication.
@@ -53,14 +53,11 @@ export async function* runAgentChat(
 
   logger.debug(
     { agentId: agent.id, provider: config.provider, model: config.model },
-    "agent chat starting"
+    "agent chat starting",
   );
 
   const { streamText, stepCountIs } = await import("ai");
-  const [model, tools] = await Promise.all([
-    resolveModel(config),
-    defineTools(db, agentSessionId),
-  ]);
+  const [model, tools] = await Promise.all([resolveModel(config), defineTools(db, agentSessionId)]);
 
   const result = streamText({
     model,
@@ -150,7 +147,7 @@ async function defineTools(db: DB, sessionId: string): Promise<ToolSet> {
             session_id,
             tags,
             limit: limit ?? 20,
-          })
+          }),
         ),
     }),
     ask_session: tool({
@@ -171,8 +168,7 @@ async function defineTools(db: DB, sessionId: string): Promise<ToolSet> {
         }),
     }),
     check_inbox: tool({
-      description:
-        "Check if other sessions have asked you questions that are pending a reply.",
+      description: "Check if other sessions have asked you questions that are pending a reply.",
       inputSchema: z.object({}),
       execute: async () => safe(() => checkInbox(db, sessionId)),
     }),

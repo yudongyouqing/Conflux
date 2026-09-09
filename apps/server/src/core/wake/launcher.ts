@@ -24,9 +24,7 @@ export interface LaunchRequest {
   onSpawned?: (pid: number | undefined) => void;
 }
 
-export type LaunchResult =
-  | { ok: true; command: string }
-  | { ok: false; error: string };
+export type LaunchResult = { ok: true; command: string } | { ok: false; error: string };
 
 export function launchWakeRun(req: LaunchRequest): LaunchResult {
   if (req.dryRun) return { ok: true, command: req.command };
@@ -77,7 +75,7 @@ export function pinCodexDescendants(db: DB, launcherPid: number, sessionId: stri
     "while((Get-Date) -lt $deadline -and $all.Count -eq 0){",
     "  $frontier=@(LAUNCHER_PID)",
     "  foreach($i in 1..6){",
-    "    $kids=@($frontier | ForEach-Object { Get-CimInstance Win32_Process -Filter \"ParentProcessId=$_\" })",
+    '    $kids=@($frontier | ForEach-Object { Get-CimInstance Win32_Process -Filter "ParentProcessId=$_" })',
     "    if($kids.Count -eq 0){ break }",
     "$all+=@($kids | Where-Object { __RUNTIME_MATCH__ })",
     "    $frontier=@($kids.ProcessId)",
@@ -102,6 +100,6 @@ export function pinCodexDescendants(db: DB, launcherPid: number, sessionId: stri
         for (const pid of pids) setSetting(db, `codex-current:${pid}`, sessionId);
         logger.info({ sessionId, pids }, "codex wake pid(s) pinned");
       }
-    }
+    },
   );
 }

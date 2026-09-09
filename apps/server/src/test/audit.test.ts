@@ -7,9 +7,27 @@ const { db, cleanup } = makeDb();
 after(cleanup);
 
 test("logAudit stores entries queryable by filters", () => {
-  logAudit(db, { caller_session: "s1", interface: "mcp", action: "ask_session", args: { to: "s2" }, result: { id: 1 } });
-  logAudit(db, { caller_session: "s2", interface: "http", action: "publish_context", args: { title: "t" }, result: { id: 2 } });
-  logAudit(db, { caller_session: "s1", interface: "cli", action: "ask_session", args: { to: "s3" }, result: { id: 3 } });
+  logAudit(db, {
+    caller_session: "s1",
+    interface: "mcp",
+    action: "ask_session",
+    args: { to: "s2" },
+    result: { id: 1 },
+  });
+  logAudit(db, {
+    caller_session: "s2",
+    interface: "http",
+    action: "publish_context",
+    args: { title: "t" },
+    result: { id: 2 },
+  });
+  logAudit(db, {
+    caller_session: "s1",
+    interface: "cli",
+    action: "ask_session",
+    args: { to: "s3" },
+    result: { id: 3 },
+  });
 
   const byAction = queryAudit(db, { action: "ask_session" });
   assert.equal(byAction.length, 2);
@@ -40,4 +58,3 @@ test("oversized args get truncated with marker", () => {
   assert.equal(parsed._truncated, true);
   assert.ok(parsed.length > 8 * 1024);
 });
-

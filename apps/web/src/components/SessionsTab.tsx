@@ -56,9 +56,7 @@ export function SessionsTab({ onSelectSession, selectedSessionId }: SessionsTabP
 
   if (isLoading)
     return (
-      <div className="flex items-center justify-center h-full text-gray-400 text-sm">
-        加载会话…
-      </div>
+      <div className="flex items-center justify-center h-full text-gray-400 text-sm">加载会话…</div>
     );
   if (error)
     return (
@@ -87,7 +85,10 @@ export function SessionsTab({ onSelectSession, selectedSessionId }: SessionsTabP
         <div className="p-3 space-y-4">
           {groups.map((g) => (
             <div key={g.dir}>
-              <div className="text-[11px] font-medium text-gray-500 truncate mb-1.5 px-1" title={g.dir}>
+              <div
+                className="text-[11px] font-medium text-gray-500 truncate mb-1.5 px-1"
+                title={g.dir}
+              >
                 {g.dir}
               </div>
               <div className="space-y-1">
@@ -113,7 +114,10 @@ export function SessionsTab({ onSelectSession, selectedSessionId }: SessionsTabP
                         </span>
                       </div>
                       {s.description && s.description !== "Claude Code session (hook)" && (
-                        <div className="text-[11px] text-gray-500 truncate mt-0.5" title={s.description}>
+                        <div
+                          className="text-[11px] text-gray-500 truncate mt-0.5"
+                          title={s.description}
+                        >
                           {s.description}
                         </div>
                       )}

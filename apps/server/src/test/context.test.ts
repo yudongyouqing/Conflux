@@ -64,4 +64,3 @@ test("listMyContext returns only own entries", () => {
   assert.ok(mine.every((e) => e.session_id === "owner"));
   assert.ok(mine.some((e) => e.title === "mine"));
 });
-

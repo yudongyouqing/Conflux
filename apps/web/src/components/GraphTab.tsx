@@ -80,12 +80,14 @@ export function GraphTab({
       } catch {
         return {};
       }
-    })()
+    })(),
   );
 
   // Reframe when the composition itself changes — dagre/grid/rows swap
   // positions wholesale and the initial fitView never reruns on its own.
-  const rfInstance = useRef<{ fitView: (opts?: { padding?: number; duration?: number }) => void } | null>(null);
+  const rfInstance = useRef<{
+    fitView: (opts?: { padding?: number; duration?: number }) => void;
+  } | null>(null);
   useEffect(() => {
     const t = setTimeout(() => rfInstance.current?.fitView({ padding: 0.2, duration: 400 }), 350);
     return () => clearTimeout(t);
@@ -102,15 +104,14 @@ export function GraphTab({
       setEdges((eds) =>
         eds.map((e) => {
           const d = e.data as
-            | { offsetKey?: string; offset?: number; autoOffset?: number }
-            | undefined;
+            { offsetKey?: string; offset?: number; autoOffset?: number } | undefined;
           if (d?.offsetKey !== key) return e;
           const auto = d.autoOffset ?? 0;
           return { ...e, data: { ...d, offset: offset === null ? auto : Math.round(offset) } };
-        })
+        }),
       );
     },
-    [setEdges]
+    [setEdges],
   );
 
   // Sync polled data into state. Node positions the user dragged to are
@@ -126,12 +127,8 @@ export function GraphTab({
   useEffect(() => {
     if (!data) return;
 
-    const live = data.nodes.filter(
-      (n) => n.status === "active" || n.type === "agent"
-    );
-    const offline = data.nodes.filter(
-      (n) => n.status !== "active" && n.type === "session"
-    );
+    const live = data.nodes.filter((n) => n.status === "active" || n.type === "agent");
+    const offline = data.nodes.filter((n) => n.status !== "active" && n.type === "session");
 
     const toSessionNode = (n: (typeof data.nodes)[number]): Node<SessionNodeData> => ({
       id: n.id,
@@ -262,7 +259,7 @@ export function GraphTab({
       const allNodes = [...live, ...offline];
       const { nodes: layouted } = layoutGraph(
         allNodes.map((n) => toSessionNode(n) as unknown as Node),
-        rawEdges as never
+        rawEdges as never,
       );
       outNodes = layouted;
     } else {
@@ -273,7 +270,7 @@ export function GraphTab({
         .map((e, i) => mkEdge(e, i));
       const { nodes: layouted } = layoutGraph(
         live.map((n) => toSessionNode(n) as unknown as Node),
-        rawEdges as never
+        rawEdges as never,
       );
       outNodes = layouted;
     }
@@ -343,7 +340,11 @@ export function GraphTab({
           },
         };
       }
-      if (!selKey && selectedSessionId && (d.from === selectedSessionId || d.to === selectedSessionId)) {
+      if (
+        !selKey &&
+        selectedSessionId &&
+        (d.from === selectedSessionId || d.to === selectedSessionId)
+      ) {
         return {
           ...e,
           style: { ...e.style, stroke: "#3b82f6" },
@@ -372,7 +373,16 @@ export function GraphTab({
       }));
     });
     setEdges(styledEdges);
-  }, [data, selectedSessionId, selectedEdge, viewMode, orphanExpanded, handleOffsetChange, setNodes, setEdges]);
+  }, [
+    data,
+    selectedSessionId,
+    selectedEdge,
+    viewMode,
+    orphanExpanded,
+    handleOffsetChange,
+    setNodes,
+    setEdges,
+  ]);
 
   const onNodeClick: NodeMouseHandler = useCallback(
     (_, node) => {
@@ -383,7 +393,7 @@ export function GraphTab({
       if (node.type === "dirLabel") return;
       onSelectSession(node.id);
     },
-    [onSelectSession]
+    [onSelectSession],
   );
 
   const onEdgeClick: EdgeMouseHandler = useCallback(
@@ -393,7 +403,7 @@ export function GraphTab({
         onSelectEdge(d);
       }
     },
-    [onSelectEdge]
+    [onSelectEdge],
   );
 
   if (isLoading)
@@ -414,8 +424,7 @@ export function GraphTab({
     return (
       <div className="flex items-center justify-center h-full text-gray-400 text-sm text-center px-8">
         暂无会话。
-        <br />
-        用 CLI 注册一个会话:
+        <br />用 CLI 注册一个会话:
         <code className="text-gray-500 ml-1 bg-gray-100 px-1 rounded">
           muiltchat sessions register --name "test"
         </code>
@@ -450,9 +459,7 @@ export function GraphTab({
               key={m}
               onClick={() => setViewMode(m)}
               className={`px-3 py-1.5 transition-colors ${
-                viewMode === m
-                  ? "bg-blue-600 text-white"
-                  : "text-gray-600 hover:bg-gray-50"
+                viewMode === m ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-50"
               }`}
             >
               {VIEW_LABELS[m]}
@@ -460,15 +467,15 @@ export function GraphTab({
           ))}
         </div>
       </Panel>
-{/* no edges in view: say WHY instead of looking like a broken graph */}
-{edges.length === 0 && nodes.length > 0 && (
+      {/* no edges in view: say WHY instead of looking like a broken graph */}
+      {edges.length === 0 && nodes.length > 0 && (
         <Panel position="bottom-center" className="!mb-4">
           <div className="text-[11px] text-gray-400 bg-white/85 border border-gray-100 rounded-full px-3 py-1 shadow-sm">
             当前视图暂无会话间消息通道 —— 发起一次对话即可建立连线
           </div>
         </Panel>
       )}
-      <Background color="#cbd5e1"  gap={24} />
+      <Background color="#cbd5e1" gap={24} />
       <Controls className="!bg-white !border !border-gray-200 !rounded-lg !shadow-sm [&_button]:!bg-white [&_button]:!border-gray-200 [&_button]:!text-gray-600 [&_button:hover]:!bg-gray-50" />
     </ReactFlow>
   );
