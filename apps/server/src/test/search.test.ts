@@ -10,9 +10,24 @@ after(cleanup);
 registerSession(db, { id: "a", name: "a" });
 registerSession(db, { id: "b", name: "b" });
 
-publishContext(db, { session_id: "a", title: "auth refactor", content: "moving auth to JWT tokens", tags: ["auth"] });
-publishContext(db, { session_id: "b", title: "deploy notes", content: "docker compose setup", tags: ["ops"] });
-publishContext(db, { session_id: "b", title: "api schema", content: "GET /api/user returns fields", tags: ["api"] });
+publishContext(db, {
+  session_id: "a",
+  title: "auth refactor",
+  content: "moving auth to JWT tokens",
+  tags: ["auth"],
+});
+publishContext(db, {
+  session_id: "b",
+  title: "deploy notes",
+  content: "docker compose setup",
+  tags: ["ops"],
+});
+publishContext(db, {
+  session_id: "b",
+  title: "api schema",
+  content: "GET /api/user returns fields",
+  tags: ["api"],
+});
 
 test("FTS query matches by content keyword", () => {
   const hits = queryContext(db, { query: "docker" });
@@ -42,4 +57,3 @@ test("empty query returns recent entries up to limit", () => {
   const hits = queryContext(db, { limit: 2 });
   assert.equal(hits.length, 2);
 });
-

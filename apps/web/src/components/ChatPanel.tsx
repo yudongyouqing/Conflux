@@ -63,19 +63,25 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
           prev.map((m) =>
             m.kind === "chat" && m.role === "assistant" && m.streaming
               ? { ...m, streaming: false }
-              : m
-          )
+              : m,
+          ),
         );
       },
       (msg) => {
         setError(msg);
         setMessages((prev) => {
           const last = prev[prev.length - 1];
-          if (last && last.kind === "chat" && last.role === "assistant" && last.streaming && !receivedAny) {
+          if (
+            last &&
+            last.kind === "chat" &&
+            last.role === "assistant" &&
+            last.streaming &&
+            !receivedAny
+          ) {
             return prev.slice(0, -1);
           }
           return prev.map((m) =>
-            m.kind === "chat" && m.streaming ? { ...m, streaming: false } : m
+            m.kind === "chat" && m.streaming ? { ...m, streaming: false } : m,
           );
         });
       },
@@ -85,9 +91,9 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
       },
       (name, result) => {
         setMessages((prev) => {
-          const idx = [...prev].reverse().findIndex(
-            (m) => m.kind === "tool" && m.name === name && m.loading
-          );
+          const idx = [...prev]
+            .reverse()
+            .findIndex((m) => m.kind === "tool" && m.name === name && m.loading);
           if (idx === -1) return prev;
           const realIdx = prev.length - 1 - idx;
           const target = prev[realIdx] as Extract<DisplayMessage, { kind: "tool" }>;
@@ -142,9 +148,24 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
           )}
           {messages.map((msg, i) => {
             if (msg.kind === "tool") {
-              return <ToolCard key={i} name={msg.name} input={msg.input} result={msg.result} loading={msg.loading} />;
+              return (
+                <ToolCard
+                  key={i}
+                  name={msg.name}
+                  input={msg.input}
+                  result={msg.result}
+                  loading={msg.loading}
+                />
+              );
             }
-            return <MessageBubble key={i} role={msg.role} content={msg.content} streaming={msg.streaming} />;
+            return (
+              <MessageBubble
+                key={i}
+                role={msg.role}
+                content={msg.content}
+                streaming={msg.streaming}
+              />
+            );
           })}
           {error && (
             <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl p-3">
@@ -194,8 +215,14 @@ function MessageBubble({
   if (!content && streaming) {
     return (
       <div className={`flex gap-2.5 ${isUser ? "flex-row-reverse" : ""}`}>
-        <div className={`flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center ${isUser ? "bg-blue-600" : "bg-gray-200"}`}>
-          {isUser ? <User size={13} className="text-white" /> : <Bot size={13} className="text-gray-600" />}
+        <div
+          className={`flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center ${isUser ? "bg-blue-600" : "bg-gray-200"}`}
+        >
+          {isUser ? (
+            <User size={13} className="text-white" />
+          ) : (
+            <Bot size={13} className="text-gray-600" />
+          )}
         </div>
         <div className="px-4 py-2.5 rounded-xl bg-white border border-gray-200 shadow-sm">
           <Loader2 size={14} className="text-gray-400 animate-spin" />
@@ -206,14 +233,18 @@ function MessageBubble({
 
   return (
     <div className={`flex gap-2.5 ${isUser ? "flex-row-reverse" : ""}`}>
-      <div className={`flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center ${isUser ? "bg-blue-600" : "bg-gray-200"}`}>
-        {isUser ? <User size={13} className="text-white" /> : <Bot size={13} className="text-gray-600" />}
+      <div
+        className={`flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center ${isUser ? "bg-blue-600" : "bg-gray-200"}`}
+      >
+        {isUser ? (
+          <User size={13} className="text-white" />
+        ) : (
+          <Bot size={13} className="text-gray-600" />
+        )}
       </div>
       <div
         className={`max-w-[75%] px-4 py-2.5 rounded-xl text-sm whitespace-pre-wrap shadow-sm ${
-          isUser
-            ? "bg-blue-600 text-white"
-            : "bg-white text-gray-800 border border-gray-200"
+          isUser ? "bg-blue-600 text-white" : "bg-white text-gray-800 border border-gray-200"
         }`}
       >
         {content}
@@ -249,7 +280,9 @@ function ToolCard({
     <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-amber-50/60 border border-amber-200/60 text-xs mx-10">
       <Wrench size={11} className="text-amber-600 flex-shrink-0" />
       <span className="text-gray-700 font-mono font-medium">{name}</span>
-      <span className="text-gray-400 truncate">{inputStr.length > 80 ? inputStr.slice(0, 80) + "..." : inputStr}</span>
+      <span className="text-gray-400 truncate">
+        {inputStr.length > 80 ? inputStr.slice(0, 80) + "..." : inputStr}
+      </span>
       {loading && <Loader2 size={10} className="animate-spin text-gray-400 flex-shrink-0" />}
       {!loading && resultSummary && (
         <span className="text-emerald-600 flex-shrink-0">{resultSummary}</span>

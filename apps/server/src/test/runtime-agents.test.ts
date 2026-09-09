@@ -11,8 +11,8 @@ import {
   tickScheduledAgents,
   createRuntimeAgent,
   listRuntimeAgentsWithLiveness,
-  wakeOfflineSession,
 } from "../core/runtime-agents.js";
+import { wakeSessionForMail } from "../core/wake/index.js";
 import { getAutoWake, setAutoWake, setSetting } from "../core/app-settings.js";
 import { registerSession, mergeSessionMeta } from "../core/sessions.js";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
@@ -27,7 +27,11 @@ const makeTranscript = (sessionId: string, projectDir: string) => {
   writeFileSync(join(dir, `${sessionId}.jsonl`), '{"type":"user","message":"hi"}' + "\n", "utf8");
 };
 after(() => {
-  try { rmSync(FAKE_HOME, { recursive: true, force: true }); } catch {}
+  try {
+    rmSync(FAKE_HOME, { recursive: true, force: true });
+  } catch {
+    // temp dir disposal is best-effort on Windows file locks
+  }
 });
 import { makeDb } from "./helpers.js";
 
@@ -55,10 +59,10 @@ test("user instructions extend, not replace, the operator prompt", () => {
 });
 
 test("codex args stay model-only (no system-prompt injection)", () => {
-  assert.deepEqual(
-    buildRuntimeArgs({ runtime: "codex", model: "gpt-5", instructions: "x" }),
-    ["--model", "gpt-5"]
-  );
+  assert.deepEqual(buildRuntimeArgs({ runtime: "codex", model: "gpt-5", instructions: "x" }), [
+    "--model",
+    "gpt-5",
+  ]);
 });
 
 test("buildRuntimeEnv tags the agent id for MCP-side session linking", () => {
@@ -85,12 +89,12 @@ test("isDue: interval gating math", () => {
   assert.equal(
     isDue({ interval_min: 30, last_scheduled_run: "2026-08-16T09:40:00Z" }, now),
     false,
-    "20min of 30min elapsed → not due"
+    "20min of 30min elapsed → not due",
   );
   assert.equal(
     isDue({ interval_min: 30, last_scheduled_run: "2026-08-16T09:29:00Z" }, now),
     true,
-    "31min elapsed → due"
+    "31min elapsed → due",
   );
 });
 
@@ -106,11 +110,9 @@ test("buildHeadlessArgs: one-shot prompts per runtime", () => {
 });
 
 test("createRuntimeAgent validates the interval range", () => {
+  assert.throws(() => createRuntimeAgent(db, { name: "bad", runtime: "claude", interval_min: 0 }));
   assert.throws(() =>
-    createRuntimeAgent(db, { name: "bad", runtime: "claude", interval_min: 0 })
-  );
-  assert.throws(() =>
-    createRuntimeAgent(db, { name: "bad", runtime: "claude", interval_min: 20000 })
+    createRuntimeAgent(db, { name: "bad", runtime: "claude", interval_min: 20000 }),
   );
   const ok = createRuntimeAgent(db, { name: "patrol-test", runtime: "claude", interval_min: 60 });
   assert.equal(ok.interval_min, 60);
@@ -167,7 +169,7 @@ test("listRuntimeAgentsWithLiveness derives live from spawned session heartbeats
   mergeSessionMeta(db, "spawn-b1", { agent_id: b.id });
   db.prepare(`UPDATE sessions SET last_heartbeat_at = ? WHERE id = ?`).run(
     new Date(Date.now() - 10 * 60 * 1000).toISOString(),
-    "spawn-b1"
+    "spawn-b1",
   );
 
   const agents = listRuntimeAgentsWithLiveness(db);
@@ -181,23 +183,44 @@ test("listRuntimeAgentsWithLiveness derives live from spawned session heartbeats
 
 // ---- auto-answer wake ----
 
-test("wakeOfflineSession: guards, dedup and command shape", () => {
+test("wakeSessionForMail: guards, dedup and command shape", () => {
   // not a CLI conversation
   registerSession(db, { id: "web-console", name: "Web 控制台" });
-  assert.equal(wakeOfflineSession(db, "web-console", { dryRun: true }).woke, false);
-  assert.deepEqual(
-    wakeOfflineSession(db, "agent-1", { dryRun: true }),
-    { woke: false, reason: "not a CLI conversation" }
-  );
+  assert.equal(wakeSessionForMail(db, "web-console", { dryRun: true }).woke, false);
+  assert.deepEqual(wakeSessionForMail(db, "agent-1", { dryRun: true }), {
+    woke: false,
+    reason: "not a CLI conversation",
+  });
 
-  // active sessions rely on the notice hook instead
+  // active + BUSY → the running turn will surface the mail itself
+  registerSession(db, {
+    id: "wake-busy",
+    name: "busy",
+    description: "d",
+    metadata: { source: "claude-hook", named: true, claude_pid: 424242, busy: true },
+  });
+  assert.deepEqual(wakeSessionForMail(db, "wake-busy", { dryRun: true }), {
+    woke: false,
+    reason: "busy — the running turn will surface the mail",
+  });
+
+  // active + IDLE → the open TUI holds the thread lock, so a FRESH
+  // headless run answers (digest-seeded; resume is codex-impossible here)
   registerSession(db, {
     id: "wake-alive",
     name: "alive",
     description: "d",
     metadata: { source: "claude-hook", named: true, claude_pid: 424242 },
   });
-  assert.equal(wakeOfflineSession(db, "wake-alive", { dryRun: true }).woke, false);
+  makeTranscript("wake-alive", "C:/Project folder/项目/muiltchat");
+  const idle = wakeSessionForMail(db, "wake-alive", { dryRun: true, claudeHome: FAKE_HOME });
+  assert.equal(idle.woke, true);
+  if (idle.woke) {
+    // claude has NO thread lock, so idle wake resumes the real conversation
+    // (full context, reply in actual history) whenever a transcript exists
+    assert.ok(idle.command.includes("--resume wake-alive"), "resumes the real conversation");
+    assert.ok(idle.command.trimEnd().endsWith("-p"), "headless prompt via stdin");
+  }
 
   // offline claude session → dry-run returns the full wake command
   registerSession(db, {
@@ -208,25 +231,55 @@ test("wakeOfflineSession: guards, dedup and command shape", () => {
   });
   db.prepare(`UPDATE sessions SET status = 'stale' WHERE id = 'wake-dead'`).run();
   assert.deepEqual(
-    wakeOfflineSession(db, "wake-dead", { dryRun: true }),
+    wakeSessionForMail(db, "wake-dead", { dryRun: true }),
     { woke: false, reason: "no transcript (zero-turn conversation)" },
-    "no transcript → cannot resume"
+    "no transcript → cannot resume",
   );
   makeTranscript("wake-dead", "C:/Project folder/项目/muiltchat");
-  const w = wakeOfflineSession(db, "wake-dead", { dryRun: true, claudeHome: FAKE_HOME });
+  const w = wakeSessionForMail(db, "wake-dead", { dryRun: true, claudeHome: FAKE_HOME });
   assert.equal(w.woke, true);
   if (w.woke) {
     assert.ok(w.command.includes("--resume wake-dead"), "resumes the conversation");
-    assert.ok(w.command.includes("-p "), "headless wake prompt");
+    assert.ok(w.command.trimEnd().endsWith("-p"), "headless prompt via stdin");
   }
 
   // global opt-out
   setAutoWake(db, false);
-  assert.equal(wakeOfflineSession(db, "wake-dead", { dryRun: true }).woke, false);
+  assert.equal(wakeSessionForMail(db, "wake-dead", { dryRun: true }).woke, false);
   setAutoWake(db, true);
 });
 
-test("wakeOfflineSession dedups within the window", () => {
+test("wakeSessionForMail: codex wakes headlessly via exec resume", () => {
+  // no rollout binding → cannot resume
+  registerSession(db, {
+    id: "wake-codex-unbound",
+    name: "cu",
+    description: "d",
+    metadata: { runtime: "codex", runtime_pid: 313131 },
+  });
+  db.prepare(`UPDATE sessions SET status = 'stale' WHERE id = 'wake-codex-unbound'`).run();
+  assert.deepEqual(wakeSessionForMail(db, "wake-codex-unbound", { dryRun: true }), {
+    woke: false,
+    reason: "no codex_session_id (rollout binding missing)",
+  });
+
+  // bound uuid → codex exec resume command (no transcript requirement)
+  registerSession(db, {
+    id: "wake-codex",
+    name: "cw",
+    description: "d",
+    metadata: { runtime: "codex", runtime_pid: 323232, codex_session_id: "01c0d3x-uuid" },
+  });
+  db.prepare(`UPDATE sessions SET status = 'stale' WHERE id = 'wake-codex'`).run();
+  const w = wakeSessionForMail(db, "wake-codex", { dryRun: true });
+  assert.equal(w.woke, true);
+  if (w.woke) {
+    assert.ok(w.command.includes("exec resume 01c0d3x-uuid"), "resumes the codex conversation");
+    assert.ok(!w.command.includes("--resume "), "not the claude resume flag");
+  }
+});
+
+test("wakeSessionForMail dedups within the window", () => {
   registerSession(db, {
     id: "wake-dedup",
     name: "dd",
@@ -237,21 +290,21 @@ test("wakeOfflineSession dedups within the window", () => {
   makeTranscript("wake-dedup", "C:/Project folder/项目/muiltchat");
   // dryRun is a pure preview (no side effects), so simulate the dedup key a
   // real wake would have stamped
-  const first = wakeOfflineSession(db, "wake-dedup", {
+  const first = wakeSessionForMail(db, "wake-dedup", {
     dryRun: true,
     now: new Date("2026-08-16T11:59:00Z"),
     claudeHome: FAKE_HOME,
   });
   assert.equal(first.woke, true, "no in-flight wake → wakeable");
   setSetting(db, "auto-wake:wake-dedup", "2026-08-16T12:00:00Z");
-  const second = wakeOfflineSession(db, "wake-dedup", {
+  const second = wakeSessionForMail(db, "wake-dedup", {
     dryRun: true,
     now: new Date("2026-08-16T12:01:00Z"),
     claudeHome: FAKE_HOME,
   });
   assert.deepEqual(second, { woke: false, reason: "wake already in flight" });
   // past the dedup window it may wake again
-  const third = wakeOfflineSession(db, "wake-dedup", {
+  const third = wakeSessionForMail(db, "wake-dedup", {
     dryRun: true,
     now: new Date("2026-08-16T12:05:00Z"),
     claudeHome: FAKE_HOME,

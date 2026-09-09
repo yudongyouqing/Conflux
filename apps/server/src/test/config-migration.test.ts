@@ -61,7 +61,7 @@ function seedLegacyDir(root: string): string {
 
 function readMarker(destination: string): MigrationMarker {
   return JSON.parse(
-    readFileSync(join(destination, MIGRATION_MARKER_FILENAME), "utf8")
+    readFileSync(join(destination, MIGRATION_MARKER_FILENAME), "utf8"),
   ) as MigrationMarker;
 }
 
@@ -82,31 +82,25 @@ test("resolves explicit, Conflux, legacy, project, and global data homes in orde
       CLAUDE_PROJECT_DIR: project,
     };
 
-    assert.equal(
-      resolveDataHome({ override: explicit, env, homeDir: home }),
-      resolve(explicit)
-    );
-    assert.equal(
-      resolveDataHome({ env, homeDir: home }),
-      resolve(conflux)
-    );
+    assert.equal(resolveDataHome({ override: explicit, env, homeDir: home }), resolve(explicit));
+    assert.equal(resolveDataHome({ env, homeDir: home }), resolve(conflux));
     assert.equal(
       resolveDataHome({ env: { MUILTCHAT_HOME: legacy }, homeDir: home }),
-      resolve(legacy)
+      resolve(legacy),
     );
     assert.equal(
       resolveDataHome({
         env: { CLAUDE_PROJECT_DIR: project },
         homeDir: home,
       }),
-      resolve(projectData)
+      resolve(projectData),
     );
     assert.equal(
       resolveDataHome({
         env: { CLAUDE_PROJECT_DIR: join(root, "missing-project") },
         homeDir: home,
       }),
-      resolve(join(home, ".muiltchat"))
+      resolve(join(home, ".muiltchat")),
     );
   } finally {
     removeTempDir(root);
@@ -128,7 +122,7 @@ test("resolveConfig honors CONFLUX_HOME before the legacy environment", () => {
         const config = resolveConfig("global");
         assert.equal(config.dataDir, resolve(conflux));
         assert.equal(config.dbPath, join(resolve(conflux), "data.db"));
-      }
+      },
     );
   } finally {
     removeTempDir(root);
@@ -185,7 +179,7 @@ test("migrateDataDir checkpoints before copying and preserves the legacy source"
     for (const file of ["data.db", "data.db-wal", "data.db-shm"]) {
       assert.equal(
         readFileSync(join(destination, file), "utf8"),
-        readFileSync(join(source, file), "utf8")
+        readFileSync(join(source, file), "utf8"),
       );
       assert.equal(existsSync(join(source, file)), true);
     }
@@ -203,7 +197,7 @@ test("migrateDataDir cleans its temporary destination after a copy failure", () 
       ["data.db", "data.db-wal", "data.db-shm"].map((file) => [
         file,
         readFileSync(join(source, file), "utf8"),
-      ])
+      ]),
     );
     let copies = 0;
 
@@ -219,13 +213,13 @@ test("migrateDataDir cleans its temporary destination after a copy failure", () 
             copyFileSync(from, to);
           },
         }),
-      /copy failed/
+      /copy failed/,
     );
 
     assert.equal(existsSync(destination), false);
     assert.equal(
       readdirSync(root).some((entry) => entry.includes("conflux-migration")),
-      false
+      false,
     );
     for (const [file, contents] of sourceSnapshot) {
       assert.equal(readFileSync(join(source, file), "utf8"), contents);
@@ -273,13 +267,13 @@ test("repeated migration reports conflicts and never overwrites the destination"
 
 test("package bins and MCP config expose Conflux while retaining one manual legacy entry", () => {
   const packageJson = JSON.parse(
-    readFileSync(resolve(__dirname, "../../package.json"), "utf8")
+    readFileSync(resolve(__dirname, "../../package.json"), "utf8"),
   ) as { bin: Record<string, string> };
   assert.equal(packageJson.bin.conflux, "dist/index.js");
   assert.equal(packageJson.bin.muiltchat, "dist/index.js");
 
   const mcpConfig = JSON.parse(
-    readFileSync(resolve(__dirname, "../../../..", ".mcp.json"), "utf8")
+    readFileSync(resolve(__dirname, "../../../..", ".mcp.json"), "utf8"),
   ) as {
     mcpServers: Record<string, { command: string; args: string[] }>;
   };
@@ -318,13 +312,7 @@ test("path and migrate CLI commands use explicit directories and status is read-
 
   try {
     const explicit = join(root, "explicit");
-    await buildCli("conflux").parseAsync([
-      "node",
-      "conflux",
-      "--data-dir",
-      explicit,
-      "path",
-    ]);
+    await buildCli("conflux").parseAsync(["node", "conflux", "--data-dir", explicit, "path"]);
     assert.equal(JSON.parse(output.pop()!).dataDir, resolve(explicit));
 
     const source = join(root, "legacy");

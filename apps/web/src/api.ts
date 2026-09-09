@@ -62,8 +62,7 @@ async function put<T>(path: string, body: unknown): Promise<T> {
 export const api = {
   health: () => get<{ ok: boolean }>("/healthz"),
 
-  getGraph: (status = "all") =>
-    get<Graph>(`/graph?status=${encodeURIComponent(status)}`),
+  getGraph: (status = "all") => get<Graph>(`/graph?status=${encodeURIComponent(status)}`),
 
   getMessages: (params?: {
     from?: string;
@@ -98,7 +97,7 @@ export const api = {
 
   getPeerFlow: (a: string, b: string) =>
     get<{ messages: Message[] }>(
-      `/messages/peers?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`
+      `/messages/peers?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`,
     ),
 
   getRuntimes: () =>
@@ -132,7 +131,7 @@ export const api = {
   saveTerminalSettings: (body: Partial<TerminalSettings>) =>
     put<{ terminal: TerminalSettings }>("/settings/terminal", body),
 
-  webAsk: (body: { to_session: string; question: string }) =>
+  webAsk: (body: { to_session: string; question: string; from_session?: string }) =>
     post<{ message: Message }>("/web/ask", body),
 
   getContext: (params?: { query?: string; session_id?: string; limit?: number }) => {
@@ -160,19 +159,14 @@ export const api = {
   getTurns: (conversationId: number) =>
     get<{ turns: Turn[] }>(`/conversations/${conversationId}/turns`),
 
-  deleteConversation: (id: number) =>
-    del<{ deleted: boolean }>(`/conversations/${id}`),
+  deleteConversation: (id: number) => del<{ deleted: boolean }>(`/conversations/${id}`),
 
-  getSettings: () =>
-    get<{ providers: Record<string, { configured: boolean }> }>("/settings"),
+  getSettings: () => get<{ providers: Record<string, { configured: boolean }> }>("/settings"),
 
   exportData: (scope: "global" | "project" = "global") =>
     get<ConfluxDataBundle>(`/data/export?scope=${encodeURIComponent(scope)}`),
 
-  importData: (
-    bundle: ConfluxDataBundle,
-    conflict: "skip" | "overwrite" | "copy" = "skip"
-  ) =>
+  importData: (bundle: ConfluxDataBundle, conflict: "skip" | "overwrite" | "copy" = "skip") =>
     post<{
       conflict: "skip" | "overwrite" | "copy";
       imported: number;
@@ -221,13 +215,25 @@ export const api = {
         try {
           const data = JSON.parse(dataLine.slice(6));
           switch (data.type) {
-            case "token": onToken(data.content); break;
-            case "done": onDone(data); break;
-            case "error": onError(data.message); break;
-            case "tool_use": onToolUse?.(data.name, data.input); break;
-            case "tool_result": onToolResult?.(data.name, data.result); break;
+            case "token":
+              onToken(data.content);
+              break;
+            case "done":
+              onDone(data);
+              break;
+            case "error":
+              onError(data.message);
+              break;
+            case "tool_use":
+              onToolUse?.(data.name, data.input);
+              break;
+            case "tool_result":
+              onToolResult?.(data.name, data.result);
+              break;
           }
-        } catch { /* skip malformed */ }
+        } catch {
+          /* skip malformed */
+        }
       }
     }
   },

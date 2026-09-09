@@ -1,12 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import {
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -129,14 +124,7 @@ test("CLI data commands round-trip a bundle through files", () => {
     });
 
   try {
-    const imported = run([
-      "--data-dir",
-      dataDir,
-      "data",
-      "import",
-      "--file",
-      input,
-    ]);
+    const imported = run(["--data-dir", dataDir, "data", "import", "--file", input]);
     assert.equal(imported.status, 0, imported.stderr);
     assert.equal(JSON.parse(imported.stdout).imported, 1);
 

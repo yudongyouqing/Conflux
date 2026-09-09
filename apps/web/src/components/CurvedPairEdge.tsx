@@ -1,9 +1,4 @@
-import {
-  BaseEdge,
-  EdgeLabelRenderer,
-  useReactFlow,
-  type EdgeProps,
-} from "@xyflow/react";
+import { BaseEdge, EdgeLabelRenderer, useReactFlow, type EdgeProps } from "@xyflow/react";
 
 /**
  * Quadratic-arc edge whose bow is a signed perpendicular offset supplied via
@@ -12,23 +7,16 @@ import {
  * sides — a symmetric lens instead of two overlapping lines. Single edges get
  * offset 0 and render as a straight line.
  *
- * The label doubles as a curvature handle: drag it and the arc bends so its
- * apex follows the cursor; double-click resets to the automatic offset
- * (null clears the manual override in GraphTab's persisted map).
+ * Visual language (Dify/n8n-style connection): a solid neutral rail plus an
+ * animated dot-flow riding on top (see .rf-flow-dots in index.css), an
+ * arrowhead at the target, and a message-count pill at the apex. The pill
+ * doubles as a curvature handle: drag it and the arc bends so its apex
+ * follows the cursor; double-click resets to the automatic offset (null
+ * clears the manual override in GraphTab's persisted map).
  */
 export function CurvedPairEdge(props: EdgeProps) {
-  const {
-    id,
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    data,
-    label,
-    labelStyle,
-    markerEnd,
-    style,
-  } = props;
+  const { id, sourceX, sourceY, targetX, targetY, data, label, labelStyle, markerEnd, style } =
+    props;
   const { screenToFlowPosition } = useReactFlow();
 
   const d = (data ?? {}) as {
@@ -52,7 +40,8 @@ export function CurvedPairEdge(props: EdgeProps) {
   const lx = 0.25 * sourceX + 0.5 * cx + 0.25 * targetX;
   const ly = 0.25 * sourceY + 0.5 * cy + 0.25 * targetY;
 
-  const isSelected = (style as { stroke?: string } | undefined)?.stroke === "#2563eb";
+  const stroke = (style as { stroke?: string } | undefined)?.stroke;
+  const isSelected = stroke === "#2563eb";
   const manual = d.offsetKey !== undefined && d.onOffsetChange !== undefined;
 
   const pointerToOffset = (ev: React.PointerEvent) => {
@@ -64,7 +53,28 @@ export function CurvedPairEdge(props: EdgeProps) {
 
   return (
     <>
-      <BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} />
+      {/* solid rail (also carries interaction hit-testing) */}
+      <BaseEdge
+        id={id}
+        path={path}
+        markerEnd={markerEnd}
+        style={{
+          ...style,
+          strokeWidth: 2,
+          stroke: isSelected ? "#3b82f6" : "#9ca8b6",
+        }}
+      />
+      {/* animated dot-flow riding the rail — decorative only */}
+      <path
+        d={path}
+        fill="none"
+        className="react-flow__edge-path rf-flow-dots"
+        style={{
+          stroke: isSelected ? "#60a5fa" : "#94a3b8",
+          strokeWidth: 2.5,
+          pointerEvents: "none",
+        }}
+      />
       <EdgeLabelRenderer>
         <div
           style={{
@@ -75,18 +85,18 @@ export function CurvedPairEdge(props: EdgeProps) {
             pointerEvents: "all",
           }}
           title={manual ? "拖动调整弧度 · 双击复位" : undefined}
-          className={`nodrag nopan touch-none select-none rounded border ${
-            label ? "px-1 text-[9px] max-w-[140px] truncate" : "w-2.5 h-2.5 border-gray-300 bg-gray-200 opacity-0 hover:opacity-100"
-          } ${
-            manual
-              ? "cursor-grab active:cursor-grabbing hover:border-blue-300"
-              : ""
-          } ${
+          className={`nodrag nopan touch-none select-none ${
             label
-              ? isSelected
-                ? "bg-blue-100 border-blue-300 text-blue-700 font-semibold"
-                : "bg-white border-gray-200 text-gray-500"
-              : "transition-opacity"
+              ? `px-2 py-0.5 rounded-full text-[10px] font-medium max-w-[140px] truncate border shadow-sm ${
+                  isSelected
+                    ? "bg-blue-50 border-blue-300 text-blue-700"
+                    : "bg-white border-gray-200 text-gray-500"
+                }${manual ? " cursor-grab active:cursor-grabbing hover:border-blue-300" : ""}`
+              : `w-2.5 h-2.5 rounded-full border ${
+                  manual
+                    ? "border-gray-300 bg-gray-100 opacity-0 hover:opacity-100 cursor-grab active:cursor-grabbing"
+                    : "hidden"
+                } transition-opacity`
           }`}
           onPointerDown={(ev) => {
             if (!manual) return;

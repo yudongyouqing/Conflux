@@ -33,7 +33,7 @@ test("listPeerMessages returns both directions, oldest first", () => {
   const flow = listPeerMessages(db, "peer-x", "peer-y");
   assert.deepEqual(
     flow.map((m) => m.question),
-    ["out 1", "in 1", "out 2"]
+    ["out 1", "in 1", "out 2"],
   );
 });
 
@@ -45,13 +45,16 @@ test("askSession creates pending message", () => {
 });
 
 test("askSession refuses self-ask", () => {
-  assert.throws(() => askSession(db, { from_session: "a", to_session: "a", question: "?" }), /cannot ask yourself/);
+  assert.throws(
+    () => askSession(db, { from_session: "a", to_session: "a", question: "?" }),
+    /cannot ask yourself/,
+  );
 });
 
 test("askSession rejects a pruned target with a clear error, not a FK violation", () => {
   assert.throws(
     () => askSession(db, { from_session: "a", to_session: "ghost", question: "?" }),
-    /target session not found/
+    /target session not found/,
   );
 });
 
@@ -95,19 +98,19 @@ test("pending_inbox counts seen-but-unanswered messages", () => {
   const m = askSession(db, { from_session: "a", to_session: "b", question: "count-seen?" });
   assert.equal(
     getGraph(db, { status: "all" }).nodes.find((n) => n.id === "b")!.pending_inbox,
-    before + 1
+    before + 1,
   );
   checkInbox(db, "b"); // pending -> seen, still unanswered
   assert.equal(
     getGraph(db, { status: "all" }).nodes.find((n) => n.id === "b")!.pending_inbox,
     before + 1,
-    "seen should still count as pending_inbox"
+    "seen should still count as pending_inbox",
   );
   replyAsk(db, m.id, "b", "done");
   assert.equal(
     getGraph(db, { status: "all" }).nodes.find((n) => n.id === "b")!.pending_inbox,
     before,
-    "replied no longer counts"
+    "replied no longer counts",
   );
 });
 
@@ -121,7 +124,8 @@ test("listMessages can filter by seen status", () => {
 });
 
 test("recordExchange archives native exchanges without inbox noise", () => {
-  const wBefore = getGraph(db, { status: "all" }).edges.find((e) => e.from === "a" && e.to === "b")?.weight ?? 0;
+  const wBefore =
+    getGraph(db, { status: "all" }).edges.find((e) => e.from === "a" && e.to === "b")?.weight ?? 0;
   const m = recordExchange(db, {
     from_session: "a",
     to_session: "b",
@@ -142,13 +146,16 @@ test("recordExchange archives native exchanges without inbox noise", () => {
 test("recordExchange without reply archives as read", () => {
   const m = recordExchange(db, { from_session: "b", to_session: "a", question: "fire-and-forget" });
   assert.equal(m.status, "read");
-  assert.equal(checkInbox(db, "a").some((x) => x.id === m.id), false);
+  assert.equal(
+    checkInbox(db, "a").some((x) => x.id === m.id),
+    false,
+  );
 });
 
 test("recordExchange rejects unknown sessions", () => {
   assert.throws(
     () => recordExchange(db, { from_session: "a", to_session: "ghost-x", question: "x" }),
-    /session not found/
+    /session not found/,
   );
 });
 
@@ -172,7 +179,9 @@ test("listMessages filters by from/to/status", () => {
 
 test("ask/reply: questions carry the channel, replies stay on it without bumping weight", () => {
   registerSession(db, { id: "ch-b2", name: "b2" });
-  const before = getGraph(db, { status: "all" }).edges.find((e) => e.from === "a" && e.to === "ch-b2")?.weight ?? 0;
+  const before =
+    getGraph(db, { status: "all" }).edges.find((e) => e.from === "a" && e.to === "ch-b2")?.weight ??
+    0;
   const m1 = askSession(db, { from_session: "a", to_session: "ch-b2", question: "edge1" });
   const m2 = askSession(db, { from_session: "a", to_session: "ch-b2", question: "edge2" });
   replyAsk(db, m1.id, "ch-b2", "ans1");
@@ -182,7 +191,7 @@ test("ask/reply: questions carry the channel, replies stay on it without bumping
   assert.equal(
     g.edges.find((e) => e.from === "ch-b2" && e.to === "a"),
     undefined,
-    "a reply never creates a reverse channel"
+    "a reply never creates a reverse channel",
   );
   // both exchanges link to the SAME channel
   const flow = listEdgeMessages(db, ch.id);
@@ -198,16 +207,27 @@ test("recordEdge upsert is idempotent-safe increment", () => {
   assert.equal(g.edges.find((e) => e.from === "x" && e.to === "y")!.weight, 2);
 });
 
-
 // ---- inbox delivery across /resume + proactive notices ----------------------
 
 test("forwardInboxFromPid re-addresses undelivered mail to the resume successor", () => {
-  registerSession(db, { id: "old-conv", name: "old", metadata: { source: "claude-hook", claude_pid: 909 } });
-  registerSession(db, { id: "other-pid", name: "other", metadata: { source: "claude-hook", claude_pid: 111 } });
+  registerSession(db, {
+    id: "old-conv",
+    name: "old",
+    metadata: { source: "claude-hook", claude_pid: 909 },
+  });
+  registerSession(db, {
+    id: "other-pid",
+    name: "other",
+    metadata: { source: "claude-hook", claude_pid: 111 },
+  });
   askSession(db, { from_session: "a", to_session: "old-conv", question: "resume 前的提问" });
   askSession(db, { from_session: "a", to_session: "other-pid", question: "别动我" });
   // one already-replied message must stay on the old id (history)
-  const replied = askSession(db, { from_session: "a", to_session: "old-conv", question: "已回复的" });
+  const replied = askSession(db, {
+    from_session: "a",
+    to_session: "old-conv",
+    question: "已回复的",
+  });
   replyAsk(db, replied.id, "old-conv", "done");
 
   // the successor row must exist first (messages.to_session has an FK to it)
@@ -215,15 +235,20 @@ test("forwardInboxFromPid re-addresses undelivered mail to the resume successor"
   const moved = forwardInboxFromPid(db, 909, "new-conv");
   assert.equal(moved, 1, "only the undelivered ask moves");
   const inbox = checkInbox(db, "new-conv");
-  assert.ok(inbox.some((m) => m.question === "resume 前的提问"), "mail follows the conversation");
+  assert.ok(
+    inbox.some((m) => m.question === "resume 前的提问"),
+    "mail follows the conversation",
+  );
   assert.equal(
     listMessages(db, { to_session: "other-pid", status: "all" }).length,
     1,
-    "other pid's mail untouched"
+    "other pid's mail untouched",
   );
   assert.ok(
-    listMessages(db, { to_session: "old-conv", status: "all" }).every((m) => m.status === "replied" || m.status === "read"),
-    "replied history stays on the old id"
+    listMessages(db, { to_session: "old-conv", status: "all" }).every(
+      (m) => m.status === "replied" || m.status === "read",
+    ),
+    "replied history stays on the old id",
   );
 });
 
@@ -231,7 +256,11 @@ test("formatInboxNotice is silent when read, nagging when pending", () => {
   registerSession(db, { id: "notice-target", name: "nt" });
   assert.equal(formatInboxNotice(db, "notice-target"), null, "empty inbox → no stdout noise");
 
-  askSession(db, { from_session: "a", to_session: "notice-target", question: "你好,\n   多行问题 内容" });
+  askSession(db, {
+    from_session: "a",
+    to_session: "notice-target",
+    question: "你好,\n   多行问题 内容",
+  });
   const notice = formatInboxNotice(db, "notice-target");
   assert.ok(notice && notice.includes("1 条未读"), "mentions the count");
   assert.ok(notice!.includes("多行问题"), "excerpt collapses whitespace");

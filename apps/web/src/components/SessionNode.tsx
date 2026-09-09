@@ -1,5 +1,14 @@
 import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
-import { FileText, Inbox, Bot, MessageSquare } from "lucide-react";
+import {
+  FileText,
+  Inbox,
+  Bot,
+  MessageSquare,
+  Globe,
+  Terminal,
+  Code2,
+  type LucideIcon,
+} from "lucide-react";
 
 export interface SessionNodeData {
   name: string;
@@ -19,15 +28,29 @@ export interface SessionNodeData {
   [key: string]: unknown;
 }
 
-const STATUS_BORDER: Record<string, string> = {
-  active: "border-emerald-300",
-  stale: "border-gray-300",
-  ended: "border-red-300",
-};
+/**
+ * Dify-style node identity: every node KIND carries a signature color and
+ * icon on a left block, plus a thin top accent strip — the graph reads by
+ * shape+color before text.
+ */
+interface NodeSkin {
+  icon: LucideIcon;
+  block: string; // icon block bg + icon color
+  accent: string; // top strip color
+}
+
+function skinFor(d: SessionNodeData, isAgent: boolean, isWeb: boolean): NodeSkin {
+  if (isAgent) return { icon: Bot, block: "bg-indigo-600", accent: "bg-indigo-500" };
+  if (isWeb) return { icon: Globe, block: "bg-blue-600", accent: "bg-blue-500" };
+  if (d.runtime === "claude")
+    return { icon: Terminal, block: "bg-orange-600", accent: "bg-orange-500" };
+  if (d.runtime === "codex") return { icon: Code2, block: "bg-slate-700", accent: "bg-slate-500" };
+  return { icon: Terminal, block: "bg-gray-500", accent: "bg-gray-400" };
+}
 
 const STATUS_DOT: Record<string, string> = {
   active: "bg-emerald-500",
-  stale: "bg-gray-400",
+  stale: "bg-gray-300",
   ended: "bg-red-500",
 };
 
@@ -36,6 +59,9 @@ export type SessionNodeType = Node<SessionNodeData>;
 export function SessionNode({ data, selected, dragging }: NodeProps) {
   const d = data as SessionNodeData;
   const isAgent = d.type === "agent";
+  const isWeb = (d as { id?: string }).id === "web-console" || d.name === "Web 控制台";
+  const skin = skinFor(d, isAgent, isWeb);
+  const Icon = skin.icon;
 
   // Seconds since the last heartbeat — drives the "live" feel on the graph.
   const ageSec = d.last_heartbeat_at
@@ -53,86 +79,90 @@ export function SessionNode({ data, selected, dragging }: NodeProps) {
   return (
     <div
       title={d.skills?.length ? `技能: ${d.skills.join(" · ")}` : undefined}
-      className={`px-3 py-2 rounded-xl border min-w-[120px] transition-all duration-150 cursor-grab active:cursor-grabbing ${
+      className={`group relative w-[200px] rounded-2xl bg-white border border-gray-200 overflow-hidden transition-all duration-150 cursor-grab active:cursor-grabbing ${
         dragging
-          ? "shadow-xl scale-[1.03] ring-2 ring-blue-500/40"
+          ? "shadow-xl scale-[1.02] ring-2 ring-blue-500/40"
           : selected
-            ? "shadow-md ring-2 ring-blue-500/60 ring-offset-1 ring-offset-gray-50"
-            : "shadow-sm hover:shadow-md"
-      } ${
-        isAgent ? "bg-indigo-50 border-indigo-300" : "bg-white border-gray-200"
-      } ${STATUS_BORDER[d.status] ?? "border-gray-200"} ${
-        d.highlighted ? "ring-2 ring-amber-400/80" : ""
-      }`}
+            ? "shadow-lg ring-2 ring-blue-500/50"
+            : "shadow-sm hover:shadow-lg hover:border-gray-300 hover:-translate-y-px"
+      } ${d.highlighted ? "ring-2 ring-amber-400/80" : ""}`}
     >
+      {/* signature top accent strip */}
+      <div className={`h-[3px] ${skin.accent}`} />
+
       <Handle
         type="target"
         position={Position.Left}
-        className="!w-2 !h-2 !bg-gray-400"
+        className="!w-2 !h-2 !bg-gray-300 !border-2 !border-white !shadow-sm opacity-50 group-hover:!bg-gray-400 group-hover:opacity-100 !transition-all"
       />
-      <div className="flex items-center gap-2">
-        {isAgent ? (
-          <div className="w-5 h-5 rounded-md bg-indigo-600 flex items-center justify-center flex-shrink-0">
-            <Bot size={12} className="text-white" />
+
+      <div className="px-3 pt-2.5 pb-2.5">
+        {/* header: icon block + name + status */}
+        <div className="flex items-center gap-2">
+          <div
+            className={`w-7 h-7 rounded-lg ${skin.block} flex items-center justify-center flex-shrink-0 shadow-sm`}
+          >
+            <Icon size={14} className="text-white" />
           </div>
-        ) : (
-          <span
-            className={`w-2 h-2 rounded-full flex-shrink-0 ${
-              STATUS_DOT[d.status] ?? "bg-gray-400"
-            }`}
-          />
-        )}
-        <span className="text-gray-900 text-xs font-medium truncate max-w-[100px]">
-          {d.name}
-        </span>
-        {d.runtime && (
-          <span
-            className="text-[9px] px-1 py-px rounded bg-cyan-50 text-cyan-700 border border-cyan-200 font-medium flex-shrink-0"
-            title={`运行时 agent (${d.runtime})`}
-          >
-            {d.runtime}
-          </span>
-        )}
-      </div>
-      {d.description && d.description !== "Claude Code session (hook)" && (
-        <div
-          className="text-[10px] text-gray-400 truncate mt-0.5 max-w-[130px]"
-          title={d.description}
-        >
-          {d.description}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="text-gray-900 text-xs font-semibold truncate flex-1" title={d.name}>
+                {d.name}
+              </span>
+              <span
+                className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                  STATUS_DOT[d.status] ?? "bg-gray-300"
+                } ${d.status === "active" ? "shadow-[0_0_0_2px_rgba(16,185,129,0.15)]" : ""}`}
+                title={`状态: ${d.status}`}
+              />
+            </div>
+            {d.runtime && !isAgent && (
+              <div className="text-[9px] text-gray-400 uppercase tracking-wide">{d.runtime}</div>
+            )}
+          </div>
         </div>
-      )}
-      <div className="flex items-center gap-3 mt-1 text-[10px] text-gray-500">
-        {d.context_count > 0 && (
-          <span className="flex items-center gap-0.5">
-            <FileText size={10} /> {d.context_count}
-          </span>
-        )}
-        {d.status === "active" && ageLabel && (
-          <span
-            className={`flex items-center gap-0.5 ${
-              (ageSec ?? 0) < 60 ? "text-emerald-500" : "text-gray-400"
-            }`}
-            title={`最后心跳 ${ageLabel} 前`}
-          >
-            {(ageSec ?? 0) < 60 ? "●" : "○"} {ageLabel}
-          </span>
-        )}
-        {d.pending_inbox > 0 && (
-          <span className="flex items-center gap-0.5 text-amber-600">
-            <Inbox size={10} /> {d.pending_inbox}
-          </span>
-        )}
-        {isAgent && (d.conversation_count ?? 0) > 0 && (
-          <span className="flex items-center gap-0.5 text-indigo-600">
-            <MessageSquare size={10} /> {d.conversation_count}
-          </span>
-        )}
+
+        {/* body */}
+        {d.description &&
+          d.description !== "Claude Code session (hook)" &&
+          d.description !== "浏览器界面身份(从会话详情抽屉发起的对话)" && (
+            <div
+              className="text-[10px] text-gray-500 truncate mt-2 leading-4"
+              title={d.description}
+            >
+              {d.description}
+            </div>
+          )}
+
+        {/* footer meta */}
+        <div className="flex items-center gap-3 mt-2 pt-2 border-t border-gray-100 text-[10px] text-gray-400">
+          {d.context_count > 0 && (
+            <span className="flex items-center gap-1" title="已发布上下文">
+              <FileText size={10} /> {d.context_count}
+            </span>
+          )}
+          {d.status === "active" && ageLabel && (
+            // neutral metadata: elapsed time is NOT a health signal — color
+            // stays reserved for the status dot
+            <span title={`最后心跳 ${ageLabel} 前`}>{ageLabel}</span>
+          )}
+          {d.pending_inbox > 0 && (
+            <span className="flex items-center gap-1 text-amber-600" title="待处理收件">
+              <Inbox size={10} /> {d.pending_inbox}
+            </span>
+          )}
+          {isAgent && (d.conversation_count ?? 0) > 0 && (
+            <span className="flex items-center gap-1 text-indigo-500">
+              <MessageSquare size={10} /> {d.conversation_count}
+            </span>
+          )}
+        </div>
       </div>
+
       <Handle
         type="source"
         position={Position.Right}
-        className="!w-2 !h-2 !bg-gray-400"
+        className="!w-2 !h-2 !bg-gray-300 !border-2 !border-white !shadow-sm opacity-50 group-hover:!bg-gray-400 group-hover:opacity-100 !transition-all"
       />
     </div>
   );

@@ -17,7 +17,7 @@ export const logger = pino(
     base: undefined,
     timestamp: pino.stdTimeFunctions.isoTime,
   },
-  dest
+  dest,
 );
 
 /** Reconfigure level at runtime (used by CLI flags). */

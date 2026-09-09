@@ -28,9 +28,7 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
         <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center">
           <Boxes size={15} className="text-white" />
         </div>
-        <span className="font-semibold text-[15px] text-gray-900 tracking-tight">
-          muiltchat
-        </span>
+        <span className="font-semibold text-[15px] text-gray-900 tracking-tight">muiltchat</span>
       </div>
 
       {/* Nav */}
@@ -58,9 +56,7 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
       {/* Status */}
       <div className="p-4 border-t border-gray-100">
         <div className="flex items-center gap-2 text-xs text-gray-500">
-          <span
-            className={`w-2 h-2 rounded-full ${online ? "bg-emerald-500" : "bg-red-500"}`}
-          />
+          <span className={`w-2 h-2 rounded-full ${online ? "bg-emerald-500" : "bg-red-500"}`} />
           {online ? "daemon 在线" : "daemon 离线"}
         </div>
       </div>

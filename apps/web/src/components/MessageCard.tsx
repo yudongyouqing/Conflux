@@ -42,9 +42,7 @@ export function MessageCard({
           {fromName ?? msg.from_session.slice(0, 8)}
         </span>
         <ArrowRight size={12} className="text-gray-400" />
-        <span className="text-gray-700 font-medium">
-          {toName ?? msg.to_session.slice(0, 8)}
-        </span>
+        <span className="text-gray-700 font-medium">{toName ?? msg.to_session.slice(0, 8)}</span>
         {deadLetter && (
           <span
             className="ml-auto px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-red-50 text-red-600 border border-red-200"
@@ -62,11 +60,7 @@ export function MessageCard({
         </span>
       </div>
       <div className="text-sm text-gray-800 truncate">{msg.question}</div>
-      {msg.reply && (
-        <div className="text-xs text-gray-500 truncate mt-1">
-          ↳ {msg.reply}
-        </div>
-      )}
+      {msg.reply && <div className="text-xs text-gray-500 truncate mt-1">↳ {msg.reply}</div>}
     </div>
   );
 }

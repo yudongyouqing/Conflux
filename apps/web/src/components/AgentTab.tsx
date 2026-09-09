@@ -43,9 +43,15 @@ export function AgentTab() {
       {
         onSuccess: () => {
           setShowForm(false);
-          setForm({ name: "", description: "", provider: "anthropic", model: "", system_prompt: "" });
+          setForm({
+            name: "",
+            description: "",
+            provider: "anthropic",
+            model: "",
+            system_prompt: "",
+          });
         },
-      }
+      },
     );
   }
 
@@ -86,7 +92,9 @@ export function AgentTab() {
               className="bg-white text-gray-800 text-xs rounded-lg px-3 py-2 border border-gray-200 outline-none focus:border-blue-500"
             >
               {PROVIDERS.map((p) => (
-                <option key={p} value={p}>{p}</option>
+                <option key={p} value={p}>
+                  {p}
+                </option>
               ))}
             </select>
             <input
@@ -125,9 +133,7 @@ export function AgentTab() {
       )}
 
       <div className="flex-1 overflow-y-auto p-4 space-y-2">
-        {isLoading && (
-          <div className="text-gray-400 text-sm text-center mt-8">加载中...</div>
-        )}
+        {isLoading && <div className="text-gray-400 text-sm text-center mt-8">加载中...</div>}
         {!isLoading && agents.length === 0 && !showForm && (
           <div className="text-gray-400 text-sm text-center mt-12">
             暂无 Agent。点击"创建 Agent"新建一个。
@@ -177,7 +183,10 @@ function AgentCard({
           </div>
         </div>
         <button
-          onClick={(e) => { e.stopPropagation(); onChat(); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onChat();
+          }}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white transition-colors shadow-sm"
         >
           <MessageSquare size={12} /> 对话
@@ -190,9 +199,7 @@ function AgentCard({
       </div>
       {expanded && (
         <div className="px-4 pb-4 space-y-3">
-          {agent.description && (
-            <div className="text-xs text-gray-600">{agent.description}</div>
-          )}
+          {agent.description && <div className="text-xs text-gray-600">{agent.description}</div>}
           <div>
             <div className="text-[10px] text-gray-400 mb-1.5">System Prompt</div>
             <pre className="text-[11px] text-gray-600 font-mono whitespace-pre-wrap bg-gray-50 p-3 rounded-lg border border-gray-200 max-h-40 overflow-y-auto">
@@ -200,7 +207,9 @@ function AgentCard({
             </pre>
           </div>
           <div className="flex items-center justify-between text-[10px] text-gray-400">
-            <span>ID: {agent.id} · 更新于 {new Date(agent.updated_at).toLocaleString()}</span>
+            <span>
+              ID: {agent.id} · 更新于 {new Date(agent.updated_at).toLocaleString()}
+            </span>
             <button
               onClick={(e) => {
                 e.stopPropagation();

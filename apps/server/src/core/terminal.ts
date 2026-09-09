@@ -94,7 +94,7 @@ export function posixQuote(s: string): string {
  */
 function macLaunchPlan(
   settings: Pick<TerminalSettings, "terminal">,
-  opts: { command: string; cwd?: string; title: string; env?: NodeJS.ProcessEnv }
+  opts: { command: string; cwd?: string; title: string; env?: NodeJS.ProcessEnv },
 ): LaunchSpec[] {
   const envPrefix = opts.env
     ? Object.entries(opts.env)
@@ -169,7 +169,7 @@ function macLaunchPlan(
 export function buildLaunchPlan(
   settings: Pick<TerminalSettings, "terminal">,
   opts: { command: string; cwd?: string; title: string; env?: NodeJS.ProcessEnv },
-  io: { platform?: NodeJS.Platform } = {}
+  io: { platform?: NodeJS.Platform } = {},
 ): LaunchSpec[] {
   const platform = io.platform ?? process.platform;
   if (platform === "darwin") return macLaunchPlan(settings, opts);
@@ -178,15 +178,7 @@ export function buildLaunchPlan(
 
   const wt = (): LaunchSpec => ({
     file: "wt.exe",
-    args: [
-      ...(cwd ? ["-d", cwd] : []),
-      "--title",
-      title,
-      "cmd.exe",
-      "/d",
-      "/k",
-      titled,
-    ],
+    args: [...(cwd ? ["-d", cwd] : []), "--title", title, "cmd.exe", "/d", "/k", titled],
   });
   const wezterm = (): LaunchSpec => ({
     file: "wezterm.exe",
@@ -203,13 +195,27 @@ export function buildLaunchPlan(
   // serve process cannot hand a console to a plain `cmd /k` child reliably).
   const cmdStart = (): LaunchSpec => ({
     file: process.env.comspec ?? "cmd.exe",
-    args: ["/d", "/s", "/c", ["start", cmdQuote(title), ...(cwd ? ["/D", cmdQuote(cwd)] : []), "cmd.exe", "/d", "/k", command].join(" ")],
+    args: [
+      "/d",
+      "/s",
+      "/c",
+      [
+        "start",
+        cmdQuote(title),
+        ...(cwd ? ["/D", cmdQuote(cwd)] : []),
+        "cmd.exe",
+        "/d",
+        "/k",
+        command,
+      ].join(" "),
+    ],
     cwd,
     verbatim: true,
   });
 
   if (settings.terminal === "cmd") return [cmdStart()];
-  if (settings.terminal === "powershell") return [pwshSpec("pwsh.exe"), pwshSpec("powershell.exe"), cmdStart()];
+  if (settings.terminal === "powershell")
+    return [pwshSpec("pwsh.exe"), pwshSpec("powershell.exe"), cmdStart()];
   if (settings.terminal === "wezterm") return [wezterm(), wt(), cmdStart()];
   // wt (default): wt first, fall back through cmd when wt.exe is missing.
   return [wt(), cmdStart()];
@@ -222,7 +228,7 @@ export function buildLaunchPlan(
 export function resumeCommand(
   runtime: "claude" | "codex",
   sessionId: string,
-  executable: string
+  executable: string,
 ): string {
   const exe = cmdQuote(executable);
   return runtime === "codex" ? `${exe} resume ${sessionId}` : `${exe} --resume ${sessionId}`;
@@ -259,7 +265,7 @@ const TERMINAL_LABELS: Record<TerminalChoice, { label: string; hint: string }> =
 export function resolveOnPath(
   exe: string,
   baseEnv: NodeJS.ProcessEnv = process.env,
-  platform: NodeJS.Platform = process.platform
+  platform: NodeJS.Platform = process.platform,
 ): string | null {
   if (/[\\/]/.test(exe)) return existsSync(exe) ? exe : null;
   // macOS has no where.exe; /usr/bin/which covers it (no Store-alias quirks).
@@ -289,32 +295,16 @@ export function resolveOnPath(
  */
 export function terminalOptions(
   baseEnv: NodeJS.ProcessEnv = process.env,
-  io: { platform?: NodeJS.Platform } = {}
+  io: { platform?: NodeJS.Platform } = {},
 ): TerminalOption[] {
   const platform = io.platform ?? process.platform;
   const order: TerminalChoice[] =
-    platform === "darwin"
-      ? ["terminal", "iterm", "tmux"]
-      : ["wt", "powershell", "cmd", "wezterm"];
+    platform === "darwin" ? ["terminal", "iterm", "tmux"] : ["wt", "powershell", "cmd", "wezterm"];
   return order.map((value) => ({
     value,
     ...TERMINAL_LABELS[value],
     available: TERMINAL_FILES[value].some((f) => resolveOnPath(f, baseEnv, platform) !== null),
   }));
-}
-
-/** Wake-up prompt for auto-answer: asker's message is waiting in the inbox. */
-export const AUTO_WAKE_PROMPT =
-  "你收到一条新消息:请立即调用 muiltchat 的 check_inbox 查看收件箱,用 reply_ask 认真回复每条,然后结束本轮,不要做其他事。";
-
-/** Pre-authorized tools for headless runs (-p cannot show permission prompts). */
-export const HEADLESS_ALLOWED_TOOLS = "mcp__muiltchat__*";
-
-/** Full headless wake command: resume the conversation and drive the reply. */
-export function wakeCommand(runtime: "claude", sessionId: string, executable: string): string {
-  return `${resumeCommand(runtime, sessionId, executable)} --allowedTools ${cmdQuote(
-    HEADLESS_ALLOWED_TOOLS
-  )} -p ${cmdQuote(AUTO_WAKE_PROMPT)}`;
 }
 
 /**
@@ -326,7 +316,7 @@ export function wakeCommand(runtime: "claude", sessionId: string, executable: st
 export function openInTerminal(
   settings: Pick<TerminalSettings, "terminal">,
   opts: { command: string; cwd?: string; title: string; env?: NodeJS.ProcessEnv },
-  io: { platform?: NodeJS.Platform; comspec?: string } = {}
+  io: { platform?: NodeJS.Platform; comspec?: string } = {},
 ): { opener: string } {
   const platform = io.platform ?? process.platform;
   if (platform !== "win32" && platform !== "darwin") {
@@ -361,6 +351,6 @@ export function openInTerminal(
   throw new Error(
     platform === "darwin"
       ? `no terminal available (${lastError}) — macOS 自带 Terminal.app,理论上不应发生`
-      : `no terminal available (${lastError}) — install Windows Terminal or set 终端打开方式 为 "系统默认"`
+      : `no terminal available (${lastError}) — install Windows Terminal or set 终端打开方式 为 "系统默认"`,
   );
 }

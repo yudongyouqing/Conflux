@@ -23,11 +23,11 @@ test("parseProcessLines reads both Get-CimInstance and ps formats", () => {
     '123 "C:\\Program Files\\nodejs\\node.exe" C:\\x\\claude-code\\cli.js\n' +
       "456 cmd /c claude\n" +
       "\n" +
-      "not-a-pid line\n"
+      "not-a-pid line\n",
   );
   assert.deepEqual(
     win.map((e) => e.pid),
-    [123, 456]
+    [123, 456],
   );
   assert.equal(win[0].command.includes("claude-code"), true);
 
@@ -37,7 +37,11 @@ test("parseProcessLines reads both Get-CimInstance and ps formats", () => {
 
 test("isClaudeCommand matches claude invocation shapes, rejects lookalikes", () => {
   assert.ok(isClaudeCommand("cmd /c claude"));
-  assert.ok(isClaudeCommand('"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\x\\node_modules\\@anthropic-ai\\claude-code\\cli.js"'));
+  assert.ok(
+    isClaudeCommand(
+      '"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\x\\node_modules\\@anthropic-ai\\claude-code\\cli.js"',
+    ),
+  );
   assert.ok(isClaudeCommand("C:\\tools\\claude.exe --resume 123"));
   assert.ok(isClaudeCommand("/usr/local/bin/claude"));
   assert.ok(!isClaudeCommand("node server.js"));
@@ -51,12 +55,18 @@ test("isRuntimeCommand matches Codex invocation shapes, rejects lookalikes", () 
   assert.ok(
     isRuntimeCommand(
       '"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\x\\node_modules\\@openai\\codex\\bin\\codex.js"',
-      "codex"
-    )
+      "codex",
+    ),
   );
   assert.ok(isRuntimeCommand("node /tools/codex-cli/bin/run.js", "codex"));
-  assert.ok(!isRuntimeCommand("vim my-codex-notes.md", "codex"), "similar filename != Codex process");
-  assert.ok(!isRuntimeCommand("node /notes/my-codex-cli-notes.js", "codex"), "similar package name != Codex process");
+  assert.ok(
+    !isRuntimeCommand("vim my-codex-notes.md", "codex"),
+    "similar filename != Codex process",
+  );
+  assert.ok(
+    !isRuntimeCommand("node /notes/my-codex-cli-notes.js", "codex"),
+    "similar package name != Codex process",
+  );
   assert.ok(!isRuntimeCommand("node server.js", "codex"));
   assert.ok(!isRuntimeCommand("claude --resume 123", "codex"));
 });
@@ -74,8 +84,7 @@ test("runtimePidsFrom separates Claude and Codex processes", () => {
 });
 
 test("probeRuntimePids returns both runtime PID sets", async () => {
-  const fake = async () =>
-    "10 cmd /c claude\n20 codex exec\n30 node x @openai/codex\n40 node x.js";
+  const fake = async () => "10 cmd /c claude\n20 codex exec\n30 node x @openai/codex\n40 node x.js";
   const pids = await probeRuntimePids(fake as never, "win32");
   assert.deepEqual([...pids!.claude], [10]);
   assert.deepEqual([...pids!.codex].sort(), [20, 30]);
@@ -119,7 +128,7 @@ test("reconcileLiveness: live pid stays active + refreshed; dead pid reaped imme
   mk("no-pid", null); // no pid → not probe-managed
   // age every heartbeat far past the TTL so refreshing proves probe authority
   db.prepare(
-    `UPDATE sessions SET last_heartbeat_at = ?, status = 'active' WHERE id != 'already-stale'`
+    `UPDATE sessions SET last_heartbeat_at = ?, status = 'active' WHERE id != 'already-stale'`,
   ).run(new Date(Date.now() - 3600_000).toISOString());
 
   const { refreshed, reaped } = reconcileLiveness(db, new Set([100]));
@@ -127,12 +136,15 @@ test("reconcileLiveness: live pid stays active + refreshed; dead pid reaped imme
   assert.ok(reaped >= 1);
 
   const row = (id: string) =>
-    (db.prepare(`SELECT status, last_heartbeat_at FROM sessions WHERE id = ?`).get(id) as {
+    db.prepare(`SELECT status, last_heartbeat_at FROM sessions WHERE id = ?`).get(id) as {
       status: string;
       last_heartbeat_at: string;
-    });
+    };
   assert.equal(row("idle-open").status, "active");
-  assert.ok(Date.now() - Date.parse(row("idle-open").last_heartbeat_at) < 5000, "heartbeat refreshed by probe");
+  assert.ok(
+    Date.now() - Date.parse(row("idle-open").last_heartbeat_at) < 5000,
+    "heartbeat refreshed by probe",
+  );
   assert.equal(row("dead-proc").status, "stale", "dead process reaped without TTL wait");
   assert.equal(row("already-stale").status, "stale");
   assert.equal(row("no-pid").status, "active", "pidless row keeps the heartbeat model");
@@ -151,14 +163,14 @@ test("reconcileRuntimeLiveness refreshes live Codex and reaps dead Codex immedia
   mk("claude-idle-open", "claude", 730);
   db.prepare(
     `UPDATE sessions SET last_heartbeat_at = ?, status = 'active'
-     WHERE id IN ('codex-idle-open', 'codex-dead-proc', 'claude-idle-open')`
+     WHERE id IN ('codex-idle-open', 'codex-dead-proc', 'claude-idle-open')`,
   ).run(new Date(Date.now() - 3600_000).toISOString());
 
   const now = new Date("2030-01-02T03:04:05.000Z");
   const result = reconcileRuntimeLiveness(
     db,
     { claude: new Set([730]), codex: new Set([710]) },
-    now
+    now,
   );
   assert.ok(result.refreshed >= 2);
   assert.ok(result.reaped >= 1);
@@ -192,13 +204,13 @@ test("reconcileRuntimeLiveness leaves MCP lease sessions to MCP liveness", () =>
   });
   db.prepare(`UPDATE sessions SET last_heartbeat_at = ? WHERE id = ?`).run(
     oldHeartbeat,
-    "codex-mcp-pid-boundary"
+    "codex-mcp-pid-boundary",
   );
 
   const row = () =>
-    db.prepare(`SELECT status, last_heartbeat_at FROM sessions WHERE id = ?`).get(
-      "codex-mcp-pid-boundary"
-    ) as { status: string; last_heartbeat_at: string };
+    db
+      .prepare(`SELECT status, last_heartbeat_at FROM sessions WHERE id = ?`)
+      .get("codex-mcp-pid-boundary") as { status: string; last_heartbeat_at: string };
 
   reconcileRuntimeLiveness(db, { claude: new Set(), codex: new Set([7310]) }, now);
   assert.equal(row().status, "active");
@@ -226,7 +238,7 @@ test("reconcileRuntimeLiveness does not overwrite leases claimed after the PID s
     });
   }
   db.prepare(
-    `UPDATE sessions SET last_heartbeat_at = ? WHERE id IN ('codex-race-live', 'codex-race-dead')`
+    `UPDATE sessions SET last_heartbeat_at = ? WHERE id IN ('codex-race-live', 'codex-race-dead')`,
   ).run(oldHeartbeat);
 
   let claimedAfterSnapshot = false;
@@ -241,14 +253,8 @@ test("reconcileRuntimeLiveness does not overwrite leases claimed after the PID s
           sql.includes("SET status = 'active'")
         ) {
           claimedAfterSnapshot = true;
-          assert.equal(
-            claimMcpConnection(db, "codex-race-live", "race-live", claimAt),
-            true
-          );
-          assert.equal(
-            claimMcpConnection(db, "codex-race-dead", "race-dead", claimAt),
-            true
-          );
+          assert.equal(claimMcpConnection(db, "codex-race-live", "race-live", claimAt), true);
+          assert.equal(claimMcpConnection(db, "codex-race-dead", "race-dead", claimAt), true);
         }
         return statement;
       };
@@ -258,7 +264,7 @@ test("reconcileRuntimeLiveness does not overwrite leases claimed after the PID s
   const result = reconcileRuntimeLiveness(
     racingDb,
     { claude: new Set(), codex: new Set([7410]) },
-    now
+    now,
   );
   assert.equal(claimedAfterSnapshot, true);
   assert.deepEqual(result, { refreshed: 0, reaped: 0 });
@@ -279,7 +285,8 @@ test("reconcileLiveness never touches the web console", () => {
   endSession(db, "web-console");
   reconcileLiveness(db, new Set()); // would reap everything pid-tagged & active
   assert.equal(
-    (db.prepare(`SELECT status FROM sessions WHERE id = 'web-console'`).get() as { status: string }).status,
-    "ended"
+    (db.prepare(`SELECT status FROM sessions WHERE id = 'web-console'`).get() as { status: string })
+      .status,
+    "ended",
   );
 });

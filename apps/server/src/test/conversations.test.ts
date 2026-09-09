@@ -44,8 +44,14 @@ test("addTurn appends in order with correct roles", () => {
   addTurn(db, { conversation_id: c.id, role: "user", content: "hi" });
   addTurn(db, { conversation_id: c.id, role: "assistant", content: "hello" });
   const turns = getTurns(db, c.id);
-  assert.deepEqual(turns.map((t) => t.role), ["user", "assistant"]);
-  assert.deepEqual(turns.map((t) => t.content), ["hi", "hello"]);
+  assert.deepEqual(
+    turns.map((t) => t.role),
+    ["user", "assistant"],
+  );
+  assert.deepEqual(
+    turns.map((t) => t.content),
+    ["hi", "hello"],
+  );
 });
 
 test("deleteConversation cascades turns", () => {
@@ -55,4 +61,3 @@ test("deleteConversation cascades turns", () => {
   assert.equal(getTurns(db, c.id).length, 0);
   assert.equal(getConversation(db, c.id), null);
 });
-

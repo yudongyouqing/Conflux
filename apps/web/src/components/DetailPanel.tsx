@@ -1,8 +1,19 @@
 import { useState } from "react";
-import { useSessionContext, useWebAsk, useEdgeMessages, useEdgeAsk, useOpenSessionTerminal } from "../hooks";
+import { useSessionContext, useEdgeMessages, useEdgeAsk, useOpenSessionTerminal } from "../hooks";
+import { MentionComposer } from "./MentionComposer";
 import type { Message, GraphNode, SessionStatus } from "@muiltchat/shared";
 import { StatusDot } from "./StatusDot";
-import { FileText, Clock, ArrowRight, FolderOpen, Send, Loader2, ArrowLeftRight, TerminalSquare } from "lucide-react";
+import {
+  FileText,
+  Clock,
+  ArrowRight,
+  FolderOpen,
+  Send,
+  Loader2,
+  ArrowLeftRight,
+  TerminalSquare,
+  MousePointerClick,
+} from "lucide-react";
 
 const WEB_CONSOLE_ID = "web-console";
 const DEFAULT_DESC = "Claude Code session (hook)";
@@ -29,11 +40,7 @@ export function DetailPanel({
 
   if (session) {
     return (
-      <SessionDetail
-        session={session}
-        contextEntries={contextEntries}
-        onOpenEdge={onOpenEdge}
-      />
+      <SessionDetail session={session} contextEntries={contextEntries} onOpenEdge={onOpenEdge} />
     );
   }
 
@@ -52,8 +59,7 @@ export function DetailPanel({
       <div className="p-5 space-y-4 overflow-y-auto h-full">
         <div className="flex items-center gap-2 text-xs">
           <span className="text-gray-700 font-medium">
-            {sessionNameLookup(message.from_session) ??
-              message.from_session.slice(0, 8)}
+            {sessionNameLookup(message.from_session) ?? message.from_session.slice(0, 8)}
           </span>
           <ArrowRight size={12} className="text-gray-400" />
           <span className="text-gray-700 font-medium">
@@ -99,7 +105,16 @@ export function DetailPanel({
   }
 
   return (
-    <div className="flex items-center justify-center h-full text-gray-400 text-sm text-center px-6">
+    <div className="flex items-center justify-center h-full p-6">
+      <div className="text-center max-w-[220px]">
+        <div className="w-12 h-12 mx-auto mb-3 rounded-2xl bg-gray-50 border border-gray-100 flex items-center justify-center">
+          <MousePointerClick size={20} className="text-gray-300" />
+        </div>
+        <div className="text-sm text-gray-500 font-medium">选择一个对象查看详情</div>
+        <div className="text-xs text-gray-400 mt-1">
+          点击图节点、图谱连线或消息条目，详情会显示在这里
+        </div>
+      </div>
       点击图节点或消息条目查看详情
     </div>
   );
@@ -126,16 +141,13 @@ function EdgeFlowView({
   const [text, setText] = useState("");
   const messages = (data?.messages ?? []).slice().reverse();
   const nameOf = (id: string) => sessionNameLookup(id) ?? id.slice(0, 8);
-  const speakable = from === WEB_CONSOLE_ID;
+  // every channel is speakable — the UI continues it on the initiator's behalf
   const targetOffline = sessionStatusLookup(to) && sessionStatusLookup(to) !== "active";
 
   const send = () => {
     const question = text.trim();
     if (!question || ask.isPending) return;
-    ask.mutate(
-      { edgeId: edge.id, question },
-      { onSuccess: () => setText("") }
-    );
+    ask.mutate({ edgeId: edge.id, question }, { onSuccess: () => setText("") });
   };
 
   return (
@@ -162,41 +174,35 @@ function EdgeFlowView({
         </div>
       </div>
 
-      {speakable ? (
-        <div>
-          {targetOffline && (
-            <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mb-1.5">
-              ⚠ {nameOf(to)} 当前离线。发送后将自动 headless 唤醒它回复(若可恢复)。
-            </div>
-          )}
-          <div className="flex gap-1.5">
-            <input
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.nativeEvent.isComposing) send();
-              }}
-              placeholder={`以 Web 控制台身份在通道 #${edge.id} 发言…`}
-              className="flex-1 min-w-0 text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-300"
-            />
-            <button
-              onClick={send}
-              disabled={!text.trim() || ask.isPending}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-blue-700 transition-colors flex-shrink-0"
-            >
-              {ask.isPending ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
-              发送
-            </button>
+      <div>
+        {targetOffline && (
+          <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mb-1.5">
+            ⚠ {nameOf(to)} 当前离线。发送后将自动 headless 唤醒它回复(若可恢复)。
           </div>
-          {ask.isError && (
-            <p className="text-[10px] text-red-500 mt-1">{(ask.error as Error).message}</p>
-          )}
+        )}
+        <div className="flex gap-1.5">
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) send();
+            }}
+            placeholder={`以 ${nameOf(from)} 身份在通道 #${edge.id} 发言…`}
+            className="flex-1 min-w-0 text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-300"
+          />
+          <button
+            onClick={send}
+            disabled={!text.trim() || ask.isPending}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-blue-700 transition-colors flex-shrink-0"
+          >
+            {ask.isPending ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+            发送
+          </button>
         </div>
-      ) : (
-        <div className="text-[10px] text-gray-500 bg-gray-50 border border-gray-200 rounded-md px-2 py-1.5">
-          只读通道:由 {nameOf(from)} 发起,只有它能在本通道发问;{nameOf(to)} 的回复会显示在这里。
-        </div>
-      )}
+        {ask.isError && (
+          <p className="text-[10px] text-red-500 mt-1">{(ask.error as Error).message}</p>
+        )}
+      </div>
 
       {messages.length === 0 ? (
         <p className="text-xs text-gray-400">通道还没有消息。</p>
@@ -205,10 +211,7 @@ function EdgeFlowView({
           {messages.map((m) => {
             const outgoing = m.from_session === from;
             return (
-              <div
-                key={m.id}
-                className={`flex flex-col ${outgoing ? "items-end" : "items-start"}`}
-              >
+              <div key={m.id} className={`flex flex-col ${outgoing ? "items-end" : "items-start"}`}>
                 <div className="text-[10px] text-gray-400 mb-0.5">
                   {nameOf(m.from_session)} → {nameOf(m.to_session)} ·{" "}
                   {new Date(m.created_at).toLocaleString()}
@@ -252,9 +255,7 @@ function SessionDetail({
   const openTerminal = useOpenSessionTerminal();
   const [openNote, setOpenNote] = useState<string | null>(null);
   const activity =
-    session.description && session.description !== DEFAULT_DESC
-      ? session.description
-      : null;
+    session.description && session.description !== DEFAULT_DESC ? session.description : null;
 
   const handleOpenTerminal = () => {
     setOpenNote(null);
@@ -268,21 +269,23 @@ function SessionDetail({
     <div className="p-5 space-y-5 overflow-y-auto h-full">
       <div>
         <div className="flex items-center gap-2 mb-1.5">
-          <StatusDot status={session.status} />
-          <h2 className="text-gray-900 font-semibold text-[15px] break-all">
-            {session.name}
-          </h2>
+          <StatusDot status={session.status} busy={session.busy} />
+          <h2 className="text-gray-900 font-semibold text-[15px] break-all">{session.name}</h2>
         </div>
         {activity && (
-          <div className="text-xs text-blue-600 bg-blue-50 border border-blue-100 rounded-lg px-2 py-1 mb-1.5 truncate" title={activity}>
+          <div
+            className="text-xs text-blue-600 bg-blue-50 border border-blue-100 rounded-lg px-2 py-1 mb-1.5 truncate"
+            title={activity}
+          >
             正在: {activity}
           </div>
         )}
-        <div className="text-[10px] text-gray-400 font-mono break-all">
-          {session.id}
-        </div>
+        <div className="text-[10px] text-gray-400 font-mono break-all">{session.id}</div>
         {session.project_dir && (
-          <div className="text-[11px] text-gray-500 mt-1 flex items-center gap-1 min-w-0" title={session.project_dir}>
+          <div
+            className="text-[11px] text-gray-500 mt-1 flex items-center gap-1 min-w-0"
+            title={session.project_dir}
+          >
             <FolderOpen size={11} className="flex-shrink-0" />
             <span className="truncate">{session.project_dir}</span>
           </div>
@@ -338,7 +341,7 @@ function SessionDetail({
         </div>
       )}
 
-      {isSession && <InitiateConversation sessionId={session.id} status={session.status} onOpenEdge={onOpenEdge} />}
+      {isSession && <InitiateConversation session={session} onOpenEdge={onOpenEdge} />}
 
       <div>
         <h3 className="text-xs text-gray-500 font-medium mb-2 flex items-center gap-1">
@@ -349,16 +352,9 @@ function SessionDetail({
         ) : (
           <div className="space-y-2">
             {contextEntries.entries.map((e) => (
-              <div
-                key={e.id}
-                className="p-3 rounded-xl bg-gray-50 border border-gray-200"
-              >
-                <div className="text-xs text-gray-800 font-medium">
-                  {e.title}
-                </div>
-                <div className="text-[11px] text-gray-500 mt-1 line-clamp-3">
-                  {e.content}
-                </div>
+              <div key={e.id} className="p-3 rounded-xl bg-gray-50 border border-gray-200">
+                <div className="text-xs text-gray-800 font-medium">{e.title}</div>
+                <div className="text-[11px] text-gray-500 mt-1 line-clamp-3">{e.content}</div>
                 {e.tags && e.tags.length > 0 && (
                   <div className="flex gap-1 mt-1.5 flex-wrap">
                     {e.tags.map((t) => (
@@ -382,67 +378,35 @@ function SessionDetail({
 
 /** Ask/message flow between the web console and one session. */
 function InitiateConversation({
-  sessionId,
-  status,
+  session,
   onOpenEdge,
 }: {
-  sessionId: string;
-  status: SessionStatus;
+  session: GraphNode;
   onOpenEdge: (edge: { id: number; from: string; to: string }) => void;
 }) {
-  const ask = useWebAsk();
-  const [text, setText] = useState("");
-
-  const initiate = () => {
-    const question = text.trim();
-    if (!question || ask.isPending) return;
-    ask.mutate(
-      { to_session: sessionId, question },
-      {
-        onSuccess: (r) => {
-          setText("");
-          // jump straight into the channel this question created
-          if (r.message.edge_id != null) {
-            onOpenEdge({ id: r.message.edge_id, from: WEB_CONSOLE_ID, to: sessionId });
-          }
-        },
-      }
-    );
-  };
-
   return (
     <div>
       <h3 className="text-xs text-gray-500 font-medium mb-2 flex items-center gap-1">
         <ArrowRight size={12} /> 发起对话通道
       </h3>
-      {status !== "active" && (
+      {session.status !== "active" && (
         <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mb-2">
-          ⚠ 对方当前{status === "ended" ? "已结束" : "离线"}。发送后将尝试自动唤醒它回复。
+          ⚠ 对方当前{session.status === "ended" ? "已结束" : "离线"}。发送后将尝试自动唤醒它回复。
         </div>
       )}
-      <div className="flex gap-1.5">
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.nativeEvent.isComposing) initiate();
-          }}
-          placeholder="发起对话:Web 控制台 → 该会话…"
-          className="flex-1 min-w-0 text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-300"
-        />
-        <button
-          onClick={initiate}
-          disabled={!text.trim() || ask.isPending}
-          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-blue-700 transition-colors flex-shrink-0"
-        >
-          {ask.isPending ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
-          发起
-        </button>
-      </div>
-      {ask.isError && (
-        <p className="text-[10px] text-red-500 mt-1">{(ask.error as Error).message}</p>
-      )}
+      <MentionComposer
+        sender={session.id === WEB_CONSOLE_ID ? null : { id: session.id, name: session.name }}
+        onSent={(_t, message) => {
+          // jump straight into the channel this question created
+          if (message?.edge_id != null) {
+            onOpenEdge({
+              id: message.edge_id,
+              from: message.from_session ?? WEB_CONSOLE_ID,
+              to: message.to_session,
+            });
+          }
+        }}
+      />
     </div>
   );
 }
-

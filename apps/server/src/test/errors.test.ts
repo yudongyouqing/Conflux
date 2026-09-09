@@ -13,7 +13,7 @@ test("maps SQLITE_BUSY to an actionable stable error", () => {
 test("maps corrupt database errors without exposing the raw error", () => {
   const result = publicError(
     Object.assign(new Error("password=top-secret"), { code: "SQLITE_CORRUPT" }),
-    { dataDir: "C:\\Conflux\\data" }
+    { dataDir: "C:\\Conflux\\data" },
   );
   assert.equal(result.code, "DATA_CORRUPT");
   assert.match(result.message, /C:\\Conflux\\data/);

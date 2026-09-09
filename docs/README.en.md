@@ -234,6 +234,10 @@ Hooks associate lifecycle events with session identity and keep liveness informa
 
 Hooks also maintain custom titles, `/resume` lineage, and undelivered messages. Set `CLAUDE_CONFIG_DIR` when Claude Code uses a custom configuration directory.
 
+### Codex session titles
+
+Codex has no hooks, so the server maintains titles itself: every 30 seconds, alongside the MCP heartbeat and the liveness probe, it scans the rollout records under `~/.codex/sessions` plus `~/.codex/session_index.jsonl`, preferring the thread title Codex maintains itself and falling back to an excerpt of the first user instruction. A session gains its title within about 30 seconds of its first instruction; sessions named manually via `register_session` or the UI are never overridden.
+
 ## Internal Agents
 
 Internal agents are model-backed agents stored in the local database. Create one from the Agents tab with a name, system prompt, provider, and model, then chat with it from the workspace.
