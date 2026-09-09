@@ -9,6 +9,23 @@ export function layoutGraph(
   edges: Edge[],
   direction: "LR" | "TB" = "LR"
 ): { nodes: Node[]; edges: Edge[] } {
+  // No relations to draw: dagre would stack every node into one rank (a
+  // single vertical column) — a "graph" that reads as a broken list. Fall
+  // back to a tidy left-aligned grid instead.
+  if (edges.length === 0 && nodes.length > 1) {
+    const COLS = 3;
+    const GAP_X = 56;
+    const GAP_Y = 44;
+    const layoutedNodes = nodes.map((node, i) => ({
+      ...node,
+      position: {
+        x: (i % COLS) * (NODE_WIDTH + GAP_X),
+        y: Math.floor(i / COLS) * (NODE_HEIGHT + GAP_Y),
+      },
+    }));
+    return { nodes: layoutedNodes, edges };
+  }
+
   const g = new dagre.graphlib.Graph();
   g.setGraph({ rankdir: direction, ranksep: 100, nodesep: 50, marginx: 40, marginy: 40 });
   g.setDefaultEdgeLabel(() => ({}));

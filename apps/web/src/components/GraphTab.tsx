@@ -429,7 +429,7 @@ export function GraphTab({
               onClick={() => setViewMode(m)}
               className={`px-3 py-1.5 transition-colors ${
                 viewMode === m
-                  ? "bg-gray-800 text-white"
+                  ? "bg-blue-600 text-white"
                   : "text-gray-600 hover:bg-gray-50"
               }`}
             >
@@ -438,7 +438,15 @@ export function GraphTab({
           ))}
         </div>
       </Panel>
-      <Background color="#d0d5dd" gap={20} />
+{/* no edges in view: say WHY instead of looking like a broken graph */}
+{edges.length === 0 && nodes.length > 0 && (
+        <Panel position="bottom-center" className="!mb-4">
+          <div className="text-[11px] text-gray-400 bg-white/85 border border-gray-100 rounded-full px-3 py-1 shadow-sm">
+            当前视图暂无会话间消息通道 —— 发起一次对话即可建立连线
+          </div>
+        </Panel>
+      )}
+      <Background color="#cbd5e1"  gap={24} />
       <Controls className="!bg-white !border !border-gray-200 !rounded-lg !shadow-sm [&_button]:!bg-white [&_button]:!border-gray-200 [&_button]:!text-gray-600 [&_button:hover]:!bg-gray-50" />
     </ReactFlow>
   );
