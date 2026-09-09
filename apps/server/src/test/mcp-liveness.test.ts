@@ -213,6 +213,39 @@ test("new MCP connection replaces an old generation without old close killing it
   );
 });
 
+test("wake-run disconnect spares a session whose CLI process still lives", async (t) => {
+  const { db, cleanup } = makeDb();
+  t.after(cleanup);
+  const api = await loadApi();
+  assert.equal(typeof api.markMcpDisconnected, "function", "disconnect API is not implemented");
+
+  // the real CLI process is THIS test runner — definitely alive
+  registerSession(db, {
+    id: "wake-adopted-session",
+    name: "wake-adopted-session",
+    metadata: { runtime: "claude", runtime_pid: process.pid },
+  });
+  assert.equal(
+    api.claimMcpConnection!(db, "wake-adopted-session", "wake-connection", new Date()),
+    true,
+  );
+  assert.equal(
+    api.markMcpDisconnected!(
+      db,
+      "wake-adopted-session",
+      "wake-connection",
+      "transport-close",
+      new Date(),
+    ),
+    true,
+  );
+  const row = db
+    .prepare("SELECT status, metadata FROM sessions WHERE id = ?")
+    .get("wake-adopted-session") as { status: string; metadata: string };
+  assert.equal(row.status, "active", "live process must stay active");
+  const meta = JSON.parse(row.metadata);
+  assert.equal(meta.mcp_connection_state, undefined, "lease stripped -> PID-governed again");
+});
 test("silent MCP lease expires and records a disconnected state", async (t) => {
   const { db, cleanup } = makeDb();
   t.after(cleanup);
