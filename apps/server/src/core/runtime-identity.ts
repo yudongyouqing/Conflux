@@ -47,9 +47,7 @@ export function isRuntimeCommand(command: string, runtime: RuntimeId): boolean {
  */
 export function psMatchClauses(runtime: RuntimeId): string {
   const tokens = RUNTIME_TOKENS[runtime];
-  const nameChecks = tokens
-    .filter((t) => t.endsWith(".exe"))
-    .map((t) => `$_.Name -eq '${t}'`);
+  const nameChecks = tokens.filter((t) => t.endsWith(".exe")).map((t) => `$_.Name -eq '${t}'`);
   const cmdChecks = tokens
     .filter((t) => !t.endsWith(".exe"))
     .map((t) => `$_.CommandLine -like '*${t.split("/").join("*")}*'`);

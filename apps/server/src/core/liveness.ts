@@ -69,7 +69,7 @@ const defaultRunner: ProcessRunner = (command, args) =>
 /** Snapshot of live Claude/Codex pids, or null when the probe itself failed. */
 export async function probeRuntimePids(
   runner: ProcessRunner = defaultRunner,
-  platform: NodeJS.Platform = process.platform
+  platform: NodeJS.Platform = process.platform,
 ): Promise<RuntimePidSnapshot | null> {
   try {
     const output =
@@ -86,10 +86,7 @@ export async function probeRuntimePids(
       codex: runtimePidsFrom(entries, "codex"),
     };
   } catch (err) {
-    logger.warn(
-      { err: err instanceof Error ? err.message : String(err) },
-      "liveness probe failed"
-    );
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, "liveness probe failed");
     return null;
   }
 }
@@ -97,13 +94,15 @@ export async function probeRuntimePids(
 /** Snapshot of live Claude pids (compatibility wrapper). */
 export async function probeClaudePids(
   runner: ProcessRunner = defaultRunner,
-  platform: NodeJS.Platform = process.platform
+  platform: NodeJS.Platform = process.platform,
 ): Promise<Set<number> | null> {
   const snapshot = await probeRuntimePids(runner, platform);
   return snapshot?.claude ?? null;
 }
 
-function metadataRuntimePid(meta: Record<string, unknown>): { runtime: RuntimeId; pid: number } | null {
+function metadataRuntimePid(
+  meta: Record<string, unknown>,
+): { runtime: RuntimeId; pid: number } | null {
   const runtime = meta.runtime === "codex" || meta.runtime === "claude" ? meta.runtime : null;
   if (runtime && typeof meta.runtime_pid === "number" && Number.isInteger(meta.runtime_pid)) {
     return { runtime, pid: meta.runtime_pid };
@@ -126,12 +125,12 @@ function metadataRuntimePid(meta: Record<string, unknown>): { runtime: RuntimeId
 export function reconcileRuntimeLiveness(
   db: DB,
   livePids: RuntimePidSnapshot,
-  now: Date = new Date()
+  now: Date = new Date(),
 ): { refreshed: number; reaped: number } {
   const rows = db
     .prepare(
       `SELECT id, status, metadata FROM sessions
-       WHERE metadata LIKE '%"runtime_pid":%' OR metadata LIKE '%"claude_pid":%'`
+       WHERE metadata LIKE '%"runtime_pid":%' OR metadata LIKE '%"claude_pid":%'`,
     )
     .all() as { id: string; status: string; metadata: string | null }[];
 
@@ -141,13 +140,13 @@ export function reconcileRuntimeLiveness(
   const refresh = db.prepare(
     `UPDATE sessions
      SET status = 'active', last_heartbeat_at = ?
-     WHERE id = ? AND metadata NOT LIKE '%"mcp_connection_id"%'`
+     WHERE id = ? AND metadata NOT LIKE '%"mcp_connection_id"%'`,
   );
   const reap = db.prepare(
     `UPDATE sessions
      SET status = 'stale'
      WHERE id = ? AND status = 'active'
-       AND metadata NOT LIKE '%"mcp_connection_id"%'`
+       AND metadata NOT LIKE '%"mcp_connection_id"%'`,
   );
 
   for (const row of rows) {
@@ -179,7 +178,7 @@ export function reconcileRuntimeLiveness(
 export function reconcileLiveness(
   db: DB,
   livePids: Set<number>,
-  now: Date = new Date()
+  now: Date = new Date(),
 ): { refreshed: number; reaped: number } {
   return reconcileRuntimeLiveness(db, { claude: livePids, codex: new Set<number>() }, now);
 }

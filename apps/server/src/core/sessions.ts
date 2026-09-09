@@ -2,11 +2,7 @@ import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 import { STALE_AFTER_MS } from "../config.js";
 import type { IdentitySource, Session, SessionRuntime, SessionSummary } from "@muiltchat/shared";
-import {
-  parseIdentitySource,
-  parseRuntimePid,
-  parseSessionRuntime,
-} from "./session-identity.js";
+import { parseIdentitySource, parseRuntimePid, parseSessionRuntime } from "./session-identity.js";
 
 export type { Session, SessionSummary };
 
@@ -26,7 +22,8 @@ export function registerSession(db: DB, input: RegisterInput): Session {
   const meta = input.metadata ? JSON.stringify(input.metadata) : null;
   const metadataIdentity = readMetadataIdentity(input.metadata);
   const runtime = parseSessionRuntime(input.runtime) ?? metadataIdentity.runtime;
-  const identitySource = parseIdentitySource(input.identity_source) ?? metadataIdentity.identity_source;
+  const identitySource =
+    parseIdentitySource(input.identity_source) ?? metadataIdentity.identity_source;
   const runtimePid = parseRuntimePid(input.runtime_pid) ?? metadataIdentity.runtime_pid;
   db.prepare(
     `INSERT INTO sessions (
@@ -43,7 +40,7 @@ export function registerSession(db: DB, input: RegisterInput): Session {
        identity_source = COALESCE(excluded.identity_source, sessions.identity_source),
        runtime_pid = COALESCE(excluded.runtime_pid, sessions.runtime_pid),
        status = 'active',
-       last_heartbeat_at = excluded.last_heartbeat_at`
+       last_heartbeat_at = excluded.last_heartbeat_at`,
   ).run(
     input.id,
     input.name,
@@ -54,7 +51,7 @@ export function registerSession(db: DB, input: RegisterInput): Session {
     meta,
     runtime,
     identitySource,
-    runtimePid
+    runtimePid,
   );
   return getSession(db, input.id)!;
 }
@@ -65,7 +62,8 @@ function readMetadataIdentity(metadata: Record<string, unknown> | null | undefin
   runtime_pid: number | null;
 } {
   const legacyClaudePid = parseRuntimePid(metadata?.claude_pid);
-  const runtime = parseSessionRuntime(metadata?.runtime) ?? (legacyClaudePid !== null ? "claude" : null);
+  const runtime =
+    parseSessionRuntime(metadata?.runtime) ?? (legacyClaudePid !== null ? "claude" : null);
   const metadataRuntimePid = parseRuntimePid(metadata?.runtime_pid);
   return {
     runtime,
@@ -86,8 +84,7 @@ export function sessionBusy(metadata: string | null): boolean {
 
 export function getSession(db: DB, id: string): Session | null {
   const row = db.prepare(`SELECT * FROM sessions WHERE id = ?`).get(id) as
-    | Record<string, unknown>
-    | undefined;
+    Record<string, unknown> | undefined;
   if (!row) return null;
   return normalizeSession(row);
 }
@@ -104,7 +101,7 @@ function normalizeSession(row: Record<string, unknown>): Session {
 export function heartbeat(db: DB, id: string): void {
   db.prepare(`UPDATE sessions SET last_heartbeat_at = ?, status = 'active' WHERE id = ?`).run(
     nowIso(),
-    id
+    id,
   );
 }
 
@@ -125,14 +122,16 @@ export function setSessionDescription(db: DB, id: string, description: string): 
 export function markStaleSessions(db: DB, now: Date = new Date()): number {
   const threshold = new Date(now.getTime() - STALE_AFTER_MS).toISOString();
   const res = db
-    .prepare(`UPDATE sessions SET status = 'stale' WHERE status = 'active' AND last_heartbeat_at < ?`)
+    .prepare(
+      `UPDATE sessions SET status = 'stale' WHERE status = 'active' AND last_heartbeat_at < ?`,
+    )
     .run(threshold);
   return res.changes;
 }
 
 export function listSessions(
   db: DB,
-  opts: { status?: "active" | "stale" | "ended" | "all" } = {}
+  opts: { status?: "active" | "stale" | "ended" | "all" } = {},
 ): SessionSummary[] {
   markStaleSessions(db);
   const status = opts.status ?? "active";
@@ -140,9 +139,7 @@ export function listSessions(
   // stale or ended placeholders, which are UUID noise after their process exits.
   const tempVisibility = `(COALESCE(s.metadata, '') NOT LIKE '%"temp":true%' OR s.status = 'active')`;
   const where =
-    status === "all"
-      ? `WHERE ${tempVisibility}`
-      : `WHERE s.status = ? AND ${tempVisibility}`;
+    status === "all" ? `WHERE ${tempVisibility}` : `WHERE s.status = ? AND ${tempVisibility}`;
   const params: string[] = status === "all" ? [] : [status];
   const rows = db
     .prepare(
@@ -151,7 +148,7 @@ export function listSessions(
          (SELECT COUNT(*) FROM messages m WHERE m.to_session = s.id AND m.status IN ('pending','seen')) AS pending_inbox
        FROM sessions s
        ${where}
-       ORDER BY s.last_heartbeat_at DESC`
+       ORDER BY s.last_heartbeat_at DESC`,
     )
     .all(...params) as Record<string, unknown>[];
   return rows.map((row) => normalizeSession(row) as SessionSummary);
@@ -185,7 +182,7 @@ export function endSession(db: DB, id: string): void {
  */
 export function pruneAbandonedSessions(
   db: DB,
-  opts: { claudePid?: number; keepId?: string } = {}
+  opts: { claudePid?: number; keepId?: string } = {},
 ): number {
   const candidates = db
     .prepare(
@@ -195,7 +192,7 @@ export function pruneAbandonedSessions(
          AND (
            description IN ('Claude Code session (hook)', 'Claude Code session (auto-registered)')
            OR COALESCE(metadata, '') LIKE '%"temp":true%'
-         )`
+         )`,
     )
     .all() as { id: string; status: string; metadata: string | null }[];
 
@@ -219,7 +216,7 @@ export function pruneAbandonedSessions(
         `DELETE FROM sessions WHERE id = ?
          AND (SELECT COUNT(*) FROM messages WHERE from_session = ? OR to_session = ?) = 0
          AND (SELECT COUNT(*) FROM edges WHERE from_session = ? OR to_session = ?) = 0
-         AND (SELECT COUNT(*) FROM context_entries WHERE session_id = ?) = 0`
+         AND (SELECT COUNT(*) FROM context_entries WHERE session_id = ?) = 0`,
       )
       .run(row.id, row.id, row.id, row.id, row.id, row.id);
     deleted += res.changes;
@@ -230,8 +227,7 @@ export function pruneAbandonedSessions(
 /** Merge keys into a session's metadata JSON (in place, no full rewrite). */
 export function mergeSessionMeta(db: DB, id: string, patch: Record<string, unknown>): void {
   const row = db.prepare(`SELECT metadata FROM sessions WHERE id = ?`).get(id) as
-    | { metadata: string | null }
-    | undefined;
+    { metadata: string | null } | undefined;
   if (!row) return;
   let meta: Record<string, unknown> = {};
   try {
@@ -241,6 +237,6 @@ export function mergeSessionMeta(db: DB, id: string, patch: Record<string, unkno
   }
   db.prepare(`UPDATE sessions SET metadata = ? WHERE id = ?`).run(
     JSON.stringify({ ...meta, ...patch }),
-    id
+    id,
   );
 }

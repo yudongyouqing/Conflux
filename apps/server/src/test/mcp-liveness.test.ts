@@ -22,13 +22,13 @@ type Api = {
     id: string,
     connectionId: string,
     reason: string,
-    now?: Date
+    now?: Date,
   ) => boolean;
   expireMcpLeases?: (db: unknown, now?: Date) => { expired: number };
   installMcpStdioLifecycle?: (
     stdin: StdioEventSource,
     transport: StdioCloseableTransport,
-    onClose: (reason: string) => void
+    onClose: (reason: string) => void,
   ) => () => void;
 };
 
@@ -44,7 +44,7 @@ type McpServerApi = {
     currentSessionId: string,
     targetSessionId: string,
     claim: () => boolean,
-    deletePrevious: (id: string) => void
+    deletePrevious: (id: string) => void,
   ) => { sessionId: string; adopted: boolean };
 };
 
@@ -76,7 +76,10 @@ class FakeTransport implements StdioCloseableTransport {
   closeCalls = 0;
   onclose?: () => void;
 
-  constructor(private readonly closeError?: Error, private readonly invokeOnClose = true) {}
+  constructor(
+    private readonly closeError?: Error,
+    private readonly invokeOnClose = true,
+  ) {}
 
   close(): Promise<void> {
     this.closeCalls++;
@@ -110,7 +113,7 @@ test("MCP server session metadata builder combines identity and lease metadata",
   assert.equal(
     typeof api.buildMcpSessionMetadata,
     "function",
-    "MCP server metadata builder is not implemented"
+    "MCP server metadata builder is not implemented",
   );
 
   const now = new Date("2026-09-02T10:00:00.000Z");
@@ -149,19 +152,14 @@ test("failed MCP adoption claim keeps the current lease owner for a later retry"
     "mcp-temp-session",
     "ended-target",
     claim,
-    deletePrevious
+    deletePrevious,
   );
   assert.deepEqual(firstAttempt, { sessionId: "mcp-temp-session", adopted: false });
   assert.equal(claimCalls, 1);
   assert.deepEqual(deleted, []);
 
   claimAllowed = true;
-  const retry = api.adoptMcpSession!(
-    firstAttempt.sessionId,
-    "ended-target",
-    claim,
-    deletePrevious
-  );
+  const retry = api.adoptMcpSession!(firstAttempt.sessionId, "ended-target", claim, deletePrevious);
   assert.deepEqual(retry, { sessionId: "ended-target", adopted: true });
   assert.deepEqual(deleted, ["mcp-temp-session"]);
 });
@@ -193,7 +191,7 @@ test("new MCP connection replaces an old generation without old close killing it
   });
   assert.equal(
     api.claimMcpConnection!(db, "lease-generation-session", "new-connection", new Date()),
-    true
+    true,
   );
   assert.equal(
     api.markMcpDisconnected!(
@@ -201,13 +199,17 @@ test("new MCP connection replaces an old generation without old close killing it
       "lease-generation-session",
       "old-connection",
       "transport-close",
-      new Date()
+      new Date(),
     ),
-    false
+    false,
   );
   assert.equal(
-    (db.prepare("SELECT status FROM sessions WHERE id = ?").get("lease-generation-session") as { status: string }).status,
-    "active"
+    (
+      db.prepare("SELECT status FROM sessions WHERE id = ?").get("lease-generation-session") as {
+        status: string;
+      }
+    ).status,
+    "active",
   );
 });
 
@@ -230,7 +232,9 @@ test("silent MCP lease expires and records a disconnected state", async (t) => {
   });
   const result = api.expireMcpLeases!(db, new Date("2026-09-02T10:01:31.000Z"));
   assert.equal(result.expired, 1);
-  const row = db.prepare("SELECT status, metadata FROM sessions WHERE id = ?").get("lease-expiry-session") as {
+  const row = db
+    .prepare("SELECT status, metadata FROM sessions WHERE id = ?")
+    .get("lease-expiry-session") as {
     status: string;
     metadata: string;
   };
@@ -248,7 +252,7 @@ test("stdin end and close request transport close once and report transport clos
   assert.equal(
     typeof api.installMcpStdioLifecycle,
     "function",
-    "stdio lifecycle API is not implemented"
+    "stdio lifecycle API is not implemented",
   );
 
   const dispose = api.installMcpStdioLifecycle!(stdin, transport, (reason) => {
@@ -276,7 +280,7 @@ test("successful stdin transport close reports stdin close without transport onc
   assert.equal(
     typeof api.installMcpStdioLifecycle,
     "function",
-    "stdio lifecycle API is not implemented"
+    "stdio lifecycle API is not implemented",
   );
 
   const dispose = api.installMcpStdioLifecycle!(stdin, transport, (reason) => {
@@ -307,7 +311,7 @@ test("transport onclose reports transport close once", async (t) => {
   assert.equal(
     typeof api.installMcpStdioLifecycle,
     "function",
-    "stdio lifecycle API is not implemented"
+    "stdio lifecycle API is not implemented",
   );
 
   const dispose = api.installMcpStdioLifecycle!(stdin, transport, (reason) => {
@@ -334,7 +338,7 @@ test("rejected stdin transport close reports a close failure", async (t) => {
   assert.equal(
     typeof api.installMcpStdioLifecycle,
     "function",
-    "stdio lifecycle API is not implemented"
+    "stdio lifecycle API is not implemented",
   );
 
   const dispose = api.installMcpStdioLifecycle!(stdin, transport, (reason) => {

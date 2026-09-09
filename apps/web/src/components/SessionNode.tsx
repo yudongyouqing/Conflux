@@ -44,8 +44,7 @@ function skinFor(d: SessionNodeData, isAgent: boolean, isWeb: boolean): NodeSkin
   if (isWeb) return { icon: Globe, block: "bg-blue-600", accent: "bg-blue-500" };
   if (d.runtime === "claude")
     return { icon: Terminal, block: "bg-orange-600", accent: "bg-orange-500" };
-  if (d.runtime === "codex")
-    return { icon: Code2, block: "bg-slate-700", accent: "bg-slate-500" };
+  if (d.runtime === "codex") return { icon: Code2, block: "bg-slate-700", accent: "bg-slate-500" };
   return { icon: Terminal, block: "bg-gray-500", accent: "bg-gray-400" };
 }
 
@@ -107,10 +106,7 @@ export function SessionNode({ data, selected, dragging }: NodeProps) {
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5">
-              <span
-                className="text-gray-900 text-xs font-semibold truncate flex-1"
-                title={d.name}
-              >
+              <span className="text-gray-900 text-xs font-semibold truncate flex-1" title={d.name}>
                 {d.name}
               </span>
               <span
@@ -121,9 +117,7 @@ export function SessionNode({ data, selected, dragging }: NodeProps) {
               />
             </div>
             {d.runtime && !isAgent && (
-              <div className="text-[9px] text-gray-400 uppercase tracking-wide">
-                {d.runtime}
-              </div>
+              <div className="text-[9px] text-gray-400 uppercase tracking-wide">{d.runtime}</div>
             )}
           </div>
         </div>

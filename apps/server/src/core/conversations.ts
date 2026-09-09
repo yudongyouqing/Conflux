@@ -6,13 +6,13 @@ export type { Conversation, Turn };
 
 export function createConversation(
   db: DB,
-  input: { agent_id: number; initiated_by?: string | null; title?: string | null }
+  input: { agent_id: number; initiated_by?: string | null; title?: string | null },
 ): Conversation {
   const now = nowIso();
   const res = db
     .prepare(
       `INSERT INTO conversations (agent_id, initiated_by, title, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?)`,
     )
     .run(input.agent_id, input.initiated_by ?? null, input.title ?? null, now, now);
   return getConversation(db, Number(res.lastInsertRowid))!;
@@ -24,7 +24,7 @@ export function getConversation(db: DB, id: number): Conversation | null {
 
 export function listConversations(
   db: DB,
-  opts: { agent_id?: number; limit?: number } = {}
+  opts: { agent_id?: number; limit?: number } = {},
 ): Conversation[] {
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 500);
   if (opts.agent_id) {
@@ -39,16 +39,17 @@ export function listConversations(
 
 export function addTurn(
   db: DB,
-  input: { conversation_id: number; role: "user" | "assistant"; content: string }
+  input: { conversation_id: number; role: "user" | "assistant"; content: string },
 ): Turn {
   const now = nowIso();
   const res = db
-    .prepare(
-      `INSERT INTO turns (conversation_id, role, content, created_at) VALUES (?, ?, ?, ?)`
-    )
+    .prepare(`INSERT INTO turns (conversation_id, role, content, created_at) VALUES (?, ?, ?, ?)`)
     .run(input.conversation_id, input.role, input.content, now);
   // Bump conversation updated_at
-  db.prepare(`UPDATE conversations SET updated_at = ? WHERE id = ?`).run(now, input.conversation_id);
+  db.prepare(`UPDATE conversations SET updated_at = ? WHERE id = ?`).run(
+    now,
+    input.conversation_id,
+  );
   return getTurns(db, input.conversation_id).find((t) => t.id === Number(res.lastInsertRowid))!;
 }
 

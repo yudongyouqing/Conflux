@@ -156,7 +156,11 @@ export function readCodexUserPrompts(rolloutPath: string): string[] {
           content?: Array<{ type?: string; text?: unknown }>;
         };
       };
-      if (j.type !== "response_item" || j.payload?.type !== "message" || j.payload.role !== "user") {
+      if (
+        j.type !== "response_item" ||
+        j.payload?.type !== "message" ||
+        j.payload.role !== "user"
+      ) {
         continue;
       }
       for (const c of j.payload.content ?? []) {
@@ -213,12 +217,19 @@ export function codexRolloutDigest(rolloutPath: string, maxChars = 1500): string
     if (!line.includes('"response_item"')) continue;
     try {
       const j = JSON.parse(line) as {
-        payload?: { type?: string; role?: string; content?: Array<{ type?: string; text?: unknown }> };
+        payload?: {
+          type?: string;
+          role?: string;
+          content?: Array<{ type?: string; text?: unknown }>;
+        };
       };
       const p = j.payload;
       if (p?.type !== "message" || (p.role !== "user" && p.role !== "assistant")) continue;
       const parts = (p.content ?? [])
-        .filter((c) => (c.type === "input_text" || c.type === "output_text") && typeof c.text === "string")
+        .filter(
+          (c) =>
+            (c.type === "input_text" || c.type === "output_text") && typeof c.text === "string",
+        )
         .map((c) => c.text as string);
       if (parts.length === 0) continue;
       const t = parts.join(" ").replace(/\s+/g, " ").trim();
@@ -236,9 +247,7 @@ export function codexRolloutDigest(rolloutPath: string, maxChars = 1500): string
 /** Locate the rollout jsonl for a codex conversation uuid (filename suffix). */
 export function findCodexRolloutPath(codexSessionId: string): string {
   try {
-    const root = join(
-      (process.env.USERPROFILE || process.env.HOME || ".") + "/.codex/sessions"
-    );
+    const root = join((process.env.USERPROFILE || process.env.HOME || ".") + "/.codex/sessions");
     // day dirs from 30d back to today; the filename embeds the uuid
     for (let t = Date.now() - 30 * 86_400_000; t <= Date.now() + 86_400_000; t += 86_400_000) {
       const d = new Date(t);

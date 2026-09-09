@@ -52,7 +52,7 @@ function guardArgs(row: SessionRow): unknown[] {
 
 export function createMcpLeaseMetadata(
   connectionId: string,
-  now: Date = new Date()
+  now: Date = new Date(),
 ): Record<string, unknown> {
   const iso = now.toISOString();
   return {
@@ -71,7 +71,7 @@ export function claimMcpConnection(
   db: DB,
   id: string,
   connectionId: string,
-  now: Date = new Date()
+  now: Date = new Date(),
 ): boolean {
   const row = getSessionRow(db, id);
   if (!row || row.status === "ended") return false;
@@ -83,7 +83,7 @@ export function claimMcpConnection(
     .prepare(
       `UPDATE sessions
           SET metadata = ?, status = 'active', last_heartbeat_at = ?
-        WHERE ${metadataGuard(row)}`
+        WHERE ${metadataGuard(row)}`,
     )
     .run(JSON.stringify(next), iso, ...guardArgs(row));
   return result.changes === 1;
@@ -93,16 +93,13 @@ export function touchMcpConnection(
   db: DB,
   id: string,
   connectionId: string,
-  now: Date = new Date()
+  now: Date = new Date(),
 ): boolean {
   const row = getSessionRow(db, id);
   if (!row || row.status === "ended") return false;
   const current = readMetadata(row.metadata);
   if (!current) return false;
-  if (
-    current.mcp_connection_id !== connectionId ||
-    current.mcp_connection_state !== "connected"
-  ) {
+  if (current.mcp_connection_id !== connectionId || current.mcp_connection_state !== "connected") {
     return false;
   }
   const iso = now.toISOString();
@@ -114,7 +111,7 @@ export function touchMcpConnection(
     .prepare(
       `UPDATE sessions
           SET metadata = ?, status = 'active', last_heartbeat_at = ?
-        WHERE ${metadataGuard(row)}`
+        WHERE ${metadataGuard(row)}`,
     )
     .run(JSON.stringify(next), iso, ...guardArgs(row));
   return result.changes === 1;
@@ -125,7 +122,7 @@ export function markMcpDisconnected(
   id: string,
   connectionId: string,
   reason: string,
-  now: Date = new Date()
+  now: Date = new Date(),
 ): boolean {
   const row = getSessionRow(db, id);
   if (!row) return false;
@@ -143,7 +140,7 @@ export function markMcpDisconnected(
       `UPDATE sessions
           SET metadata = ?,
               status = CASE WHEN status = 'active' THEN 'stale' ELSE status END
-        WHERE ${metadataGuard(row)}`
+        WHERE ${metadataGuard(row)}`,
     )
     .run(JSON.stringify(next), ...guardArgs(row));
   return result.changes === 1;
@@ -153,7 +150,7 @@ export function expireMcpLeases(db: DB, now: Date = new Date()): { expired: numb
   const rows = db
     .prepare(
       `SELECT id, status, metadata, last_heartbeat_at FROM sessions
-        WHERE status = 'active' AND metadata LIKE '%"mcp_connection_id"%'`
+        WHERE status = 'active' AND metadata LIKE '%"mcp_connection_id"%'`,
     )
     .all() as SessionRow[];
   let expired = 0;
@@ -168,15 +165,7 @@ export function expireMcpLeases(db: DB, now: Date = new Date()): { expired: numb
         ? Date.parse(metadata.mcp_last_heartbeat_at)
         : Date.parse(row.last_heartbeat_at);
     if (!Number.isFinite(last) || now.getTime() - last < MCP_LEASE_TTL_MS) continue;
-    if (
-      markMcpDisconnected(
-        db,
-        row.id,
-        String(metadata.mcp_connection_id),
-        "lease-expired",
-        now
-      )
-    ) {
+    if (markMcpDisconnected(db, row.id, String(metadata.mcp_connection_id), "lease-expired", now)) {
       expired++;
     }
   }
@@ -186,7 +175,7 @@ export function expireMcpLeases(db: DB, now: Date = new Date()): { expired: numb
 export function installMcpStdioLifecycle(
   stdin: StdioEventSource,
   transport: StdioCloseableTransport,
-  onClose: (reason: string) => void
+  onClose: (reason: string) => void,
 ): () => void {
   let closeRequested = false;
   let closeReported = false;
@@ -213,7 +202,7 @@ export function installMcpStdioLifecycle(
     try {
       void transport.close().then(
         () => reportClose("stdin-close"),
-        () => reportClose("stdin-close-failed")
+        () => reportClose("stdin-close-failed"),
       );
     } catch {
       reportClose("stdin-close-failed");

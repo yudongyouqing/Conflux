@@ -28,11 +28,20 @@ function fakeHome(): string {
   return mkdtempSync(join(tmpdir(), "muiltchat-title-home-"));
 }
 
-function writeTranscript(home: string, projectDir: string, sessionId: string, lines: object[]): void {
+function writeTranscript(
+  home: string,
+  projectDir: string,
+  sessionId: string,
+  lines: object[],
+): void {
   const munged = projectDir.replace(/[^a-zA-Z0-9]/g, "-");
   const dir = join(home, "projects", munged);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, `${sessionId}.jsonl`), lines.map((l) => JSON.stringify(l)).join("\n"), "utf8");
+  writeFileSync(
+    join(dir, `${sessionId}.jsonl`),
+    lines.map((l) => JSON.stringify(l)).join("\n"),
+    "utf8",
+  );
 }
 
 function disposeHome(home: string): void {
@@ -49,7 +58,12 @@ describe("busy flag from hook event pair", () => {
   it("prompt marks busy, stop clears it, session-start resets a stuck flag", () => {
     const home = fakeHome();
     handleHookEvent(db, "session-start", { session_id: SID, cwd: "C:workusy demo" }, home);
-    handleHookEvent(db, "prompt", { session_id: SID, cwd: "C:workusy demo", prompt: "do things" }, home);
+    handleHookEvent(
+      db,
+      "prompt",
+      { session_id: SID, cwd: "C:workusy demo", prompt: "do things" },
+      home,
+    );
     assert.equal(JSON.parse(getSession(db, SID)!.metadata!).busy, true);
 
     handleHookEvent(db, "stop", { session_id: SID, cwd: "C:workusy demo" }, home);
@@ -58,7 +72,12 @@ describe("busy flag from hook event pair", () => {
     // stuck busy on an old row is cleared by a fresh session-start
     handleHookEvent(db, "prompt", { session_id: SID, cwd: "C:workusy demo", prompt: "more" }, home);
     assert.equal(JSON.parse(getSession(db, SID)!.metadata!).busy, true);
-    handleHookEvent(db, "session-start", { session_id: SID, cwd: "C:workusy demo", source: "resume" }, home);
+    handleHookEvent(
+      db,
+      "session-start",
+      { session_id: SID, cwd: "C:workusy demo", source: "resume" },
+      home,
+    );
     assert.equal(JSON.parse(getSession(db, SID)!.metadata!).busy, false);
     disposeHome(home);
   });
@@ -142,7 +161,12 @@ describe("handleHookEvent title sync", () => {
   it("prompt excerpt still applies when there is no title", () => {
     const home = fakeHome();
     const sid = "55555555-6666-7777-8888-999999999999";
-    handleHookEvent(db, "prompt", { session_id: sid, cwd: "C:\\work\\untitled", prompt: "second line\nmore" }, join(home));
+    handleHookEvent(
+      db,
+      "prompt",
+      { session_id: sid, cwd: "C:\\work\\untitled", prompt: "second line\nmore" },
+      join(home),
+    );
     assert.equal(getSession(db, sid)!.name, "second line");
     disposeHome(home);
   });
@@ -150,8 +174,18 @@ describe("handleHookEvent title sync", () => {
   it("prompt events refresh the description (what the session is doing)", () => {
     const home = fakeHome();
     const sid = "dddddddd-eeee-ffff-0000-111111111111";
-    handleHookEvent(db, "prompt", { session_id: sid, cwd: "C:\\work\\d", prompt: "first task" }, join(home));
-    handleHookEvent(db, "prompt", { session_id: sid, cwd: "C:\\work\\d", prompt: "now doing something else" }, join(home));
+    handleHookEvent(
+      db,
+      "prompt",
+      { session_id: sid, cwd: "C:\\work\\d", prompt: "first task" },
+      join(home),
+    );
+    handleHookEvent(
+      db,
+      "prompt",
+      { session_id: sid, cwd: "C:\\work\\d", prompt: "now doing something else" },
+      join(home),
+    );
     const s = getSession(db, sid)!;
     assert.equal(s.name, "first task"); // name stable after first prompt
     assert.equal(s.description, "now doing something else"); // description tracks latest
@@ -177,7 +211,8 @@ describe("handleHookEvent title sync", () => {
     disposeHome(home);
   });
 
-  it("forwards undelivered inbox to the resume successor, but not on /clear", () => {    const home = fakeHome();
+  it("forwards undelivered inbox to the resume successor, but not on /clear", () => {
+    const home = fakeHome();
     const cwd = "C:\\work\\inbox-fwd";
     const mk = (id: string, extra: Record<string, unknown> = {}) =>
       registerSession(db, {
@@ -199,12 +234,13 @@ describe("handleHookEvent title sync", () => {
       db,
       "session-start",
       { session_id: "b1b1b1b1-1111-2222-3333-444444444444", cwd, source: "resume" },
-      join(home)
+      join(home),
     );
     assert.equal(
-      listMessages(db, { to_session: "b1b1b1b1-1111-2222-3333-444444444444", status: "all" }).length,
+      listMessages(db, { to_session: "b1b1b1b1-1111-2222-3333-444444444444", status: "all" })
+        .length,
       1,
-      "pending mail re-addressed to the successor id"
+      "pending mail re-addressed to the successor id",
     );
 
     // /clear: a DIFFERENT conversation starts → its mail must not follow
@@ -218,12 +254,13 @@ describe("handleHookEvent title sync", () => {
       db,
       "session-start",
       { session_id: "d3d3d3d3-1111-2222-3333-444444444444", cwd, source: "clear" },
-      join(home)
+      join(home),
     );
     assert.equal(
-      listMessages(db, { to_session: "d3d3d3d3-1111-2222-3333-444444444444", status: "all" }).length,
+      listMessages(db, { to_session: "d3d3d3d3-1111-2222-3333-444444444444", status: "all" })
+        .length,
       0,
-      "clear starts an unrelated conversation — no forwarding"
+      "clear starts an unrelated conversation — no forwarding",
     );
     disposeHome(home);
   });
@@ -268,7 +305,7 @@ describe("Codex runtime identity", () => {
     });
     assert.equal(
       findSessionByRuntimePid(db, "codex", pid, "codex-runtime-temp")?.id,
-      "codex-runtime-session"
+      "codex-runtime-session",
     );
   });
 
@@ -294,7 +331,7 @@ describe("Codex runtime identity", () => {
 describe("cross-process resume lineage (transcript matching)", () => {
   it("re-addresses stranded mail when the resumed transcript contains the old conversation's first prompt", () => {
     const home = fakeHome();
-    const cwd = "C:\work\lineage";
+    const cwd = "C:/work/lineage";
     registerSession(db, { id: "asker-2", name: "asker2" });
 
     // OLD conversation, run in a DIFFERENT (now dead) process, stale, with mail
@@ -327,22 +364,17 @@ describe("cross-process resume lineage (transcript matching)", () => {
       { type: "user", message: "alpha unique first prompt text for lineage" },
       { type: "assistant", message: "continuing the same conversation" },
     ]);
-    handleHookEvent(
-      db,
-      "session-start",
-      { session_id: newB, cwd, source: "resume" },
-      join(home)
-    );
+    handleHookEvent(db, "session-start", { session_id: newB, cwd, source: "resume" }, join(home));
 
     const got = listMessages(db, { to_session: newB, status: "all" });
     assert.ok(
       got.some((m) => m.question === "跨进程 stranded mail"),
-      "stranded mail follows the conversation across processes"
+      "stranded mail follows the conversation across processes",
     );
     assert.equal(
       listMessages(db, { to_session: otherC, status: "all" }).length,
       1,
-      "unrelated conversation keeps its own mail"
+      "unrelated conversation keeps its own mail",
     );
     disposeHome(home);
   });

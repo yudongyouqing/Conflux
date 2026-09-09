@@ -9,17 +9,8 @@ import { openDb, type DB } from "../core/db.js";
 import { migrateDataDir, readMigrationStatus } from "../core/config-migration.js";
 import { handleHookEvent, readJsonFile } from "../core/live.js";
 import { logger } from "../log.js";
-import {
-  registerSession,
-  listSessions,
-  endSession,
-} from "../core/sessions.js";
-import {
-  publishContext,
-  updateContext,
-  deleteContext,
-  listMyContext,
-} from "../core/context.js";
+import { registerSession, listSessions, endSession } from "../core/sessions.js";
+import { publishContext, updateContext, deleteContext, listMyContext } from "../core/context.js";
 import { queryContext } from "../core/search.js";
 import {
   askSession,
@@ -30,12 +21,7 @@ import {
   formatInboxNotice,
 } from "../core/messages.js";
 import { getGraph } from "../core/graph.js";
-import {
-  createAgent,
-  listAgents,
-  deleteAgent,
-  type ModelConfig,
-} from "../core/agents.js";
+import { createAgent, listAgents, deleteAgent, type ModelConfig } from "../core/agents.js";
 import { logAudit, queryAudit } from "../core/audit.js";
 import {
   exportData,
@@ -61,14 +47,11 @@ export function buildCli(argv?: string | readonly string[]): Command {
     .name(cliDisplayName(argv))
     .description("Cross-session context query and conversation system")
     .version("0.1.0")
-    .option(
-      "--data-dir <path>",
-      "override the muiltchat data directory (also via MUILTCHAT_HOME)"
-    )
+    .option("--data-dir <path>", "override the muiltchat data directory (also via MUILTCHAT_HOME)")
     .option("--scope <scope>", '"project" or "global" (default: auto)', "auto")
     .option(
       "--http <url>",
-      "send commands to a remote HTTP server instead of the local SQLite file"
+      "send commands to a remote HTTP server instead of the local SQLite file",
     )
     .option("--log-level <level>", "pino log level", "warn");
 
@@ -136,13 +119,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
       if (!o.from || !o.to) {
         throw new Error("migrate requires --from <legacy-dir> and --to <conflux-dir>");
       }
-      console.log(
-        JSON.stringify(
-          migrateDataDir({ from: o.from, to: o.to }),
-          null,
-          2
-        )
-      );
+      console.log(JSON.stringify(migrateDataDir({ from: o.from, to: o.to }), null, 2));
     });
 
   // data ------------------------------------------------------------
@@ -166,7 +143,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
         program,
         () => exportData(openDbFrom(o), { scope, projectDir: o.projectDir }),
         "GET",
-        `/data/export?scope=${encodeURIComponent(scope)}`
+        `/data/export?scope=${encodeURIComponent(scope)}`,
       );
       writeDataOutput(result, o.output);
     });
@@ -188,7 +165,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
         () => importData(openDbFrom(o), bundle, { conflict }),
         "POST",
         "/data/import",
-        { bundle, conflict }
+        { bundle, conflict },
       );
       console.log(JSON.stringify(result, null, 2));
     });
@@ -205,7 +182,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
         program,
         () => getGraph(openDbFrom(o), { status }),
         "GET",
-        `/graph?status=${encodeURIComponent(status)}`
+        `/graph?status=${encodeURIComponent(status)}`,
       );
       console.log(JSON.stringify(res, null, 2));
     });
@@ -224,7 +201,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
         program,
         () => ({ sessions: listSessions(openDbFrom(o), { status }) }),
         "GET",
-        `/sessions?status=${encodeURIComponent(status)}`
+        `/sessions?status=${encodeURIComponent(status)}`,
       );
       console.log(JSON.stringify(res, null, 2));
     });
@@ -258,7 +235,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
         },
         "POST",
         "/sessions/register",
-        { name: o.name, description: o.desc }
+        { name: o.name, description: o.desc },
       );
       console.log(JSON.stringify(res, null, 2));
     });
@@ -321,7 +298,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
         },
         "POST",
         "/context",
-        { title: o.title, content: o.content, tags }
+        { title: o.title, content: o.content, tags },
       );
       console.log(JSON.stringify(res, null, 2));
     });
@@ -347,7 +324,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
           return { entries };
         },
         "GET",
-        "/context/mine"
+        "/context/mine",
       );
       console.log(JSON.stringify(res, null, 2));
     });
@@ -389,7 +366,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
           return { entries };
         },
         "GET",
-        `/context/query?${qs.toString()}`
+        `/context/query?${qs.toString()}`,
       );
       console.log(JSON.stringify(res, null, 2));
     });
@@ -426,7 +403,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
         },
         "PUT",
         `/context/${id}`,
-        patch
+        patch,
       );
       console.log(JSON.stringify(res, null, 2));
     });
@@ -454,7 +431,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
           return { deleted: ok };
         },
         "DELETE",
-        `/context/${id}`
+        `/context/${id}`,
       );
       console.log(JSON.stringify(res, null, 2));
     });
@@ -507,7 +484,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
           system_prompt: o.prompt,
           model_config: modelConfig,
           description: o.desc,
-        }
+        },
       );
       console.log(JSON.stringify(res, null, 2));
     });
@@ -533,7 +510,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
           return { agents: agentList };
         },
         "GET",
-        "/agents"
+        "/agents",
       );
       console.log(JSON.stringify(res, null, 2));
     });
@@ -561,7 +538,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
           return { deleted: ok };
         },
         "DELETE",
-        `/agents/${id}`
+        `/agents/${id}`,
       );
       console.log(JSON.stringify(res, null, 2));
     });
@@ -597,7 +574,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
         },
         "POST",
         "/messages/ask",
-        { to_session: o.to, question }
+        { to_session: o.to, question },
       );
       console.log(JSON.stringify(res, null, 2));
     });
@@ -623,7 +600,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
           return { inbox };
         },
         "GET",
-        "/messages/inbox"
+        "/messages/inbox",
       );
       console.log(JSON.stringify(res, null, 2));
     });
@@ -653,7 +630,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
         },
         "POST",
         `/messages/${id}/reply`,
-        { reply }
+        { reply },
       );
       console.log(JSON.stringify(res, null, 2));
     });
@@ -681,7 +658,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
           return { replies };
         },
         "GET",
-        `/messages/replies${qs}`
+        `/messages/replies${qs}`,
       );
       console.log(JSON.stringify(res, null, 2));
     });
@@ -713,7 +690,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
         program,
         () => ({ messages: listMessages(openDbFrom(o), args) }),
         "GET",
-        `/messages?${qs.toString()}`
+        `/messages?${qs.toString()}`,
       );
       console.log(JSON.stringify(res, null, 2));
     });
@@ -724,9 +701,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
     .description("query audit log")
     .option("--session <id>")
     .option("--action <name>")
-    .addOption(
-      new Option("--interface <iface>").choices(["mcp", "http", "cli"])
-    )
+    .addOption(new Option("--interface <iface>").choices(["mcp", "http", "cli"]))
     .option("--limit <n>", "max results", "50")
     .action(async function (this: Command) {
       const o = this.optsWithGlobals();
@@ -746,13 +721,15 @@ export function buildCli(argv?: string | readonly string[]): Command {
           }),
         }),
         "GET",
-        `/audit?${qs.toString()}`
+        `/audit?${qs.toString()}`,
       );
       console.log(JSON.stringify(res, null, 2));
     });
 
   // hooks ------------------------------------------------------------
-  const hooks = program.command("hooks").description("Claude Code hook integration (liveness + naming)");
+  const hooks = program
+    .command("hooks")
+    .description("Claude Code hook integration (liveness + naming)");
 
   hooks
     .command("install")
@@ -780,7 +757,10 @@ export function buildCli(argv?: string | readonly string[]): Command {
           .map((e) => {
             if (Array.isArray(e.hooks)) {
               e.hooks = (e.hooks as Record<string, unknown>[]).filter(
-                (h) => !(typeof h.command === "string" && h.command.includes("muiltchat hooks dispatch"))
+                (h) =>
+                  !(
+                    typeof h.command === "string" && h.command.includes("muiltchat hooks dispatch")
+                  ),
               );
             }
             return e;
@@ -798,7 +778,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
       console.log(
         `installed hooks for [${HOOK_EVENTS.join(", ")}] -> ${settingsPath}\n` +
           `entry: ${base}\n` +
-          `new Claude Code sessions will now register themselves (id = conversation id, name = first prompt).`
+          `new Claude Code sessions will now register themselves (id = conversation id, name = first prompt).`,
       );
     });
 
@@ -831,7 +811,9 @@ export function buildCli(argv?: string | readonly string[]): Command {
       if (Object.keys(hooksCfg).length > 0) settings.hooks = hooksCfg;
       else delete settings.hooks;
       writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf8");
-      console.log(`removed ${removed} hook entr${removed === 1 ? "y" : "ies"} from ${settingsPath}`);
+      console.log(
+        `removed ${removed} hook entr${removed === 1 ? "y" : "ies"} from ${settingsPath}`,
+      );
     });
 
   hooks
@@ -866,7 +848,10 @@ export function buildCli(argv?: string | readonly string[]): Command {
           }
         }
       } catch (err) {
-        logger.warn({ err: err instanceof Error ? err.message : String(err) }, "hook dispatch failed");
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          "hook dispatch failed",
+        );
       }
     });
 
@@ -974,7 +959,7 @@ async function runOp(
   local: () => unknown,
   method: string,
   path: string,
-  body?: unknown
+  body?: unknown,
 ): Promise<unknown> {
   const opts = program.opts();
   if (opts.logLevel) {
@@ -991,7 +976,7 @@ async function remote(
   baseUrl: string,
   method: string,
   path: string,
-  body?: unknown
+  body?: unknown,
 ): Promise<unknown> {
   const url = `${baseUrl.replace(/\/$/, "")}${path}`;
   const sid = process.env.MUILTCHAT_SESSION_ID || uuidv4();
@@ -1046,7 +1031,7 @@ function resolveCliSessionId(db: DB): string {
   process.env.MUILTCHAT_SESSION_ID = sid;
   process.stderr.write(
     `muiltchat: registered transient CLI session ${sid}\n` +
-      `set MUILTCHAT_SESSION_ID=${sid} to reuse it across commands\n`
+      `set MUILTCHAT_SESSION_ID=${sid} to reuse it across commands\n`,
   );
   return sid;
 }

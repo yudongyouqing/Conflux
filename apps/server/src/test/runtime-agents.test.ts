@@ -27,7 +27,11 @@ const makeTranscript = (sessionId: string, projectDir: string) => {
   writeFileSync(join(dir, `${sessionId}.jsonl`), '{"type":"user","message":"hi"}' + "\n", "utf8");
 };
 after(() => {
-  try { rmSync(FAKE_HOME, { recursive: true, force: true }); } catch {}
+  try {
+    rmSync(FAKE_HOME, { recursive: true, force: true });
+  } catch {
+    // temp dir disposal is best-effort on Windows file locks
+  }
 });
 import { makeDb } from "./helpers.js";
 
@@ -55,10 +59,10 @@ test("user instructions extend, not replace, the operator prompt", () => {
 });
 
 test("codex args stay model-only (no system-prompt injection)", () => {
-  assert.deepEqual(
-    buildRuntimeArgs({ runtime: "codex", model: "gpt-5", instructions: "x" }),
-    ["--model", "gpt-5"]
-  );
+  assert.deepEqual(buildRuntimeArgs({ runtime: "codex", model: "gpt-5", instructions: "x" }), [
+    "--model",
+    "gpt-5",
+  ]);
 });
 
 test("buildRuntimeEnv tags the agent id for MCP-side session linking", () => {
@@ -85,12 +89,12 @@ test("isDue: interval gating math", () => {
   assert.equal(
     isDue({ interval_min: 30, last_scheduled_run: "2026-08-16T09:40:00Z" }, now),
     false,
-    "20min of 30min elapsed → not due"
+    "20min of 30min elapsed → not due",
   );
   assert.equal(
     isDue({ interval_min: 30, last_scheduled_run: "2026-08-16T09:29:00Z" }, now),
     true,
-    "31min elapsed → due"
+    "31min elapsed → due",
   );
 });
 
@@ -106,11 +110,9 @@ test("buildHeadlessArgs: one-shot prompts per runtime", () => {
 });
 
 test("createRuntimeAgent validates the interval range", () => {
+  assert.throws(() => createRuntimeAgent(db, { name: "bad", runtime: "claude", interval_min: 0 }));
   assert.throws(() =>
-    createRuntimeAgent(db, { name: "bad", runtime: "claude", interval_min: 0 })
-  );
-  assert.throws(() =>
-    createRuntimeAgent(db, { name: "bad", runtime: "claude", interval_min: 20000 })
+    createRuntimeAgent(db, { name: "bad", runtime: "claude", interval_min: 20000 }),
   );
   const ok = createRuntimeAgent(db, { name: "patrol-test", runtime: "claude", interval_min: 60 });
   assert.equal(ok.interval_min, 60);
@@ -167,7 +169,7 @@ test("listRuntimeAgentsWithLiveness derives live from spawned session heartbeats
   mergeSessionMeta(db, "spawn-b1", { agent_id: b.id });
   db.prepare(`UPDATE sessions SET last_heartbeat_at = ? WHERE id = ?`).run(
     new Date(Date.now() - 10 * 60 * 1000).toISOString(),
-    "spawn-b1"
+    "spawn-b1",
   );
 
   const agents = listRuntimeAgentsWithLiveness(db);
@@ -185,10 +187,10 @@ test("wakeSessionForMail: guards, dedup and command shape", () => {
   // not a CLI conversation
   registerSession(db, { id: "web-console", name: "Web 控制台" });
   assert.equal(wakeSessionForMail(db, "web-console", { dryRun: true }).woke, false);
-  assert.deepEqual(
-    wakeSessionForMail(db, "agent-1", { dryRun: true }),
-    { woke: false, reason: "not a CLI conversation" }
-  );
+  assert.deepEqual(wakeSessionForMail(db, "agent-1", { dryRun: true }), {
+    woke: false,
+    reason: "not a CLI conversation",
+  });
 
   // active + BUSY → the running turn will surface the mail itself
   registerSession(db, {
@@ -197,10 +199,10 @@ test("wakeSessionForMail: guards, dedup and command shape", () => {
     description: "d",
     metadata: { source: "claude-hook", named: true, claude_pid: 424242, busy: true },
   });
-  assert.deepEqual(
-    wakeSessionForMail(db, "wake-busy", { dryRun: true }),
-    { woke: false, reason: "busy — the running turn will surface the mail" }
-  );
+  assert.deepEqual(wakeSessionForMail(db, "wake-busy", { dryRun: true }), {
+    woke: false,
+    reason: "busy — the running turn will surface the mail",
+  });
 
   // active + IDLE → the open TUI holds the thread lock, so a FRESH
   // headless run answers (digest-seeded; resume is codex-impossible here)
@@ -231,7 +233,7 @@ test("wakeSessionForMail: guards, dedup and command shape", () => {
   assert.deepEqual(
     wakeSessionForMail(db, "wake-dead", { dryRun: true }),
     { woke: false, reason: "no transcript (zero-turn conversation)" },
-    "no transcript → cannot resume"
+    "no transcript → cannot resume",
   );
   makeTranscript("wake-dead", "C:/Project folder/项目/muiltchat");
   const w = wakeSessionForMail(db, "wake-dead", { dryRun: true, claudeHome: FAKE_HOME });
@@ -256,10 +258,10 @@ test("wakeSessionForMail: codex wakes headlessly via exec resume", () => {
     metadata: { runtime: "codex", runtime_pid: 313131 },
   });
   db.prepare(`UPDATE sessions SET status = 'stale' WHERE id = 'wake-codex-unbound'`).run();
-  assert.deepEqual(
-    wakeSessionForMail(db, "wake-codex-unbound", { dryRun: true }),
-    { woke: false, reason: "no codex_session_id (rollout binding missing)" }
-  );
+  assert.deepEqual(wakeSessionForMail(db, "wake-codex-unbound", { dryRun: true }), {
+    woke: false,
+    reason: "no codex_session_id (rollout binding missing)",
+  });
 
   // bound uuid → codex exec resume command (no transcript requirement)
   registerSession(db, {

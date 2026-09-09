@@ -100,11 +100,14 @@ function parseMeta(row: { metadata: string | null }): Record<string, unknown> {
 export function matchCodexRollouts(
   rows: MatchRow[],
   rollouts: CodexRollout[],
-  ownedSessionIds: Set<string>
+  ownedSessionIds: Set<string>,
 ): Map<string, CodexRollout> {
   const matches = new Map<string, CodexRollout>();
   const cands = rollouts.filter(
-    (r) => r.codexSessionId !== null && r.startedAtMs !== null && !ownedSessionIds.has(r.codexSessionId!)
+    (r) =>
+      r.codexSessionId !== null &&
+      r.startedAtMs !== null &&
+      !ownedSessionIds.has(r.codexSessionId!),
   );
   if (rows.length === 0 || cands.length === 0) return matches;
 
@@ -126,7 +129,7 @@ export function matchCodexRollouts(
     (a, b) =>
       Number(b.cwdMatch) - Number(a.cwdMatch) || // cwd agreement is decisive
       a.gap - b.gap || // then tightest launch-to-prompt gap
-      a.row.createdMs - b.row.createdMs // deterministic tie-break
+      a.row.createdMs - b.row.createdMs, // deterministic tie-break
   );
   const takenRollouts = new Set<string>();
   for (const p of pairs) {
@@ -157,13 +160,13 @@ export function refreshCodexSessionTitles(db: DB, opts: CodexTitleRefreshOptions
     opts.onlySessionId
       ? db
           .prepare(
-            `SELECT id, name, description, project_dir, created_at, metadata FROM sessions WHERE id = ?`
+            `SELECT id, name, description, project_dir, created_at, metadata FROM sessions WHERE id = ?`,
           )
           .all(opts.onlySessionId)
       : db
           .prepare(
             `SELECT id, name, description, project_dir, created_at, metadata FROM sessions
-             WHERE status = 'active' AND metadata LIKE '%"runtime":"codex"%'`
+             WHERE status = 'active' AND metadata LIKE '%"runtime":"codex"%'`,
           )
           .all()
   ) as SessionRow[];
@@ -191,7 +194,7 @@ export function refreshCodexSessionTitles(db: DB, opts: CodexTitleRefreshOptions
     .filter((t) => Number.isFinite(t));
   const scanSince = Math.min(
     createdStamps.length > 0 ? Math.min(...createdStamps) : Date.now(),
-    Date.now() - RESUME_LOOKBACK_MS
+    Date.now() - RESUME_LOOKBACK_MS,
   );
   const rollouts = listCodexRollouts(home, scanSince);
   if (rollouts.length === 0) return 0;
@@ -230,14 +233,14 @@ export function refreshCodexSessionTitles(db: DB, opts: CodexTitleRefreshOptions
       r.startedAtMs !== null &&
       r.mtimeMs >= nowMs - RESUME_ACTIVE_MS &&
       !ownedSessionIds.has(r.codexSessionId!) &&
-      !claimedPaths.has(r.path)
+      !claimedPaths.has(r.path),
   );
   const unmatched = matchRows
     .filter((r) => !matches.has(r.id))
     .sort((a, b) => a.createdMs - b.createdMs);
   for (const row of unmatched) {
     const cands = activeResumes.filter(
-      (r) => !claimedPaths.has(r.path) && r.startedAtMs! < row.createdMs - ROLLOUT_SKEW_MS
+      (r) => !claimedPaths.has(r.path) && r.startedAtMs! < row.createdMs - ROLLOUT_SKEW_MS,
     );
     if (cands.length === 0) continue;
     cands.sort((a, b) => {
@@ -277,7 +280,7 @@ export function refreshCodexSessionTitles(db: DB, opts: CodexTitleRefreshOptions
           codex_name: title,
           codex_title: thread ? "thread" : "prompt",
         }),
-        row.id
+        row.id,
       );
       updated++;
     } catch {

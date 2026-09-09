@@ -13,7 +13,7 @@ type HttpLivenessApi = {
   reconcileRuntimeState?: (
     db: ReturnType<typeof makeDb>["db"],
     probe: () => Promise<RuntimePidSnapshot>,
-    now: Date
+    now: Date,
   ) => Promise<{ expired: number; refreshed: number; reaped: number }>;
 };
 
@@ -43,18 +43,24 @@ test("HTTP liveness expires MCP leases and reconciles legacy runtime PIDs", asyn
   const result = await server.reconcileRuntimeState!(
     db,
     async () => ({ claude: new Set([7502]), codex: new Set() }),
-    new Date("2026-09-02T10:01:31.000Z")
+    new Date("2026-09-02T10:01:31.000Z"),
   );
 
   assert.equal(result.expired, 1);
   assert.equal(
-    (db.prepare("SELECT status FROM sessions WHERE id = ?").get("old-mcp-lease") as { status: string })
-      .status,
-    "stale"
+    (
+      db.prepare("SELECT status FROM sessions WHERE id = ?").get("old-mcp-lease") as {
+        status: string;
+      }
+    ).status,
+    "stale",
   );
   assert.equal(
-    (db.prepare("SELECT status FROM sessions WHERE id = ?").get("legacy-claude") as { status: string })
-      .status,
-    "active"
+    (
+      db.prepare("SELECT status FROM sessions WHERE id = ?").get("legacy-claude") as {
+        status: string;
+      }
+    ).status,
+    "active",
   );
 });

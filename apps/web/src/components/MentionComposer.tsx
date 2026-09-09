@@ -53,8 +53,7 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
       .filter((s) => s.id !== "web-console" && !s.id.startsWith("agent-"))
       .filter(
         (s) =>
-          s.name.toLowerCase().includes(mentionQuery) ||
-          s.id.toLowerCase().includes(mentionQuery)
+          s.name.toLowerCase().includes(mentionQuery) || s.id.toLowerCase().includes(mentionQuery),
       )
       .slice(0, 6);
   }, [sessions.data, mentionQuery]);
@@ -101,7 +100,10 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
     <div className={`p-3 bg-white border border-gray-200 rounded-lg shadow-sm ${className ?? ""}`}>
       <div className="flex items-center gap-2">
         {sender && sender.id !== "web-console" && (
-          <span className="text-xs text-gray-500 whitespace-nowrap truncate max-w-32" title={`以 ${sender.name} 的身份发送`}>
+          <span
+            className="text-xs text-gray-500 whitespace-nowrap truncate max-w-32"
+            title={`以 ${sender.name} 的身份发送`}
+          >
             {sender.name} →
           </span>
         )}
@@ -130,7 +132,11 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
         <input
           ref={inputRef}
           type="text"
-          placeholder={target ? `向 ${target.name} 提问…（回车发送）` : "@某个会话 提问，例如：@server 帮我看看构建"}
+          placeholder={
+            target
+              ? `向 ${target.name} 提问…（回车发送）`
+              : "@某个会话 提问，例如：@server 帮我看看构建"
+          }
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
@@ -168,7 +174,9 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
         )}
       </div>
       {needTarget && (
-        <div className="text-xs text-amber-600 mt-1">请先 @ 选择一个目标会话（每次对话只能有一个目标）</div>
+        <div className="text-xs text-amber-600 mt-1">
+          请先 @ 选择一个目标会话（每次对话只能有一个目标）
+        </div>
       )}
       {ask.isError && (
         <div className="text-xs text-red-500 mt-1">发送失败: {(ask.error as Error).message}</div>

@@ -36,27 +36,34 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: ServerContext)
     }
   });
 
-  app.put<{ Body: Partial<TerminalSettings> & { auto_wake?: boolean } }>("/settings/terminal", {
-    schema: {
-      body: {
-        type: "object",
-        properties: {
-          terminal: { type: "string", enum: ["wt", "powershell", "cmd", "wezterm"] },
-          claude_path: { type: "string", maxLength: 500 },
-          codex_path: { type: "string", maxLength: 500 },
-          auto_wake: { type: "boolean" },
+  app.put<{ Body: Partial<TerminalSettings> & { auto_wake?: boolean } }>(
+    "/settings/terminal",
+    {
+      schema: {
+        body: {
+          type: "object",
+          properties: {
+            terminal: { type: "string", enum: ["wt", "powershell", "cmd", "wezterm"] },
+            claude_path: { type: "string", maxLength: 500 },
+            codex_path: { type: "string", maxLength: 500 },
+            auto_wake: { type: "boolean" },
+          },
         },
       },
     },
-  }, async (req, reply) => {
-    try {
-      const terminal = saveTerminalSettings(db, req.body);
-      if (typeof req.body.auto_wake === "boolean") setAutoWake(db, req.body.auto_wake);
-      logAudit(db, { interface: "http", action: "save_terminal_settings", args: { terminal: terminal.terminal } });
-      return reply.send({ terminal, auto_wake: getAutoWake(db) });
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
+    async (req, reply) => {
+      try {
+        const terminal = saveTerminalSettings(db, req.body);
+        if (typeof req.body.auto_wake === "boolean") setAutoWake(db, req.body.auto_wake);
+        logAudit(db, {
+          interface: "http",
+          action: "save_terminal_settings",
+          args: { terminal: terminal.terminal },
+        });
+        return reply.send({ terminal, auto_wake: getAutoWake(db) });
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
 }
-

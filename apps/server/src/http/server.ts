@@ -6,12 +6,7 @@ import fastifyStatic from "@fastify/static";
 import { existsSync } from "fs";
 import { resolve } from "path";
 
-import {
-  resolveConfig,
-  resolveHttpHost,
-  resolveHttpPort,
-  type Scope,
-} from "../config.js";
+import { resolveConfig, resolveHttpHost, resolveHttpPort, type Scope } from "../config.js";
 import { openDb, stopWalCheckpoint, type DB } from "../core/db.js";
 import {
   registerSession,
@@ -23,7 +18,11 @@ import {
 import { getContext } from "../core/context.js";
 import { getMessage } from "../core/messages.js";
 import { tickScheduledAgents } from "../core/runtime-agents.js";
-import { probeRuntimePids, reconcileRuntimeLiveness, type RuntimePidSnapshot } from "../core/liveness.js";
+import {
+  probeRuntimePids,
+  reconcileRuntimeLiveness,
+  type RuntimePidSnapshot,
+} from "../core/liveness.js";
 import { expireMcpLeases } from "../core/mcp-liveness.js";
 import { refreshCodexSessionTitles } from "../core/codex-titles.js";
 import { logger } from "../log.js";
@@ -48,7 +47,7 @@ export type RuntimePidProbe = () => Promise<RuntimePidSnapshot | null>;
 export async function reconcileRuntimeState(
   db: DB,
   probe: RuntimePidProbe = probeRuntimePids,
-  now: Date = new Date()
+  now: Date = new Date(),
 ): Promise<{ expired: number; refreshed: number; reaped: number }> {
   const { expired } = expireMcpLeases(db, now);
   const livePids = await probe();
@@ -148,8 +147,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
       info: {
         title: "muiltchat",
         version: "0.1.0",
-        description:
-          "Cross-session context query and async messaging for AI coding assistants.",
+        description: "Cross-session context query and async messaging for AI coding assistants.",
       },
     },
   });
@@ -173,7 +171,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   const ctx = createServerContext(db, { dataDir: config.dataDir, port });
 
   app.setNotFoundHandler((req, reply) =>
-    ctx.sendError(reply, httpError(404, `route not found: ${req.method} ${req.url}`))
+    ctx.sendError(reply, httpError(404, `route not found: ${req.method} ${req.url}`)),
   );
   app.setErrorHandler((err, _req, reply) => {
     if (reply.sent) return;
@@ -194,10 +192,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
     closeResources();
     throw err;
   }
-  logger.info(
-    { webDist, host, port, dataDir: config.dataDir },
-    "http server listening"
-  );
+  logger.info({ webDist, host, port, dataDir: config.dataDir }, "http server listening");
 
   return app;
 }

@@ -25,7 +25,8 @@ export function registerSystemRoutes(app: FastifyInstance, ctx: ServerContext): 
   // GET /graph — return nodes (sessions) + edges (communication links)
   app.get<{ Querystring: { status?: string } }>("/graph", {}, async (req, reply) => {
     try {
-      const status = (req.query.status as "active" | "stale" | "ended" | "all" | undefined) ?? "active";
+      const status =
+        (req.query.status as "active" | "stale" | "ended" | "all" | undefined) ?? "active";
       const graph = getGraph(db, { status });
       return reply.send(graph);
     } catch (err) {
@@ -56,39 +57,43 @@ export function registerSystemRoutes(app: FastifyInstance, ctx: ServerContext): 
   });
 
   // POST /data/import - validate and import one portable bundle atomically
-  app.post<{ Body: DataImportBody }>("/data/import", {
-    schema: {
-      body: {
-        type: "object",
-        required: ["bundle"],
-        additionalProperties: false,
-        properties: {
-          bundle: { type: "object" },
-          conflict: { type: "string", enum: ["skip", "overwrite", "copy"] },
+  app.post<{ Body: DataImportBody }>(
+    "/data/import",
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["bundle"],
+          additionalProperties: false,
+          properties: {
+            bundle: { type: "object" },
+            conflict: { type: "string", enum: ["skip", "overwrite", "copy"] },
+          },
         },
       },
     },
-  }, async (req, reply) => {
-    const conflict = req.body.conflict ?? "skip";
-    if (!isImportConflictStrategy(conflict)) {
-      return sendHttpError(reply, 400, "conflict must be skip, overwrite, or copy");
-    }
-    try {
-      const result = importData(db, req.body.bundle, {
-        conflict,
-        projectDir: process.env.CLAUDE_PROJECT_DIR || process.cwd(),
-      });
-      logAudit(db, {
-        interface: "http",
-        action: "import_data",
-        args: { conflict },
-        result: { ...result },
-      });
-      return reply.send(result);
-    } catch (err) {
-      return sendError(reply, err, undefined, "import_data", { conflict }, 400);
-    }
-  });
+    async (req, reply) => {
+      const conflict = req.body.conflict ?? "skip";
+      if (!isImportConflictStrategy(conflict)) {
+        return sendHttpError(reply, 400, "conflict must be skip, overwrite, or copy");
+      }
+      try {
+        const result = importData(db, req.body.bundle, {
+          conflict,
+          projectDir: process.env.CLAUDE_PROJECT_DIR || process.cwd(),
+        });
+        logAudit(db, {
+          interface: "http",
+          action: "import_data",
+          args: { conflict },
+          result: { ...result },
+        });
+        return reply.send(result);
+      } catch (err) {
+        return sendError(reply, err, undefined, "import_data", { conflict }, 400);
+      }
+    },
+  );
 
   // GET /audit
   app.get<{ Querystring: AuditQs }>("/audit", {}, async (req, reply) => {

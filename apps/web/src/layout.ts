@@ -7,7 +7,7 @@ const NODE_HEIGHT = 88;
 export function layoutGraph(
   nodes: Node[],
   edges: Edge[],
-  direction: "LR" | "TB" = "LR"
+  direction: "LR" | "TB" = "LR",
 ): { nodes: Node[]; edges: Edge[] } {
   // No relations to draw: dagre would stack every node into one rank (a
   // single vertical column) — a "graph" that reads as a broken list. Fall
@@ -45,9 +45,7 @@ export function layoutGraph(
     const pos = g.node(node.id);
     return {
       ...node,
-      position: pos
-        ? { x: pos.x - NODE_WIDTH / 2, y: pos.y - NODE_HEIGHT / 2 }
-        : node.position,
+      position: pos ? { x: pos.x - NODE_WIDTH / 2, y: pos.y - NODE_HEIGHT / 2 } : node.position,
     };
   });
 

@@ -34,7 +34,7 @@ export function publishContext(db: DB, input: PublishInput): ContextEntry {
   const res = db
     .prepare(
       `INSERT INTO context_entries (session_id, title, content, tags, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
     .run(input.session_id, input.title, input.content, tags, now, now);
   return getContext(db, Number(res.lastInsertRowid))!;
@@ -42,8 +42,7 @@ export function publishContext(db: DB, input: PublishInput): ContextEntry {
 
 export function getContext(db: DB, id: number): ContextEntry | null {
   const row = db.prepare(`SELECT * FROM context_entries WHERE id = ?`).get(id) as
-    | ContextRow
-    | undefined;
+    ContextRow | undefined;
   return row ? toEntry(row) : null;
 }
 
@@ -51,7 +50,7 @@ export function updateContext(
   db: DB,
   id: number,
   ownerSessionId: string,
-  patch: { title?: string; content?: string; tags?: string[] | null }
+  patch: { title?: string; content?: string; tags?: string[] | null },
 ): ContextEntry | null {
   const existing = getContext(db, id);
   if (!existing) return null;

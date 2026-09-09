@@ -144,7 +144,7 @@ test("session reads normalize malformed explicit identity columns", () => {
     runtime_pid: 4321,
   });
   db.prepare(
-    `UPDATE sessions SET runtime = ?, identity_source = ?, runtime_pid = ? WHERE id = ?`
+    `UPDATE sessions SET runtime = ?, identity_source = ?, runtime_pid = ? WHERE id = ?`,
   ).run("unknown-runtime", "unknown-source", -1, "malformed-identity");
 
   const session = getSession(db, "malformed-identity")!;
@@ -153,7 +153,7 @@ test("session reads normalize malformed explicit identity columns", () => {
   assert.equal(session.runtime_pid, null);
 
   const listed = listSessions(db, { status: "all" }).find(
-    (candidate) => candidate.id === "malformed-identity"
+    (candidate) => candidate.id === "malformed-identity",
   )!;
   assert.equal(listed.runtime, null);
   assert.equal(listed.identity_source, null);
@@ -172,7 +172,7 @@ test("markStaleSessions flips old heartbeats to stale", () => {
   registerSession(db, { id: "old", name: "old" });
   db.prepare(`UPDATE sessions SET last_heartbeat_at = ? WHERE id = ?`).run(
     new Date(Date.now() - 3600_000).toISOString(),
-    "old"
+    "old",
   );
   registerSession(db, { id: "fresh", name: "fresh" });
   const changed = markStaleSessions(db, new Date());
@@ -207,7 +207,7 @@ test("listSessions shows active MCP placeholders but hides stale ones", () => {
   });
   db.prepare(`UPDATE sessions SET last_heartbeat_at = ? WHERE id = ?`).run(
     new Date(Date.now() - 3600_000).toISOString(),
-    "codex-stale-temp"
+    "codex-stale-temp",
   );
 
   const all = listSessions(db, { status: "all" });
@@ -226,7 +226,7 @@ test("endSession marks ended", () => {
 function ageOut(id: string) {
   db.prepare(`UPDATE sessions SET last_heartbeat_at = ? WHERE id = ?`).run(
     new Date(Date.now() - 3600_000).toISOString(),
-    id
+    id,
   );
   markStaleSessions(db);
 }

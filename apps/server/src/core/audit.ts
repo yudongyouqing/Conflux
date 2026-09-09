@@ -45,14 +45,14 @@ function shrink(value: unknown): string | null {
 export function logAudit(db: DB, input: LogInput): void {
   db.prepare(
     `INSERT INTO audit_log (ts, caller_session, interface, action, args, result)
-     VALUES (?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?)`,
   ).run(
     nowIso(),
     input.caller_session ?? null,
     input.interface,
     input.action,
     shrink(input.args),
-    shrink(input.result)
+    shrink(input.result),
   );
 }
 
@@ -63,7 +63,7 @@ export function queryAudit(
     action?: string;
     iface?: AuditInterface;
     limit?: number;
-  } = {}
+  } = {},
 ): AuditEntry[] {
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 1000);
   const where: string[] = [];

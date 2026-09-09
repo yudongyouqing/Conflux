@@ -31,39 +31,44 @@ export function registerSessionRoutes(app: FastifyInstance, ctx: ServerContext):
   const { db, audit, sendError, sendHttpError } = ctx;
 
   // POST /sessions/register
-  app.post<{ Body: RegisterBody }>("/sessions/register", {
-    schema: {
-      body: {
-        type: "object",
-        required: ["name"],
-        properties: {
-          name: { type: "string", maxLength: 200 },
-          description: { type: "string", maxLength: 2000 },
-          session_id: { type: "string" },
+  app.post<{ Body: RegisterBody }>(
+    "/sessions/register",
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["name"],
+          properties: {
+            name: { type: "string", maxLength: 200 },
+            description: { type: "string", maxLength: 2000 },
+            session_id: { type: "string" },
+          },
         },
       },
     },
-  }, async (req, reply) => {
-    const sid = req.body.session_id || req.headers["x-session-id"] as string || uuidv4();
-    try {
-      const session = registerSession(db, {
-        id: sid,
-        name: req.body.name,
-        description: req.body.description ?? null,
-        project_dir: process.env.CLAUDE_PROJECT_DIR || process.cwd(),
-      });
-      audit(sid, "register_session", { name: req.body.name }, { session_id: sid });
-      reply.header("X-Session-Id", sid);
-      return reply.send({ session_id: sid, session });
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
+    async (req, reply) => {
+      const sid = req.body.session_id || (req.headers["x-session-id"] as string) || uuidv4();
+      try {
+        const session = registerSession(db, {
+          id: sid,
+          name: req.body.name,
+          description: req.body.description ?? null,
+          project_dir: process.env.CLAUDE_PROJECT_DIR || process.cwd(),
+        });
+        audit(sid, "register_session", { name: req.body.name }, { session_id: sid });
+        reply.header("X-Session-Id", sid);
+        return reply.send({ session_id: sid, session });
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
 
   // GET /sessions
   app.get<{ Querystring: { status?: string } }>("/sessions", {}, async (req, reply) => {
     try {
-      const status = (req.query.status as "active" | "stale" | "ended" | "all" | undefined) ?? "active";
+      const status =
+        (req.query.status as "active" | "stale" | "ended" | "all" | undefined) ?? "active";
       const sessions = listSessions(db, { status }).map((s) => ({
         ...s,
         busy: sessionBusy(s.metadata),
@@ -86,7 +91,9 @@ export function registerSessionRoutes(app: FastifyInstance, ctx: ServerContext):
       }
       let runtime: "claude" | "codex" = "claude";
       try {
-        const meta = session.metadata ? (JSON.parse(session.metadata) as Record<string, unknown>) : null;
+        const meta = session.metadata
+          ? (JSON.parse(session.metadata) as Record<string, unknown>)
+          : null;
         if (meta?.runtime === "codex") runtime = "codex";
       } catch {
         // malformed metadata — default runtime

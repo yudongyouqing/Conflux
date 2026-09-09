@@ -39,15 +39,13 @@ export function queryContext(db: DB, input: QueryInput): ContextEntry[] {
     const where = input.session_id ? `WHERE session_id = ?` : "";
     const params: (string | number)[] = input.session_id ? [input.session_id] : [];
     const rows = db
-      .prepare(
-        `SELECT * FROM context_entries ${where} ORDER BY updated_at DESC LIMIT ?`
-      )
+      .prepare(`SELECT * FROM context_entries ${where} ORDER BY updated_at DESC LIMIT ?`)
       .all(...params, limit) as ContextRow[];
     return rows.map(toEntry);
   }
 
   // Compose a query that combines FTS rank + post-filter tags/session.
-  let ftsSql = "";
+  let ftsSql: string;
   const ftsParams: string[] = [];
   if (input.query && input.query.trim().length > 0) {
     ftsSql = `
@@ -60,20 +58,18 @@ export function queryContext(db: DB, input: QueryInput): ContextEntry[] {
   }
 
   if (input.session_id) {
-    ftsSql += input.query ? ` AND context_entries.session_id = ?` : ` AND context_entries.session_id = ?`;
+    ftsSql += input.query
+      ? ` AND context_entries.session_id = ?`
+      : ` AND context_entries.session_id = ?`;
     ftsParams.push(input.session_id);
   }
 
-  const order = input.query
-    ? `ORDER BY rank`
-    : `ORDER BY context_entries.updated_at DESC`;
+  const order = input.query ? `ORDER BY rank` : `ORDER BY context_entries.updated_at DESC`;
 
   // We fetch a larger candidate set then filter tags in JS (tags stored as JSON).
   const fetchLimit = Math.min(limit * 4, MAX_LIMIT);
   const candidateRows = db
-    .prepare(
-      `SELECT context_entries.* FROM context_entries ${ftsSql} ${order} LIMIT ?`
-    )
+    .prepare(`SELECT context_entries.* FROM context_entries ${ftsSql} ${order} LIMIT ?`)
     .all(...ftsParams, fetchLimit) as ContextRow[];
 
   const out: ContextEntry[] = [];

@@ -8,7 +8,11 @@ export function parseSessionRuntime(value: unknown): SessionRuntime | null {
 }
 
 export function parseIdentitySource(value: unknown): IdentitySource | null {
-  return value === "hook" || value === "mcp" || value === "http" || value === "cli" || value === "internal"
+  return value === "hook" ||
+    value === "mcp" ||
+    value === "http" ||
+    value === "cli" ||
+    value === "internal"
     ? value
     : null;
 }

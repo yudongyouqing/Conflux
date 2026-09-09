@@ -8,10 +8,7 @@ import {
   resolveOnPath,
   terminalOptions,
 } from "../core/terminal.js";
-import {
-  getTerminalSettings,
-  saveTerminalSettings,
-} from "../core/app-settings.js";
+import { getTerminalSettings, saveTerminalSettings } from "../core/app-settings.js";
 
 const { db, cleanup } = makeDb();
 after(cleanup);
@@ -25,7 +22,10 @@ test("getTerminalSettings returns defaults on a fresh db", () => {
 });
 
 test("saveTerminalSettings merges partials and validates the choice", () => {
-  const saved = saveTerminalSettings(db, { terminal: "wezterm", claude_path: "C:/tools/claude.exe" });
+  const saved = saveTerminalSettings(db, {
+    terminal: "wezterm",
+    claude_path: "C:/tools/claude.exe",
+  });
   assert.equal(saved.terminal, "wezterm");
   assert.equal(saved.claude_path, "C:/tools/claude.exe");
   assert.equal(saved.codex_path, "codex", "untouched field keeps its default");
@@ -47,7 +47,10 @@ test("buildLaunchPlan: wt first with fallback, cmd-only for cmd choice", () => {
   assert.equal(wt[0].file, "wt.exe");
   assert.deepEqual(wt[0].args.slice(0, 2), ["-d", "C:/work/dir"]);
   assert.ok(wt[0].args.includes("cmd.exe"));
-  assert.ok(wt.some((s) => s.file.endsWith("cmd.exe") && s.verbatim), "cmd start fallback present");
+  assert.ok(
+    wt.some((s) => s.file.endsWith("cmd.exe") && s.verbatim),
+    "cmd start fallback present",
+  );
 
   const wez = buildLaunchPlan({ terminal: "wezterm" }, base, win32);
   assert.equal(wez[0].file, "wezterm.exe");
@@ -64,7 +67,7 @@ test("buildLaunchPlan: powershell runs the command directly with pwsh fallback c
   const plan = buildLaunchPlan(
     { terminal: "powershell" },
     { command: "claude --resume abc", cwd: "C:/work/dir", title: "t" },
-    win32
+    win32,
   );
   assert.equal(plan[0].file, "pwsh.exe");
   assert.deepEqual(plan[0].args.slice(0, 4), ["-NoLogo", "-NoProfile", "-NoExit", "-Command"]);
@@ -82,7 +85,7 @@ test("resolveOnPath resolves via where.exe (handles Store aliases); terminalOpti
   const opts = terminalOptions();
   assert.deepEqual(
     opts.map((o) => o.value),
-    ["wt", "powershell", "cmd", "wezterm"]
+    ["wt", "powershell", "cmd", "wezterm"],
   );
   const cmdOpt = opts.find((o) => o.value === "cmd")!;
   assert.equal(cmdOpt.available, true);
@@ -93,7 +96,7 @@ test("resumeCommand builds runtime-correct commands with quoted paths", () => {
   assert.equal(resumeCommand("claude", "abc-123", "claude"), "claude --resume abc-123");
   assert.equal(
     resumeCommand("codex", "abc-123", "C:/Program Files/codex.exe"),
-    '"C:/Program Files/codex.exe" resume abc-123'
+    '"C:/Program Files/codex.exe" resume abc-123',
   );
 });
 
@@ -145,7 +148,10 @@ test("darwin plan: iterm first with Terminal.app fallback; tmux new-window carri
   assert.deepEqual(tm[0].args.slice(0, 3), ["new-window", "-n", "muiltchat · x"]);
   const shIdx = tm[0].args.indexOf("-c");
   assert.ok(tm[0].args[shIdx + 1].startsWith("env "), "env inlined into sh -c payload");
-  assert.ok(tm[0].args[shIdx + 1].endsWith('"claude" --resume abc'), "no AppleScript escaping on the tmux path");
+  assert.ok(
+    tm[0].args[shIdx + 1].endsWith('"claude" --resume abc'),
+    "no AppleScript escaping on the tmux path",
+  );
 });
 
 test("darwin plan: windows-flavoured choice falls back to Terminal.app", () => {
@@ -158,7 +164,7 @@ test("terminalOptions on darwin lists mac openers only", () => {
   const opts = terminalOptions(process.env, darwin);
   assert.deepEqual(
     opts.map((o) => o.value),
-    ["terminal", "iterm", "tmux"]
+    ["terminal", "iterm", "tmux"],
   );
   assert.ok(opts.every((o) => typeof o.label === "string" && o.label.length > 0));
 });
