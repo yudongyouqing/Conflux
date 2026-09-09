@@ -1,8 +1,8 @@
 import dagre from "@dagrejs/dagre";
 import type { Node, Edge } from "@xyflow/react";
 
-const NODE_WIDTH = 160;
-const NODE_HEIGHT = 56;
+const NODE_WIDTH = 200;
+const NODE_HEIGHT = 88;
 
 export function layoutGraph(
   nodes: Node[],
@@ -15,7 +15,7 @@ export function layoutGraph(
   if (edges.length === 0 && nodes.length > 1) {
     const COLS = 3;
     const GAP_X = 56;
-    const GAP_Y = 44;
+    const GAP_Y = 48;
     const layoutedNodes = nodes.map((node, i) => ({
       ...node,
       position: {

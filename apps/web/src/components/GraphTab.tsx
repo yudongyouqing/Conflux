@@ -27,8 +27,8 @@ const CLUSTER_ID = "__orphan_cluster__";
 const dirLabelId = (dir: string) => `__dirlabel:${dir}`;
 
 // Grid geometry for orphan children inside the expanded cluster container.
-const CELL_W = 176;
-const CELL_H = 64;
+const CELL_W = 216;
+const CELL_H = 100;
 const GRID_COLS = 3;
 const GRID_PAD_X = 16;
 const GRID_PAD_TOP = 34; // room for the container title bar
@@ -37,9 +37,9 @@ const GRID_PAD_TOP = 34; // room for the container title bar
 // cannot be told about directory grouping). Rows are sorted newest-first.
 const START_X = 40;
 const START_Y = 24;
-const ROW_H = 130;
+const ROW_H = 150;
 const DIR_LABEL_SPAN = 190; // dir caption + breathing room before first card
-const COL_W = 210;
+const COL_W = 224;
 
 type ViewMode = "active" | "dirs" | "all";
 
@@ -83,6 +83,13 @@ export function GraphTab({
     })()
   );
 
+  // Reframe when the composition itself changes — dagre/grid/rows swap
+  // positions wholesale and the initial fitView never reruns on its own.
+  const rfInstance = useRef<{ fitView: (opts?: { padding?: number; duration?: number }) => void } | null>(null);
+  useEffect(() => {
+    const t = setTimeout(() => rfInstance.current?.fitView({ padding: 0.2, duration: 400 }), 350);
+    return () => clearTimeout(t);
+  }, [viewMode, orphanExpanded]);
   const handleOffsetChange = useCallback(
     (key: string, offset: number | null) => {
       if (offset === null) delete manualOffsets.current[key];
@@ -271,6 +278,15 @@ export function GraphTab({
       outNodes = layouted;
     }
 
+    // Fan-out: parallel edges leaving the SAME source would stack into one
+    // bundle (the web-console spoke mess). Spread them by per-source index.
+    const srcTotal = new Map<string, number>();
+    const srcIndex = new Map<string, number>();
+    for (const e of rawEdges) {
+      const d0 = e.data as { from: string; to: string };
+      srcIndex.set(d0.from + ">" + d0.to, srcTotal.get(d0.from) ?? 0);
+      srcTotal.set(d0.from, (srcTotal.get(d0.from) ?? 0) + 1);
+    }
     // Reciprocal separation: count edges per unordered node pair, then bend
     // both directions of a two-way pair by the same perpendicular offset —
     // the reversed direction vector flips the bow to the opposite side, so
@@ -287,7 +303,10 @@ export function GraphTab({
       const pairKey = d.from < d.to ? `${d.from}|${d.to}` : `${d.to}|${d.from}`;
       const twoWay = (pairCount.get(pairKey) ?? 0) > 1;
       const dirKey = `${d.from}->${d.to}`;
-      const auto = twoWay ? 34 : 0;
+      const n = srcTotal.get(d.from) ?? 1;
+      const idx = srcIndex.get(d.from + ">" + d.to) ?? 0;
+      const fan = n > 1 ? (idx - (n - 1) / 2) * 48 : 0;
+      const auto = (twoWay ? 34 : 0) + fan;
       return {
         ...e,
         type: "curved" as const,
@@ -414,6 +433,9 @@ export function GraphTab({
       onNodeClick={onNodeClick}
       onEdgeClick={onEdgeClick}
       nodesConnectable={false}
+      onInit={(instance) => {
+        rfInstance.current = instance;
+      }}
       minZoom={0.2}
       maxZoom={2}
       fitView
