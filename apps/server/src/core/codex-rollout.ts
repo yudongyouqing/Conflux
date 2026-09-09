@@ -39,10 +39,13 @@ export const SYNTHETIC_PROMPT_PREFIXES = [
   "Another language model started to solve", // resume/fork handoff blob
 ];
 
-/** Case-insensitive on Windows only, matching how the OS treats paths. */
+/** Case-insensitive path comparison for cwd matching. Unconditional
+ * lowercasing keeps behavior identical on every OS the tests run on
+ * (Windows/Linux CI parity); the match is heuristic anyway - rollout
+ * binding ultimately rides on the stamped uuid, not the cwd. */
 export function normalizeDir(p: string): string {
-  const s = p.replace(/\\/g, "/").replace(/\/+$/, "");
-  return process.platform === "win32" ? s.toLowerCase() : s;
+  const s = p.split("\\").join("/").replace(new RegExp("\\/+$"), "");
+  return s.toLowerCase();
 }
 
 /**
