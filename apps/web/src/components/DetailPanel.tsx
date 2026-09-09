@@ -3,7 +3,7 @@ import { useSessionContext, useEdgeMessages, useEdgeAsk, useOpenSessionTerminal 
 import { MentionComposer } from "./MentionComposer";
 import type { Message, GraphNode, SessionStatus } from "@muiltchat/shared";
 import { StatusDot } from "./StatusDot";
-import { FileText, Clock, ArrowRight, FolderOpen, Send, Loader2, ArrowLeftRight, TerminalSquare } from "lucide-react";
+import { FileText, Clock, ArrowRight, FolderOpen, Send, Loader2, ArrowLeftRight, TerminalSquare, MousePointerClick } from "lucide-react";
 
 const WEB_CONSOLE_ID = "web-console";
 const DEFAULT_DESC = "Claude Code session (hook)";
@@ -100,7 +100,14 @@ export function DetailPanel({
   }
 
   return (
-    <div className="flex items-center justify-center h-full text-gray-400 text-sm text-center px-6">
+    <div className="flex items-center justify-center h-full p-6">
+      <div className="text-center max-w-[220px]">
+        <div className="w-12 h-12 mx-auto mb-3 rounded-2xl bg-gray-50 border border-gray-100 flex items-center justify-center">
+          <MousePointerClick size={20} className="text-gray-300" />
+        </div>
+        <div className="text-sm text-gray-500 font-medium">选择一个对象查看详情</div>
+        <div className="text-xs text-gray-400 mt-1">点击图节点、图谱连线或消息条目，详情会显示在这里</div>
+      </div>
       点击图节点或消息条目查看详情
     </div>
   );

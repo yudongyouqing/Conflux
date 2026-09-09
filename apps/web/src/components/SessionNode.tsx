@@ -53,7 +53,7 @@ export function SessionNode({ data, selected, dragging }: NodeProps) {
   return (
     <div
       title={d.skills?.length ? `技能: ${d.skills.join(" · ")}` : undefined}
-      className={`px-3 py-2 rounded-xl border min-w-[120px] transition-all duration-150 cursor-grab active:cursor-grabbing ${
+      className={`px-3 py-2 rounded-xl border min-w-[140px] transition-all duration-150 cursor-grab active:cursor-grabbing ${
         dragging
           ? "shadow-xl scale-[1.03] ring-2 ring-blue-500/40"
           : selected
@@ -68,7 +68,7 @@ export function SessionNode({ data, selected, dragging }: NodeProps) {
       <Handle
         type="target"
         position={Position.Left}
-        className="!w-2 !h-2 !bg-gray-400"
+        className="!w-1.5 !h-1.5 !bg-gray-300 !border-2 !border-white"
       />
       <div className="flex items-center gap-2">
         {isAgent ? (
@@ -82,12 +82,15 @@ export function SessionNode({ data, selected, dragging }: NodeProps) {
             }`}
           />
         )}
-        <span className="text-gray-900 text-xs font-medium truncate max-w-[100px]">
+        <span
+          className="text-gray-900 text-xs font-medium truncate max-w-[150px]"
+          title={d.name}
+        >
           {d.name}
         </span>
         {d.runtime && (
           <span
-            className="text-[9px] px-1 py-px rounded bg-cyan-50 text-cyan-700 border border-cyan-200 font-medium flex-shrink-0"
+            className="text-[9px] px-1 py-px rounded bg-slate-50 text-slate-500 border border-slate-200 font-medium flex-shrink-0"
             title={`运行时 agent (${d.runtime})`}
           >
             {d.runtime}
@@ -96,7 +99,7 @@ export function SessionNode({ data, selected, dragging }: NodeProps) {
       </div>
       {d.description && d.description !== "Claude Code session (hook)" && (
         <div
-          className="text-[10px] text-gray-400 truncate mt-0.5 max-w-[130px]"
+          className="text-[10px] text-gray-400 truncate mt-0.5 max-w-[170px]"
           title={d.description}
         >
           {d.description}
@@ -109,13 +112,10 @@ export function SessionNode({ data, selected, dragging }: NodeProps) {
           </span>
         )}
         {d.status === "active" && ageLabel && (
-          <span
-            className={`flex items-center gap-0.5 ${
-              (ageSec ?? 0) < 60 ? "text-emerald-500" : "text-gray-400"
-            }`}
-            title={`最后心跳 ${ageLabel} 前`}
-          >
-            {(ageSec ?? 0) < 60 ? "●" : "○"} {ageLabel}
+          // neutral metadata: elapsed time is NOT a health signal — color
+          // stays reserved for the status dot
+          <span className="text-gray-400" title={`最后心跳 ${ageLabel} 前`}>
+            {ageLabel}
           </span>
         )}
         {d.pending_inbox > 0 && (
@@ -132,7 +132,7 @@ export function SessionNode({ data, selected, dragging }: NodeProps) {
       <Handle
         type="source"
         position={Position.Right}
-        className="!w-2 !h-2 !bg-gray-400"
+        className="!w-1.5 !h-1.5 !bg-gray-300 !border-2 !border-white"
       />
     </div>
   );
