@@ -32,6 +32,7 @@
     "muiltchat": "file:apps/server"
   },
   "devDependencies": {
-    "concurrently": "^10.0.4"
+    "concurrently": "^10.0.4",
+    "playwright": "^1.63.0"
   }
 }
