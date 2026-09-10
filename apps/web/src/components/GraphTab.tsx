@@ -27,7 +27,6 @@ const CLUSTER_ID = "__orphan_cluster__";
 // Grid geometry for orphan children inside the expanded cluster container.
 const CELL_W = 216;
 const CELL_H = 100;
-const GRID_COLS = 3;
 const GRID_PAD_X = 16;
 const GRID_PAD_TOP = 58; // room below the frame header (accent + title bar)
 
@@ -36,7 +35,9 @@ const GRID_PAD_TOP = 58; // room below the frame header (accent + title bar)
 // Frames stack vertically newest-first; idle dirs default to collapsed.
 const START_X = 40;
 const START_Y = 24;
-const FRAME_GAP = 28;
+const FRAME_W = 480; // uniform dir-frame width (2 cards per row) — masonry needs aligned columns
+const FRAME_GAP_X = 56;
+const FRAME_GAP_Y = 56;
 const FRAME_HEADER_H = 56; // collapsed frame height
 const groupId = (dir: string) => `__group:${dir}`;
 const ARCHIVE_KEY = "__archive__";
@@ -203,20 +204,28 @@ export function GraphTab({
       // real React Flow children (parentId + extent) so a frame drags as
       // one unit; edges still connect children across frames.
       outNodes = [];
-      let frameY = START_Y;
+      // two-column masonry: each frame drops into the SHORTER column —
+      // avoids the single tall tower of stacked slabs
+      const colH = [START_Y, START_Y];
+      const place = (height: number): { x: number; y: number } => {
+        const c = colH[0] <= colH[1] ? 0 : 1;
+        const pos = { x: START_X + c * (FRAME_W + FRAME_GAP_X), y: colH[c] };
+        colH[c] = pos.y + height + FRAME_GAP_Y;
+        return pos;
+      };
       for (const row of rows) {
         const active = row.nodes.filter((n) => n.status === "active" || n.type === "agent").length;
         const key = "dir:" + row.dir;
         const collapsed = frameCollapsed[key] ?? active === 0;
-        const cols = Math.min(GRID_COLS, Math.max(row.nodes.length, 1));
+        const cols = 2;
         const gridRows = Math.ceil(row.nodes.length / cols);
-        const width = Math.max(cols * CELL_W + GRID_PAD_X * 2, 300);
+        const width = FRAME_W;
         const height = collapsed ? FRAME_HEADER_H : gridRows * CELL_H + GRID_PAD_TOP + 14;
         const id = groupId(row.dir);
         outNodes.push({
           id,
           type: "cluster",
-          position: { x: START_X, y: frameY },
+          position: place(height),
           data: {
             key,
             variant: "dir",
@@ -243,20 +252,19 @@ export function GraphTab({
             outNodes.push(node);
           });
         }
-        frameY += height + FRAME_GAP;
       }
 
       // Orphan archive frame below the directory frames.
       if (orphans.length > 0) {
         const expanded = !(frameCollapsed[ARCHIVE_KEY] ?? true);
-        const cols = Math.min(GRID_COLS, orphans.length);
+        const cols = 2;
         const gridRows = Math.ceil(orphans.length / cols);
-        const width = Math.max(cols * CELL_W + GRID_PAD_X * 2, 300);
+        const width = FRAME_W;
         const height = expanded ? gridRows * CELL_H + GRID_PAD_TOP + 14 : FRAME_HEADER_H;
         outNodes.push({
           id: CLUSTER_ID,
           type: "cluster",
-          position: { x: START_X, y: frameY },
+          position: place(height),
           data: {
             key: ARCHIVE_KEY,
             variant: "archive",
