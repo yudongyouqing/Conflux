@@ -66,9 +66,10 @@ export function GraphTab({
 }: GraphTabProps) {
   const { data, isLoading, error } = useGraph();
   const [viewMode, setViewMode] = useState<ViewMode>("active");
-  // Per-frame collapse overrides keyed by GroupFrameData.key; default for
-  // a frame is collapsed-when-no-active-sessions (computed at click time).
-  const [frameCollapsed, setFrameCollapsed] = useState<Record<string, boolean>>({});
+  // ACCORDION: at most one frame open at a time. The overview stays
+  // constant-density (every directory is one compact tile) no matter how
+  // many sessions exist; clicking a tile drills into that directory.
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
   // Interactive state — required for node dragging in React Flow v12.
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
@@ -95,7 +96,7 @@ export function GraphTab({
   useEffect(() => {
     const t = setTimeout(() => rfInstance.current?.fitView({ padding: 0.2, duration: 400 }), 350);
     return () => clearTimeout(t);
-  }, [viewMode, frameCollapsed]);
+  }, [viewMode, expandedKey]);
   const handleOffsetChange = useCallback(
     (key: string, offset: number | null) => {
       if (offset === null) delete manualOffsets.current[key];
@@ -216,11 +217,23 @@ export function GraphTab({
       for (const row of rows) {
         const active = row.nodes.filter((n) => n.status === "active" || n.type === "agent").length;
         const key = "dir:" + row.dir;
-        const collapsed = frameCollapsed[key] ?? active === 0;
+        const collapsed = expandedKey !== key;
+        const shown = collapsed ? [] : row.nodes.slice(0, 6); // cap: 3 rows x 2
+        const hidden = row.nodes.length - shown.length;
         const cols = 2;
-        const gridRows = Math.ceil(row.nodes.length / cols);
+        const gridRows = Math.max(Math.ceil(shown.length / cols), 1);
         const width = FRAME_W;
         const height = collapsed ? FRAME_HEADER_H : gridRows * CELL_H + GRID_PAD_TOP + 14;
+        const runtimeDots = row.nodes
+          .filter((n) => n.status === "active" && n.type !== "agent")
+          .map((n) =>
+            n.runtime === "codex"
+              ? "bg-slate-600"
+              : n.runtime === "claude"
+                ? "bg-orange-500"
+                : "bg-blue-500",
+          )
+          .slice(0, 4);
         const id = groupId(row.dir);
         outNodes.push({
           id,
@@ -232,6 +245,8 @@ export function GraphTab({
             label: dirBasename(row.dir),
             count: row.nodes.length,
             activeCount: active,
+            hiddenCount: hidden,
+            runtimeDots,
             expanded: !collapsed,
             width,
             height,
@@ -240,7 +255,7 @@ export function GraphTab({
           zIndex: -1,
         } as Node<GroupFrameData>);
         if (!collapsed) {
-          row.nodes.forEach((n, i) => {
+          shown.forEach((n, i) => {
             const node = toSessionNode(n);
             node.parentId = id;
             node.extent = "parent";
@@ -256,9 +271,11 @@ export function GraphTab({
 
       // Orphan archive frame below the directory frames.
       if (orphans.length > 0) {
-        const expanded = !(frameCollapsed[ARCHIVE_KEY] ?? true);
+        const expanded = expandedKey === ARCHIVE_KEY;
+        const shownOrphans = expanded ? orphans.slice(0, 6) : [];
+        const hiddenOrphans = orphans.length - shownOrphans.length;
         const cols = 2;
-        const gridRows = Math.ceil(orphans.length / cols);
+        const gridRows = Math.max(Math.ceil(shownOrphans.length / cols), 1);
         const width = FRAME_W;
         const height = expanded ? gridRows * CELL_H + GRID_PAD_TOP + 14 : FRAME_HEADER_H;
         outNodes.push({
@@ -271,6 +288,7 @@ export function GraphTab({
             label: null,
             count: orphans.length,
             activeCount: 0,
+            hiddenCount: hiddenOrphans,
             expanded,
             width,
             height,
@@ -279,7 +297,7 @@ export function GraphTab({
           zIndex: -1,
         });
         if (expanded) {
-          orphans.forEach((n, i) => {
+          shownOrphans.forEach((n, i) => {
             const node = toSessionNode(n);
             node.parentId = CLUSTER_ID;
             node.extent = "parent";
@@ -420,7 +438,7 @@ export function GraphTab({
     selectedSessionId,
     selectedEdge,
     viewMode,
-    frameCollapsed,
+    expandedKey,
     handleOffsetChange,
     setNodes,
     setEdges,
@@ -429,12 +447,8 @@ export function GraphTab({
   const onNodeClick: NodeMouseHandler = useCallback(
     (_, node) => {
       if (node.type === "cluster") {
-        const d = node.data;
-        setFrameCollapsed((prev) => {
-          const def = ((d as { activeCount?: number }).activeCount ?? 0) === 0;
-          const key = (d as { key?: string }).key ?? "";
-          return { ...prev, [key]: !(prev[key] ?? def) };
-        });
+        const key = (node.data as { key?: string }).key ?? "";
+        setExpandedKey((prev) => (prev === key ? null : key));
         return;
       }
       onSelectSession(node.id);
