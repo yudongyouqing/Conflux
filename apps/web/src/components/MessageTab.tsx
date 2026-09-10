@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useMessages, useGraph, useSessions, usePeerMessages } from "../hooks";
 import { MentionComposer } from "./MentionComposer";
 import { MessageCard } from "./MessageCard";
+import { MarkdownText } from "./MarkdownText";
 import { StatusDot } from "./StatusDot";
 import type { Message } from "@muiltchat/shared";
 
@@ -86,15 +87,17 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
                         : "bg-gray-100 text-gray-800 border border-gray-200"
                     }`}
                   >
-                    <div className="whitespace-pre-wrap break-words">{m.question}</div>
+                    <MarkdownText tone={mine ? "blue" : "light"}>{m.question}</MarkdownText>
                     {m.reply && (
                       <div
-                        className={`mt-1 pt-1 border-t whitespace-pre-wrap break-words ${
+                        className={`mt-2 pt-2 border-t ${
                           mine ? "border-blue-400/50" : "border-gray-200"
                         }`}
                       >
-                        <span className="opacity-60">回复: </span>
-                        {m.reply}
+                        <div className="text-[9px] font-semibold uppercase tracking-wide opacity-60 mb-0.5">
+                          回复
+                        </div>
+                        <MarkdownText>{m.reply}</MarkdownText>
                       </div>
                     )}
                     {mine && m.status === "pending" && (
