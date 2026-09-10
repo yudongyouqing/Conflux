@@ -52,6 +52,7 @@ export function CurvedPairEdge(props: EdgeProps) {
     offset?: number;
     offsetKey?: string;
     onOffsetChange?: (key: string, offset: number | null) => void;
+    onSelect?: () => void;
   };
   const offset = d.offset ?? 0;
   const p0 = { x: sourceX, y: sourceY };
@@ -119,6 +120,10 @@ export function CurvedPairEdge(props: EdgeProps) {
     if (rafId.current === null) rafId.current = requestAnimationFrame(flushOffset);
   };
 
+  // The pill is the edge's most clickable surface — clicks open the
+  // channel; drags adjust curvature. Distinguish by movement distance.
+  const dragged = useRef(false);
+
   const pointerToOffset = (ev: React.PointerEvent) => {
     const p = screenToFlowPosition({ x: ev.clientX, y: ev.clientY });
     // The apex sits at mid + n * offset/2, so the cursor position maps to
@@ -165,9 +170,9 @@ export function CurvedPairEdge(props: EdgeProps) {
           title={manual ? "拖动调整弧度 · 双击复位" : undefined}
           className={`nodrag nopan touch-none select-none ${
             label
-              ? `px-2 py-0.5 rounded-full text-[10px] font-medium max-w-[140px] truncate border shadow-sm bg-white ${
+              ? `px-2 py-0.5 rounded-full text-[10px] font-medium max-w-[140px] truncate border shadow-sm bg-white cursor-pointer hover:border-blue-300 ${
                   isSelected ? "border-blue-300 text-blue-700" : "border-gray-200 text-gray-600"
-                }${manual ? " cursor-grab active:cursor-grabbing hover:border-blue-300" : ""}`
+                }${manual ? " active:cursor-grabbing" : ""}`
               : `w-2.5 h-2.5 rounded-full border ${
                   manual
                     ? "border-gray-300 bg-gray-100 opacity-0 hover:opacity-100 cursor-grab active:cursor-grabbing"
@@ -175,19 +180,24 @@ export function CurvedPairEdge(props: EdgeProps) {
                 } transition-opacity`
           }`}
           onPointerDown={(ev) => {
+            dragged.current = false;
+            pendingOffset.current = null;
             if (!manual) return;
-            ev.preventDefault();
             ev.stopPropagation();
             (ev.target as HTMLElement).setPointerCapture(ev.pointerId);
           }}
           onPointerMove={(ev) => {
             if (!manual || !(ev.buttons & 1)) return;
             ev.stopPropagation();
+            dragged.current = true;
             scheduleOffset(d.offsetKey!, pointerToOffset(ev));
           }}
           onPointerUp={() => {
             if (rafId.current !== null) cancelAnimationFrame(rafId.current);
             flushOffset();
+            // press-release without movement = a click: open the channel
+            if (!dragged.current) d.onSelect?.();
+            dragged.current = false;
           }}
           onDoubleClick={(ev) => {
             if (!manual) return;
