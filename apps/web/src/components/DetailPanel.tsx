@@ -3,6 +3,7 @@ import { useSessionContext, useEdgeMessages, useEdgeAsk, useOpenSessionTerminal 
 import { MentionComposer } from "./MentionComposer";
 import type { Message, GraphNode, SessionStatus } from "@muiltchat/shared";
 import { StatusDot } from "./StatusDot";
+import { MarkdownText } from "./MarkdownText";
 import {
   FileText,
   Clock,
@@ -84,7 +85,7 @@ export function DetailPanel({
           <div className="text-[10px] text-gray-400 mb-1.5 flex items-center gap-1">
             <Clock size={10} /> {new Date(message.created_at).toLocaleString()}
           </div>
-          <div className="text-sm text-gray-800 whitespace-pre-wrap bg-gray-50 p-3 rounded-xl border border-gray-200">
+          <div className="bg-white p-3 rounded-2xl border border-gray-200 shadow-sm">
             {message.question}
           </div>
         </div>
@@ -95,7 +96,7 @@ export function DetailPanel({
               回复
               {message.replied_at && ` · ${new Date(message.replied_at).toLocaleString()}`}
             </div>
-            <div className="text-sm text-emerald-800 whitespace-pre-wrap bg-emerald-50 p-3 rounded-xl border border-emerald-200">
+            <div className="bg-white p-3 rounded-2xl border border-emerald-200 shadow-sm relative">
               {message.reply}
             </div>
           </div>
@@ -217,19 +218,22 @@ function EdgeFlowView({
                   {new Date(m.created_at).toLocaleString()}
                 </div>
                 <div
-                  className={`text-sm whitespace-pre-wrap p-2.5 rounded-xl border max-w-[95%] ${
+                  className={`p-3 rounded-2xl border max-w-[95%] shadow-sm ${
                     outgoing
-                      ? "bg-blue-50 border-blue-200 text-gray-800"
-                      : "bg-gray-50 border-gray-200 text-gray-800"
+                      ? "bg-blue-500 border-blue-400 text-white"
+                      : "bg-white border-gray-200 text-gray-800"
                   }`}
                 >
-                  {m.question}
+                  <MarkdownText tone={outgoing ? "blue" : "light"}>{m.question}</MarkdownText>
                 </div>
                 {m.status === "pending" ? (
                   <div className="text-[10px] text-amber-600 mt-0.5">等待回复…</div>
                 ) : m.reply ? (
-                  <div className="text-sm whitespace-pre-wrap p-2.5 rounded-xl border bg-emerald-50 border-emerald-200 text-emerald-800 max-w-[95%] mt-1">
-                    ↩ {m.reply}
+                  <div className="p-3 rounded-2xl border bg-white border-emerald-200 text-gray-800 max-w-[95%] mt-1 shadow-sm relative">
+                    <div className="absolute -top-2 left-3 text-[9px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-full px-1.5">
+                      回复
+                    </div>
+                    <MarkdownText>{m.reply}</MarkdownText>
                   </div>
                 ) : null}
               </div>
