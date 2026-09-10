@@ -170,12 +170,15 @@ export function GraphTab({
     // makes the direction (who asked whom) readable at a glance.
     const previewOf = (m: string | null | undefined) =>
       !m ? "" : m.length > 28 ? m.slice(0, 28) + "…" : m;
+    // Canvas shows STRUCTURE (who talks to whom, how much); the message
+    // preview is detail — it appears only while the edge is selected. The
+    // default label is a compact xN count badge.
     const mkEdge = (e: (typeof data.edges)[number], i: number): Edge => ({
       id: `e-${e.from}-${e.to}-${i}`,
       source: e.from,
       target: e.to,
       animated: true,
-      label: previewOf(e.last_message) || (e.weight > 1 ? String(e.weight) : ""),
+      label: e.weight > 1 ? `x${e.weight}` : "",
       style: { strokeWidth: Math.min(1 + e.weight, 5), stroke: "#94a3b8" },
       markerEnd: {
         type: MarkerType.ArrowClosed,
@@ -183,7 +186,13 @@ export function GraphTab({
         width: 18,
         height: 18,
       },
-      data: { id: e.id, from: e.from, to: e.to },
+      data: {
+        id: e.id,
+        from: e.from,
+        to: e.to,
+        lastMessage: e.last_message ?? null,
+        onSelect: () => onSelectEdge({ id: e.id, from: e.from, to: e.to }),
+      },
     });
 
     let rawEdges: Edge[];
@@ -373,7 +382,7 @@ export function GraphTab({
       const dirKey = `${d.from}->${d.to}`;
       const n = srcTotal.get(d.from) ?? 1;
       const idx = srcIndex.get(d.from + ">" + d.to) ?? 0;
-      const fan = n > 1 ? (idx - (n - 1) / 2) * 48 : 0;
+      const fan = n > 1 ? (idx - (n - 1) / 2) * 34 : 0;
       const auto = (twoWay ? 34 : 0) + fan;
       return {
         ...e,
@@ -394,12 +403,13 @@ export function GraphTab({
     const selKey = selectedEdge ? `${selectedEdge.from}->${selectedEdge.to}` : null;
     const endpoints = selectedEdge ? new Set([selectedEdge.from, selectedEdge.to]) : null;
     const styledEdges = rawEdges.map((e) => {
-      const d = e.data as { from: string; to: string };
+      const d = e.data as { from: string; to: string; lastMessage?: string | null };
       const w = (e.style?.strokeWidth as number) ?? 2;
       if (selKey && `${d.from}->${d.to}` === selKey) {
         return {
           ...e,
           zIndex: 5,
+          label: previewOf(d.lastMessage) || e.label,
           style: { ...e.style, stroke: "#2563eb", strokeWidth: Math.min(w + 1, 6) },
           labelStyle: { fill: "#1d4ed8", fontWeight: 600 },
           labelBgStyle: { fill: "#dbeafe" },
