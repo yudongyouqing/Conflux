@@ -26,7 +26,7 @@ const CLUSTER_ID = "__orphan_cluster__";
 
 // Grid geometry for orphan children inside the expanded cluster container.
 const CELL_W = 192;
-const CELL_H = 78;
+const CELL_H = 98;
 const GRID_PAD_X = 16;
 const GRID_PAD_TOP = 52; // room below the frame header (accent + title bar)
 
