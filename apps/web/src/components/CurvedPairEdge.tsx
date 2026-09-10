@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { BaseEdge, EdgeLabelRenderer, useReactFlow, type EdgeProps } from "@xyflow/react";
 
 /**
@@ -43,6 +44,22 @@ export function CurvedPairEdge(props: EdgeProps) {
   const stroke = (style as { stroke?: string } | undefined)?.stroke;
   const isSelected = stroke === "#2563eb";
   const manual = d.offsetKey !== undefined && d.onOffsetChange !== undefined;
+
+  // Coalesce pointermove-driven updates to one per animation frame —
+  // pointer events can outpace the display, and each update re-renders
+  // every edge on the canvas.
+  const pendingOffset = useRef<{ key: string; offset: number } | null>(null);
+  const rafId = useRef<number | null>(null);
+  const flushOffset = () => {
+    rafId.current = null;
+    const pending = pendingOffset.current;
+    if (!pending || !d.onOffsetChange || d.offsetKey === undefined) return;
+    d.onOffsetChange(pending.key, pending.offset);
+  };
+  const scheduleOffset = (key: string, offset: number) => {
+    pendingOffset.current = { key, offset };
+    if (rafId.current === null) rafId.current = requestAnimationFrame(flushOffset);
+  };
 
   const pointerToOffset = (ev: React.PointerEvent) => {
     const p = screenToFlowPosition({ x: ev.clientX, y: ev.clientY });
@@ -107,7 +124,11 @@ export function CurvedPairEdge(props: EdgeProps) {
           onPointerMove={(ev) => {
             if (!manual || !(ev.buttons & 1)) return;
             ev.stopPropagation();
-            d.onOffsetChange!(d.offsetKey!, pointerToOffset(ev));
+            scheduleOffset(d.offsetKey!, pointerToOffset(ev));
+          }}
+          onPointerUp={() => {
+            if (rafId.current !== null) cancelAnimationFrame(rafId.current);
+            flushOffset();
           }}
           onDoubleClick={(ev) => {
             if (!manual) return;
