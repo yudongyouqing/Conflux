@@ -1,5 +1,5 @@
 import type { NodeProps, Node } from "@xyflow/react";
-import { Folder, Ghost, Archive } from "lucide-react";
+import { Folder, Ghost, ChevronDown, ChevronRight } from "lucide-react";
 
 export interface GroupFrameData {
   /** stable key driving per-frame collapse state (GraphTab keeps the map) */
@@ -19,17 +19,19 @@ export type GroupFrameNodeType = Node<GroupFrameData>;
 
 /**
  * Canvas group frame (Dify/Figma-section style): a titled container that
- * OWNS its child session nodes (React Flow parentId + extent), making the
- * grouping visually explicit instead of implied by a row caption.
+ * OWNS its child session nodes (React Flow parentId + extent).
  *
- *  - variant "dir": solid tinted card, folder icon, live-count pill — the
- *    primary grouping in the dirs view mode.
- *  - variant "archive": dashed gray frame for offline orphans — archive
- *    semantics, "not live".
+ * The frame is deliberately QUIET chrome — no accent strip, no shadow, hairline
+ * border, near-transparent tint. The session cards inside carry the visual
+ * weight; the frame only whispers the grouping (a loud container would turn
+ * the canvas into stacked slabs).
+ *
+ *  - variant "dir": cool tint, folder icon, live-count summary.
+ *  - variant "archive": dashed outline for offline orphans.
  *
  * Collapsed it is a header-only bar; expanded GraphTab lays children out on
- * an absolute grid below the header. Clicking the header toggles collapse
- * (handled in GraphTab via data.key).
+ * an absolute grid below the header. Clicking toggles collapse (GraphTab,
+ * via data.key). The chevron indicates the state wordlessly.
  */
 export function GroupFrame({ data }: NodeProps) {
   const d = data as GroupFrameData;
@@ -39,63 +41,50 @@ export function GroupFrame({ data }: NodeProps) {
   const active = d.activeCount ?? 0;
 
   const shell = isDir
-    ? "bg-blue-50/60 border-blue-200/80 hover:border-blue-300"
-    : "border-dashed border-gray-300 bg-gray-50/50 hover:border-gray-400";
-  const accent = isDir ? "bg-blue-400/70" : "bg-gray-300";
-  const iconBlock = isDir
-    ? "bg-blue-100 border-blue-200 text-blue-600"
-    : "bg-gray-100 border-gray-200 text-gray-400";
+    ? "bg-slate-50/70 border-slate-200/90 hover:border-blue-300/70 hover:bg-blue-50/40"
+    : "border-dashed border-slate-300/80 bg-slate-50/40 hover:border-slate-400";
 
   return (
     <div
       className={`group relative rounded-2xl border ${shell} cursor-pointer select-none overflow-hidden transition-colors`}
       style={{ width: d.width, height: d.height }}
     >
-      <div className={`h-[3px] ${accent}`} />
-      <div className="flex items-center gap-2 px-3 pt-2.5 pb-2">
+      <div className="flex items-center gap-2 px-3 pt-2.5 pb-1">
         <div
-          className={`w-7 h-7 rounded-lg border flex items-center justify-center flex-shrink-0 ${iconBlock}`}
+          className={`w-6 h-6 rounded-md border flex items-center justify-center flex-shrink-0 ${
+            isDir
+              ? "bg-blue-50 border-blue-100 text-blue-500"
+              : "bg-slate-100 border-slate-200 text-slate-400"
+          }`}
         >
-          <Icon size={14} />
+          <Icon size={12} />
         </div>
         <span
-          className={`text-xs font-semibold truncate ${isDir ? "text-gray-700" : "text-gray-500"}`}
+          className={`text-xs font-semibold truncate ${isDir ? "text-slate-600" : "text-slate-400"}`}
           title={d.label ?? undefined}
         >
           {title}
         </span>
-        <span
-          className={`flex items-center gap-0.5 text-[10px] font-medium rounded-full px-1.5 py-px border flex-shrink-0 ${
-            isDir
-              ? "bg-white border-blue-200 text-blue-600"
-              : "bg-white border-gray-200 text-gray-400"
-          }`}
-        >
-          <Archive size={9} /> {d.count}
-        </span>
+        <span className="text-[10px] text-slate-400 tabular-nums flex-shrink-0">{d.count}</span>
         {isDir && (
           <span
-            className={`flex items-center gap-1 text-[10px] font-medium rounded-full px-1.5 py-px border flex-shrink-0 ${
-              active > 0
-                ? "bg-emerald-50 border-emerald-200 text-emerald-600"
-                : "bg-gray-50 border-gray-200 text-gray-400"
+            className={`flex items-center gap-1 text-[10px] font-medium flex-shrink-0 ${
+              active > 0 ? "text-emerald-600" : "text-slate-400"
             }`}
             title={active > 0 ? `${active} 个会话在线` : "该目录暂无在线会话"}
           >
             <span
-              className={`w-1.5 h-1.5 rounded-full ${active > 0 ? "bg-emerald-500" : "bg-gray-300"}`}
+              className={`w-1.5 h-1.5 rounded-full ${active > 0 ? "bg-emerald-500" : "bg-slate-300"}`}
             />
-            {active > 0 ? `${active} 在线` : "全离线"}
+            {active > 0 ? `${active} 在线` : "离线"}
           </span>
         )}
-        <span className="ml-auto text-[9px] text-gray-400 uppercase tracking-wide flex-shrink-0">
-          {d.expanded ? "点击折叠" : "点击展开"}
+        <span className="ml-auto text-slate-300 group-hover:text-slate-500 flex-shrink-0 transition-colors">
+          {d.expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         </span>
       </div>
       {!d.expanded && (
-        <div className="px-3 pb-2.5 text-[10px] text-gray-400">
-          {isDir ? "目录会话已折叠" : `${d.count} 个离线会话`}
-        </div>
+        <div className="px-3 pb-2 text-[10px] text-slate-400">{d.count} 个会话 · 点击展开</div>
       )}
     </div>
   );
