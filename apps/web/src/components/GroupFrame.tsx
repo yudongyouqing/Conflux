@@ -2,13 +2,17 @@ import type { NodeProps, Node } from "@xyflow/react";
 import { Folder, Ghost, ChevronDown, ChevronRight } from "lucide-react";
 
 export interface GroupFrameData {
-  /** stable key driving per-frame collapse state (GraphTab keeps the map) */
+  /** stable key; the ONE frame whose key matches GraphTab's expandedKey opens */
   key: string;
   variant: "dir" | "archive";
   /** frame title: project directory basename, or null for the offline archive */
   label?: string | null;
   count: number;
   activeCount?: number;
+  /** sessions beyond the display cap inside an expanded frame */
+  hiddenCount?: number;
+  /** tailwind bg classes for active sessions' runtime dots (max 4) */
+  runtimeDots?: string[];
   expanded: boolean;
   width: number;
   height: number;
@@ -18,20 +22,16 @@ export interface GroupFrameData {
 export type GroupFrameNodeType = Node<GroupFrameData>;
 
 /**
- * Canvas group frame (Dify/Figma-section style): a titled container that
- * OWNS its child session nodes (React Flow parentId + extent).
+ * Progressive-disclosure group tile (Google-Maps-cluster / Linear-drill-in
+ * pattern) for scale: at overview EVERY directory is one compact tile —
+ * name, count, live pill, runtime dots — so the canvas stays constant
+ * density no matter how many sessions exist (13 dirs / 57 sessions render
+ * as 13 tidy tiles). Clicking a tile drills in (accordion: one frame open
+ * at a time); the opened frame shows at most six cards plus a "+N" chip —
+ * a 32-session directory can never become a wall of cards again.
  *
- * The frame is deliberately QUIET chrome — no accent strip, no shadow, hairline
- * border, near-transparent tint. The session cards inside carry the visual
- * weight; the frame only whispers the grouping (a loud container would turn
- * the canvas into stacked slabs).
- *
- *  - variant "dir": cool tint, folder icon, live-count summary.
- *  - variant "archive": dashed outline for offline orphans.
- *
- * Collapsed it is a header-only bar; expanded GraphTab lays children out on
- * an absolute grid below the header. Clicking toggles collapse (GraphTab,
- * via data.key). The chevron indicates the state wordlessly.
+ * Chrome stays whisper-quiet (hairline border, near-transparent bg): the
+ * cards inside carry the weight, the frame only groups.
  */
 export function GroupFrame({ data }: NodeProps) {
   const d = data as GroupFrameData;
@@ -46,7 +46,9 @@ export function GroupFrame({ data }: NodeProps) {
 
   return (
     <div
-      className={`group relative rounded-2xl border ${shell} cursor-pointer select-none overflow-hidden transition-colors`}
+      className={`group relative rounded-2xl border ${shell} cursor-pointer select-none overflow-hidden transition-colors ${
+        d.expanded ? "bg-blue-50/30 border-blue-200" : ""
+      }`}
       style={{ width: d.width, height: d.height }}
     >
       <div className="flex items-center gap-2 px-3 pt-2.5 pb-1">
@@ -73,19 +75,35 @@ export function GroupFrame({ data }: NodeProps) {
             }`}
             title={active > 0 ? `${active} 个会话在线` : "该目录暂无在线会话"}
           >
-            <span
-              className={`w-1.5 h-1.5 rounded-full ${active > 0 ? "bg-emerald-500" : "bg-slate-300"}`}
-            />
+            <span className={`w-1.5 h-1.5 rounded-full ${active > 0 ? "bg-emerald-500" : "bg-slate-300"}`} />
             {active > 0 ? `${active} 在线` : "离线"}
+          </span>
+        )}
+        {/* runtime identity dots: which CLIs are alive here, at a glance */}
+        {!d.expanded && (d.runtimeDots?.length ?? 0) > 0 && (
+          <span className="flex items-center -space-x-1 flex-shrink-0" title="在线会话的运行时">
+            {d.runtimeDots!.map((c, i) => (
+              <span
+                key={i}
+                className={`w-2 h-2 rounded-full border border-white shadow-sm ${c}`}
+              />
+            ))}
           </span>
         )}
         <span className="ml-auto text-slate-300 group-hover:text-slate-500 flex-shrink-0 transition-colors">
           {d.expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         </span>
       </div>
-      {!d.expanded && (
-        <div className="px-3 pb-2 text-[10px] text-slate-400">{d.count} 个会话 · 点击展开</div>
-      )}
+
+      {!d.expanded ? (
+        <div className="px-3 pb-2 text-[10px] text-slate-400">
+          {d.count} 个会话 · 点击展开
+        </div>
+      ) : (d.hiddenCount ?? 0) > 0 ? (
+        <div className="absolute bottom-1.5 right-3 text-[10px] font-medium text-slate-400 bg-white/80 border border-slate-200 rounded-full px-1.5">
+          还有 {d.hiddenCount} 个未显示
+        </div>
+      ) : null}
     </div>
   );
 }
