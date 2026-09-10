@@ -94,7 +94,13 @@ export function CurvedPairEdge(props: EdgeProps) {
       arcLen += Math.hypot(pt.x - prev.x, pt.y - prev.y);
       prev = pt;
     }
-    const textPx = Math.min(String(label).length * 5.6 + 22, 140);
+    // char-class-aware pill width: CJK glyphs are full-width (~10px at
+    // 10px font), ASCII ~5.5px — a flat per-char estimate undersizes CJK
+    // labels and the beads clip the text edges. +18 padding/border, x1.12
+    // safety so the gap always clears the pill.
+    let textPx = 18;
+    for (const ch of String(label)) textPx += ch.charCodeAt(0) > 0x2e7f ? 10 : 5.5;
+    textPx = Math.min(textPx * 1.12, 160);
     const halfT = Math.min(0.42, Math.max(0.06, textPx / 2 / arcLen));
     const t0 = 0.5 - halfT;
     const t1 = 0.5 + halfT;

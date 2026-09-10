@@ -169,7 +169,7 @@ export function GraphTab({
     // opens the two-way message flow in the detail panel. The closed marker
     // makes the direction (who asked whom) readable at a glance.
     const previewOf = (m: string | null | undefined) =>
-      !m ? "" : m.length > 28 ? m.slice(0, 28) + "…" : m;
+      !m ? "" : m.length > 16 ? m.slice(0, 16) + "…" : m;
     // Canvas shows STRUCTURE (who talks to whom, how much); the message
     // preview is detail — it appears only while the edge is selected. The
     // default label is a compact xN count badge.
