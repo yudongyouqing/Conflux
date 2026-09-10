@@ -25,17 +25,17 @@ const edgeTypes = { curved: CurvedPairEdge };
 const CLUSTER_ID = "__orphan_cluster__";
 
 // Grid geometry for orphan children inside the expanded cluster container.
-const CELL_W = 216;
-const CELL_H = 100;
+const CELL_W = 192;
+const CELL_H = 78;
 const GRID_PAD_X = 16;
-const GRID_PAD_TOP = 58; // room below the frame header (accent + title bar)
+const GRID_PAD_TOP = 52; // room below the frame header (accent + title bar)
 
 // Dirs-mode geometry: one group FRAME per project directory (Dify/Figma
 // section style) — the frame OWNS its session nodes as React Flow children.
 // Frames stack vertically newest-first; idle dirs default to collapsed.
 const START_X = 40;
 const START_Y = 24;
-const FRAME_W = 480; // uniform dir-frame width (2 cards per row) — masonry needs aligned columns
+const FRAME_W = 420; // uniform dir-frame width (2 cards per row) — masonry needs aligned columns
 const FRAME_GAP_X = 56;
 const FRAME_GAP_Y = 56;
 const FRAME_HEADER_H = 56; // collapsed frame height
@@ -91,10 +91,13 @@ export function GraphTab({
   // Reframe when the composition itself changes — dagre/grid/rows swap
   // positions wholesale and the initial fitView never reruns on its own.
   const rfInstance = useRef<{
-    fitView: (opts?: { padding?: number; duration?: number }) => void;
+    fitView: (opts?: { padding?: number; duration?: number; maxZoom?: number }) => void;
   } | null>(null);
   useEffect(() => {
-    const t = setTimeout(() => rfInstance.current?.fitView({ padding: 0.2, duration: 400 }), 350);
+    const t = setTimeout(
+      () => rfInstance.current?.fitView({ padding: 0.3, maxZoom: 1, duration: 400 }),
+      350,
+    );
     return () => clearTimeout(t);
   }, [viewMode, expandedKey]);
   const handleOffsetChange = useCallback(
@@ -506,9 +509,9 @@ export function GraphTab({
         rfInstance.current = instance;
       }}
       minZoom={0.2}
-      maxZoom={2}
+      maxZoom={1.25}
       fitView
-      fitViewOptions={{ padding: 0.2 }}
+      fitViewOptions={{ padding: 0.3, maxZoom: 1 }}
       proOptions={{ hideAttribution: true }}
       className="bg-gray-50"
     >
