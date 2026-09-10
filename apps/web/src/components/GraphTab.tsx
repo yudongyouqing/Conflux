@@ -100,15 +100,23 @@ export function GraphTab({
     );
     return () => clearTimeout(t);
   }, [viewMode, expandedKey]);
+  // localStorage writes are DEBOUNCED: pointermove fires ~60x/s during an
+  // edge-curvature drag, and a synchronous disk write per event janks the
+  // drag on Windows. The in-memory ref is authoritative immediately; the
+  // disk copy trails by the debounce window.
+  const offsetPersistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleOffsetChange = useCallback(
     (key: string, offset: number | null) => {
       if (offset === null) delete manualOffsets.current[key];
       else manualOffsets.current[key] = Math.round(offset);
-      try {
-        localStorage.setItem(OFFSETS_KEY, JSON.stringify(manualOffsets.current));
-      } catch {
-        // storage full/blocked — in-memory override still works this session
-      }
+      if (offsetPersistTimer.current) clearTimeout(offsetPersistTimer.current);
+      offsetPersistTimer.current = setTimeout(() => {
+        try {
+          localStorage.setItem(OFFSETS_KEY, JSON.stringify(manualOffsets.current));
+        } catch {
+          // storage full/blocked — in-memory override still works this session
+        }
+      }, 250);
       setEdges((eds) =>
         eds.map((e) => {
           const d = e.data as
