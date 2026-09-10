@@ -102,6 +102,15 @@ git diff --check
 - **一个分支一个主题**：混入无关改动会让评审与回滚都变难；顺手修的小问题另开 fix 分支。
 - **分支生命周期短**：长期分支合主干前 rebase main 解冲突；合并后立即删除远端与本地分支。
 - 纯笔误/文档错字等一行业内改动可以例外直接进 main，但必须保证 CI 绿。
+
+### dev → main 两级流向（强制）
+
+日常开发目标是 **dev**；main 只接受来自 dev 的合并，发布节奏由此控制：
+
+- 功能/修复分支的 PR 一律以 **dev** 为 base（dev 有与 main 相同的 CI 检查保护）。
+- dev → main 走独立 PR，由 **main-merge-gate** 工作流强制只放行 dev 来源
+  （该检查是 main 的必需 status check，其它来源分支的 PR 会直接红）。
+- dev 与 main 同受 branch protection：三 CI 检查必需 + 管理员同约束 + 禁 force push。
 - 以上策略已在 GitHub **branch protection** 层面强制（main：三个 CI 检查必需 + 管理员同样受约束 + 禁 force push/删除）。紧急热修时到 Settings → Branches 临时放宽。
 
 ### Pull Request 检查项
