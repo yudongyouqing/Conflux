@@ -28,16 +28,17 @@ Conflux 欢迎 Issue、文档改进和 Pull Request。中文说明在前，英�
 
 ### 平台陷阱清单（Windows 实测）
 
-| 陷阱                      | 规则                                                     |
-| ------------------------- | -------------------------------------------------------- |
-| cmd 参数截断              | 长/含引号换行的内容（提示词、摘要）一律走 stdin          |
-| codex 净化 MCP 子进程环境 | 身份冒用走 pid 钉扎（core/wake/launcher.ts），别指望 env |
-| codex 线程写锁            | TUI 开着时无法 resume 该会话——唤醒策略据此分诊           |
-| CRLF                      | 仓库源码 LF（.gitattributes 归一）；脚本匹配内容要容忍   |
+| 陷阱                      | 规则                                                                                                                                                                                                   |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| cmd 参数截断              | 长/含引号换行的内容（提示词、摘要）一律走 stdin                                                                                                                                                        |
+| codex 净化 MCP 子进程环境 | 身份冒用走 pid 钉扎（core/wake/launcher.ts），别指望 env                                                                                                                                               |
+| codex 线程写锁            | TUI 开着时无法 resume 该会话——唤醒策略据此分诊                                                                                                                                                         |
+| CRLF                      | 仓库源码 LF（.gitattributes 归一）；脚本匹配内容要容忍                                                                                                                                                 |
 |                           |
-| Claude hooks 跑 dist      | 改 hook 逻辑后必须 npm run build 才生效                  |
-| node --test glob          | Node 21+ 特性，CI 与本地统一 Node 22                     |
-| 同步 IO 卡帧              | 高频事件路径（拖拽 pointermove）禁止同步 localStorage 写 |
+| Claude hooks 跑 dist      | 改 hook 逻辑后必须 npm run build 才生效                                                                                                                                                                |
+| node --test glob          | Node 21+ 特性，CI 与本地统一 Node 22                                                                                                                                                                   |
+| 同步 IO 卡帧              | 高频事件路径（拖拽 pointermove）禁止同步 localStorage 写                                                                                                                                               |
+| CI 触发器死锁             | 给分支开保护前必须确认 workflow triggers 覆盖它：ci.yml 的 push/pull_request 过滤要包含 dev 与所有 PR 来源前缀——否则 PR 目标是该分支时必需检查永远 pending，合并被 405 卡死（实测：docs/* → dev 死锁） |
 
 ### 开发环境
 
@@ -101,7 +102,7 @@ git diff --check
 
 - **一个分支一个主题**：混入无关改动会让评审与回滚都变难；顺手修的小问题另开 fix 分支。
 - **分支生命周期短**：长期分支合主干前 rebase main 解冲突；合并后立即删除远端与本地分支。
-- 纯笔误/文档错字等一行业内改动可以例外直接进 main，但必须保证 CI 绿。
+- 笔误/文档错字也走 PR（main 的 enforce_admins 连管理员直推都拦）；嫌慢就走 docs 分支 → dev → main 的快速通道。
 
 ### dev → main 两级流向（强制）
 
@@ -118,6 +119,7 @@ git diff --check
 - 说明用户可观察到的行为变化和兼容性影响。
 - 为新行为补充 server、web 或 desktop 测试。
 - 通过 `npm test -w apps/server`、`npm run build` 和 `npm run test:desktop`。
+- 分支落后 base 时先 update-branch 同步再合并（strict up-to-date 是保护规则；合并报 "required status checks are expected" 多半是新头还没跑完检查，等绿或重试）。
 - 修改 workflow、发布配置或示例时通过 `npm run check:secrets`。
 - 不在 PR 中提交数据库、凭据、个人路径或无关格式化变更。
 
