@@ -4,6 +4,41 @@ Conflux 欢迎 Issue、文档改进和 Pull Request。中文说明在前，英�
 
 ## 中文
 
+### 新功能开发流程（从想法到合并）
+
+一个功能的标准生命周期，每步都有明确产出与验证手段：
+
+1. **需求确认** — 一句话说清"谁、在哪、做什么、期望结果"。
+2. **方案设计** — 涉及核心逻辑或 UI 大改时先写简短设计说明（数据从哪来、边界在哪）。
+3. **测试先行** — 会话生命周期相关缺陷先写可复现测试再修。
+4. **实现** — 业务逻辑只写在 core/，接口层做薄适配（见修改边界）。
+5. **本地验证** — 跑完整验证链（见下），完成声明必须附实际命令与结果。
+6. **提交** — Conventional Commits + 中文正文说明"为什么"。
+7. **PR + CI** — CI 全绿才可合并；单一职责，一条 PR 一个主题。
+8. **文档同步** — README 中英双语按需更新（双语同步是仓库约定）。
+
+### UI 开发规范
+
+- **安静容器，彩色身份卡**：分组框/瓦片用细边框近透明底，视觉重量留给会话卡。
+- **类型身份系统**：claude=橙(Terminal)、codex=石墨(Code2)、web=蓝(Globe)、内置智能体=靛(Bot)。
+- **渐进式披露**：总览恒定密度（目录=一枚瓦片），详情点击下钻；画布管结构，内容按需展开。
+- **色彩语义**：绿=状态灯专用；琥珀脉冲=正在回复（busy）；中性灰=元数据。
+- **UI 改动必须截图验证**：playwright 截图 + 几何断言（boundingBox 测间距/重叠）比肉眼可靠；美学改动建议加视觉模型评审。
+- 布局常量改动同步核对：卡片 CSS 尺寸 ↔ layout.ts 的 NODE_* ↔ GraphTab 的 CELL_*。
+
+### 平台陷阱清单（Windows 实测）
+
+| 陷阱                      | 规则                                                     |
+| ------------------------- | -------------------------------------------------------- |
+| cmd 参数截断              | 长/含引号换行的内容（提示词、摘要）一律走 stdin          |
+| codex 净化 MCP 子进程环境 | 身份冒用走 pid 钉扎（core/wake/launcher.ts），别指望 env |
+| codex 线程写锁            | TUI 开着时无法 resume 该会话——唤醒策略据此分诊           |
+| CRLF                      | 仓库源码 LF（.gitattributes 归一）；脚本匹配内容要容忍   |
+|                           |
+| Claude hooks 跑 dist      | 改 hook 逻辑后必须 npm run build 才生效                  |
+| node --test glob          | Node 21+ 特性，CI 与本地统一 Node 22                     |
+| 同步 IO 卡帧              | 高频事件路径（拖拽 pointermove）禁止同步 localStorage 写 |
+
 ### 开发环境
 
 - Node.js 22 LTS，npm 9 或更高版本。
@@ -37,6 +72,8 @@ npm run check:secrets
 - Electron 专属能力放在 `apps/desktop`，preload 只暴露必要的最小接口。
 - 涉及会话生命周期的修复，先增加可复现测试，再修改实现。
 - 保持现有 `muiltchat` 兼容入口、环境变量和数据目录行为，除非变更说明明确要求调整。
+
+模块速查：唤醒系统在 core/wake/（提示词必须 stdin）；rollout 读取与标题策略分离（codex-rollout / codex-titles）；四条 ask 路径统一走 core/ask.ts；进程识别令牌表在 core/runtime-identity.ts（live.ts 内嵌副本需同步）。
 
 ### 数据与敏感信息
 
@@ -79,5 +116,7 @@ Install dependencies with `npm ci`, then run `npm test -w apps/server`, `npm run
 Keep business rules in `apps/server/src/core`, keep the web app on the HTTP boundary, and expose only minimal desktop capabilities from preload. Add a regression test before changing session lifecycle behavior. Preserve the `muiltchat` compatibility entry points, environment variables, and data directory unless a change explicitly updates them.
 
 Never commit SQLite files, `.muiltchat`, `.electron-dev`, build output, `.env` files, or real credentials. Export bundles must not contain API keys. Redact credentials, personal paths, and database contents before sharing logs. A pull request should explain user-visible behavior, include focused tests, pass the server suite, build, desktop tests, secret scan, and `git diff --check`.
+
+Feature work follows an eight-step flow: clarify the request, sketch the design, write a reproducing test for lifecycle bugs, implement in core, run the local verification chain, commit with a rationale, merge only with green CI, and sync both READMEs. UI changes require Playwright screenshot verification plus geometry assertions; the design language is quiet containers with colored identity cards and progressive disclosure. Platform rules: wake prompts ride stdin (cmd quoting corrupts them), Codex MCP children get a scrubbed environment (identity rides pid pinning), source line endings are LF, and hot event paths must not perform synchronous I/O.
 
 Use Conventional Commit subjects such as `feat:`, `fix:`, `docs:`, `test:`, `build:`, and `ci:` so release notes remain easy to generate.
