@@ -13,8 +13,8 @@ Conflux 欢迎 Issue、文档改进和 Pull Request。中文说明在前，英�
 3. **测试先行** — 会话生命周期相关缺陷先写可复现测试再修。
 4. **实现** — 业务逻辑只写在 core/，接口层做薄适配（见修改边界）。
 5. **本地验证** — 跑完整验证链（见下），完成声明必须附实际命令与结果。
-6. **提交** — Conventional Commits + 中文正文说明"为什么"。
-7. **PR + CI** — CI 全绿才可合并；单一职责，一条 PR 一个主题。
+6. **提交** — 在 feat/fix 分支上以 Conventional Commits + 中文正文说明"为什么"（见分支策略）。
+7. **PR + CI** — 分支推远端开 PR 到 main，CI 全绿才可合并；合并后删除分支。
 8. **文档同步** — README 中英双语按需更新（双语同步是仓库约定）。
 
 ### UI 开发规范
@@ -86,6 +86,24 @@ npm run check:secrets
 git diff --check
 ```
 
+### 分支策略（强制）
+
+- **禁止直接在 main 上开发**。任何新功能、缺陷修复、重构都必须先开分支，再提交 PR 合并——main 随时保持可发布、CI 可过。
+- **分支从最新的 main 切出**，命名体现意图与范围：
+
+| 前缀      | 用途                 | 示例                   |
+| --------- | -------------------- | ---------------------- |
+| feat/     | 新功能               | feat/mention-composer  |
+| fix/      | 缺陷修复             | fix/edge-label-gap     |
+| refactor/ | 重构（不含行为变化） | refactor/wake-decouple |
+| docs/     | 纯文档               | docs/api-reference     |
+| chore/    | 工具链/依赖/CI       | chore/lint-setup       |
+
+- **一个分支一个主题**：混入无关改动会让评审与回滚都变难；顺手修的小问题另开 fix 分支。
+- **分支生命周期短**：长期分支合主干前 rebase main 解冲突；合并后立即删除远端与本地分支。
+- 纯笔误/文档错字等一行业内改动可以例外直接进 main，但必须保证 CI 绿。
+- 以上策略已在 GitHub **branch protection** 层面强制（main：三个 CI 检查必需 + 管理员同样受约束 + 禁 force push/删除）。紧急热修时到 Settings → Branches 临时放宽。
+
 ### Pull Request 检查项
 
 - 说明用户可观察到的行为变化和兼容性影响。
@@ -117,6 +135,6 @@ Keep business rules in `apps/server/src/core`, keep the web app on the HTTP boun
 
 Never commit SQLite files, `.muiltchat`, `.electron-dev`, build output, `.env` files, or real credentials. Export bundles must not contain API keys. Redact credentials, personal paths, and database contents before sharing logs. A pull request should explain user-visible behavior, include focused tests, pass the server suite, build, desktop tests, secret scan, and `git diff --check`.
 
-Feature work follows an eight-step flow: clarify the request, sketch the design, write a reproducing test for lifecycle bugs, implement in core, run the local verification chain, commit with a rationale, merge only with green CI, and sync both READMEs. UI changes require Playwright screenshot verification plus geometry assertions; the design language is quiet containers with colored identity cards and progressive disclosure. Platform rules: wake prompts ride stdin (cmd quoting corrupts them), Codex MCP children get a scrubbed environment (identity rides pid pinning), source line endings are LF, and hot event paths must not perform synchronous I/O.
+All work happens on purpose-named branches (feat/, fix/, refactor/, docs/, chore/) cut from the latest main; direct commits to main are only allowed for trivial typo-level fixes, and branches are deleted right after merge. Feature work follows an eight-step flow: clarify the request, sketch the design, write a reproducing test for lifecycle bugs, implement in core, run the local verification chain, commit with a rationale, merge only with green CI, and sync both READMEs. UI changes require Playwright screenshot verification plus geometry assertions; the design language is quiet containers with colored identity cards and progressive disclosure. Platform rules: wake prompts ride stdin (cmd quoting corrupts them), Codex MCP children get a scrubbed environment (identity rides pid pinning), source line endings are LF, and hot event paths must not perform synchronous I/O.
 
 Use Conventional Commit subjects such as `feat:`, `fix:`, `docs:`, `test:`, `build:`, and `ci:` so release notes remain easy to generate.
