@@ -31,6 +31,18 @@ function isAllowedNavigation(url, appOrigin) {
 function externalLinkDecision(url, appOrigin) {
   if (isAllowedNavigation(url, appOrigin)) return { action: "allow" };
 
+  // mailto hands off to the OS mail handler. Carved out BEFORE the
+  // http(s)-only parse: parseHttpUrl powers origin comparison and must
+  // never accept a scheme without an origin.
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === "mailto:" && !parsed.username && !parsed.password) {
+      return { action: "external", url: parsed.href };
+    }
+  } catch {
+    // fall through to deny
+  }
+
   const candidate = parseHttpUrl(url);
   if (!candidate) return { action: "deny" };
   return { action: "external", url: candidate.href };

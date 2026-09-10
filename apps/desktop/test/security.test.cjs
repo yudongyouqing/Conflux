@@ -1,18 +1,14 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const {
-  isAllowedNavigation,
-  externalLinkDecision,
-  productionCsp,
-} = require("../src/security.cjs");
+const { isAllowedNavigation, externalLinkDecision, productionCsp } = require("../src/security.cjs");
 
 const APP_ORIGIN = "http://127.0.0.1:9527";
 
 test("allows paths on the local Conflux origin", () => {
   assert.equal(
     isAllowedNavigation(`${APP_ORIGIN}/sessions?selected=one#messages`, APP_ORIGIN),
-    true
+    true,
   );
 });
 
@@ -24,14 +20,11 @@ test("rejects navigation when protocol, host, or port differs", () => {
 });
 
 test("routes safe non-Conflux HTTP links to the system browser", () => {
-  assert.deepEqual(
-    externalLinkDecision("https://example.com/docs", APP_ORIGIN),
-    { action: "external", url: "https://example.com/docs" }
-  );
-  assert.deepEqual(
-    externalLinkDecision(`${APP_ORIGIN}/inside`, APP_ORIGIN),
-    { action: "allow" }
-  );
+  assert.deepEqual(externalLinkDecision("https://example.com/docs", APP_ORIGIN), {
+    action: "external",
+    url: "https://example.com/docs",
+  });
+  assert.deepEqual(externalLinkDecision(`${APP_ORIGIN}/inside`, APP_ORIGIN), { action: "allow" });
 });
 
 test("denies malformed and executable external URLs", () => {
@@ -49,4 +42,12 @@ test("builds a production CSP with only local API connectivity", () => {
   assert.match(csp, /default-src 'self'/);
   assert.match(csp, /connect-src 'self' http:\/\/127\.0\.0\.1:9527/);
   assert.doesNotMatch(csp, /connect-src[^;]*https:\/\/example\.com/);
+});
+
+test("mailto links go external, scheme-less origins stay denied", () => {
+  assert.deepEqual(externalLinkDecision("mailto:someone@example.com", APP_ORIGIN), {
+    action: "external",
+    url: "mailto:someone@example.com",
+  });
+  assert.equal(externalLinkDecision("ftp://example.com/", APP_ORIGIN).action, "deny");
 });
