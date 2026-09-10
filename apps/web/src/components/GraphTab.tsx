@@ -6,7 +6,6 @@ import {
   Panel,
   useNodesState,
   useEdgesState,
-  MarkerType,
   type Node,
   type Edge,
   type NodeMouseHandler,
@@ -14,34 +13,21 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useGraph } from "../hooks";
-import { layoutGraph } from "../layout";
-import { SessionNode, type SessionNodeData } from "./SessionNode";
+import { SessionNode } from "./SessionNode";
 import { GroupFrame, type GroupFrameData } from "./GroupFrame";
 import { CurvedPairEdge } from "./CurvedPairEdge";
+import {
+  applyEdgeOffsets,
+  buildActiveView,
+  buildAllView,
+  buildDirsView,
+  mergeNodePositions,
+  selectedEdgeEndpoints,
+  styleEdges,
+} from "../graph-builders";
 
 const nodeTypes = { session: SessionNode, cluster: GroupFrame };
 const edgeTypes = { curved: CurvedPairEdge };
-
-const CLUSTER_ID = "__orphan_cluster__";
-
-// Grid geometry for orphan children inside the expanded cluster container.
-const CELL_W = 192;
-const CELL_H = 98;
-const GRID_PAD_X = 16;
-const GRID_PAD_TOP = 52; // room below the frame header (accent + title bar)
-
-// Dirs-mode geometry: one group FRAME per project directory (Dify/Figma
-// section style) — the frame OWNS its session nodes as React Flow children.
-// Frames stack vertically newest-first; idle dirs default to collapsed.
-const START_X = 40;
-const START_Y = 24;
-const FRAME_W = 420; // uniform dir-frame width (2 cards per row) — masonry needs aligned columns
-const FRAME_GAP_X = 56;
-const FRAME_GAP_Y = 56;
-const FRAME_HEADER_H = 56; // collapsed frame height
-const groupId = (dir: string) => `__group:${dir}`;
-const ARCHIVE_KEY = "__archive__";
-const dirBasename = (dir: string) => dir.split(/[\\/]/).pop() || dir;
 
 type ViewMode = "active" | "dirs" | "all";
 
@@ -100,6 +86,7 @@ export function GraphTab({
     );
     return () => clearTimeout(t);
   }, [viewMode, expandedKey]);
+
   // localStorage writes are DEBOUNCED: pointermove fires ~60x/s during an
   // edge-curvature drag, and a synchronous disk write per event janks the
   // drag on Windows. The in-memory ref is authoritative immediately; the
@@ -130,336 +117,35 @@ export function GraphTab({
     [setEdges],
   );
 
-  // Sync polled data into state. Node positions the user dragged to are
-  // preserved across polls; only data (name/status/counts) refreshes.
-  //
-  // View modes:
-  //   active — live nodes only; edges never dangle onto offline/placeholder nodes
-  //   dirs   — live + still-linked offline sessions laid out ONE BY ONE, one
-  //            row per project directory (newest directory first); orphan
-  //            offline sessions (no communication links) collapse into a
-  //            single archive cluster below the rows
-  //   all    — every node through dagre with its real edges
+  // Sync polled data into state via the pure builders in graph-builders.ts.
+  // Node positions the user dragged to are preserved across polls; only
+  // data (name/status/counts) refreshes.
   useEffect(() => {
     if (!data) return;
+    const built =
+      viewMode === "dirs"
+        ? buildDirsView({ data, onSelectEdge, expandedKey })
+        : viewMode === "all"
+          ? buildAllView({ data, onSelectEdge })
+          : buildActiveView({ data, onSelectEdge });
+    const offset = applyEdgeOffsets(built.edges, manualOffsets.current, handleOffsetChange);
+    const styled = styleEdges(offset, selectedEdge, selectedSessionId);
+    const endpoints = selectedEdgeEndpoints(selectedEdge);
 
-    const live = data.nodes.filter((n) => n.status === "active" || n.type === "agent");
-    const offline = data.nodes.filter((n) => n.status !== "active" && n.type === "session");
-
-    const toSessionNode = (n: (typeof data.nodes)[number]): Node<SessionNodeData> => ({
-      id: n.id,
-      type: "session",
-      position: { x: 0, y: 0 },
-      data: {
-        name: n.name,
-        status: n.status,
-        type: n.type,
-        context_count: n.context_count,
-        pending_inbox: n.pending_inbox,
-        conversation_count: n.conversation_count,
-        last_heartbeat_at: n.last_heartbeat_at,
-        description: n.description,
-        project_dir: n.project_dir,
-        runtime: n.runtime ?? null,
-        skills: n.skills,
-      },
-    });
-
-    // An edge carries its channel's latest question as the label; clicking it
-    // opens the two-way message flow in the detail panel. The closed marker
-    // makes the direction (who asked whom) readable at a glance.
-    const previewOf = (m: string | null | undefined) =>
-      !m ? "" : m.length > 16 ? m.slice(0, 16) + "…" : m;
-    // Canvas shows STRUCTURE (who talks to whom, how much); the message
-    // preview is detail — it appears only while the edge is selected. The
-    // default label is a compact xN count badge.
-    const mkEdge = (e: (typeof data.edges)[number], i: number): Edge => ({
-      id: `e-${e.from}-${e.to}-${i}`,
-      source: e.from,
-      target: e.to,
-      animated: true,
-      label: e.weight > 1 ? `x${e.weight}` : "",
-      style: { strokeWidth: Math.min(1 + e.weight, 5), stroke: "#94a3b8" },
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        color: "#94a3b8",
-        width: 18,
-        height: 18,
-      },
-      data: {
-        id: e.id,
-        from: e.from,
-        to: e.to,
-        lastMessage: e.last_message ?? null,
-        onSelect: () => onSelectEdge({ id: e.id, from: e.from, to: e.to }),
-      },
-    });
-
-    let rawEdges: Edge[];
-    let outNodes: Node[];
-
-    if (viewMode === "dirs") {
-      // Endpoints of any edge = sessions that still carry communication
-      // history. Offline sessions without links are orphans -> archive frame.
-      const linked = new Set<string>();
-      for (const e of data.edges) {
-        linked.add(e.from);
-        linked.add(e.to);
-      }
-      const individuals = [...live, ...offline.filter((n) => linked.has(n.id))];
-      const orphans = offline.filter((n) => !linked.has(n.id));
-
-      const groups = new Map<string, (typeof data.nodes)[number][]>();
-      for (const n of individuals) {
-        const dir = n.project_dir || "(no dir)";
-        const g = groups.get(dir) ?? [];
-        g.push(n);
-        groups.set(dir, g);
-      }
-      const hb = (n: (typeof data.nodes)[number]) => n.last_heartbeat_at ?? "";
-      const rows = [...groups.entries()]
-        .map(([dir, ns]) => ({ dir, nodes: [...ns].sort((a, b) => hb(b).localeCompare(hb(a))) }))
-        .sort((a, b) => hb(b.nodes[0]).localeCompare(hb(a.nodes[0])));
-
-      // One owning frame per directory, stacked vertically. Children are
-      // real React Flow children (parentId + extent) so a frame drags as
-      // one unit; edges still connect children across frames.
-      outNodes = [];
-      // two-column masonry: each frame drops into the SHORTER column —
-      // avoids the single tall tower of stacked slabs
-      const colH = [START_Y, START_Y];
-      const place = (height: number): { x: number; y: number } => {
-        const c = colH[0] <= colH[1] ? 0 : 1;
-        const pos = { x: START_X + c * (FRAME_W + FRAME_GAP_X), y: colH[c] };
-        colH[c] = pos.y + height + FRAME_GAP_Y;
-        return pos;
-      };
-      for (const row of rows) {
-        const active = row.nodes.filter((n) => n.status === "active" || n.type === "agent").length;
-        const key = "dir:" + row.dir;
-        const collapsed = expandedKey !== key;
-        const shown = collapsed ? [] : row.nodes.slice(0, 6); // cap: 3 rows x 2
-        const hidden = row.nodes.length - shown.length;
-        const cols = 2;
-        const gridRows = Math.max(Math.ceil(shown.length / cols), 1);
-        const width = FRAME_W;
-        const height = collapsed ? FRAME_HEADER_H : gridRows * CELL_H + GRID_PAD_TOP + 14;
-        const runtimeDots = row.nodes
-          .filter((n) => n.status === "active" && n.type !== "agent")
-          .map((n) =>
-            n.runtime === "codex"
-              ? "bg-slate-600"
-              : n.runtime === "claude"
-                ? "bg-orange-500"
-                : "bg-blue-500",
-          )
-          .slice(0, 4);
-        const id = groupId(row.dir);
-        outNodes.push({
-          id,
-          type: "cluster",
-          position: place(height),
-          data: {
-            key,
-            variant: "dir",
-            label: dirBasename(row.dir),
-            count: row.nodes.length,
-            activeCount: active,
-            hiddenCount: hidden,
-            runtimeDots,
-            expanded: !collapsed,
-            width,
-            height,
-          },
-          style: { width, height },
-          zIndex: -1,
-        } as Node<GroupFrameData>);
-        if (!collapsed) {
-          shown.forEach((n, i) => {
-            const node = toSessionNode(n);
-            node.parentId = id;
-            node.extent = "parent";
-            node.position = {
-              x: GRID_PAD_X + (i % cols) * CELL_W,
-              y: GRID_PAD_TOP + Math.floor(i / cols) * CELL_H,
-            };
-            node.zIndex = 0;
-            outNodes.push(node);
-          });
-        }
-      }
-
-      // Orphan archive frame below the directory frames.
-      if (orphans.length > 0) {
-        const expanded = expandedKey === ARCHIVE_KEY;
-        const shownOrphans = expanded ? orphans.slice(0, 6) : [];
-        const hiddenOrphans = orphans.length - shownOrphans.length;
-        const cols = 2;
-        const gridRows = Math.max(Math.ceil(shownOrphans.length / cols), 1);
-        const width = FRAME_W;
-        const height = expanded ? gridRows * CELL_H + GRID_PAD_TOP + 14 : FRAME_HEADER_H;
-        outNodes.push({
-          id: CLUSTER_ID,
-          type: "cluster",
-          position: place(height),
-          data: {
-            key: ARCHIVE_KEY,
-            variant: "archive",
-            label: null,
-            count: orphans.length,
-            activeCount: 0,
-            hiddenCount: hiddenOrphans,
-            expanded,
-            width,
-            height,
-          },
-          style: { width, height },
-          zIndex: -1,
-        });
-        if (expanded) {
-          shownOrphans.forEach((n, i) => {
-            const node = toSessionNode(n);
-            node.parentId = CLUSTER_ID;
-            node.extent = "parent";
-            node.position = {
-              x: GRID_PAD_X + (i % cols) * CELL_W,
-              y: GRID_PAD_TOP + Math.floor(i / cols) * CELL_H,
-            };
-            node.zIndex = 0;
-            outNodes.push(node);
-          });
-        }
-      }
-
-      // Orphans have no edges by definition, so every real edge already runs
-      // between visible individuals — no folding or aggregation needed.
-      rawEdges = data.edges.map((e, i) => mkEdge(e, i));
-    } else if (viewMode === "all") {
-      rawEdges = data.edges.map((e, i) => mkEdge(e, i));
-      const allNodes = [...live, ...offline];
-      const { nodes: layouted } = layoutGraph(
-        allNodes.map((n) => toSessionNode(n) as unknown as Node),
-        rawEdges as never,
-      );
-      outNodes = layouted;
-    } else {
-      // active: only edges between visible (live) nodes — no dangling links.
-      const visible = new Set(live.map((n) => n.id));
-      rawEdges = data.edges
-        .filter((e) => visible.has(e.from) && visible.has(e.to))
-        .map((e, i) => mkEdge(e, i));
-      const { nodes: layouted } = layoutGraph(
-        live.map((n) => toSessionNode(n) as unknown as Node),
-        rawEdges as never,
-      );
-      outNodes = layouted;
-    }
-
-    // Fan-out: parallel edges leaving the SAME source would stack into one
-    // bundle (the web-console spoke mess). Spread them by per-source index.
-    const srcTotal = new Map<string, number>();
-    const srcIndex = new Map<string, number>();
-    for (const e of rawEdges) {
-      const d0 = e.data as { from: string; to: string };
-      srcIndex.set(d0.from + ">" + d0.to, srcTotal.get(d0.from) ?? 0);
-      srcTotal.set(d0.from, (srcTotal.get(d0.from) ?? 0) + 1);
-    }
-    // Reciprocal separation: count edges per unordered node pair, then bend
-    // both directions of a two-way pair by the same perpendicular offset —
-    // the reversed direction vector flips the bow to the opposite side, so
-    // A→B and B→A render as a symmetric lens instead of overlapping lines.
-    // Single edges stay straight (offset 0).
-    const pairCount = new Map<string, number>();
-    for (const e of rawEdges) {
-      const d = e.data as { from: string; to: string };
-      const key = d.from < d.to ? `${d.from}|${d.to}` : `${d.to}|${d.from}`;
-      pairCount.set(key, (pairCount.get(key) ?? 0) + 1);
-    }
-    rawEdges = rawEdges.map((e) => {
-      const d = e.data as { from: string; to: string };
-      const pairKey = d.from < d.to ? `${d.from}|${d.to}` : `${d.to}|${d.from}`;
-      const twoWay = (pairCount.get(pairKey) ?? 0) > 1;
-      const dirKey = `${d.from}->${d.to}`;
-      const n = srcTotal.get(d.from) ?? 1;
-      const idx = srcIndex.get(d.from + ">" + d.to) ?? 0;
-      const fan = n > 1 ? (idx - (n - 1) / 2) * 34 : 0;
-      const auto = (twoWay ? 34 : 0) + fan;
-      return {
-        ...e,
-        type: "curved" as const,
-        data: {
-          ...d,
-          offset: manualOffsets.current[dirKey] ?? auto,
-          autoOffset: auto,
-          offsetKey: dirKey,
-          onOffsetChange: handleOffsetChange,
-        },
-      };
-    });
-
-    // Selection emphasis. Edge selected: that edge goes strong blue with a
-    // bigger arrow, its two endpoint nodes get an amber ring, all other
-    // edges dim. Node selected instead: its incident edges go blue.
-    const selKey = selectedEdge ? `${selectedEdge.from}->${selectedEdge.to}` : null;
-    const endpoints = selectedEdge ? new Set([selectedEdge.from, selectedEdge.to]) : null;
-    const styledEdges = rawEdges.map((e) => {
-      const d = e.data as { from: string; to: string; lastMessage?: string | null };
-      const w = (e.style?.strokeWidth as number) ?? 2;
-      if (selKey && `${d.from}->${d.to}` === selKey) {
-        return {
-          ...e,
-          zIndex: 5,
-          label: previewOf(d.lastMessage) || e.label,
-          style: { ...e.style, stroke: "#2563eb", strokeWidth: Math.min(w + 1, 6) },
-          labelStyle: { fill: "#1d4ed8", fontWeight: 600 },
-          labelBgStyle: { fill: "#dbeafe" },
-          markerEnd: {
-            type: MarkerType.ArrowClosed,
-            color: "#2563eb",
-            width: 22,
-            height: 22,
-          },
-        };
-      }
-      if (
-        !selKey &&
-        selectedSessionId &&
-        (d.from === selectedSessionId || d.to === selectedSessionId)
-      ) {
-        return {
-          ...e,
-          style: { ...e.style, stroke: "#3b82f6" },
-          markerEnd: { type: MarkerType.ArrowClosed, color: "#3b82f6", width: 18, height: 18 },
-        };
-      }
-      if (selKey) {
-        // another edge is in focus — fade this one out
-        return {
-          ...e,
-          animated: false,
-          style: { ...e.style, stroke: "#d1d5db" },
-          markerEnd: { type: MarkerType.ArrowClosed, color: "#d1d5db", width: 16, height: 16 },
-        };
-      }
-      return e;
-    });
-
-    setNodes((prev) => {
-      const prevPos = new Map(prev.map((n) => [n.id, n.position]));
-      return outNodes.map((n) => ({
+    setNodes((prev) =>
+      mergeNodePositions(prev, built.nodes as Node[], selectedSessionId).map((n) => ({
         ...n,
-        position: prevPos.get(n.id) ?? n.position,
-        selected: n.id === selectedSessionId,
         data: { ...n.data, highlighted: !!endpoints?.has(n.id) },
-      }));
-    });
-    setEdges(styledEdges);
+      })),
+    );
+    setEdges(styled);
   }, [
     data,
     selectedSessionId,
     selectedEdge,
     viewMode,
     expandedKey,
+    onSelectEdge,
     handleOffsetChange,
     setNodes,
     setEdges,
@@ -468,7 +154,7 @@ export function GraphTab({
   const onNodeClick: NodeMouseHandler = useCallback(
     (_, node) => {
       if (node.type === "cluster") {
-        const key = (node.data as { key?: string }).key ?? "";
+        const key = (node.data as GroupFrameData).key ?? "";
         setExpandedKey((prev) => (prev === key ? null : key));
         return;
       }
