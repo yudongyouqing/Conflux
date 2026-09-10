@@ -16,30 +16,31 @@ import "@xyflow/react/dist/style.css";
 import { useGraph } from "../hooks";
 import { layoutGraph } from "../layout";
 import { SessionNode, type SessionNodeData } from "./SessionNode";
-import { StaleCluster, type StaleClusterData } from "./StaleCluster";
-import { DirLabelNode, type DirLabelData } from "./DirLabelNode";
+import { GroupFrame, type GroupFrameData } from "./GroupFrame";
 import { CurvedPairEdge } from "./CurvedPairEdge";
 
-const nodeTypes = { session: SessionNode, cluster: StaleCluster, dirLabel: DirLabelNode };
+const nodeTypes = { session: SessionNode, cluster: GroupFrame };
 const edgeTypes = { curved: CurvedPairEdge };
 
 const CLUSTER_ID = "__orphan_cluster__";
-const dirLabelId = (dir: string) => `__dirlabel:${dir}`;
 
 // Grid geometry for orphan children inside the expanded cluster container.
 const CELL_W = 216;
 const CELL_H = 100;
 const GRID_COLS = 3;
 const GRID_PAD_X = 16;
-const GRID_PAD_TOP = 34; // room for the container title bar
+const GRID_PAD_TOP = 58; // room below the frame header (accent + title bar)
 
-// Dirs-mode geometry: one row per project directory, hand-rolled (dagre
-// cannot be told about directory grouping). Rows are sorted newest-first.
+// Dirs-mode geometry: one group FRAME per project directory (Dify/Figma
+// section style) — the frame OWNS its session nodes as React Flow children.
+// Frames stack vertically newest-first; idle dirs default to collapsed.
 const START_X = 40;
 const START_Y = 24;
-const ROW_H = 150;
-const DIR_LABEL_SPAN = 190; // dir caption + breathing room before first card
-const COL_W = 224;
+const FRAME_GAP = 28;
+const FRAME_HEADER_H = 56; // collapsed frame height
+const groupId = (dir: string) => `__group:${dir}`;
+const ARCHIVE_KEY = "__archive__";
+const dirBasename = (dir: string) => dir.split(/[\\/]/).pop() || dir;
 
 type ViewMode = "active" | "dirs" | "all";
 
@@ -64,7 +65,9 @@ export function GraphTab({
 }: GraphTabProps) {
   const { data, isLoading, error } = useGraph();
   const [viewMode, setViewMode] = useState<ViewMode>("active");
-  const [orphanExpanded, setOrphanExpanded] = useState(false);
+  // Per-frame collapse overrides keyed by GroupFrameData.key; default for
+  // a frame is collapsed-when-no-active-sessions (computed at click time).
+  const [frameCollapsed, setFrameCollapsed] = useState<Record<string, boolean>>({});
 
   // Interactive state — required for node dragging in React Flow v12.
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
@@ -91,7 +94,7 @@ export function GraphTab({
   useEffect(() => {
     const t = setTimeout(() => rfInstance.current?.fitView({ padding: 0.2, duration: 400 }), 350);
     return () => clearTimeout(t);
-  }, [viewMode, orphanExpanded]);
+  }, [viewMode, frameCollapsed]);
   const handleOffsetChange = useCallback(
     (key: string, offset: number | null) => {
       if (offset === null) delete manualOffsets.current[key];
@@ -175,7 +178,7 @@ export function GraphTab({
 
     if (viewMode === "dirs") {
       // Endpoints of any edge = sessions that still carry communication
-      // history. Offline sessions without links are orphans → archive cluster.
+      // history. Offline sessions without links are orphans -> archive frame.
       const linked = new Set<string>();
       for (const e of data.edges) {
         linked.add(e.from);
@@ -186,7 +189,7 @@ export function GraphTab({
 
       const groups = new Map<string, (typeof data.nodes)[number][]>();
       for (const n of individuals) {
-        const dir = n.project_dir || "(无目录)";
+        const dir = n.project_dir || "(no dir)";
         const g = groups.get(dir) ?? [];
         g.push(n);
         groups.set(dir, g);
@@ -196,40 +199,78 @@ export function GraphTab({
         .map(([dir, ns]) => ({ dir, nodes: [...ns].sort((a, b) => hb(b).localeCompare(hb(a))) }))
         .sort((a, b) => hb(b.nodes[0]).localeCompare(hb(a.nodes[0])));
 
+      // One owning frame per directory, stacked vertically. Children are
+      // real React Flow children (parentId + extent) so a frame drags as
+      // one unit; edges still connect children across frames.
       outNodes = [];
-      rows.forEach((row, r) => {
+      let frameY = START_Y;
+      for (const row of rows) {
+        const active = row.nodes.filter((n) => n.status === "active" || n.type === "agent").length;
+        const key = "dir:" + row.dir;
+        const collapsed = frameCollapsed[key] ?? active === 0;
+        const cols = Math.min(GRID_COLS, Math.max(row.nodes.length, 1));
+        const gridRows = Math.ceil(row.nodes.length / cols);
+        const width = Math.max(cols * CELL_W + GRID_PAD_X * 2, 300);
+        const height = collapsed ? FRAME_HEADER_H : gridRows * CELL_H + GRID_PAD_TOP + 14;
+        const id = groupId(row.dir);
         outNodes.push({
-          id: dirLabelId(row.dir),
-          type: "dirLabel",
-          position: { x: START_X, y: START_Y + r * ROW_H },
-          data: { label: row.dir.split(/[\\/]/).pop() || row.dir },
-          draggable: false,
-          selectable: false,
-        } as Node<DirLabelData>);
-        row.nodes.forEach((n, i) => {
-          const node = toSessionNode(n);
-          node.position = { x: START_X + DIR_LABEL_SPAN + i * COL_W, y: START_Y + r * ROW_H };
-          outNodes.push(node);
-        });
-      });
+          id,
+          type: "cluster",
+          position: { x: START_X, y: frameY },
+          data: {
+            key,
+            variant: "dir",
+            label: dirBasename(row.dir),
+            count: row.nodes.length,
+            activeCount: active,
+            expanded: !collapsed,
+            width,
+            height,
+          },
+          style: { width, height },
+          zIndex: -1,
+        } as Node<GroupFrameData>);
+        if (!collapsed) {
+          row.nodes.forEach((n, i) => {
+            const node = toSessionNode(n);
+            node.parentId = id;
+            node.extent = "parent";
+            node.position = {
+              x: GRID_PAD_X + (i % cols) * CELL_W,
+              y: GRID_PAD_TOP + Math.floor(i / cols) * CELL_H,
+            };
+            node.zIndex = 0;
+            outNodes.push(node);
+          });
+        }
+        frameY += height + FRAME_GAP;
+      }
 
-      // Orphan archive cluster below the rows. Children are real React Flow
-      // children (parentId + extent: "parent") so the container drags as one.
+      // Orphan archive frame below the directory frames.
       if (orphans.length > 0) {
-        const clusterY = START_Y + Math.max(rows.length, 1) * ROW_H + 16;
-        if (orphanExpanded) {
-          const cols = Math.min(GRID_COLS, orphans.length);
-          const gridRows = Math.ceil(orphans.length / cols);
-          const width = cols * CELL_W + GRID_PAD_X * 2;
-          const height = gridRows * CELL_H + GRID_PAD_TOP + 12;
-          outNodes.push({
-            id: CLUSTER_ID,
-            type: "cluster",
-            position: { x: START_X, y: clusterY },
-            data: { label: null, count: orphans.length, expanded: true, width, height },
-            style: { width, height },
-            zIndex: -1,
-          } as Node<StaleClusterData>);
+        const expanded = !(frameCollapsed[ARCHIVE_KEY] ?? true);
+        const cols = Math.min(GRID_COLS, orphans.length);
+        const gridRows = Math.ceil(orphans.length / cols);
+        const width = Math.max(cols * CELL_W + GRID_PAD_X * 2, 300);
+        const height = expanded ? gridRows * CELL_H + GRID_PAD_TOP + 14 : FRAME_HEADER_H;
+        outNodes.push({
+          id: CLUSTER_ID,
+          type: "cluster",
+          position: { x: START_X, y: frameY },
+          data: {
+            key: ARCHIVE_KEY,
+            variant: "archive",
+            label: null,
+            count: orphans.length,
+            activeCount: 0,
+            expanded,
+            width,
+            height,
+          },
+          style: { width, height },
+          zIndex: -1,
+        });
+        if (expanded) {
           orphans.forEach((n, i) => {
             const node = toSessionNode(n);
             node.parentId = CLUSTER_ID;
@@ -241,13 +282,6 @@ export function GraphTab({
             node.zIndex = 0;
             outNodes.push(node);
           });
-        } else {
-          outNodes.push({
-            id: CLUSTER_ID,
-            type: "cluster",
-            position: { x: START_X, y: clusterY },
-            data: { label: null, count: orphans.length, expanded: false, width: 0, height: 0 },
-          } as Node<StaleClusterData>);
         }
       }
 
@@ -378,7 +412,7 @@ export function GraphTab({
     selectedSessionId,
     selectedEdge,
     viewMode,
-    orphanExpanded,
+    frameCollapsed,
     handleOffsetChange,
     setNodes,
     setEdges,
@@ -387,10 +421,14 @@ export function GraphTab({
   const onNodeClick: NodeMouseHandler = useCallback(
     (_, node) => {
       if (node.type === "cluster") {
-        setOrphanExpanded((v) => !v);
+        const d = node.data;
+        setFrameCollapsed((prev) => {
+          const def = ((d as { activeCount?: number }).activeCount ?? 0) === 0;
+          const key = (d as { key?: string }).key ?? "";
+          return { ...prev, [key]: !(prev[key] ?? def) };
+        });
         return;
       }
-      if (node.type === "dirLabel") return;
       onSelectSession(node.id);
     },
     [onSelectSession],
