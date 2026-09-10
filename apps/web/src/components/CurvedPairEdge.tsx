@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { BaseEdge, EdgeLabelRenderer, useReactFlow, type EdgeProps } from "@xyflow/react";
 
 /**
@@ -75,6 +75,16 @@ export function CurvedPairEdge(props: EdgeProps) {
   const isSelected = stroke === "#2563eb";
   const manual = d.offsetKey !== undefined && d.onOffsetChange !== undefined;
 
+  // ---- pill measurement (drives the dot-flow gap) -------------------------
+  const pillRef = useRef<HTMLDivElement | null>(null);
+  const [pillW, setPillW] = useState(0);
+  useLayoutEffect(() => {
+    const el = pillRef.current;
+    if (!el) return;
+    const w = el.offsetWidth;
+    setPillW((prev) => (Math.abs(prev - w) > 1 ? w : prev));
+  });
+
   // ---- dot-flow gap around the label --------------------------------------
   // Estimate the arc length (8 samples) and convert the pill's pixel width
   // to a t-interval centered at 0.5; beads render as two sub-paths skipping
@@ -94,14 +104,11 @@ export function CurvedPairEdge(props: EdgeProps) {
       arcLen += Math.hypot(pt.x - prev.x, pt.y - prev.y);
       prev = pt;
     }
-    // char-class-aware pill width: CJK glyphs are full-width (~10px at
-    // 10px font), ASCII ~5.5px — a flat per-char estimate undersizes CJK
-    // labels and the beads clip the text edges. +18 padding/border, x1.12
-    // safety so the gap always clears the pill.
-    let textPx = 18;
-    for (const ch of String(label)) textPx += ch.charCodeAt(0) > 0x2e7f ? 10 : 5.5;
-    textPx = Math.min(textPx * 1.12, 160);
-    const halfT = Math.min(0.42, Math.max(0.06, textPx / 2 / arcLen));
+    // Gap = the pill REAL rendered width (measured via ref below) + a thin
+    // 6px breathing margin per side. No per-char estimation, no safety
+    // multipliers — the DOM is the ground truth.
+    const gapPx = pillW > 0 ? pillW + 12 : 0; // first frame: no gap yet
+    const halfT = gapPx > 0 ? Math.min(0.42, gapPx / 2 / arcLen) : 0;
     const t0 = 0.5 - halfT;
     const t1 = 0.5 + halfT;
     const left = splitQ(p0, c, p2, t0).left;
@@ -166,6 +173,7 @@ export function CurvedPairEdge(props: EdgeProps) {
       ))}
       <EdgeLabelRenderer>
         <div
+          ref={pillRef}
           style={{
             position: "absolute",
             transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)`,
