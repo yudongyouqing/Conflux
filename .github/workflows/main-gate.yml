@@ -1,0 +1,21 @@
+name: main-merge-gate
+
+# 只允许 dev 分支合入 main（CONTRIBUTING 分支策略的机器强制层）。
+# 其余来源的 PR 在此检查上失败，main 的 branch protection 把本 job
+# 设为必需，从而锁死 "feature → dev → main" 的流向。
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  main-merge-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 只允许 dev 作为合入 main 的来源分支
+        if: github.head_ref != 'dev'
+        run: |
+          echo "::error::只允许 dev 分支合入 main（当前来源：${{ github.head_ref }}）。请先把工作合入 dev，再从 dev 发起到 main 的 PR。"
+          exit 1
+      - name: 来源为 dev，放行
+        if: github.head_ref == 'dev'
+        run: echo "source is dev — OK"

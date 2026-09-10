@@ -2,6 +2,10 @@
 
 Conflux（内部名 muiltchat）：本地优先的 AI 编程会话协作工作空间。Electron 桌面壳 + React 工作空间 + Fastify/SQLite 内核，MCP/HTTP/CLI 三接口共用同一 core。
 
+## 分支流向
+
+开发目标是 **dev**（feat/fix 分支 PR → dev）；main 只接受 dev 的 PR（main-merge-gate 强制）。禁止直推任何受保护分支。
+
 ## 常用命令
 
 ```bash
