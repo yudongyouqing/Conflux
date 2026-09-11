@@ -7,6 +7,7 @@ import {
   startRuntimeAgent,
 } from "../../core/runtime-agents.js";
 import { logAudit } from "../../core/audit.js";
+import { RUNTIME_IDS } from "../../core/runtime-registry.js";
 import type { ServerContext } from "../context.js";
 
 interface RuntimeAgentBody {
@@ -47,7 +48,7 @@ export function registerRuntimeRoutes(app: FastifyInstance, ctx: ServerContext):
           required: ["name", "runtime"],
           properties: {
             name: { type: "string", maxLength: 100 },
-            runtime: { type: "string", enum: ["claude", "codex"] },
+            runtime: { type: "string", enum: RUNTIME_IDS },
             workdir: { type: "string", maxLength: 1000 },
             model: { type: "string", maxLength: 200 },
             base_url: { type: "string", maxLength: 1000 },
