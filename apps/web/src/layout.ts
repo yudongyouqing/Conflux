@@ -68,7 +68,7 @@ function wrapSnake(nodes: Node[], edges: Edge[]): Node[] {
   // traversal order: BFS from the HIGHEST-degree node — paths walk end to
   // end, stars radiate from the hub, trees stay locally grouped.
   const ids = nodes.map((n) => n.id);
-  let start = ids.reduce(
+  const start = ids.reduce(
     (a, b) => ((adj.get(a)?.length ?? 0) >= (adj.get(b)?.length ?? 0) ? a : b),
     ids[0],
   );
