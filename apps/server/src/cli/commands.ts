@@ -1065,11 +1065,11 @@ async function readChannelSnapshot(
       if (!edge) throw new Error("edge not found");
       return {
         edge: { id: edge.id, from: edge.from_session, to: edge.to_session },
-        messages: listEdgeMessages(db, edgeId),
+        messages: listEdgeMessages(db, edgeId, null),
       };
     },
     "GET",
-    `/edges/${edgeId}/messages`,
+    `/edges/${edgeId}/messages?all=true`,
   );
   return normalizeChannelSnapshot(result);
 }

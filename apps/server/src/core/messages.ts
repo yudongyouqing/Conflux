@@ -277,7 +277,13 @@ export function formatInboxNotice(db: DB, sessionId: string): string | null {
  * The full exchange history of one conversation channel (edge), oldest
  * first — the edge-panel view.
  */
-export function listEdgeMessages(db: DB, edgeId: number, limit = 200): Message[] {
+export function listEdgeMessages(db: DB, edgeId: number, limit: number | null = 200): Message[] {
+  if (limit === null) {
+    const rows = db
+      .prepare(`SELECT * FROM messages WHERE edge_id = ? ORDER BY id ASC`)
+      .all(edgeId) as MessageRow[];
+    return rows.map(toMsg);
+  }
   const rows = db
     .prepare(`SELECT * FROM messages WHERE edge_id = ? ORDER BY id DESC LIMIT ?`)
     .all(edgeId, Math.min(Math.max(limit, 1), 500)) as MessageRow[];
