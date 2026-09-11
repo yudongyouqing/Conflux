@@ -163,3 +163,20 @@ test("selectedEdgeEndpoints returns both endpoints or null", () => {
   assert.deepEqual(selectedEdgeEndpoints({ from: "a", to: "b" }), new Set(["a", "b"]));
   assert.equal(selectedEdgeEndpoints(null), null);
 });
+test("layoutGraph picks the direction that better fills the canvas (chain graph)", async () => {
+  const { layoutGraph } = await import("../src/layout.ts");
+  const nodes = Array.from({ length: 10 }, (_, i) => ({ id: `n${i}`, position: { x: 0, y: 0 } }));
+  const edges = nodes.slice(1).map((n, i) => ({
+    id: `e${i}`,
+    source: nodes[i].id,
+    target: n.id,
+  }));
+  const { nodes: laid } = layoutGraph(nodes as never, edges as never);
+  const xs = laid.map((n) => n.position.x);
+  const ys = laid.map((n) => n.position.y);
+  const w = Math.max(...xs) - Math.min(...xs);
+  const h = Math.max(...ys) - Math.min(...ys);
+  // a pure chain must NOT render as a narrow vertical snake on the
+  // default (landscape-biased) request: width should dominate
+  assert.ok(w > h, `expected landscape layout, got ${Math.round(w)}x${Math.round(h)}`);
+});
