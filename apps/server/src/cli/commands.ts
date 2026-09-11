@@ -19,7 +19,15 @@ import {
   checkReplies,
   listMessages,
   formatInboxNotice,
+  getEdge,
+  listEdgeMessages,
 } from "../core/messages.js";
+import {
+  parseEdgeId,
+  parseWatchInterval,
+  watchChannelSnapshots,
+  type ChannelSnapshot,
+} from "./channel-watch.js";
 import { getGraph } from "../core/graph.js";
 import { createAgent, listAgents, deleteAgent, type ModelConfig } from "../core/agents.js";
 import { logAudit, queryAudit } from "../core/audit.js";
@@ -543,6 +551,49 @@ export function buildCli(argv?: string | readonly string[]): Command {
       console.log(JSON.stringify(res, null, 2));
     });
 
+  // channel ---------------------------------------------------------
+  const channel = program.command("channel").description("inspect one directed conversation channel");
+
+  channel
+    .command("show <edge-id>")
+    .description("show a channel's complete message history")
+    .action(async function (this: Command, rawEdgeId: string) {
+      const o = this.optsWithGlobals();
+      const edgeId = parseEdgeId(rawEdgeId);
+      const db = o.http ? undefined : openDbFrom(o);
+      try {
+        const snapshot = await readChannelSnapshot(program, db, edgeId);
+        console.log(JSON.stringify(snapshot, null, 2));
+      } finally {
+        db?.close();
+      }
+    });
+
+  channel
+    .command("watch <edge-id>")
+    .description("watch a channel for new messages and replies")
+    .option("--interval <milliseconds>", "polling interval in milliseconds")
+    .action(async function (this: Command, rawEdgeId: string) {
+      const o = this.optsWithGlobals() as CliOpts & { interval?: string };
+      const edgeId = parseEdgeId(rawEdgeId);
+      const intervalMs = parseWatchInterval(o.interval);
+      const db = o.http ? undefined : openDbFrom(o);
+      const controller = new AbortController();
+      const stop = () => controller.abort();
+      process.once("SIGINT", stop);
+      try {
+        for await (const snapshot of watchChannelSnapshots(
+          () => readChannelSnapshot(program, db, edgeId),
+          { intervalMs, signal: controller.signal },
+        )) {
+          console.log(JSON.stringify(snapshot, null, 2));
+        }
+      } finally {
+        process.off("SIGINT", stop);
+        db?.close();
+      }
+    });
+
   // msg -------------------------------------------------------------
   const msg = program.command("msg").description("inter-session messaging");
 
@@ -999,6 +1050,53 @@ async function remote(
     throw new Error(`HTTP ${res.status}: ${JSON.stringify(json)}`);
   }
   return json;
+}
+
+async function readChannelSnapshot(
+  program: Command,
+  db: DB | undefined,
+  edgeId: number,
+): Promise<ChannelSnapshot> {
+  const result = await runOp(
+    program,
+    () => {
+      if (!db) throw new Error("local channel database is unavailable");
+      const edge = getEdge(db, edgeId);
+      if (!edge) throw new Error("edge not found");
+      return {
+        edge: { id: edge.id, from: edge.from_session, to: edge.to_session },
+        messages: listEdgeMessages(db, edgeId),
+      };
+    },
+    "GET",
+    `/edges/${edgeId}/messages`,
+  );
+  return normalizeChannelSnapshot(result);
+}
+
+function normalizeChannelSnapshot(value: unknown): ChannelSnapshot {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("invalid channel response");
+  }
+  const response = value as Record<string, unknown>;
+  const edge = response.edge;
+  if (!edge || typeof edge !== "object" || Array.isArray(edge)) {
+    throw new Error("invalid channel response");
+  }
+  const edgeRecord = edge as Record<string, unknown>;
+  if (
+    typeof edgeRecord.id !== "number" ||
+    !Number.isSafeInteger(edgeRecord.id) ||
+    typeof edgeRecord.from !== "string" ||
+    typeof edgeRecord.to !== "string" ||
+    !Array.isArray(response.messages)
+  ) {
+    throw new Error("invalid channel response");
+  }
+  return {
+    edge: { id: edgeRecord.id, from: edgeRecord.from, to: edgeRecord.to },
+    messages: response.messages as ChannelSnapshot["messages"],
+  };
 }
 
 function parseTags(raw: string | undefined): string[] | undefined {
