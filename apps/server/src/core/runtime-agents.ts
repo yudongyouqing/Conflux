@@ -7,6 +7,7 @@ import { STALE_AFTER_MS } from "../config.js";
 import { logger } from "../log.js";
 import type { RuntimeAgent, RuntimeId } from "@muiltchat/shared";
 import { cleanTerminalEnv, cmdQuote, openInTerminal } from "./terminal.js";
+import { RUNTIME_IDS, RUNTIME_REGISTRY, runtimeDescriptor } from "./runtime-registry.js";
 import { HEADLESS_ALLOWED_TOOLS } from "./wake/commands.js";
 import { getSetting, getTerminalSettings, setSetting } from "./app-settings.js";
 import { getSession } from "./sessions.js";
@@ -16,13 +17,17 @@ export { cleanTerminalEnv } from "./terminal.js";
 
 // ---- runtime catalog (AgentRecall-style: static definitions per CLI) ------
 
+// Catalog derived from the runtime registry — one descriptor per local
+// agent (claude/codex/cursor/codebuddy/codewiz…). Behavior is family-driven.
 export const RUNTIMES: Record<
-  RuntimeId,
+  string,
   { label: string; executable: string; executableEnv: string }
-> = {
-  claude: { label: "Claude Code", executable: "claude", executableEnv: "CLAUDE_PATH" },
-  codex: { label: "Codex", executable: "codex", executableEnv: "CODEX_PATH" },
-};
+> = Object.fromEntries(
+  RUNTIME_IDS.map((id) => {
+    const d = RUNTIME_REGISTRY[id];
+    return [id, { label: d.label, executable: d.executable, executableEnv: d.executableEnv }];
+  }),
+);
 
 export function isRuntimeId(v: unknown): v is RuntimeId {
   return v === "claude" || v === "codex";
@@ -170,22 +175,24 @@ export function deleteRuntimeAgent(db: DB, id: number): boolean {
  * session row back to this definition.
  */
 export function buildRuntimeEnv(
-  agent: Pick<RuntimeAgent, "runtime" | "base_url" | "api_key" | "model" | "extra_env" | "id">,
+  agent: { runtime: string; base_url?: string | null; api_key?: string | null; model?: string | null; extra_env?: string | null; id: number },
   baseEnv: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...baseEnv };
 
-  if (agent.runtime === "claude") {
+  const def = runtimeDescriptor(agent.runtime);
+  if (def.envBinding === "anthropic") {
     if (agent.api_key) {
       delete env.ANTHROPIC_API_KEY; // replaced, not inherited
       env.ANTHROPIC_AUTH_TOKEN = agent.api_key;
     }
     if (agent.base_url) env.ANTHROPIC_BASE_URL = agent.base_url;
     if (agent.model) env.ANTHROPIC_MODEL = agent.model;
-  } else {
+  } else if (def.envBinding === "openai") {
     if (agent.api_key) env.OPENAI_API_KEY = agent.api_key;
     if (agent.base_url) env.OPENAI_BASE_URL = agent.base_url;
   }
+  // envBinding null (cursor/custom): preset extra_env is the channel
 
   if (agent.extra_env) {
     try {
@@ -215,21 +222,19 @@ export const RUNTIME_OPERATOR_PROMPT = [
 
 /** CLI arguments for the runtime (model / system prompt presets). */
 export function buildRuntimeArgs(
-  agent: Pick<RuntimeAgent, "runtime" | "model" | "instructions">,
+  agent: { runtime: string; model?: string | null; instructions?: string | null },
 ): string[] {
-  if (agent.runtime === "claude") {
-    const args: string[] = [];
-    if (agent.model) args.push("--model", agent.model);
+  const def = runtimeDescriptor(agent.runtime);
+  const args: string[] = [];
+  if (agent.model) args.push("--model", agent.model);
+  if (def.family === "claude") {
     // Operator prompt is unconditional; user instructions extend it.
+    // (claude-family only — codex has no append-system-prompt on the CLI)
     const systemPrompt = agent.instructions?.trim()
       ? `${RUNTIME_OPERATOR_PROMPT}\n\n${agent.instructions.trim()}`
       : RUNTIME_OPERATOR_PROMPT;
     args.push("--append-system-prompt", systemPrompt);
-    return args;
   }
-  // codex: no append-system-prompt equivalent on the CLI — model only
-  const args: string[] = [];
-  if (agent.model) args.push("--model", agent.model);
   return args;
 }
 
@@ -259,8 +264,8 @@ export function startRuntimeAgent(
   }
 
   const settings = getTerminalSettings(db);
-  const def = RUNTIMES[agent.runtime];
-  const defaultExe = agent.runtime === "claude" ? settings.claude_path : settings.codex_path;
+  const def = runtimeDescriptor(agent.runtime);
+  const defaultExe = def.settingsKey ? settings[def.settingsKey] : def.executable;
   const executable = process.env[def.executableEnv] || defaultExe;
   const args = buildRuntimeArgs(agent);
   const command = [cmdQuote(executable), ...args.map(cmdQuote)].join(" ");
@@ -286,14 +291,25 @@ export const SCHEDULED_WAKE_PROMPT = "定时唤醒:请按系统指令检查并�
 
 /** Args for a one-shot headless run (claude -p / codex exec). */
 export function buildHeadlessArgs(
-  agent: Pick<RuntimeAgent, "runtime" | "model" | "instructions">,
+  agent: { runtime: string; model?: string | null; instructions?: string | null },
   prompt: string = SCHEDULED_WAKE_PROMPT,
 ): string[] {
-  if (agent.runtime === "codex") {
+  const def = runtimeDescriptor(agent.runtime);
+  if (!def.headlessArgs) {
+    throw new Error(
+      `${def.label} has no known headless mode — scheduled runs are claude/codex only`,
+    );
+  }
+  if (def.family === "codex") {
     return ["exec", ...(agent.model ? ["--model", agent.model] : []), "--", prompt];
   }
   // headless runs cannot answer permission prompts — pre-authorize muiltchat tools
-  return [...buildRuntimeArgs(agent), "--allowedTools", HEADLESS_ALLOWED_TOOLS, "-p", prompt];
+  return [
+    ...buildRuntimeArgs(agent),
+    "--allowedTools",
+    HEADLESS_ALLOWED_TOOLS,
+    ...def.headlessArgs(prompt),
+  ];
 }
 
 /** Is a spawned instance of this preset still alive? (skip overlapping runs) */
@@ -345,8 +361,8 @@ export function runScheduledAgent(
   }
 
   const settings = getTerminalSettings(db);
-  const def = RUNTIMES[agent.runtime];
-  const defaultExe = agent.runtime === "claude" ? settings.claude_path : settings.codex_path;
+  const def = runtimeDescriptor(agent.runtime);
+  const defaultExe = def.settingsKey ? settings[def.settingsKey] : def.executable;
   const executable = process.env[def.executableEnv] || defaultExe;
   const parts = [cmdQuote(executable), ...buildHeadlessArgs(agent).map(cmdQuote)];
   const command = parts.join(" ");

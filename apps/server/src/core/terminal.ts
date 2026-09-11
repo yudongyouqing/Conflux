@@ -77,6 +77,8 @@ export interface LaunchSpec {
  * Quote a token for a cmd.exe command string (`start` chain). cmd cannot
  * embed quotes, so strip them instead of escaping.
  */
+import { runtimeDescriptor } from "./runtime-registry.js";
+
 export function cmdQuote(s: string): string {
   return /[\s"]/.test(s) ? `"${s.replace(/"/g, "")}"` : s;
 }
@@ -225,13 +227,11 @@ export function buildLaunchPlan(
  * Build the resume command for a session (cmd-syntax string).
  * Pure — unit-testable.
  */
-export function resumeCommand(
-  runtime: "claude" | "codex",
-  sessionId: string,
-  executable: string,
-): string {
+export function resumeCommand(runtime: string, sessionId: string, executable: string): string {
+  const def = runtimeDescriptor(runtime);
   const exe = cmdQuote(executable);
-  return runtime === "codex" ? `${exe} resume ${sessionId}` : `${exe} --resume ${sessionId}`;
+  const args = def.resumeArgs(sessionId).map(cmdQuote).join(" ");
+  return `${exe} ${args}`;
 }
 
 // ---- which terminals does this machine actually have? -----------------------
