@@ -4,6 +4,7 @@ import { useTerminalSettings, useSaveTerminalSettings } from "../hooks";
 import { api } from "../api";
 import type { ConfluxDataBundle, TerminalChoice } from "@muiltchat/shared";
 import { Settings, Loader2, Check, Download, Upload } from "lucide-react";
+import { getThemePreference, setThemePreference, type ThemePreference } from "../theme";
 
 export function SettingsTab() {
   const { data, isLoading, error } = useTerminalSettings();
@@ -18,6 +19,7 @@ export function SettingsTab() {
   const [transferNotice, setTransferNotice] = useState<string | null>(null);
   const [transferPending, setTransferPending] = useState(false);
   const [importConflict, setImportConflict] = useState<"skip" | "overwrite" | "copy">("skip");
+  const [theme, setTheme] = useState<ThemePreference>(() => getThemePreference());
 
   // load persisted values once available
   useEffect(() => {
@@ -130,6 +132,15 @@ export function SettingsTab() {
     <div className="h-full overflow-y-auto p-6">
       <div className="max-w-xl mx-auto space-y-5">
         <div>
+        <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3 shadow-sm">
+          <h3 className="text-gray-800 font-medium text-sm">界面主题</h3>
+          <div className="flex gap-1">
+            {([["system", "跟随系统"], ["light", "工作台"], ["dark", "终端"]] as const).map(([value, label]) => (
+              <button key={value} type="button" aria-pressed={theme === value} onClick={() => { setTheme(value); setThemePreference(value); }} className={`flex-1 px-2 py-1.5 rounded-md border text-xs ${theme === value ? "bg-blue-600 text-white border-blue-600" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}>{label}</button>
+            ))}
+          </div>
+        </div>
+
           <h2 className="text-gray-900 font-semibold text-base flex items-center gap-2">
             <Settings size={16} className="text-gray-500" /> 设置
           </h2>
