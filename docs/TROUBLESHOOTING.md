@@ -101,6 +101,10 @@ npx tsx apps/server/src/index.ts --data-dir .\conflux-recovered data import --fi
 }
 ```
 
+Codex CLI 不读取 `.mcp.json`；其项目级挂载使用仓库根目录的 `.codex/config.toml`（`[mcp_servers.conflux]`，仅 trusted 项目生效），格式见 README「Codex CLI 挂载 MCP」一节。
+
+另注：Codex CLI 0.147–0.154 存在 MCP 工具目录回归（上游 [#37567](https://github.com/openai/codex/issues/37567)、[#23839](https://github.com/openai/codex/issues/23839)）：服务器能连接、握手和响应 `tools/list`，但内部日志出现 `omitting pending optional MCP server`，模型请求里始终没有 MCP 工具（内置 `functions__*` 工具正常）。诊断入口：`~/.codex/logs_2.sqlite` 的 `logs` 表（`target LIKE 'codex_mcp%'`），以及用本地 HTTP sink 抓 `model_providers.custom.base_url` 的请求体核对 `additional_tools`/`tools`。此为 codex 侧问题，与 Conflux 挂载配置无关；可降级到 0.146.0 验证或等待上游修复。
+
 修改配置后必须完全退出并重新启动 MCP 宿主（例如 Claude Code 或其他客户端），仅刷新网页不会重新建立 stdio 连接。确认使用的是当前仓库路径，并检查宿主的 stderr 日志；MCP 的 stdout 只应包含 JSON-RPC 数据。
 
 Conflux 中 MCP 会话显示为“在线”，表示对应的 MCP stdio 连接仍在续租租约；这不代表终端窗口当前可见或处于焦点，也不代表 Codex 或 Claude CLI 进程仍然存在。反过来，即使 Codex 或 Claude CLI 进程仍存在，也不能单独证明当前会话仍连接。关闭终端窗口后，如果 UI 短时间内仍显示“在线”，等待下一次服务 `liveness` 扫描。正常 `stdin` 断开仍会立即回收会话；强制结束宿主或 CLI 进程、以及断电时，服务无法收到正常断开信号，会在租约 TTL（Time to Live）内回收会话。
@@ -175,6 +179,10 @@ The default data directory is `%USERPROFILE%\.muiltchat` on Windows and `~/.muil
 ### The current MCP session is missing
 
 Keep exactly one Conflux server entry in the project `.mcp.json`. New projects should use the `conflux` key; older projects may keep the single `muiltchat` key. Fully exit and restart the MCP host after changing the file. Reloading the web page does not recreate a stdio connection.
+
+Codex CLI does not read `.mcp.json`. Its project-scope mount is the repo-root `.codex/config.toml` with a `[mcp_servers.conflux]` table (trusted projects only); see the "Codex MCP mounting" section in the README for the contents.
+
+Note: Codex CLI 0.147–0.154 has an MCP tool-catalog regression (upstream [#37567](https://github.com/openai/codex/issues/37567), [#23839](https://github.com/openai/codex/issues/23839)): servers connect, complete the handshake, and answer `tools/list`, but internal logs show `omitting pending optional MCP server` and the model request never includes MCP tools (built-in `functions__*` tools still appear). Diagnostics: the `logs` table in `~/.codex/logs_2.sqlite` (`target LIKE 'codex_mcp%'`), or capture the request body by pointing `model_providers.custom.base_url` at a local HTTP sink and inspecting `additional_tools`/`tools`. This is a Codex-side issue unrelated to the Conflux mount; downgrade to 0.146.0 to confirm or wait for an upstream fix.
 
 When Conflux shows an MCP session as `online`, the MCP stdio connection is still renewing its lease. This does not mean that the terminal window is visible or focused, and it does not mean that the Codex or Claude CLI process still exists. Conversely, an existing Codex or Claude CLI process alone does not prove that the current session is still connected. If the UI still shows `online` briefly after the terminal window closes, wait for the next service `liveness` scan. A normal `stdin` disconnect still reclaims the session immediately; forced termination of the host or CLI process, or a power loss, cannot send a normal disconnect, so the session is reclaimed within the lease TTL.
 
