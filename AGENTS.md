@@ -28,6 +28,8 @@ Tests use Node's built-in test runner with `tsx`; name files `*.test.ts` (deskto
 
 Use concise Conventional Commit messages such as `feat(web): ...`, `fix(cli): ...`, `docs: ...`, or `ci: ...`. Keep commits focused and avoid unrelated formatting churn. Pull requests should explain the user-visible behavior, link the relevant issue, list validation commands and results, and include screenshots for visual changes. Keep generated build output, secrets, and local `.superpowers` prototypes out of commits.
 
+When picking up a newly discovered problem, first search the issue tracker for an existing issue; create one if none matches, then branch from the latest `dev` (name the branch after the issue or feature) and link the issue in the pull request.
+
 ## Security & Configuration Tips
 
 Do not commit API keys or local databases. Run `npm run check:secrets` before pushing. Review `.env` and local data paths before sharing logs. Changes to SQLite schema or HTTP contracts require corresponding migration and regression tests.
