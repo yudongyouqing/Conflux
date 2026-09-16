@@ -30,6 +30,14 @@ Use concise Conventional Commit messages such as `feat(web): ...`, `fix(cli): ..
 
 When picking up a newly discovered problem, first search the issue tracker for an existing issue; create one if none matches, then branch from the latest `dev` (name the branch after the issue or feature) and link the issue in the pull request.
 
+Agent collaboration rules:
+
+- Pushes must be explicit: announce the branch and commits in the conversation before any push (direct command, embedded in a script, or via `gh`); a permission denial is the user's intent — never route around it through a different vehicle.
+- Merging is tiered: docs/chore PRs (no behavior change) may be auto-merged once all checks are green; feat/fix PRs stay open for the user to merge manually even when green.
+- Use the `gh` CLI for PR operations (`gh pr create`, `gh pr merge --merge --auto`); no hand-rolled API scripts.
+- AGENTS.md and CLAUDE.md are maintained in parallel (English/Chinese); any rule change updates both.
+- dev → main PRs happen at milestones (or after a batch of PRs) and are initiated only with the user's confirmation. Merged remote branches are auto-deleted by GitHub; delete the local branch when done.
+
 ## Security & Configuration Tips
 
 Do not commit API keys or local databases. Run `npm run check:secrets` before pushing. Review `.env` and local data paths before sharing logs. Changes to SQLite schema or HTTP contracts require corresponding migration and regression tests.
