@@ -6,11 +6,13 @@ Conflux（内部名 muiltchat）：本地优先的 AI 编程会话协作工作�
 
 开发目标是 **dev**（feat/fix 分支 PR → dev）；main 只接受 dev 的 PR（main-merge-gate 强制）。禁止直推任何受保护分支。
 
+发现新问题的标准流程：**先搜 issue → 没有就创建 → 从最新 dev 开新分支**（分支与 issue 对应，PR 链接 issue）。
+
 ## 常用命令
 
 ```bash
 npm run dev:desktop        # Electron 开发模式（唯一推荐入口，自动起 server+vite）
-npm run dev:all            # 纯浏览器开发（与 dev:desktop 互斥，端口冲突）
+npm run dev:all            # 同 dev:desktop（别名）；纯浏览器栈用 dev:web-stack
 npm test -w apps/server    # server 回归测试（core 层）
 node --test apps/desktop/test/dev-services.test.cjs apps/desktop/test/runtime-config.test.cjs apps/desktop/test/security.test.cjs
 npm run build              # shared → server → web 全量构建
