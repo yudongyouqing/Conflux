@@ -1,8 +1,7 @@
 import { useState, useCallback, useMemo } from "react";
 import { Sidebar, type TabId } from "./components/Sidebar";
 import { GraphTab } from "./components/GraphTab";
-import { SessionsTab } from "./components/SessionsTab";
-import { MessageTab } from "./components/MessageTab";
+import { WorkbenchTab } from "./components/WorkbenchTab";
 import { AgentTab } from "./components/AgentTab";
 import { RuntimesTab } from "./components/RuntimesTab";
 import { SettingsTab } from "./components/SettingsTab";
@@ -68,14 +67,10 @@ export default function App() {
               selectedEdge={selectedEdge}
             />
           )}
-          {tab === "sessions" && (
-            <SessionsTab
+          {tab === "workbench" && (
+            <WorkbenchTab
               onSelectSession={handleSelectSession}
               selectedSessionId={selectedSession?.id ?? null}
-            />
-          )}
-          {tab === "messages" && (
-            <MessageTab
               onSelectMessage={handleSelectMessage}
               selectedMessageId={selectedMessage?.id ?? null}
             />
