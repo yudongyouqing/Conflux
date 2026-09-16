@@ -1,7 +1,7 @@
-import { Network, MessageSquare, Bot, Boxes, Terminal, Settings } from "lucide-react";
+import { Network, MessageSquare, Bot, Boxes, ListTree, Terminal, Settings } from "lucide-react";
 import { useDaemonHealth } from "../hooks";
 
-export type TabId = "graph" | "workbench" | "agents" | "runtimes" | "settings";
+export type TabId = "graph" | "sessions" | "messages" | "agents" | "runtimes" | "settings";
 
 interface SidebarProps {
   activeTab: TabId;
@@ -14,7 +14,8 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
 
   const navItems = [
     { id: "graph" as const, icon: Network, label: "图拓扑" },
-    { id: "workbench" as const, icon: MessageSquare, label: "会话与消息" },
+    { id: "sessions" as const, icon: ListTree, label: "会话" },
+    { id: "messages" as const, icon: MessageSquare, label: "消息流" },
     { id: "agents" as const, icon: Bot, label: "Agents" },
     { id: "runtimes" as const, icon: Terminal, label: "运行时" },
     { id: "settings" as const, icon: Settings, label: "设置" },
