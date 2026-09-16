@@ -8,6 +8,8 @@ Conflux（内部名 muiltchat）：本地优先的 AI 编程会话协作工作�
 
 发现新问题的标准流程：**先搜 issue → 没有就创建 → 从最新 dev 开新分支**（分支与 issue 对应，PR 链接 issue）。
 
+分支命名规范：`<type>/<slug>`，type 与 Conventional Commits 一致（`feat` / `fix` / `docs` / `ci` / `chore` / `refactor` / `test`，统一 `feat` 不用 `feature`）；关联 issue 时 `<type>/<issue号>-<slug>`（如 `feat/13-channel-highlight`）；slug 为小写 kebab-case 英文、≤5 词、描述行为；不加 `-from-dev` 之类机制后缀；worktree 目录用 `.worktrees/<分支名>`。
+
 Agent 协作规矩：
 
 - **推送必须显式**：任何 push（直接命令、脚本内嵌、gh）之前必须在回复中明示要推的分支与提交；权限系统拒绝的推送不得换载体绕过。
