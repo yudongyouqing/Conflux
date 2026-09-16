@@ -28,7 +28,9 @@ Tests use Node's built-in test runner with `tsx`; name files `*.test.ts` (deskto
 
 Use concise Conventional Commit messages such as `feat(web): ...`, `fix(cli): ...`, `docs: ...`, or `ci: ...`. Keep commits focused and avoid unrelated formatting churn. Pull requests should explain the user-visible behavior, link the relevant issue, list validation commands and results, and include screenshots for visual changes. Keep generated build output, secrets, and local `.superpowers` prototypes out of commits.
 
-When picking up a newly discovered problem, first search the issue tracker for an existing issue; create one if none matches, then branch from the latest `dev` (name the branch after the issue or feature) and link the issue in the pull request.
+When picking up a newly discovered problem, first search the issue tracker for an existing issue; create one if none matches, then branch from the latest `dev` and link the issue in the pull request.
+
+Branch naming: `<type>/<slug>` where `type` mirrors Conventional Commits (`feat`, `fix`, `docs`, `ci`, `chore`, `refactor`, `test` — use `feat`, never `feature`). When tied to an issue, include the number: `<type>/<issue>-<slug>` (e.g. `feat/13-channel-highlight`). Keep the slug lowercase kebab-case English, at most ~5 words, describing the behavior. No mechanical suffixes like `-from-dev`; worktrees live under `.worktrees/<branch-name>`.
 
 Agent collaboration rules:
 
