@@ -6,11 +6,21 @@ Conflux（内部名 muiltchat）：本地优先的 AI 编程会话协作工作�
 
 开发目标是 **dev**（feat/fix 分支 PR → dev）；main 只接受 dev 的 PR（main-merge-gate 强制）。禁止直推任何受保护分支。
 
+发现新问题的标准流程：**先搜 issue → 没有就创建 → 从最新 dev 开新分支**（分支与 issue 对应，PR 链接 issue）。
+
+Agent 协作规矩：
+
+- **推送必须显式**：任何 push（直接命令、脚本内嵌、gh）之前必须在回复中明示要推的分支与提交；权限系统拒绝的推送不得换载体绕过。
+- **合并分级**：docs/chore 等无行为变化的 PR，检查全绿后 agent 可自动合并；feat/fix 等改行为的 PR，检查绿后停在 open 等用户人工合并。
+- **PR 操作走 gh CLI**（`gh pr create` / `gh pr merge --merge --auto`），不自制 API 脚本。
+- **AGENTS.md 与 CLAUDE.md 双语并行维护**：任何规范变更两份同步改。
+- **dev → main**：里程碑或积累一批 PR 后从 dev 发 PR 回 main，发起前经用户确认。合并后远端分支由 GitHub 自动删除（已开启），本地分支随手删。
+
 ## 常用命令
 
 ```bash
 npm run dev:desktop        # Electron 开发模式（唯一推荐入口，自动起 server+vite）
-npm run dev:all            # 纯浏览器开发（与 dev:desktop 互斥，端口冲突）
+npm run dev:all            # 同 dev:desktop（别名）；纯浏览器栈用 dev:web-stack
 npm test -w apps/server    # server 回归测试（core 层）
 node --test apps/desktop/test/dev-services.test.cjs apps/desktop/test/runtime-config.test.cjs apps/desktop/test/security.test.cjs
 npm run build              # shared → server → web 全量构建
