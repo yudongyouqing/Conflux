@@ -1,0 +1,4 @@
+[mcp_servers.conflux]
+command = "cmd"
+args = ["/c", "npx", "tsx", "apps/server/src/index.ts", "mcp"]
+startup_timeout_sec = 60

@@ -102,7 +102,7 @@ npm run dev:desktop
 npm run dev:all
 ```
 
-然后打开 <http://127.0.0.1:5173>。如果 `localhost` 无法访问，优先尝试 `127.0.0.1`。`dev:all` 会并行启动本地 API 服务器和 Vite 开发服务器。
+然后打开 <http://127.0.0.1:5173>。如果 `localhost` 无法访问，优先尝试 `127.0.0.1`。`dev:all` 会启动 Electron 桌面客户端，并由 Electron 自动管理本地 API 服务器和 Vite 开发服务器。需要只启动浏览器开发栈时使用 `npm run dev:web-stack`。
 
 如果页面或 API 无法打开，请先查看[故障排查指南](docs/TROUBLESHOOTING.md)，其中包含地址检查、端口诊断、MCP 重启和数据恢复步骤。
 
@@ -229,6 +229,19 @@ npx tsx apps/server/src/index.ts hooks uninstall
 Hooks 会把会话生命周期事件与会话身份关联起来，并持续更新在线状态。当前支持 `SessionStart`、`UserPromptSubmit` 和 `Stop`，安装前会备份现有的 `settings.json`。
 
 Hooks 还会维护自定义标题、`/resume` 会话继承关系以及未投递消息。Claude Code 使用自定义配置目录时，可以通过 `CLAUDE_CONFIG_DIR` 指定该目录。
+
+### Codex CLI 挂载 MCP
+
+Codex CLI 不读取 Claude Code 的 `.mcp.json`。Codex 的项目级挂载文件是仓库根目录的 `.codex/config.toml`（仅在 trusted 项目中生效，本仓库已包含）：
+
+```toml
+[mcp_servers.conflux]
+command = "cmd"
+args = ["/c", "npx", "tsx", "apps/server/src/index.ts", "mcp"]
+startup_timeout_sec = 60
+```
+
+非 Windows 平台改用 `command = "npx"`、`args = ["tsx", "apps/server/src/index.ts", "mcp"]`。首次在新目录启动 Codex 时需批准项目信任；修改配置后必须完全退出并重新启动 Codex 宿主，仅刷新界面不会重建 stdio 连接。
 
 ### Codex 会话标题
 
