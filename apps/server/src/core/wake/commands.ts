@@ -11,8 +11,13 @@ import { cmdQuote, resumeCommand } from "../terminal.js";
 export const AUTO_WAKE_PROMPT =
   "你收到一条来自其他会话的消息:请立即调用 Conflux 的 check_inbox 查看收件箱,结合本会话已有的工作上下文,用 reply_ask 把回复发给提问方,然后结束本轮,不要做其他事。";
 
-/** Pre-authorized tools for headless claude runs (-p cannot ask permission). */
-export const HEADLESS_ALLOWED_TOOLS = "mcp__muiltchat__*";
+/**
+ * Pre-authorized tools for headless claude runs (-p cannot ask permission).
+ * The prefix follows the MCP server KEY in the host's config, which users
+ * control: `conflux` is the new recommended key, `muiltchat` the legacy one.
+ * Authorize both so a wake works under either naming.
+ */
+export const HEADLESS_ALLOWED_TOOLS = "mcp__conflux__*,mcp__muiltchat__*";
 
 /** codex exec defaults to approval policy "never", under which MCP tool
  * calls are REJECTED headlessly ("MCP tool call requires approval") — the

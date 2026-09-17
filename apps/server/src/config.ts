@@ -64,17 +64,21 @@ export const DEFAULT_HTTP_HOST = "127.0.0.1";
 export const DEFAULT_HTTP_PORT = 9527;
 
 export function resolveHttpHost(override?: string): string {
-  const envHost = process.env.MUILTCHAT_HOST?.trim();
+  // CONFLUX_* is the new name; MUILTCHAT_* stays as the legacy fallback.
+  const envHost = (process.env.CONFLUX_HOST ?? process.env.MUILTCHAT_HOST)?.trim();
   return envHost || override || DEFAULT_HTTP_HOST;
 }
 
 export function resolveHttpPort(override?: number): number {
-  const envPort = process.env.MUILTCHAT_PORT?.trim();
+  const confluxPort = process.env.CONFLUX_PORT?.trim();
+  const legacyPort = process.env.MUILTCHAT_PORT?.trim();
+  const envPort = confluxPort || legacyPort;
   if (!envPort) return override ?? DEFAULT_HTTP_PORT;
 
   const port = Number(envPort);
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-    throw new Error(`invalid MUILTCHAT_PORT: ${envPort}`);
+    const name = confluxPort ? "CONFLUX_PORT" : "MUILTCHAT_PORT";
+    throw new Error(`invalid ${name}: ${envPort}`);
   }
   return port;
 }
