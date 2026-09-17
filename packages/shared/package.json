@@ -1,7 +1,7 @@
 {
-  "name": "@muiltchat/shared",
+  "name": "@conflux/shared",
   "version": "0.1.0",
-  "description": "Shared TypeScript types for muiltchat (single source of truth)",
+  "description": "Shared TypeScript types for Conflux (single source of truth)",
   "type": "commonjs",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

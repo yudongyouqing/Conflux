@@ -1,12 +1,14 @@
 # CLAUDE.md
 
-Conflux（内部名 muiltchat）：本地优先的 AI 编程会话协作工作空间。Electron 桌面壳 + React 工作空间 + Fastify/SQLite 内核，MCP/HTTP/CLI 三接口共用同一 core。
+Conflux（兼容别名 muiltchat）：本地优先的 AI 编程会话协作工作空间。Electron 桌面壳 + React 工作空间 + Fastify/SQLite 内核，MCP/HTTP/CLI 三接口共用同一 core。
 
 ## 分支流向
 
 开发目标是 **dev**（feat/fix 分支 PR → dev）；main 只接受 dev 的 PR（main-merge-gate 强制）。禁止直推任何受保护分支。
 
 发现新问题的标准流程：**先搜 issue → 没有就创建 → 从最新 dev 开新分支**（分支与 issue 对应，PR 链接 issue）。
+
+分支命名规范：`<type>/<slug>`，type 与 Conventional Commits 一致（`feat` / `fix` / `docs` / `ci` / `chore` / `refactor` / `test`，统一 `feat` 不用 `feature`）；关联 issue 时 `<type>/<issue号>-<slug>`（如 `feat/13-channel-highlight`）；slug 为小写 kebab-case 英文、≤5 词、描述行为；不加 `-from-dev` 之类机制后缀；worktree 目录用 `.worktrees/<分支名>`。
 
 Agent 协作规矩：
 
@@ -28,7 +30,7 @@ npm run lint               # eslint（server/web/shared 源码）
 npm run format             # prettier
 ```
 
-端口：API 9527（`/docs` 有 OpenAPI）、Vite 5173。数据目录 `~/.muiltchat`（`MUILTCHAT_HOME` 覆盖）。
+端口：API 9527（`/docs` 有 OpenAPI）、Vite 5173。数据目录默认 `~/.muiltchat`（`CONFLUX_HOME` 优先，`MUILTCHAT_HOME` 兼容覆盖；迁移见 docs/MIGRATION.md）。
 
 ## 架构边界（改代码前必读）
 

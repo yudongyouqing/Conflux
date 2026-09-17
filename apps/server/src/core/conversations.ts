@@ -1,6 +1,6 @@
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
-import type { Conversation, Turn } from "@muiltchat/shared";
+import type { Conversation, Turn } from "@conflux/shared";
 
 export type { Conversation, Turn };
 

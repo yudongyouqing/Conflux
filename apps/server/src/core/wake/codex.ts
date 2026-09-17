@@ -11,7 +11,7 @@ import { AUTO_WAKE_PROMPT, buildWakePrompt, freshWakeCommand, wakeCommand } from
  */
 
 export interface CodexWakePlanInput {
-  /** muiltchat session id (claude-shaped fallback never applies here) */
+  /** Conflux session id (claude-shaped fallback never applies here) */
   sessionId: string;
   exe: string;
   offline: boolean;

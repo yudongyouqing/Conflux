@@ -1,5 +1,6 @@
 import { ArrowRight } from "lucide-react";
-import type { Message } from "@muiltchat/shared";
+import { InlineMarkdown } from "./InlineMarkdown";
+import type { Message } from "@conflux/shared";
 
 const STATUS_COLORS: Record<string, string> = {
   pending: "bg-amber-50 text-amber-700 border border-amber-200",
@@ -59,8 +60,14 @@ export function MessageCard({
           {msg.status}
         </span>
       </div>
-      <div className="text-sm text-gray-800 truncate">{msg.question}</div>
-      {msg.reply && <div className="text-xs text-gray-500 truncate mt-1">↳ {msg.reply}</div>}
+      <div className="text-sm text-gray-800 truncate">
+        <InlineMarkdown>{msg.question}</InlineMarkdown>
+      </div>
+      {msg.reply && (
+        <div className="text-xs text-gray-500 truncate mt-1">
+          ↳ <InlineMarkdown>{msg.reply}</InlineMarkdown>
+        </div>
+      )}
     </div>
   );
 }

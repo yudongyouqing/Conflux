@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import type { ConfluxDataBundle } from "@muiltchat/shared";
+import type { ConfluxDataBundle } from "@conflux/shared";
 import { startHttpServer } from "../http/server.js";
 
 const timestamp = "2026-09-01T00:00:00.000Z";

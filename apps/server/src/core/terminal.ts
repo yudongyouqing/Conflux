@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import type { TerminalChoice, TerminalOption, TerminalSettings } from "@muiltchat/shared";
+import type { TerminalChoice, TerminalOption, TerminalSettings } from "@conflux/shared";
 import { logger } from "../log.js";
 
 /**

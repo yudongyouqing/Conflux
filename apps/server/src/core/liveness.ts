@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { RuntimeId } from "@muiltchat/shared";
+import type { RuntimeId } from "@conflux/shared";
 import type { DB } from "./db.js";
 import { logger } from "../log.js";
 import { isRuntimeCommand } from "./runtime-identity.js";
