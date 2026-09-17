@@ -1,4 +1,5 @@
 import { ArrowRight } from "lucide-react";
+import { InlineMarkdown } from "./InlineMarkdown";
 import type { Message } from "@muiltchat/shared";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -59,8 +60,14 @@ export function MessageCard({
           {msg.status}
         </span>
       </div>
-      <div className="text-sm text-gray-800 truncate">{msg.question}</div>
-      {msg.reply && <div className="text-xs text-gray-500 truncate mt-1">↳ {msg.reply}</div>}
+      <div className="text-sm text-gray-800 truncate">
+        <InlineMarkdown>{msg.question}</InlineMarkdown>
+      </div>
+      {msg.reply && (
+        <div className="text-xs text-gray-500 truncate mt-1">
+          ↳ <InlineMarkdown>{msg.reply}</InlineMarkdown>
+        </div>
+      )}
     </div>
   );
 }
