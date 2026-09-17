@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import { StatusDot } from "./StatusDot";
+import { InlineMarkdown } from "./InlineMarkdown";
 import { Search, Inbox } from "lucide-react";
 import type { SessionSummary } from "@muiltchat/shared";
 
@@ -118,7 +119,7 @@ export function SessionsTab({ onSelectSession, selectedSessionId }: SessionsTabP
                           className="text-[11px] text-gray-500 truncate mt-0.5"
                           title={s.description}
                         >
-                          {s.description}
+                          <InlineMarkdown>{s.description}</InlineMarkdown>
                         </div>
                       )}
                       {s.pending_inbox > 0 && (
