@@ -14,6 +14,10 @@ const desktopApi = Object.freeze({
   isElectron: true,
   platform: process.platform,
   showWindow: () => ipcRenderer.send("conflux:show-window"),
+  pickDirectory: async () => {
+    const picked = await ipcRenderer.invoke("conflux:pick-directory");
+    return typeof picked === "string" ? picked : null;
+  },
 });
 
 contextBridge.exposeInMainWorld("confluxDesktop", desktopApi);
