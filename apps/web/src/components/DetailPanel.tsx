@@ -116,7 +116,6 @@ export function DetailPanel({
           点击图节点、图谱连线或消息条目，详情会显示在这里
         </div>
       </div>
-      点击图节点或消息条目查看详情
     </div>
   );
 }
