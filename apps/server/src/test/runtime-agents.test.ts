@@ -101,7 +101,9 @@ test("isDue: interval gating math", () => {
 test("buildHeadlessArgs: one-shot prompts per runtime", () => {
   const claudeArgs = buildHeadlessArgs({ runtime: "claude", model: null, instructions: null });
   assert.ok(claudeArgs.includes("-p"), "headless claude runs -p");
-  assert.ok(claudeArgs.includes("mcp__muiltchat__*"), "headless pre-authorizes muiltchat tools");
+  const allowedTools = claudeArgs[claudeArgs.indexOf("--allowedTools") + 1];
+  assert.match(allowedTools, /mcp__conflux__/u, "headless pre-authorizes conflux tools");
+  assert.match(allowedTools, /mcp__muiltchat__/u, "legacy muiltchat key stays authorized");
   assert.equal(claudeArgs[claudeArgs.indexOf("-p") + 1], SCHEDULED_WAKE_PROMPT);
 
   const codexArgs = buildHeadlessArgs({ runtime: "codex", model: "gpt-5", instructions: null });
