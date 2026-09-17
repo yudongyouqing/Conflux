@@ -16,7 +16,7 @@ import { launchWakeRun } from "./launcher.js";
  *     ("already has an active writer" — resume is refused), so a FRESH
  *     headless run answers instead, seeded with the target's real
  *     conversation digest extracted from its rollout. The reply reaches the
- *     asker via reply_ask; it lives in muiltchat + the wake run's own
+ *     asker via reply_ask; it lives in Conflux + the wake run's own
  *     rollout, not in the locked thread.
  *
  * Guards: auto_wake opt-in, CLI conversations only, dedup within

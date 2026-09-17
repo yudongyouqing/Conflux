@@ -4,7 +4,7 @@ import { api } from "../api";
 import { StatusDot } from "./StatusDot";
 import { InlineMarkdown } from "./InlineMarkdown";
 import { Search, Inbox } from "lucide-react";
-import type { SessionSummary } from "@muiltchat/shared";
+import type { SessionSummary } from "@conflux/shared";
 
 interface SessionsTabProps {
   onSelectSession: (sessionId: string) => void;

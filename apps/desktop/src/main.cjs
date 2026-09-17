@@ -82,7 +82,7 @@ function failRuntime(failure) {
   runtimeFailureHandled = true;
   const message = `${failure.name} 运行异常：${failure.reason}。请重新启动 Conflux。`;
   log(message);
-  dialog.showErrorBox("muiltchat 服务异常", message);
+  dialog.showErrorBox("Conflux 服务异常", message);
   app.quit();
 }
 
@@ -99,7 +99,7 @@ function handleRendererCrash(details = {}) {
   const exitCode = details.exitCode ?? "unknown";
   const message = `Renderer 进程已退出（reason=${reason}, exitCode=${exitCode}）。请重新启动 Conflux。`;
   log(message);
-  dialog.showErrorBox("muiltchat 页面进程异常", message);
+  dialog.showErrorBox("Conflux 页面进程异常", message);
   app.quit();
 }
 
@@ -339,7 +339,7 @@ if (!hasSingleInstanceLock) {
     if (isQuitting || startupController.signal.aborted) return;
     const message = error instanceof Error ? error.message : String(error);
     log(`startup failed: ${message}`);
-    dialog.showErrorBox("muiltchat 启动失败", message);
+    dialog.showErrorBox("Conflux 启动失败", message);
     app.quit();
   });
 

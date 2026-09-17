@@ -145,7 +145,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   await app.register(swagger, {
     openapi: {
       info: {
-        title: "muiltchat",
+        title: "Conflux",
         version: "0.1.0",
         description: "Cross-session context query and async messaging for AI coding assistants.",
       },

@@ -55,7 +55,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
     .name(cliDisplayName(argv))
     .description("Cross-session context query and conversation system")
     .version("0.1.0")
-    .option("--data-dir <path>", "override the muiltchat data directory (also via MUILTCHAT_HOME)")
+    .option("--data-dir <path>", "override the Conflux data directory (also via CONFLUX_HOME)")
     .option("--scope <scope>", '"project" or "global" (default: auto)', "auto")
     .option(
       "--http <url>",
@@ -784,7 +784,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
 
   hooks
     .command("install")
-    .description("install muiltchat hooks into ~/.claude/settings.json (backs up first)")
+    .description("install Conflux hooks into ~/.claude/settings.json (backs up first)")
     .action(function (this: Command) {
       const settingsPath = claudeSettingsPath();
       const settings = readJsonFile(settingsPath);
@@ -792,7 +792,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
 
       try {
         if (existsSync(settingsPath)) {
-          copyFileSync(settingsPath, `${settingsPath}.muiltchat-bak`);
+          copyFileSync(settingsPath, `${settingsPath}.conflux-bak`);
         }
       } catch {
         // non-fatal
@@ -808,10 +808,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
           .map((e) => {
             if (Array.isArray(e.hooks)) {
               e.hooks = (e.hooks as Record<string, unknown>[]).filter(
-                (h) =>
-                  !(
-                    typeof h.command === "string" && h.command.includes("muiltchat hooks dispatch")
-                  ),
+                (h) => !isOurHookCommand(h.command),
               );
             }
             return e;
@@ -835,7 +832,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
 
   hooks
     .command("uninstall")
-    .description("remove muiltchat hooks from ~/.claude/settings.json")
+    .description("remove Conflux hooks from ~/.claude/settings.json")
     .action(function (this: Command) {
       const settingsPath = claudeSettingsPath();
       const settings = readJsonFile(settingsPath);
@@ -847,8 +844,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
         const entries = (hooksCfg[key] as Record<string, unknown>[]).map((e) => {
           if (Array.isArray(e.hooks)) {
             e.hooks = (e.hooks as Record<string, unknown>[]).filter((h) => {
-              const ours =
-                typeof h.command === "string" && h.command.includes("muiltchat hooks dispatch");
+              const ours = isOurHookCommand(h.command);
               if (ours) removed++;
               return !ours;
             });
@@ -955,6 +951,22 @@ function hookCommandBase(): string {
   const asDist = argv1.replace(/src([\\/])index\.ts$/, "dist$1index.js");
   const entry = asDist.endsWith(".js") && existsSync(asDist) ? asDist : argv1;
   return entry.endsWith(".js") ? `node "${entry}"` : `npx tsx "${entry}"`;
+}
+
+/**
+ * Recognise our own hook entries so install cleans before re-adding and
+ * uninstall removes exactly ours. Matches every shape we ever wrote:
+ * legacy bin-style (`conflux|muiltchat hooks dispatch <event>`) and the
+ * current path-style (`node "…apps/server/dist/index.js" hooks dispatch …`).
+ */
+function isOurHookCommand(command: unknown): boolean {
+  if (typeof command !== "string" || !command.includes("hooks dispatch")) return false;
+  return (
+    command.includes("conflux") ||
+    command.includes("muiltchat") ||
+    command.includes("index.js") ||
+    command.includes("index.ts")
+  );
 }
 
 function normaliseScope(s: string | undefined): Scope {
@@ -1128,7 +1140,7 @@ function resolveCliSessionId(db: DB): string {
   });
   process.env.MUILTCHAT_SESSION_ID = sid;
   process.stderr.write(
-    `muiltchat: registered transient CLI session ${sid}\n` +
+    `conflux: registered transient CLI session ${sid}\n` +
       `set MUILTCHAT_SESSION_ID=${sid} to reuse it across commands\n`,
   );
   return sid;

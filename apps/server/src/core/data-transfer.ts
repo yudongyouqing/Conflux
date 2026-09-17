@@ -11,13 +11,13 @@ import type {
   RuntimeAgent,
   Session,
   Turn,
-} from "@muiltchat/shared";
+} from "@conflux/shared";
 import { z } from "zod";
 
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 
-export type { ConfluxDataBundle, DataBundleScope, ExportedRuntimeAgent } from "@muiltchat/shared";
+export type { ConfluxDataBundle, DataBundleScope, ExportedRuntimeAgent } from "@conflux/shared";
 
 export type ImportConflictStrategy = "skip" | "overwrite" | "copy";
 

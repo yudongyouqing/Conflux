@@ -1,5 +1,5 @@
 {
-  "name": "muiltchat-monorepo",
+  "name": "conflux-monorepo",
   "version": "0.1.0",
   "private": true,
   "description": "Cross-session context query and conversation system for AI coding assistants (monorepo root)",
@@ -32,7 +32,7 @@
     "format": "prettier --write \"apps/server/src/**/*.ts\" \"apps/web/src/**/*.{ts,tsx,css}\" \"packages/shared/src/**/*.ts\""
   },
   "dependencies": {
-    "muiltchat": "file:apps/server"
+    "conflux": "file:apps/server"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -28,7 +28,7 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
         <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center">
           <Boxes size={15} className="text-white" />
         </div>
-        <span className="font-semibold text-[15px] text-gray-900 tracking-tight">muiltchat</span>
+        <span className="font-semibold text-[15px] text-gray-900 tracking-tight">Conflux</span>
       </div>
 
       {/* Nav */}
