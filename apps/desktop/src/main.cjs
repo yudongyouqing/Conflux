@@ -313,6 +313,13 @@ if (!hasSingleInstanceLock) {
 } else {
   app.on("second-instance", () => focusMainWindow());
   ipcMain.on("conflux:show-window", focusMainWindow);
+  ipcMain.handle("conflux:pick-directory", async (event) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) return null;
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ["openDirectory"],
+    });
+    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
+  });
   ipcMain.on("conflux:renderer-pong", (event, payload) => {
     if (!mainWindow || event.sender !== mainWindow.webContents) return;
     if (!payload || !Number.isInteger(payload.nonce) || payload.nonce <= 0) return;
