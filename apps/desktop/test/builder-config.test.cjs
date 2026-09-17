@@ -33,7 +33,7 @@ test("production build config includes app, server, web, and native module resou
 test("declares the server workspace as a root production dependency", () => {
   const packageJson = JSON.parse(fs.readFileSync(ROOT_PACKAGE_PATH, "utf8"));
 
-  assert.equal(packageJson.dependencies?.muiltchat, "file:apps/server");
+  assert.equal(packageJson.dependencies?.conflux, "file:apps/server");
 });
 
 test("resolves the Builder config from the desktop project directory", () => {

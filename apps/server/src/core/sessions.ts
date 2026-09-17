@@ -1,7 +1,7 @@
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 import { STALE_AFTER_MS } from "../config.js";
-import type { IdentitySource, Session, SessionRuntime, SessionSummary } from "@muiltchat/shared";
+import type { IdentitySource, Session, SessionRuntime, SessionSummary } from "@conflux/shared";
 import { parseIdentitySource, parseRuntimePid, parseSessionRuntime } from "./session-identity.js";
 
 export type { Session, SessionSummary };

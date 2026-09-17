@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This repository is an npm workspaces monorepo for Conflux/muiltchat. The server and CLI live in `apps/server/src`; HTTP routes, core SQLite logic, MCP integration, and CLI commands are separated by directory. The React Flow web UI is in `apps/web/src`, with web tests in `apps/web/test`. Shared TypeScript contracts are in `packages/shared/src`. Electron packaging and desktop tests are in `apps/desktop`. Repository automation lives in `scripts` and `.github`; design specifications and implementation plans belong under `docs/superpowers`.
+This repository is an npm workspaces monorepo for Conflux (legacy alias `muiltchat`). The server and CLI live in `apps/server/src`; HTTP routes, core SQLite logic, MCP integration, and CLI commands are separated by directory. The React Flow web UI is in `apps/web/src`, with web tests in `apps/web/test`. Shared TypeScript contracts are in `packages/shared/src`. Electron packaging and desktop tests are in `apps/desktop`. Repository automation lives in `scripts` and `.github`; design specifications and implementation plans belong under `docs/superpowers`.
 
 ## Build, Test, and Development Commands
 

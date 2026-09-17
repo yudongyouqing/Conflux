@@ -1,4 +1,4 @@
-import type { RuntimeId } from "@muiltchat/shared";
+import type { RuntimeId } from "@conflux/shared";
 
 /**
  * Single source of truth for "which OS processes belong to which CLI

@@ -5,7 +5,7 @@ import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 import { STALE_AFTER_MS } from "../config.js";
 import { logger } from "../log.js";
-import type { RuntimeAgent, RuntimeId } from "@muiltchat/shared";
+import type { RuntimeAgent, RuntimeId } from "@conflux/shared";
 import { cleanTerminalEnv, cmdQuote, openInTerminal } from "./terminal.js";
 import { RUNTIME_IDS, RUNTIME_REGISTRY, runtimeDescriptor } from "./runtime-registry.js";
 import { HEADLESS_ALLOWED_TOOLS } from "./wake/commands.js";
@@ -210,12 +210,12 @@ export function buildRuntimeEnv(
 
 /**
  * Always appended to spawned claude runtime agents: turns the terminal
- * session into an active muiltchat responder instead of a passive mailbox.
+ * session into an active Conflux responder instead of a passive mailbox.
  * User instructions (if any) come after it.
  */
 export const RUNTIME_OPERATOR_PROMPT = [
-  "你是 muiltchat 网络的常驻应答会话。",
-  "每次被唤起时,先调用 muiltchat 的 check_inbox 工具:如有其他会话的问题,认真处理后用 reply_ask 回复;",
+  "你是 Conflux 网络的常驻应答会话。",
+  "每次被唤起时,先调用 Conflux 的 check_inbox 工具:如有其他会话的问题,认真处理后用 reply_ask 回复;",
   "处理过程中发现值得共享的结论,用 publish_context 发布。",
   "没有待办时保持安静、简短,不要输出无关内容。",
 ].join("");
@@ -275,7 +275,7 @@ export function startRuntimeAgent(
     {
       command,
       cwd: agent.workdir || undefined,
-      title: `muiltchat · ${agent.name}`,
+      title: `Conflux · ${agent.name}`,
       env: buildRuntimeEnv(agent, cleanTerminalEnv()),
     },
     opts,
@@ -303,7 +303,7 @@ export function buildHeadlessArgs(
   if (def.family === "codex") {
     return ["exec", ...(agent.model ? ["--model", agent.model] : []), "--", prompt];
   }
-  // headless runs cannot answer permission prompts — pre-authorize muiltchat tools
+  // headless runs cannot answer permission prompts — pre-authorize Conflux tools
   return [
     ...buildRuntimeArgs(agent),
     "--allowedTools",

@@ -1,6 +1,6 @@
 import { ArrowRight } from "lucide-react";
 import { InlineMarkdown } from "./InlineMarkdown";
-import type { Message } from "@muiltchat/shared";
+import type { Message } from "@conflux/shared";
 
 const STATUS_COLORS: Record<string, string> = {
   pending: "bg-amber-50 text-amber-700 border border-amber-200",

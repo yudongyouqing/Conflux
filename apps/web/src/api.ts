@@ -13,7 +13,7 @@ import type {
   TerminalOption,
   TerminalSettings,
   Turn,
-} from "@muiltchat/shared";
+} from "@conflux/shared";
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path);
