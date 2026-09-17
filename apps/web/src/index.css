@@ -1,3 +1,7 @@
+/* highlight.js theme first in the cascade so Tailwind utilities (bg-transparent
+ * on the code element) can override its background — the pre owns the surface */
+@import "highlight.js/styles/github-dark.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
