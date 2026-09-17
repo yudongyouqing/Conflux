@@ -1,4 +1,8 @@
 <div align="center">
+  <img src="docs/assets/conflux-readme-banner.png" alt="Conflux — 多个 AI 编程会话汇入同一工作空间" width="100%">
+</div>
+
+<div align="center">
   <h1>Conflux</h1>
   <p>本地优先的桌面工作空间 · 连接 AI 编程会话、智能体、消息与共享上下文</p>
   <p>简体中文 ｜ <a href="./docs/README.en.md">English</a></p>
