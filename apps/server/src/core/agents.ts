@@ -1,7 +1,7 @@
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 import { registerSession, endSession } from "./sessions.js";
-import type { Agent, ModelConfig } from "@muiltchat/shared";
+import type { Agent, ModelConfig } from "@conflux/shared";
 
 export type { Agent, ModelConfig };
 

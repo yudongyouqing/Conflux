@@ -12,7 +12,7 @@
 
 Conflux gives AI coding sessions a shared place to exchange context and coordinate work. Each session can publish knowledge, ask another session a question, receive asynchronous replies, and appear as a live node in a conversation graph.
 
-The public project name and new CLI entry are `Conflux`. The npm package name, legacy CLI entry, environment variables, and default data directory retain `muiltchat` compatibility.
+The public project name, CLI entry, and npm package names are all `Conflux` (`conflux` / `@conflux/shared`). The legacy `muiltchat` CLI entry, environment variables, and default data directory remain supported for compatibility.
 
 Documentation: [Migration](MIGRATION.md) · [Troubleshooting](TROUBLESHOOTING.md) · [Contributing](../CONTRIBUTING.md) · [Changelog](../CHANGELOG.md)
 

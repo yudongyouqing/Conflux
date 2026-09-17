@@ -1,4 +1,4 @@
-import type { Message } from "@muiltchat/shared";
+import type { Message } from "@conflux/shared";
 
 export interface ChannelSnapshot {
   edge: { id: number; from: string; to: string };

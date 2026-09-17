@@ -29,7 +29,7 @@ function assertPackageLayout(packageDir) {
     "apps/web/dist/index.html",
     "node_modules/fastify",
     "node_modules/@modelcontextprotocol/sdk",
-    "node_modules/@muiltchat/shared",
+    "node_modules/@conflux/shared",
   ]) {
     assert.ok(
       entries.has(entry) || [...entries].some((candidate) => candidate.startsWith(`${entry}/`)),

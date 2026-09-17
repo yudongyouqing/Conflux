@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useSessionContext, useEdgeMessages, useEdgeAsk, useOpenSessionTerminal } from "../hooks";
 import { MentionComposer } from "./MentionComposer";
-import type { Message, GraphNode, SessionStatus } from "@muiltchat/shared";
+import type { Message, GraphNode, SessionStatus } from "@conflux/shared";
 import { StatusDot } from "./StatusDot";
 import { MarkdownText } from "./MarkdownText";
 import {

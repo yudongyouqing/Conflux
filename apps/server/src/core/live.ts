@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import type { RuntimeId } from "@muiltchat/shared";
+import type { RuntimeId } from "@conflux/shared";
 import type { DB } from "./db.js";
 import {
   registerSession,
@@ -21,7 +21,7 @@ import { isRuntimeCommand } from "./liveness.js";
  * Hook-driven liveness + identity for Claude Code sessions.
  *
  * Claude Code fires shell hooks (SessionStart / UserPromptSubmit / Stop) with
- * the REAL conversation id in stdin JSON. We use that id as the muiltchat
+ * the REAL conversation id in stdin JSON. We use that id as the Conflux
  * session id, so resuming a conversation reactivates the same node, and the
  * first user prompt becomes the node name.
  *
@@ -312,7 +312,7 @@ export function forwardStrandedInboxByTranscript(
 }
 
 /**
- * Handle one hook event. The muiltchat session id equals the Claude Code
+ * Handle one hook event. The Conflux session id equals the Claude Code
  * conversation id, so a resumed conversation reactivates its own node.
  */
 export function handleHookEvent(

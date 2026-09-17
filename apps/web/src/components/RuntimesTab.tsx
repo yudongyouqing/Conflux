@@ -6,7 +6,7 @@ import {
   useStartRuntimeAgent,
   useSessions,
 } from "../hooks";
-import type { RuntimeId } from "@muiltchat/shared";
+import type { RuntimeId } from "@conflux/shared";
 import { Terminal, FolderOpen, Cpu, Trash2, Plus, Loader2, Clock, X, ChevronDown, Bot, Search, Compass } from "lucide-react";
 
 const EMPTY_FORM = {
@@ -417,7 +417,7 @@ function KanbanColumn({
   title: string;
   accent: string;
   countAccent: string;
-  agents: import("@muiltchat/shared").RuntimeAgent[];
+  agents: import("@conflux/shared").RuntimeAgent[];
   runtimeLabel: (id: string) => string;
   launch: (id: number, name: string) => void;
   del: ReturnType<typeof useDeleteRuntimeAgent>;

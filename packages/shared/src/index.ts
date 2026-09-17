@@ -1,5 +1,5 @@
 /**
- * Shared types for muiltchat — the single source of truth.
+ * Shared types for Conflux — the single source of truth.
  *
  * Consumed by apps/server (core modules, type-only imports) and apps/web.
  * When the backend changes a response field, the frontend compile breaks
@@ -72,7 +72,7 @@ export interface Agent {
 
 export type RuntimeId = "claude" | "codex";
 
-/** How muiltchat opens a new terminal window (AgentRecall-style choice). */
+/** How Conflux opens a new terminal window (AgentRecall-style choice). */
 export type TerminalChoice =
   | "wt"
   | "powershell"

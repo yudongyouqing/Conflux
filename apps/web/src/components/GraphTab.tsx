@@ -63,11 +63,12 @@ export function GraphTab({
 
   // Manual edge curvature overrides, keyed `${from}->${to}`. Survives the 5s
   // poll rebuilds (read when edges are rebuilt) and page reloads (localStorage).
-  const OFFSETS_KEY = "muiltchat:edge-offsets:v1";
+  const OFFSETS_KEY = "conflux:edge-offsets:v1";
+  const LEGACY_OFFSETS_KEY = "muiltchat:edge-offsets:v1"; // pre-rename key, read-only
   const manualOffsets = useRef<Record<string, number>>(
     (() => {
       try {
-        return JSON.parse(localStorage.getItem(OFFSETS_KEY) ?? "{}");
+        return JSON.parse(localStorage.getItem(OFFSETS_KEY) ?? localStorage.getItem(LEGACY_OFFSETS_KEY) ?? "{}");
       } catch {
         return {};
       }
@@ -193,7 +194,7 @@ export function GraphTab({
         暂无会话。
         <br />用 CLI 注册一个会话:
         <code className="text-gray-500 ml-1 bg-gray-100 px-1 rounded">
-          muiltchat sessions register --name "test"
+          conflux sessions register --name "test"
         </code>
       </div>
     );
