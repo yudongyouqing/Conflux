@@ -8,7 +8,7 @@ import {
 } from "../../core/app-settings.js";
 import { terminalOptions } from "../../core/terminal.js";
 import { logAudit } from "../../core/audit.js";
-import type { TerminalSettings } from "@muiltchat/shared";
+import type { TerminalSettings } from "@conflux/shared";
 import type { ServerContext } from "../context.js";
 
 export function registerSettingsRoutes(app: FastifyInstance, ctx: ServerContext): void {

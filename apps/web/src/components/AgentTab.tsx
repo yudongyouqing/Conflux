@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Plus, Trash2, Bot, ChevronDown, ChevronUp, MessageSquare } from "lucide-react";
 import { useAgents, useCreateAgent, useDeleteAgent } from "../hooks";
 import { ChatPanel } from "./ChatPanel";
-import type { Agent } from "@muiltchat/shared";
+import type { Agent } from "@conflux/shared";
 
 const PROVIDERS = ["anthropic", "openai", "google", "mistral", "local"];
 

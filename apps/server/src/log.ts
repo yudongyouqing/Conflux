@@ -12,7 +12,7 @@ const dest =
 
 export const logger = pino(
   {
-    name: "muiltchat",
+    name: "conflux",
     level: process.env.MUILTCHAT_LOG_LEVEL || "info",
     base: undefined,
     timestamp: pino.stdTimeFunctions.isoTime,

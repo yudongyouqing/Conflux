@@ -12,7 +12,7 @@ Conflux 以兼容方式接收旧版 `muiltchat` 数据。普通启动不会删�
 | MCP key `muiltchat` | MCP key `conflux` | 旧 key 可以继续使用，但同一 `.mcp.json` 只保留一个 key。 |
 | `MUILTCHAT_HOME` | `CONFLUX_HOME` | 新变量优先；未设置时继续读取旧变量。 |
 | `~/.muiltchat` | 显式目标目录 | 默认仍读取旧目录，不会自动创建 `~/.conflux`。 |
-| npm package `muiltchat` | 公开项目名 `Conflux` | 内部 package 和兼容 bin 暂不强制重命名。 |
+| npm package `muiltchat` / `@muiltchat/shared` | `conflux` / `@conflux/shared` | 内部 package 已更名；兼容 bin `muiltchat` 与环境变量继续保留。 |
 
 目录解析优先级为：CLI `--data-dir`、`CONFLUX_HOME`、`MUILTCHAT_HOME`、已有项目目录 `.muiltchat`，最后是全局 `~/.muiltchat`。
 
@@ -77,7 +77,7 @@ Conflux reads legacy `muiltchat` data without destructive changes. A normal star
 | MCP key `muiltchat` | MCP key `conflux` | Keep exactly one key in a project `.mcp.json`. |
 | `MUILTCHAT_HOME` | `CONFLUX_HOME` | The new variable takes precedence; the old one remains supported. |
 | `~/.muiltchat` | An explicit destination | The legacy default remains active; `~/.conflux` is not created automatically. |
-| npm package `muiltchat` | Public project name `Conflux` | Compatibility package and bin names remain available. |
+| npm package `muiltchat` / `@muiltchat/shared` | `conflux` / `@conflux/shared` | Internal packages are renamed; the legacy `muiltchat` bin and environment variables remain supported. |
 
 The data-directory precedence is `--data-dir`, `CONFLUX_HOME`, `MUILTCHAT_HOME`, an existing project `.muiltchat`, and finally `~/.muiltchat`.
 

@@ -7,7 +7,7 @@ import { MessageCard } from "./MessageCard";
 import { MarkdownText } from "./MarkdownText";
 import { StatusDot } from "./StatusDot";
 import { ArrowLeft, Send } from "lucide-react";
-import type { Message } from "@muiltchat/shared";
+import type { Message } from "@conflux/shared";
 
 interface MessageTabProps {
   onSelectMessage: (msg: Message | null) => void;

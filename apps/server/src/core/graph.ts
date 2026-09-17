@@ -1,7 +1,7 @@
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 import { markStaleSessions } from "./sessions.js";
-import type { Graph, GraphEdge, GraphNode, NodeType } from "@muiltchat/shared";
+import type { Graph, GraphEdge, GraphNode, NodeType } from "@conflux/shared";
 import { parseIdentitySource, parseRuntimePid, parseSessionRuntime } from "./session-identity.js";
 
 export type { Graph, GraphEdge, GraphNode, NodeType };

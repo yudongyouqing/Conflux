@@ -12,7 +12,7 @@
 
 Conflux 为多个 AI 编程会话提供一个共享空间。每个会话都可以发布知识、向其他会话提问、异步接收回复，并作为实时节点出现在会话图谱中。
 
-公开项目名和新 CLI 入口为 `Conflux`。npm package 名称、旧 CLI 入口、环境变量和默认数据目录继续保留 `muiltchat` 兼容性。
+公开项目名、CLI 入口和 npm package 名称均为 `Conflux`（`conflux` / `@conflux/shared`）。旧 CLI 入口 `muiltchat`、环境变量和默认数据目录继续保留兼容性。
 
 文档入口：[迁移指南](docs/MIGRATION.md) · [故障排查](docs/TROUBLESHOOTING.md) · [贡献指南](CONTRIBUTING.md) · [更新日志](CHANGELOG.md)
 

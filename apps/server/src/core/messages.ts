@@ -1,7 +1,7 @@
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 import { recordEdge, touchEdge } from "./graph.js";
-import type { Message, MessageStatus } from "@muiltchat/shared";
+import type { Message, MessageStatus } from "@conflux/shared";
 
 export type { Message, MessageStatus };
 
@@ -268,8 +268,8 @@ export function formatInboxNotice(db: DB, sessionId: string): string | null {
   const excerpt = first.question.replace(/\s+/g, " ").slice(0, 60);
   const from = first.name ?? first.sid8;
   return (
-    `[muiltchat] 收件箱有 ${rows.length} 条未读消息(最新来自「${from}」: ${excerpt}…)。` +
-    `请调用 muiltchat 的 check_inbox 工具查看并 reply_ask 回复。`
+    `[Conflux] 收件箱有 ${rows.length} 条未读消息(最新来自「${from}」: ${excerpt}…)。` +
+    `请调用 Conflux 的 check_inbox 工具查看并 reply_ask 回复。`
   );
 }
 

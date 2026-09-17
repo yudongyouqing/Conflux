@@ -1,5 +1,5 @@
 import type { DB } from "./db.js";
-import type { TerminalChoice, TerminalSettings } from "@muiltchat/shared";
+import type { TerminalChoice, TerminalSettings } from "@conflux/shared";
 
 const TERMINAL_KEY = "terminal";
 

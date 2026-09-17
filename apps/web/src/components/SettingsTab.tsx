@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTerminalSettings, useSaveTerminalSettings } from "../hooks";
 import { api } from "../api";
-import type { ConfluxDataBundle, TerminalChoice } from "@muiltchat/shared";
+import type { ConfluxDataBundle, TerminalChoice } from "@conflux/shared";
 import { Settings, Loader2, Check, Download, Upload } from "lucide-react";
 import { getThemePreference, setThemePreference, type ThemePreference } from "../theme";
 

@@ -1,6 +1,6 @@
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
-import type { ContextEntry } from "@muiltchat/shared";
+import type { ContextEntry } from "@conflux/shared";
 
 export type { ContextEntry };
 

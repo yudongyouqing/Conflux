@@ -34,7 +34,7 @@ test("resume args follow family shapes (AgentRecall-validated)", () => {
 test("buildRuntimeArgs: claude family gets operator prompt, others model only", () => {
   const claude = buildRuntimeArgs({ runtime: "claude", model: null, instructions: null });
   assert.ok(
-    claude.some((a) => a.includes("muiltchat")),
+    claude.some((a) => a.includes("Conflux")),
     "operator prompt appended",
   );
   const cursor = buildRuntimeArgs({ runtime: "cursor", model: "big", instructions: "x" });

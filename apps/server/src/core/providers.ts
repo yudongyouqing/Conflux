@@ -1,5 +1,5 @@
 import type { LanguageModel } from "ai" with { "resolution-mode": "import" };
-import type { ModelConfig } from "@muiltchat/shared";
+import type { ModelConfig } from "@conflux/shared";
 
 export interface ProviderEntry {
   /** Environment variable that unlocks this provider. */

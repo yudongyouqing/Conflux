@@ -21,7 +21,7 @@ import {
  * own records: the thread_name it maintains itself, or an excerpt of the
  * first real user instruction.
  *
- * Correlating a muiltchat row to a rollout cannot rely on cwd alone: when
+ * Correlating a Conflux row to a rollout cannot rely on cwd alone: when
  * the MCP server is configured globally with a fixed working directory
  * (e.g. `npm --prefix <repo> run mcp`), every codex session records that
  * directory as project_dir no matter where Codex actually runs, while the
