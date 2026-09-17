@@ -1,4 +1,4 @@
-import type { IdentitySource, SessionRuntime } from "@muiltchat/shared";
+import type { IdentitySource, SessionRuntime } from "@conflux/shared";
 
 /** Parse values crossing the SQLite/metadata boundary into shared types. */
 export function parseSessionRuntime(value: unknown): SessionRuntime | null {

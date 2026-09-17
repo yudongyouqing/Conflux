@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSessions } from "../hooks";
 import { api } from "../api";
 import { StatusDot } from "./StatusDot";
-import type { Message, SessionStatus } from "@muiltchat/shared";
+import type { Message, SessionStatus } from "@conflux/shared";
 
 /** Minimal session identity the composer needs (GraphNode and SessionSummary both satisfy it). */
 export interface ComposerTarget {

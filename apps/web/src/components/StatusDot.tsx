@@ -1,4 +1,4 @@
-import type { SessionStatus } from "@muiltchat/shared";
+import type { SessionStatus } from "@conflux/shared";
 
 const COLORS: Record<SessionStatus, string> = {
   active: "bg-emerald-500",

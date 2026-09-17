@@ -103,7 +103,7 @@ export function registerSessionRoutes(app: FastifyInstance, ctx: ServerContext):
       const result = openInTerminal(settings, {
         command: resumeCommand(runtime, id, executable),
         cwd: session.project_dir ?? undefined,
-        title: `muiltchat · ${session.name}`,
+        title: `Conflux · ${session.name}`,
       });
       heartbeat(db, id);
       logAudit(db, {

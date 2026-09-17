@@ -1,5 +1,5 @@
 import { MarkerType, type Edge, type Node } from "@xyflow/react";
-import type { GraphEdge, GraphNode } from "@muiltchat/shared";
+import type { GraphEdge, GraphNode } from "@conflux/shared";
 import { layoutGraph } from "./layout";
 import type { SessionNodeData } from "./components/SessionNode";
 import type { GroupFrameData } from "./components/GroupFrame";

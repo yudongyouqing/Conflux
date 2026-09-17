@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { v4 as uuidv4 } from "uuid";
-import type { RuntimeId } from "@muiltchat/shared";
+import type { RuntimeId } from "@conflux/shared";
 
 import { resolveConfig, type Scope } from "../config.js";
 import { openDb, type DB } from "../core/db.js";
@@ -28,7 +28,7 @@ import { refreshCodexSessionTitles } from "../core/codex-titles.js";
 import { logger } from "../log.js";
 
 const INSTRUCTIONS = `
-muiltchat: cross-session context + async messaging for AI coding assistants.
+Conflux: cross-session context + async messaging for AI coding assistants.
 
 This session is already auto-registered. Call register_session to update its
 name and description with something meaningful for other sessions to recognize.
@@ -41,7 +41,7 @@ You share a SQLite file with other sessions, so you can:
 
 For messaging Claude Code peers you may prefer your NATIVE SendMessage tool
 (lower latency). When you do, call log_exchange once afterwards so the
-exchange lands in the shared archive + graph. muiltchat ask_session stays
+exchange lands in the shared archive + graph. Conflux ask_session stays
 the channel for non-claude runtimes and offline mail.
 
 After answering a user, if you discovered something worth sharing, proactively
@@ -243,7 +243,7 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
 
   const server = new McpServer(
     {
-      name: "muiltchat",
+      name: "conflux",
       version: "0.1.0",
     },
     {
@@ -520,7 +520,7 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
     "log_exchange",
     {
       description:
-        "Archive a message exchange that already happened OUTSIDE muiltchat (e.g. via Claude Code's native SendMessage) into the shared history + graph, so other sessions can discover it. Call after the native exchange completes; do not use for muiltchat-delivered mail.",
+        "Archive a message exchange that already happened OUTSIDE Conflux (e.g. via Claude Code's native SendMessage) into the shared history + graph, so other sessions can discover it. Call after the native exchange completes; do not use for Conflux-delivered mail.",
       inputSchema: {
         to_session: z.string().min(1).describe("Peer the exchange was with"),
         question: z.string().min(1).max(20_000).describe("What was asked/sent"),

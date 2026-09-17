@@ -8,7 +8,7 @@ import { RuntimesTab } from "./components/RuntimesTab";
 import { SettingsTab } from "./components/SettingsTab";
 import { DetailPanel } from "./components/DetailPanel";
 import { useGraph } from "./hooks";
-import type { Message, GraphNode } from "@muiltchat/shared";
+import type { Message, GraphNode } from "@conflux/shared";
 
 export default function App() {
   const [tab, setTab] = useState<TabId>("graph");

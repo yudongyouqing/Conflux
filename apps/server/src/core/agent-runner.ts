@@ -1,7 +1,7 @@
 import type { ModelMessage, ToolSet } from "ai" with { "resolution-mode": "import" };
 import { z } from "zod";
 import type { DB } from "./db.js";
-import type { Agent } from "@muiltchat/shared";
+import type { Agent } from "@conflux/shared";
 import { registerSession, listSessions } from "./sessions.js";
 import { queryContext } from "./search.js";
 import { askSession, checkInbox, replyAsk } from "./messages.js";
@@ -46,7 +46,7 @@ export async function* runAgentChat(
 
   const systemPrompt =
     agent.system_prompt +
-    `\n\nYou are registered as session "${agentSessionId}" in the muiltchat cross-session network. ` +
+    `\n\nYou are registered as session "${agentSessionId}" in the Conflux cross-session network. ` +
     `You can use the provided tools to interact with other sessions (external AI coding assistants). ` +
     `Use them proactively when the user's question involves information that other sessions might have. ` +
     `After using tools, summarize the findings for the user. Be concise.`;
