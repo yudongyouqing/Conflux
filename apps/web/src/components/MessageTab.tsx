@@ -81,25 +81,25 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
   // ---- full-height thread view (replaces the feed) ----
   if (peer !== null) {
     return (
-      <div className="flex flex-col h-full bg-gray-100">
-        <div className="flex items-center justify-between p-3 bg-white border-b border-gray-200">
-          <div className="flex items-center gap-2 text-xs text-gray-600">
+      <div className="flex flex-col h-full bg-paper">
+        <div className="flex items-center justify-between p-3 bg-white border-b border-line">
+          <div className="flex items-center gap-2 text-xs text-ink-muted">
             <button
-              className="inline-flex items-center gap-1 text-gray-400 hover:text-gray-700"
+              className="inline-flex items-center gap-1 text-ink-faint hover:text-ink"
               onClick={closeThread}
               title="返回消息流"
             >
               <ArrowLeft size={13} /> 返回
             </button>
-            <span className="text-gray-300">|</span>
+            <span className="text-ink-faint">|</span>
             {peerSession && <StatusDot status={peerSession.status} busy={peerSession.busy} />}
             <span className="font-medium">与 {peerName} 的对话</span>
-            <span className="text-gray-400">每 5 秒刷新</span>
+            <span className="text-ink-faint">每 5 秒刷新</span>
           </div>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
           {(thread.data?.messages ?? []).length === 0 && (
-            <div className="text-xs text-gray-400 text-center py-6">暂无往来消息</div>
+            <div className="text-xs text-ink-faint text-center py-6">暂无往来消息</div>
           )}
           {(thread.data?.messages ?? []).map((m) => {
             const mine = m.from_session === WEB_CONSOLE_ID;
@@ -109,14 +109,14 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
                   className={`max-w-[80%] rounded-xl px-3 py-2 text-xs ${
                     mine
                       ? "bg-blue-500 text-white"
-                      : "bg-gray-100 text-gray-800 border border-gray-200"
+                      : "bg-paper text-ink border border-line"
                   }`}
                 >
                   <MarkdownText tone={mine ? "blue" : "light"}>{m.question}</MarkdownText>
                   {m.reply && (
                     <div
                       className={`mt-2 pt-2 border-t ${
-                        mine ? "border-blue-400/50" : "border-gray-200"
+                        mine ? "border-blue-400/50" : "border-line"
                       }`}
                     >
                       <div className="text-[10px] font-semibold uppercase tracking-wide opacity-60 mb-0.5">
@@ -134,7 +134,7 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
           })}
         </div>
         {/* fixed-target composer */}
-        <div className="p-3 bg-white border-t border-gray-200">
+        <div className="p-3 bg-white border-t border-line">
           <div className="flex items-center gap-2">
             <input
               type="text"
@@ -147,7 +147,7 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
                   sendDraft();
                 }
               }}
-              className="flex-1 bg-white text-gray-800 text-sm rounded-lg px-3 py-2 border border-gray-200 placeholder-gray-400 outline-none focus:border-blue-500"
+              className="flex-1 bg-white text-ink text-sm rounded-lg px-3 py-2 border border-line placeholder-gray-400 outline-none focus:border-blue-500"
             />
             <button
               onClick={sendDraft}
@@ -169,18 +169,18 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
 
   // ---- feed view ----
   return (
-    <div className="flex flex-col h-full bg-gray-100">
+    <div className="flex flex-col h-full bg-paper">
       {/* ---- @ composer ---- */}
-      <div className="p-3 bg-white border-b border-gray-200">
+      <div className="p-3 bg-white border-b border-line">
         <MentionComposer onSent={(t) => openThread(t.id)} />
       </div>
 
       {/* ---- list filters ---- */}
-      <div className="flex items-center gap-2 p-3 bg-white border-b border-gray-200">
+      <div className="flex items-center gap-2 p-3 bg-white border-b border-line">
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="bg-white text-gray-700 text-xs rounded-lg px-2.5 py-1.5 border border-gray-200 outline-none focus:border-blue-500"
+          className="bg-white text-ink text-xs rounded-lg px-2.5 py-1.5 border border-line outline-none focus:border-blue-500"
         >
           <option value="all">全部状态</option>
           <option value="pending">待回复</option>
@@ -193,13 +193,13 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
           placeholder="搜索消息内容..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="flex-1 bg-white text-gray-800 text-xs rounded-lg px-2.5 py-1.5 border border-gray-200 placeholder-gray-400 outline-none focus:border-blue-500"
+          className="flex-1 bg-white text-ink text-xs rounded-lg px-2.5 py-1.5 border border-line placeholder-gray-400 outline-none focus:border-blue-500"
         />
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-2">
-        {isLoading && <div className="text-gray-400 text-sm text-center mt-8">加载中...</div>}
+        {isLoading && <div className="text-ink-faint text-sm text-center mt-8">加载中...</div>}
         {!isLoading && filtered.length === 0 && (
-          <div className="text-gray-400 text-sm text-center mt-8">
+          <div className="text-ink-faint text-sm text-center mt-8">
             {search ? "无匹配消息" : "暂无消息"}
           </div>
         )}

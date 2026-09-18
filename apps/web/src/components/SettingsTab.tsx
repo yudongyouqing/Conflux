@@ -113,7 +113,7 @@ export function SettingsTab() {
 
   if (isLoading)
     return (
-      <div className="flex items-center justify-center h-full text-gray-400 text-sm">
+      <div className="flex items-center justify-center h-full text-ink-faint text-sm">
         加载设置...
       </div>
     );
@@ -132,26 +132,26 @@ export function SettingsTab() {
     <div className="h-full overflow-y-auto p-6">
       <div className="max-w-xl mx-auto space-y-5">
         <div>
-        <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3 shadow-sm">
-          <h3 className="text-gray-800 font-medium text-sm">界面主题</h3>
+        <div className="bg-white border border-line rounded-xl p-4 space-y-3 shadow-sm">
+          <h3 className="text-ink font-medium text-sm">界面主题</h3>
           <div className="flex gap-1">
             {([["system", "跟随系统"], ["light", "工作台"], ["dark", "终端"]] as const).map(([value, label]) => (
-              <button key={value} type="button" aria-pressed={theme === value} onClick={() => { setTheme(value); setThemePreference(value); }} className={`flex-1 px-2 py-1.5 rounded-md border text-xs ${theme === value ? "bg-blue-600 text-white border-blue-600" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}>{label}</button>
+              <button key={value} type="button" aria-pressed={theme === value} onClick={() => { setTheme(value); setThemePreference(value); }} className={`flex-1 px-2 py-1.5 rounded-md border text-xs ${theme === value ? "bg-blue-600 text-white border-blue-600" : "border-line text-ink-muted hover:bg-paper"}`}>{label}</button>
             ))}
           </div>
         </div>
 
-          <h2 className="text-gray-900 font-semibold text-base flex items-center gap-2">
-            <Settings size={16} className="text-gray-500" /> 设置
+          <h2 className="text-ink font-semibold text-base flex items-center gap-2">
+            <Settings size={16} className="text-ink-muted" /> 设置
           </h2>
-          <p className="text-xs text-gray-500 mt-0.5">
+          <p className="text-xs text-ink-muted mt-0.5">
             「在终端打开」和运行时 agent 启动使用的终端与可执行文件。
           </p>
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-4 shadow-sm">
+        <div className="bg-white border border-line rounded-xl p-4 space-y-4 shadow-sm">
           <label className="block">
-            <span className="block text-xs font-medium text-gray-700 mb-1.5">终端打开方式</span>
+            <span className="block text-xs font-medium text-ink mb-1.5">终端打开方式</span>
             <select
               value={terminal}
               onChange={(e) => setTerminal(e.target.value as TerminalChoice)}
@@ -165,7 +165,7 @@ export function SettingsTab() {
               ))}
             </select>
             {selected && (
-              <span className="block text-[11px] text-gray-400 mt-1.5">
+              <span className="block text-[11px] text-ink-faint mt-1.5">
                 {selected.hint}
                 {selected.available ? "" : " · 本机未检测到,保存后走回退链"}
               </span>
@@ -174,7 +174,7 @@ export function SettingsTab() {
 
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
-              <span className="block text-[11px] text-gray-500 mb-1">claude 可执行文件</span>
+              <span className="block text-[11px] text-ink-muted mb-1">claude 可执行文件</span>
               <input
                 value={claudePath}
                 onChange={(e) => setClaudePath(e.target.value)}
@@ -183,7 +183,7 @@ export function SettingsTab() {
               />
             </label>
             <label className="block">
-              <span className="block text-[11px] text-gray-500 mb-1">codex 可执行文件</span>
+              <span className="block text-[11px] text-ink-muted mb-1">codex 可执行文件</span>
               <input
                 value={codexPath}
                 onChange={(e) => setCodexPath(e.target.value)}
@@ -217,11 +217,11 @@ export function SettingsTab() {
           </div>
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3 shadow-sm">
+        <div className="bg-white border border-line rounded-xl p-4 space-y-3 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-gray-800 font-medium text-sm">数据备份</h3>
-              <p className="text-[11px] text-gray-400 mt-0.5">导出不包含 API key</p>
+              <h3 className="text-ink font-medium text-sm">数据备份</h3>
+              <p className="text-[11px] text-ink-faint mt-0.5">导出不包含 API key</p>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -229,7 +229,7 @@ export function SettingsTab() {
                 onClick={exportWorkspace}
                 disabled={transferPending}
                 title="导出数据"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 text-xs hover:bg-gray-50 disabled:opacity-50"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line text-ink text-xs hover:bg-paper disabled:opacity-50"
               >
                 {transferPending ? (
                   <Loader2 size={13} className="animate-spin" />
@@ -243,7 +243,7 @@ export function SettingsTab() {
                 onClick={() => importInput.current?.click()}
                 disabled={transferPending}
                 title="导入 JSON 数据"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 text-xs hover:bg-gray-50 disabled:opacity-50"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line text-ink text-xs hover:bg-paper disabled:opacity-50"
               >
                 <Upload size={13} />
                 导入 JSON
@@ -258,7 +258,7 @@ export function SettingsTab() {
             </div>
           </div>
           <div className="flex items-center justify-between gap-3">
-            <label className="text-[11px] text-gray-500" htmlFor="import-conflict">
+            <label className="text-[11px] text-ink-muted" htmlFor="import-conflict">
               冲突处理
             </label>
             <select
@@ -289,7 +289,7 @@ export function SettingsTab() {
           )}
         </div>
 
-        <p className="text-[11px] text-gray-400">
+        <p className="text-[11px] text-ink-faint">
           提示:可执行文件留空使用默认值(从 PATH 解析)。点击图上任意会话 →
           右侧面板「在终端打开」即可在新终端窗口 resume 该对话。
         </p>
@@ -299,6 +299,6 @@ export function SettingsTab() {
 }
 
 const inputCls =
-  "w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 bg-white";
+  "w-full px-2.5 py-1.5 rounded-lg border border-line text-xs text-ink focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 bg-white";
 const selectCls =
-  "w-full px-2.5 py-2 rounded-lg border border-gray-200 text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 bg-white cursor-pointer";
+  "w-full px-2.5 py-2 rounded-lg border border-line text-xs text-ink focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 bg-white cursor-pointer";
