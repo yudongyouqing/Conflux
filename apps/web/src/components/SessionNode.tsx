@@ -1,14 +1,7 @@
 import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
-import {
-  FileText,
-  Inbox,
-  Bot,
-  MessageSquare,
-  Globe,
-  Terminal,
-  Code2,
-  type LucideIcon,
-} from "lucide-react";
+import { FileText, Inbox, Bot, MessageSquare, Globe, Terminal } from "lucide-react";
+import type { ElementType } from "react";
+import { ClaudeIcon, OpenAIIcon } from "./brand-icons";
 import { PLACEHOLDER_DESCRIPTIONS, WEB_CONSOLE_ID } from "@conflux/shared";
 
 export interface SessionNodeData {
@@ -35,7 +28,8 @@ export interface SessionNodeData {
  * shape+color before text.
  */
 interface NodeSkin {
-  icon: LucideIcon;
+  /** lucide icons and brand glyphs share the (size, className) surface */
+  icon: ElementType;
   block: string; // icon block bg + icon color
   accent: string; // top strip color
 }
@@ -44,8 +38,9 @@ function skinFor(d: SessionNodeData, isAgent: boolean, isWeb: boolean): NodeSkin
   if (isAgent) return { icon: Bot, block: "bg-indigo-600", accent: "bg-indigo-500" };
   if (isWeb) return { icon: Globe, block: "bg-blue-600", accent: "bg-blue-500" };
   if (d.runtime === "claude")
-    return { icon: Terminal, block: "bg-orange-600", accent: "bg-orange-500" };
-  if (d.runtime === "codex") return { icon: Code2, block: "bg-slate-700", accent: "bg-slate-500" };
+    return { icon: ClaudeIcon, block: "bg-orange-600", accent: "bg-orange-500" };
+  if (d.runtime === "codex")
+    return { icon: OpenAIIcon, block: "bg-slate-700", accent: "bg-slate-500" };
   return { icon: Terminal, block: "bg-gray-500", accent: "bg-gray-400" };
 }
 
