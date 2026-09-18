@@ -56,7 +56,7 @@ export default function App() {
   }, []);
 
   return (
-    <div className="flex h-full bg-gray-100">
+    <div className="flex h-full bg-paper">
       <Sidebar activeTab={tab} onTabChange={setTab} />
       <div className="flex flex-1 overflow-hidden">
         <main className="flex-1 overflow-hidden">

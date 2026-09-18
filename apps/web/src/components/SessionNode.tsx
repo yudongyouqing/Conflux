@@ -110,9 +110,7 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
               />
             </div>
             {d.runtime && !isAgent && (
-              <div className="text-[9px] text-slate-400 font-medium uppercase tracking-wider leading-3">
-                {d.runtime}
-              </div>
+              <div className="font-mono text-[10px] text-slate-400 leading-3">{d.runtime}</div>
             )}
           </div>
         </div>
@@ -128,7 +126,7 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
           )}
 
         {/* footer meta — quiet metric chips */}
-        <div className="flex items-center gap-1.5 mt-2 text-[9px]">
+        <div className="flex items-center gap-1.5 mt-2 text-[10px]">
           {d.context_count > 0 && (
             <span
               className="inline-flex items-center gap-1 rounded-md bg-slate-50 border border-slate-100 px-1.5 py-[1px] text-gray-500"
