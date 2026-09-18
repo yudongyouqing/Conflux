@@ -63,19 +63,6 @@ export function SessionNode({ data, selected, dragging }: NodeProps) {
   const skin = skinFor(d, isAgent, isWeb);
   const Icon = skin.icon;
 
-  // Seconds since the last heartbeat — drives the "live" feel on the graph.
-  const ageSec = d.last_heartbeat_at
-    ? Math.max(0, Math.round((Date.now() - new Date(d.last_heartbeat_at).getTime()) / 1000))
-    : null;
-  const ageLabel =
-    ageSec === null
-      ? null
-      : ageSec < 60
-        ? `${ageSec}s`
-        : ageSec < 3600
-          ? `${Math.floor(ageSec / 60)}m`
-          : `${Math.floor(ageSec / 3600)}h`;
-
   return (
     <div
       title={d.skills?.length ? `技能: ${d.skills.join(" · ")}` : undefined}
@@ -143,11 +130,6 @@ export function SessionNode({ data, selected, dragging }: NodeProps) {
             <span className="flex items-center gap-1" title="已发布上下文">
               <FileText size={10} /> {d.context_count}
             </span>
-          )}
-          {d.status === "active" && ageLabel && (
-            // neutral metadata: elapsed time is NOT a health signal — color
-            // stays reserved for the status dot
-            <span title={`最后心跳 ${ageLabel} 前`}>{ageLabel}</span>
           )}
           {d.pending_inbox > 0 && (
             <span className="flex items-center gap-1 text-amber-600" title="待处理收件">
