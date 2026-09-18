@@ -128,7 +128,7 @@ export function MarkdownText({ children, tone = "light", className }: MarkdownTe
             return (
               <div className="relative my-2">
                 <span
-                  className={`absolute top-1.5 right-2 text-[9px] font-mono uppercase tracking-wide select-none pointer-events-none ${
+                  className={`absolute top-1.5 right-2 text-[10px] font-mono uppercase tracking-wide select-none pointer-events-none ${
                     onBlue ? "text-blue-300/60" : "text-gray-500"
                   }`}
                 >
