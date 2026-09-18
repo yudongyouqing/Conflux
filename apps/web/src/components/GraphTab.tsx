@@ -3,6 +3,7 @@ import {
   ReactFlow,
   Background,
   Controls,
+  MiniMap,
   Panel,
   useNodesState,
   useEdgesState,
@@ -216,18 +217,20 @@ export function GraphTab({
       minZoom={0.2}
       maxZoom={1.25}
       fitView
-      fitViewOptions={{ padding: 0.3, maxZoom: 1 }}
+      fitViewOptions={{ padding: 0.3, maxZoom: 1, duration: 400 }}
       proOptions={{ hideAttribution: true }}
-      className="bg-gray-50"
+      className="bg-[#F7F8FA]"
     >
       <Panel position="top-left" className="!m-2">
-        <div className="flex bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden text-xs">
+        <div className="flex bg-white border border-slate-200/80 rounded-lg shadow-[0_2px_10px_rgba(16,24,40,0.08)] overflow-hidden text-xs">
           {(Object.keys(VIEW_LABELS) as ViewMode[]).map((m) => (
             <button
               key={m}
               onClick={() => setViewMode(m)}
-              className={`px-3 py-1.5 transition-colors ${
-                viewMode === m ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-50"
+              className={`px-3 py-1.5 transition-colors duration-200 ${
+                viewMode === m
+                  ? "bg-blue-600 text-white"
+                  : "text-gray-600 hover:bg-slate-50 hover:text-gray-900"
               }`}
             >
               {VIEW_LABELS[m]}
@@ -238,13 +241,24 @@ export function GraphTab({
       {/* no edges in view: say WHY instead of looking like a broken graph */}
       {edges.length === 0 && nodes.length > 0 && (
         <Panel position="bottom-center" className="!mb-4">
-          <div className="text-[11px] text-gray-400 bg-white/85 border border-gray-100 rounded-full px-3 py-1 shadow-sm">
+          <div className="text-[11px] text-gray-400 bg-white/90 backdrop-blur-sm border border-slate-100 rounded-full px-3 py-1 shadow-[0_2px_10px_rgba(16,24,40,0.08)]">
             当前视图暂无会话间消息通道 —— 发起一次对话即可建立连线
           </div>
         </Panel>
       )}
-      <Background color="#cbd5e1" gap={24} />
-      <Controls className="!bg-white !border !border-gray-200 !rounded-lg !shadow-sm [&_button]:!bg-white [&_button]:!border-gray-200 [&_button]:!text-gray-600 [&_button:hover]:!bg-gray-50" />
+      <Background color="#D9DFE8" gap={22} size={1.2} />
+      <Controls
+        className="!bg-white !border !border-slate-200/80 !rounded-lg !shadow-[0_2px_10px_rgba(16,24,40,0.1)] !overflow-hidden [&_button]:!bg-white [&_button]:!border-slate-100 [&_button]:!text-slate-500 [&_button:hover]:!bg-slate-50 [&_button:hover]:!text-slate-700"
+      />
+      <MiniMap
+        pannable
+        zoomable
+        bgColor="#F7F8FA"
+        nodeColor="#CBD5E1"
+        nodeStrokeColor="#94A3B8"
+        maskColor="rgba(247,248,250,0.7)"
+        className="!border !border-slate-200/80 !rounded-lg !shadow-[0_2px_10px_rgba(16,24,40,0.1)]"
+      />
     </ReactFlow>
   );
 }
