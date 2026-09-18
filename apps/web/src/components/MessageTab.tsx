@@ -119,7 +119,7 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
                         mine ? "border-blue-400/50" : "border-gray-200"
                       }`}
                     >
-                      <div className="text-[9px] font-semibold uppercase tracking-wide opacity-60 mb-0.5">
+                      <div className="text-[10px] font-semibold uppercase tracking-wide opacity-60 mb-0.5">
                         回复
                       </div>
                       <MarkdownText>{m.reply}</MarkdownText>

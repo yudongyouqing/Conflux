@@ -232,7 +232,7 @@ function EdgeFlowView({
                   <div className="text-[10px] text-amber-600 mt-0.5">等待回复…</div>
                 ) : m.reply ? (
                   <div className="p-3 rounded-2xl border bg-white border-emerald-200 text-gray-800 max-w-[95%] mt-1 shadow-sm relative">
-                    <div className="absolute -top-2 left-3 text-[9px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-full px-1.5">
+                    <div className="absolute -top-2 left-3 text-[10px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-full px-1.5">
                       回复
                     </div>
                     <MarkdownText>{m.reply}</MarkdownText>
