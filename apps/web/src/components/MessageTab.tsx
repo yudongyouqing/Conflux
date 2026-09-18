@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useMessages, useGraph, useSessions, usePeerMessages } from "../hooks";
+import { useMessages, useGraph, useSessions, usePeerMessages, useEdgeMessages, useEdgeAsk } from "../hooks";
 import { api } from "../api";
 import { MentionComposer } from "./MentionComposer";
 import { MessageCard } from "./MessageCard";
@@ -21,13 +21,23 @@ interface MessageTabProps {
 export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabProps) {
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
-  const [peer, setPeer] = useState<string | null>(null); // thread open with this session
+  // Open conversation: either a CHANNEL (edge — any A→B pair, the common case
+  // when clicking a feed card) or a plain web-console↔peer thread (composer
+  // sends). Channel mode shows the full exchange and speaks as the channel's
+  // initiator; peer mode is the legacy web-only view.
+  const [conv, setConv] = useState<
+    { kind: "edge"; edgeId: number; from: string; to: string } | { kind: "peer"; peer: string } | null
+  >(null);
   const [draft, setDraft] = useState("");
 
   const { data, isLoading } = useMessages({ status: statusFilter });
   const graph = useGraph();
   const sessions = useSessions("active");
+  const peer = conv?.kind === "peer" ? conv.peer : null;
   const thread = usePeerMessages(peer);
+  const channel = conv?.kind === "edge" ? conv : null;
+  const channelMsgs = useEdgeMessages(channel?.edgeId ?? null);
+  const edgeAsk = useEdgeAsk();
 
   const queryClient = useQueryClient();
   const ask = useMutation({
@@ -68,18 +78,34 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
   const peerName = peer
     ? (peerSession?.name ?? nameMap.get(peer) ?? peer.slice(0, 8))
     : null;
+  const nameOf = (id: string) => nameMap.get(id) ?? id.slice(0, 8);
+  // edge endpoint list arrives newest-first (EdgeFlowView contract); the
+  // bubble stream wants chronological order
+  const channelList = (channelMsgs.data?.messages ?? []).slice().reverse();
+  const fromSession = sessions.data?.sessions.find((s) => s.id === channel?.from);
 
   const sendDraft = () => {
     const question = draft.trim();
-    if (!peer || !question || ask.isPending) return;
+    if (!question) return;
+    if (channel) {
+      if (edgeAsk.isPending) return;
+      edgeAsk.mutate(
+        { edgeId: channel.edgeId, question },
+        { onSuccess: () => setDraft("") },
+      );
+      return;
+    }
+    if (!peer || ask.isPending) return;
     ask.mutate(question);
   };
+  const sending = channel ? edgeAsk.isPending : ask.isPending;
+  const askError = channel ? edgeAsk.error : ask.error;
 
-  const openThread = (id: string) => setPeer(id);
-  const closeThread = () => setPeer(null);
+  const openThread = (id: string) => setConv({ kind: "peer", peer: id });
+  const closeThread = () => setConv(null);
 
-  // ---- full-height thread view (replaces the feed) ----
-  if (peer !== null) {
+  // ---- full-height conversation view (replaces the feed) ----
+  if (conv !== null) {
     return (
       <div className="flex flex-col h-full bg-paper">
         <div className="flex items-center justify-between p-3 bg-white border-b border-line">
@@ -92,17 +118,29 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
               <ArrowLeft size={13} /> 返回
             </button>
             <span className="text-ink-faint">|</span>
-            {peerSession && <StatusDot status={peerSession.status} busy={peerSession.busy} />}
-            <span className="font-medium">与 {peerName} 的对话</span>
+            {channel ? (
+              <>
+                {fromSession && <StatusDot status={fromSession.status} busy={fromSession.busy} />}
+                <span className="font-medium">
+                  {nameOf(channel.from)} 与 {nameOf(channel.to)} 的对话
+                </span>
+              </>
+            ) : (
+              <>
+                {peerSession && <StatusDot status={peerSession.status} busy={peerSession.busy} />}
+                <span className="font-medium">与 {peerName} 的对话</span>
+              </>
+            )}
             <span className="text-ink-faint">每 5 秒刷新</span>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-4 space-y-2">
-          {(thread.data?.messages ?? []).length === 0 && (
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="max-w-3xl mx-auto space-y-2">
+          {(channel ? channelList : (thread.data?.messages ?? [])).length === 0 && (
             <div className="text-xs text-ink-faint text-center py-6">暂无往来消息</div>
           )}
-          {(thread.data?.messages ?? []).map((m) => {
-            const mine = m.from_session === WEB_CONSOLE_ID;
+          {(channel ? channelList : (thread.data?.messages ?? [])).map((m) => {
+            const mine = channel ? m.from_session === channel.from : m.from_session === WEB_CONSOLE_ID;
             return (
               <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
                 <div
@@ -132,13 +170,18 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
               </div>
             );
           })}
+          </div>
         </div>
         {/* fixed-target composer */}
         <div className="p-3 bg-white border-t border-line">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 max-w-3xl mx-auto">
             <input
               type="text"
-              placeholder={`向 ${peerName} 提问…（回车发送）`}
+              placeholder={
+                channel
+                  ? `以 ${nameOf(channel.from)} 身份在通道 #${channel.edgeId} 发言…（回车发送）`
+                  : `向 ${peerName} 提问…（回车发送）`
+              }
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
@@ -151,15 +194,15 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
             />
             <button
               onClick={sendDraft}
-              disabled={!draft.trim() || ask.isPending}
+              disabled={!draft.trim() || sending}
               className="inline-flex items-center gap-1.5 text-sm text-white bg-blue-500 hover:bg-blue-600 rounded-lg px-3 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Send size={13} /> 发送
             </button>
           </div>
-          {ask.isError && (
+          {askError && (
             <div className="text-xs text-red-500 mt-1">
-              发送失败: {(ask.error as Error).message}
+              发送失败: {(askError as Error).message}
             </div>
           )}
         </div>
@@ -219,11 +262,16 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
             toName={nameMap.get(msg.to_session)}
             toStatus={statusMap.get(msg.to_session)}
             onClick={() => {
-              // The full-height thread view IS the detail view — the side
-              // DetailPanel must not light up next to it (duplicate content,
-              // wasted width), so clear any stale selection instead.
+              // The full-height conversation view IS the detail view — the
+              // side DetailPanel must not light up next to it. Feed cards
+              // open the message's CHANNEL (any A→B pair) — the web-console
+              // peer thread would be empty for third-party exchanges.
               onSelectMessage(null);
-              openThread(msg.from_session === WEB_CONSOLE_ID ? msg.to_session : msg.from_session);
+              if (msg.edge_id != null) {
+                setConv({ kind: "edge", edgeId: msg.edge_id, from: msg.from_session, to: msg.to_session });
+              } else {
+                openThread(msg.from_session === WEB_CONSOLE_ID ? msg.to_session : msg.from_session);
+              }
             }}
             selected={msg.id === selectedMessageId}
           />
