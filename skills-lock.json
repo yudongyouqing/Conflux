@@ -13,6 +13,12 @@
       "skillPath": "skills/webapp-testing/SKILL.md",
       "computedHash": "3f14af7f5690695209c22fbf8c8d133769a86d64892602c09bb13f135e14e857"
     },
+    "frontend-design": {
+      "source": "anthropics/claude-code",
+      "sourceType": "github",
+      "skillPath": "plugins/frontend-design/skills/frontend-design/SKILL.md",
+      "computedHash": "d91970639e9f5c37682ac7ab60094d35f1c7c1f38d731bd56396563aee10c1d3"
+    },
     "code-reviewer": {
       "source": "google-gemini/gemini-cli",
       "sourceType": "github",
