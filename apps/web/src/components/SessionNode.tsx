@@ -66,12 +66,12 @@ export function SessionNode({ data, selected, dragging }: NodeProps) {
   return (
     <div
       title={d.skills?.length ? `技能: ${d.skills.join(" · ")}` : undefined}
-      className={`group relative w-[176px] rounded-xl bg-white border border-gray-200 overflow-hidden transition-all duration-150 cursor-grab active:cursor-grabbing ${
+      className={`group relative w-[176px] rounded-xl bg-white border border-slate-200/70 overflow-hidden transition-all duration-200 ease-out cursor-grab active:cursor-grabbing ${
         dragging
-          ? "shadow-xl scale-[1.02] ring-2 ring-blue-500/40"
+          ? "shadow-[0_12px_28px_rgba(16,24,40,0.18)] scale-[1.02] ring-2 ring-blue-500/30 border-slate-300"
           : selected
-            ? "shadow-lg ring-2 ring-blue-500/50"
-            : "shadow-sm hover:shadow-lg hover:border-gray-300 hover:-translate-y-px"
+            ? "shadow-[0_4px_16px_rgba(37,99,235,0.16)] ring-2 ring-blue-500"
+            : "shadow-[0_1px_2px_rgba(16,24,40,0.05),0_4px_12px_rgba(16,24,40,0.06)] hover:shadow-[0_8px_24px_rgba(16,24,40,0.12)] hover:border-slate-300 hover:-translate-y-0.5"
       } ${d.highlighted ? "ring-2 ring-amber-400/80" : ""}`}
     >
       {/* signature top accent strip */}
@@ -87,14 +87,14 @@ export function SessionNode({ data, selected, dragging }: NodeProps) {
         {/* header: icon block + name + status */}
         <div className="flex items-center gap-2">
           <div
-            className={`w-5 h-5 rounded-md ${skin.block} flex items-center justify-center flex-shrink-0 shadow-sm`}
+            className={`w-6 h-6 rounded-[7px] ${skin.block} flex items-center justify-center flex-shrink-0 shadow-sm`}
           >
-            <Icon size={11} className="text-white" />
+            <Icon size={12} className="text-white" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1">
               <span
-                className="text-gray-900 text-[11px] font-semibold truncate flex-1"
+                className="text-gray-900 text-[12px] font-semibold truncate flex-1"
                 title={d.name}
               >
                 {d.name}
@@ -102,12 +102,14 @@ export function SessionNode({ data, selected, dragging }: NodeProps) {
               <span
                 className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
                   STATUS_DOT[d.status] ?? "bg-gray-300"
-                } ${d.status === "active" ? "shadow-[0_0_0_2px_rgba(16,185,129,0.15)]" : ""}`}
+                } ${d.status === "active" ? "shadow-[0_0_0_2px_rgba(16,185,129,0.15)] animate-pulse" : ""}`}
                 title={`状态: ${d.status}`}
               />
             </div>
             {d.runtime && !isAgent && (
-              <div className="text-[8px] text-gray-400 uppercase tracking-wide">{d.runtime}</div>
+              <div className="text-[9px] text-slate-400 font-medium uppercase tracking-wider leading-3">
+                {d.runtime}
+              </div>
             )}
           </div>
         </div>
@@ -117,27 +119,36 @@ export function SessionNode({ data, selected, dragging }: NodeProps) {
           d.description !== "Claude Code session (hook)" &&
           d.description !== "浏览器界面身份(从会话详情抽屉发起的对话)" && (
             <div
-              className="text-[10px] text-gray-500 truncate mt-1 leading-3"
+              className="text-[11px] text-gray-500 truncate mt-1.5 leading-4"
               title={d.description}
             >
               {d.description}
             </div>
           )}
 
-        {/* footer meta */}
-        <div className="flex items-center gap-2.5 mt-1.5 text-[9px] text-gray-400">
+        {/* footer meta — quiet metric chips */}
+        <div className="flex items-center gap-1.5 mt-2 text-[9px]">
           {d.context_count > 0 && (
-            <span className="flex items-center gap-1" title="已发布上下文">
+            <span
+              className="inline-flex items-center gap-1 rounded-md bg-slate-50 border border-slate-100 px-1.5 py-[1px] text-gray-500"
+              title="已发布上下文"
+            >
               <FileText size={10} /> {d.context_count}
             </span>
           )}
           {d.pending_inbox > 0 && (
-            <span className="flex items-center gap-1 text-amber-600" title="待处理收件">
+            <span
+              className="inline-flex items-center gap-1 rounded-md bg-amber-50 border border-amber-100 px-1.5 py-[1px] text-amber-600"
+              title="待处理收件"
+            >
               <Inbox size={10} /> {d.pending_inbox}
             </span>
           )}
           {isAgent && (d.conversation_count ?? 0) > 0 && (
-            <span className="flex items-center gap-1 text-indigo-500">
+            <span
+              className="inline-flex items-center gap-1 rounded-md bg-indigo-50 border border-indigo-100 px-1.5 py-[1px] text-indigo-500"
+              title="对话数"
+            >
               <MessageSquare size={10} /> {d.conversation_count}
             </span>
           )}
