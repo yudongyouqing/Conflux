@@ -1,7 +1,14 @@
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 import { STALE_AFTER_MS } from "../config.js";
-import type { IdentitySource, Session, SessionRuntime, SessionSummary } from "@conflux/shared";
+import {
+  PLACEHOLDER_DESCRIPTIONS,
+  WEB_CONSOLE_ID,
+  type IdentitySource,
+  type Session,
+  type SessionRuntime,
+  type SessionSummary,
+} from "@conflux/shared";
 import { parseIdentitySource, parseRuntimePid, parseSessionRuntime } from "./session-identity.js";
 
 export type { Session, SessionSummary };
@@ -190,15 +197,15 @@ export function pruneAbandonedSessions(
        WHERE COALESCE(metadata, '') NOT LIKE '%"named":true%'
          AND COALESCE(metadata, '') NOT LIKE '%"agent_id":%'
          AND (
-           description IN ('Claude Code session (hook)', 'Claude Code session (auto-registered)')
+           description IN (${PLACEHOLDER_DESCRIPTIONS.map(() => "?").join(", ")})
            OR COALESCE(metadata, '') LIKE '%"temp":true%'
          )`,
     )
-    .all() as { id: string; status: string; metadata: string | null }[];
+    .all(...PLACEHOLDER_DESCRIPTIONS) as { id: string; status: string; metadata: string | null }[];
 
   let deleted = 0;
   for (const row of candidates) {
-    if (row.id === "web-console" || row.id === opts.keepId) continue;
+    if (row.id === WEB_CONSOLE_ID || row.id === opts.keepId) continue;
     if (opts.claudePid !== undefined) {
       let meta: Record<string, unknown> = {};
       try {

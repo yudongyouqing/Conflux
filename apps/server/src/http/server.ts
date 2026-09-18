@@ -26,6 +26,7 @@ import {
 import { expireMcpLeases } from "../core/mcp-liveness.js";
 import { refreshCodexSessionTitles } from "../core/codex-titles.js";
 import { logger } from "../log.js";
+import { WEB_CONSOLE_DESCRIPTION, WEB_CONSOLE_NAME } from "@conflux/shared";
 import { createServerContext, httpError, WEB_CONSOLE_ID } from "./context.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
 import { registerContextRoutes } from "./routes/context.js";
@@ -70,8 +71,8 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   // asks have a stable FK target and appear in the graph as a single node.
   registerSession(db, {
     id: WEB_CONSOLE_ID,
-    name: "Web 控制台",
-    description: "浏览器界面身份(从会话详情抽屉发起的对话)",
+    name: WEB_CONSOLE_NAME,
+    description: WEB_CONSOLE_DESCRIPTION,
   });
   const consoleBeat = setInterval(() => {
     try {

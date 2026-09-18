@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSessions } from "../hooks";
 import { api } from "../api";
 import { StatusDot } from "./StatusDot";
-import type { Message, SessionStatus } from "@conflux/shared";
+import { WEB_CONSOLE_ID, type Message, type SessionStatus } from "@conflux/shared";
 
 /** Minimal session identity the composer needs (GraphNode and SessionSummary both satisfy it). */
 export interface ComposerTarget {
@@ -50,7 +50,7 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
   const candidates = useMemo(() => {
     if (mentionQuery === null) return [];
     return (sessions.data?.sessions ?? [])
-      .filter((s) => s.id !== "web-console" && !s.id.startsWith("agent-"))
+      .filter((s) => s.id !== WEB_CONSOLE_ID && !s.id.startsWith("agent-"))
       .filter(
         (s) =>
           s.name.toLowerCase().includes(mentionQuery) || s.id.toLowerCase().includes(mentionQuery),
@@ -92,14 +92,14 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
     ask.mutate({
       to_session: target.id,
       question,
-      ...(sender && sender.id !== "web-console" ? { from_session: sender.id } : {}),
+      ...(sender && sender.id !== WEB_CONSOLE_ID ? { from_session: sender.id } : {}),
     });
   };
 
   return (
     <div className={`p-3 bg-white border border-gray-200 rounded-lg shadow-sm ${className ?? ""}`}>
       <div className="flex items-center gap-2">
-        {sender && sender.id !== "web-console" && (
+        {sender && sender.id !== WEB_CONSOLE_ID && (
           <span
             className="text-xs text-gray-500 whitespace-nowrap truncate max-w-32"
             title={`以 ${sender.name} 的身份发送`}
