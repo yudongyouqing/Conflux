@@ -22,7 +22,7 @@ Use TypeScript with two-space indentation, semicolons, and double quotes, matchi
 
 ## Testing Guidelines
 
-Tests use Node's built-in test runner with `tsx`; name files `*.test.ts` (desktop tests use `*.test.cjs`). Place tests beside the owning workspace's test directory and describe behavior in test names. Add focused regression coverage for changed contracts, then run the affected workspace suite and `npm run build`. UI changes should also be checked at desktop and narrow viewport sizes when layout is involved.
+Tests use Node's built-in test runner with `tsx`; name files `*.test.ts` (desktop tests use `*.test.cjs`). Place tests beside the owning workspace's test directory and describe behavior in test names. Add focused regression coverage for changed contracts, then run the affected workspace suite and `npm run build`. UI changes should also be checked at desktop and narrow viewport sizes when layout is involved, and every component must use the design tokens defined in `docs/DESIGN-TOKENS.md` (no raw gray scales, IBM Plex type, three-tier shadows, 10px floor).
 
 ## Commit & Pull Request Guidelines
 
