@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 import { ArrowLeft, Send, Bot, User, Wrench, Loader2 } from "lucide-react";
 import { api } from "../api";
+import { MarkdownText } from "./MarkdownText";
 import type { Agent } from "@conflux/shared";
 
 interface ChatPanelProps {
@@ -243,11 +244,11 @@ function MessageBubble({
         )}
       </div>
       <div
-        className={`max-w-[75%] px-4 py-2.5 rounded-xl text-sm whitespace-pre-wrap shadow-sm ${
+        className={`max-w-[75%] px-4 py-2.5 rounded-xl shadow-sm ${
           isUser ? "bg-blue-600 text-white" : "bg-white text-gray-800 border border-gray-200"
         }`}
       >
-        {content}
+        <MarkdownText tone={isUser ? "blue" : "light"}>{content}</MarkdownText>
         {streaming && (
           <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-gray-400 animate-pulse align-text-bottom" />
         )}
