@@ -140,33 +140,31 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
             <div className="text-xs text-ink-faint text-center py-6">暂无往来消息</div>
           )}
           {(channel ? channelList : (thread.data?.messages ?? [])).map((m) => {
+            // Ask and answer are SEPARATE bubbles: the question rides the
+            // asker's side, the reply the answerer's — a chat exchange, not
+            // a Q/A card.
             const mine = channel ? m.from_session === channel.from : m.from_session === WEB_CONSOLE_ID;
             return (
-              <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
-                <div
-                  className={`max-w-[80%] rounded-xl px-3 py-2 text-xs ${
-                    mine
-                      ? "bg-blue-500 text-white"
-                      : "bg-paper text-ink border border-line"
-                  }`}
-                >
-                  <MarkdownText tone={mine ? "blue" : "light"}>{m.question}</MarkdownText>
-                  {m.reply && (
-                    <div
-                      className={`mt-2 pt-2 border-t ${
-                        mine ? "border-blue-400/50" : "border-line"
-                      }`}
-                    >
-                      <div className="text-[10px] font-semibold uppercase tracking-wide opacity-60 mb-0.5">
-                        回复
-                      </div>
+              <div key={m.id} className="space-y-2">
+                <div className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+                  <div
+                    className={`max-w-[68%] rounded-xl px-3 py-2 text-xs ${
+                      mine ? "bg-blue-500 text-white" : "bg-paper text-ink border border-line"
+                    }`}
+                  >
+                    <MarkdownText tone={mine ? "blue" : "light"}>{m.question}</MarkdownText>
+                    {mine && m.status === "pending" && (
+                      <div className="mt-1 text-[10px] text-blue-200">等待对方处理…</div>
+                    )}
+                  </div>
+                </div>
+                {m.reply && (
+                  <div className={`flex ${mine ? "justify-start" : "justify-end"}`}>
+                    <div className="max-w-[68%] rounded-xl px-3 py-2 text-xs bg-paper text-ink border border-line">
                       <MarkdownText>{m.reply}</MarkdownText>
                     </div>
-                  )}
-                  {mine && m.status === "pending" && (
-                    <div className="mt-1 text-[10px] text-blue-200">等待对方处理…</div>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             );
           })}
