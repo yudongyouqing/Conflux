@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { RuntimeId } from "@conflux/shared";
+import { WEB_CONSOLE_ID, type RuntimeId } from "@conflux/shared";
 import type { DB } from "./db.js";
 import { logger } from "../log.js";
 import { isRuntimeCommand } from "./runtime-identity.js";
@@ -150,7 +150,7 @@ export function reconcileRuntimeLiveness(
   );
 
   for (const row of rows) {
-    if (row.id === "web-console") continue;
+    if (row.id === WEB_CONSOLE_ID) continue;
     try {
       const parsed: unknown = JSON.parse(row.metadata ?? "{}");
       if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) continue;

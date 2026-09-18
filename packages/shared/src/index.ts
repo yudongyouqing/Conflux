@@ -230,3 +230,26 @@ export interface ConfluxDataBundle {
   turns: Turn[];
   runtime_agents: ExportedRuntimeAgent[];
 }
+
+/**
+ * Well-known session identities shared by the server (which registers them)
+ * and the web app (which styles/filters them). String literals must never
+ * drift between the two sides.
+ */
+export const WEB_CONSOLE_ID = "web-console";
+export const WEB_CONSOLE_NAME = "Web 控制台";
+
+/**
+ * Boilerplate descriptions the server writes for sessions that have no
+ * user-facing name yet. Writers reference the named constants; consumers
+ * (SQL filters, card renderers) match against PLACEHOLDER_DESCRIPTIONS.
+ */
+export const HOOK_SESSION_DESCRIPTION = "Claude Code session (hook)";
+export const AUTO_REGISTERED_DESCRIPTION = "Claude Code session (auto-registered)";
+export const WEB_CONSOLE_DESCRIPTION = "浏览器界面身份(从会话详情抽屉发起的对话)";
+
+export const PLACEHOLDER_DESCRIPTIONS = [
+  HOOK_SESSION_DESCRIPTION,
+  AUTO_REGISTERED_DESCRIPTION,
+  WEB_CONSOLE_DESCRIPTION,
+] as const;

@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import type { RuntimeId } from "@conflux/shared";
+import { HOOK_SESSION_DESCRIPTION, type RuntimeId } from "@conflux/shared";
 import type { DB } from "./db.js";
 import {
   registerSession,
@@ -371,7 +371,7 @@ export function handleHookEvent(
         (typeof meta.named === "boolean" && meta.named && existing
           ? existing.name
           : basename(payload.cwd || "") || "claude"),
-      description: meta.named && existing ? existing.description : "Claude Code session (hook)",
+      description: meta.named && existing ? existing.description : HOOK_SESSION_DESCRIPTION,
       project_dir: payload.cwd ?? existing?.project_dir ?? null,
       metadata: {
         source: "claude-hook",
@@ -425,7 +425,7 @@ export function handleHookEvent(
   registerSession(db, {
     id,
     name: title ?? excerpt ?? existing?.name ?? "claude",
-    description: excerpt ?? existing?.description ?? "Claude Code session (hook)",
+    description: excerpt ?? existing?.description ?? HOOK_SESSION_DESCRIPTION,
     project_dir: payload.cwd ?? existing?.project_dir ?? null,
     metadata: {
       source: "claude-hook",
