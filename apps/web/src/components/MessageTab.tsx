@@ -168,15 +168,21 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
   }
 
   // ---- feed view ----
+  // Content column is width-capped and centered (ChatPanel pattern): a
+  // full-bleed feed leaves empty states stranded left on wide screens and
+  // stretches message cards past a readable line length.
   return (
     <div className="flex flex-col h-full bg-paper">
       {/* ---- @ composer ---- */}
       <div className="p-3 bg-white border-b border-line">
-        <MentionComposer onSent={(t) => openThread(t.id)} />
+        <div className="max-w-3xl mx-auto">
+          <MentionComposer onSent={(t) => openThread(t.id)} />
+        </div>
       </div>
 
       {/* ---- list filters ---- */}
-      <div className="flex items-center gap-2 p-3 bg-white border-b border-line">
+      <div className="p-3 bg-white border-b border-line">
+        <div className="flex items-center gap-2 max-w-3xl mx-auto">
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
@@ -195,9 +201,11 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
           onChange={(e) => setSearch(e.target.value)}
           className="flex-1 bg-white text-ink text-xs rounded-lg px-2.5 py-1.5 border border-line placeholder-gray-400 outline-none focus:border-blue-500"
         />
+        </div>
       </div>
-      <div className="flex-1 overflow-y-auto p-4 space-y-2">
-        {isLoading && <div className="text-ink-faint text-sm text-center mt-8">加载中...</div>}
+      <div className="flex-1 overflow-y-auto p-4">
+        <div className="max-w-3xl mx-auto space-y-2">
+          {isLoading && <div className="text-ink-faint text-sm text-center mt-8">加载中...</div>}
         {!isLoading && filtered.length === 0 && (
           <div className="text-ink-faint text-sm text-center mt-8">
             {search ? "无匹配消息" : "暂无消息"}
@@ -220,6 +228,7 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
             selected={msg.id === selectedMessageId}
           />
         ))}
+        </div>
       </div>
     </div>
   );
