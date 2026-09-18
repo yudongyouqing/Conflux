@@ -7,7 +7,8 @@ import {
   useSessions,
 } from "../hooks";
 import type { RuntimeId } from "@conflux/shared";
-import { Terminal, FolderOpen, Cpu, Trash2, Plus, Loader2, Clock, X, ChevronDown, Bot, Search, Compass } from "lucide-react";
+import { ClaudeIcon, OpenAIIcon } from "./brand-icons";
+import { Terminal, FolderOpen, Cpu, Trash2, Plus, Loader2, Clock, X, ChevronDown, Search, Compass } from "lucide-react";
 
 const EMPTY_FORM = {
   interval_min: "",
@@ -397,7 +398,7 @@ function RuntimeCard({
           : "border-gray-200 text-gray-600 hover:border-gray-300"
       }`}
     >
-      {label === "Claude Code" ? <Bot size={14} /> : <Terminal size={14} />}
+      {label === "Claude Code" ? <ClaudeIcon size={14} /> : <OpenAIIcon size={14} />}
       {label}
     </button>
   );
