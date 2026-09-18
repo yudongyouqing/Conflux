@@ -84,16 +84,22 @@ export default function App() {
           {tab === "runtimes" && <RuntimesTab />}
           {tab === "settings" && <SettingsTab />}
         </main>
-        <aside className="w-80 border-l border-line bg-white overflow-hidden flex-shrink-0">
-          <DetailPanel
-            session={selectedSession}
-            message={selectedMessage}
-            edge={selectedEdge}
-            sessionNameLookup={sessionNameLookup}
-            sessionStatusLookup={sessionStatusLookup}
-            onOpenEdge={handleSelectEdge}
-          />
-        </aside>
+        {/* The detail rail belongs to the graph and session views (node/edge
+         * inspection). Messages own their full-screen conversation view,
+         * agents/runtimes/settings are self-contained — no dead "select an
+         * object" panel next to them. */}
+        {(tab === "graph" || tab === "sessions") && (
+          <aside className="w-80 border-l border-line bg-white overflow-hidden flex-shrink-0">
+            <DetailPanel
+              session={selectedSession}
+              message={selectedMessage}
+              edge={selectedEdge}
+              sessionNameLookup={sessionNameLookup}
+              sessionStatusLookup={sessionStatusLookup}
+              onOpenEdge={handleSelectEdge}
+            />
+          </aside>
+        )}
       </div>
     </div>
   );
