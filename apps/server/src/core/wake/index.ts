@@ -1,3 +1,4 @@
+import { WEB_CONSOLE_ID } from "@conflux/shared";
 import type { DB } from "../db.js";
 import { logger } from "../../log.js";
 import { getAutoWake, getSetting, getTerminalSettings, setSetting } from "../app-settings.js";
@@ -33,7 +34,7 @@ export function wakeSessionForMail(
   opts: { dryRun?: boolean; now?: Date; claudeHome?: string } = {},
 ): WakeResult {
   if (!getAutoWake(db)) return { woke: false, reason: "auto_wake disabled" };
-  if (sessionId === "web-console" || sessionId.startsWith("agent-")) {
+  if (sessionId === WEB_CONSOLE_ID || sessionId.startsWith("agent-")) {
     return { woke: false, reason: "not a CLI conversation" };
   }
   const session = getSession(db, sessionId);

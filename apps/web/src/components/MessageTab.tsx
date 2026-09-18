@@ -7,7 +7,7 @@ import { MessageCard } from "./MessageCard";
 import { MarkdownText } from "./MarkdownText";
 import { StatusDot } from "./StatusDot";
 import { ArrowLeft, Send } from "lucide-react";
-import type { Message } from "@conflux/shared";
+import { WEB_CONSOLE_ID, type Message } from "@conflux/shared";
 
 interface MessageTabProps {
   onSelectMessage: (msg: Message | null) => void;
@@ -102,7 +102,7 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
             <div className="text-xs text-gray-400 text-center py-6">暂无往来消息</div>
           )}
           {(thread.data?.messages ?? []).map((m) => {
-            const mine = m.from_session === "web-console";
+            const mine = m.from_session === WEB_CONSOLE_ID;
             return (
               <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
                 <div
@@ -212,7 +212,7 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
             toStatus={statusMap.get(msg.to_session)}
             onClick={() => {
               onSelectMessage(msg);
-              openThread(msg.from_session === "web-console" ? msg.to_session : msg.from_session);
+              openThread(msg.from_session === WEB_CONSOLE_ID ? msg.to_session : msg.from_session);
             }}
             selected={msg.id === selectedMessageId}
           />

@@ -1,7 +1,13 @@
 import { useState } from "react";
 import { useSessionContext, useEdgeMessages, useEdgeAsk, useOpenSessionTerminal } from "../hooks";
 import { MentionComposer } from "./MentionComposer";
-import type { Message, GraphNode, SessionStatus } from "@conflux/shared";
+import {
+  PLACEHOLDER_DESCRIPTIONS,
+  WEB_CONSOLE_ID,
+  type Message,
+  type GraphNode,
+  type SessionStatus,
+} from "@conflux/shared";
 import { StatusDot } from "./StatusDot";
 import { MarkdownText } from "./MarkdownText";
 import {
@@ -15,9 +21,6 @@ import {
   TerminalSquare,
   MousePointerClick,
 } from "lucide-react";
-
-const WEB_CONSOLE_ID = "web-console";
-const DEFAULT_DESC = "Claude Code session (hook)";
 
 interface DetailPanelProps {
   session: GraphNode | null;
@@ -258,7 +261,10 @@ function SessionDetail({
   const openTerminal = useOpenSessionTerminal();
   const [openNote, setOpenNote] = useState<string | null>(null);
   const activity =
-    session.description && session.description !== DEFAULT_DESC ? session.description : null;
+    session.description &&
+    !(PLACEHOLDER_DESCRIPTIONS as readonly string[]).includes(session.description)
+      ? session.description
+      : null;
 
   const handleOpenTerminal = () => {
     setOpenNote(null);

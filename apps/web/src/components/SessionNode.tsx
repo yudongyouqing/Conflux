@@ -9,6 +9,7 @@ import {
   Code2,
   type LucideIcon,
 } from "lucide-react";
+import { PLACEHOLDER_DESCRIPTIONS, WEB_CONSOLE_ID } from "@conflux/shared";
 
 export interface SessionNodeData {
   name: string;
@@ -56,10 +57,12 @@ const STATUS_DOT: Record<string, string> = {
 
 export type SessionNodeType = Node<SessionNodeData>;
 
-export function SessionNode({ data, selected, dragging }: NodeProps) {
+export function SessionNode({ id, data, selected, dragging }: NodeProps) {
   const d = data as SessionNodeData;
   const isAgent = d.type === "agent";
-  const isWeb = (d as { id?: string }).id === "web-console" || d.name === "Web 控制台";
+  // The server registers the browser identity with the fixed WEB_CONSOLE_ID;
+  // name matching would break the moment a user renames the session.
+  const isWeb = id === WEB_CONSOLE_ID;
   const skin = skinFor(d, isAgent, isWeb);
   const Icon = skin.icon;
 
@@ -114,10 +117,8 @@ export function SessionNode({ data, selected, dragging }: NodeProps) {
           </div>
         </div>
 
-        {/* body */}
-        {d.description &&
-          d.description !== "Claude Code session (hook)" &&
-          d.description !== "浏览器界面身份(从会话详情抽屉发起的对话)" && (
+        {/* body — hide boilerplate descriptions the server writes for unnamed sessions */}
+        {d.description && !(PLACEHOLDER_DESCRIPTIONS as readonly string[]).includes(d.description) && (
             <div
               className="text-[11px] text-gray-500 truncate mt-1.5 leading-4"
               title={d.description}
