@@ -219,7 +219,10 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
             toName={nameMap.get(msg.to_session)}
             toStatus={statusMap.get(msg.to_session)}
             onClick={() => {
-              onSelectMessage(msg);
+              // The full-height thread view IS the detail view — the side
+              // DetailPanel must not light up next to it (duplicate content,
+              // wasted width), so clear any stale selection instead.
+              onSelectMessage(null);
               openThread(msg.from_session === WEB_CONSOLE_ID ? msg.to_session : msg.from_session);
             }}
             selected={msg.id === selectedMessageId}
