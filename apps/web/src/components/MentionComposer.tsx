@@ -14,7 +14,7 @@ export interface ComposerTarget {
 }
 
 function targetBadge(s: ComposerTarget): { text: string; color: string } {
-  if (s.status !== "active") return { text: "离线 · 异步投递", color: "text-gray-400" };
+  if (s.status !== "active") return { text: "离线 · 异步投递", color: "text-ink-faint" };
   if (s.busy) return { text: "在线 · 正在回复", color: "text-amber-600" };
   return { text: "在线", color: "text-emerald-600" };
 }
@@ -97,11 +97,11 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
   };
 
   return (
-    <div className={`p-3 bg-white border border-gray-200 rounded-lg shadow-sm ${className ?? ""}`}>
+    <div className={`p-3 bg-white border border-line rounded-lg shadow-sm ${className ?? ""}`}>
       <div className="flex items-center gap-2">
         {sender && sender.id !== WEB_CONSOLE_ID && (
           <span
-            className="text-xs text-gray-500 whitespace-nowrap truncate max-w-32"
+            className="text-xs text-ink-muted whitespace-nowrap truncate max-w-32"
             title={`以 ${sender.name} 的身份发送`}
           >
             {sender.name} →
@@ -120,7 +120,7 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
             </button>
           </span>
         ) : (
-          <span className="text-xs text-gray-400 whitespace-nowrap">输入 @ 选择会话</span>
+          <span className="text-xs text-ink-faint whitespace-nowrap">输入 @ 选择会话</span>
         )}
         {target && (
           <span className={`text-[11px] ${targetBadge(target).color}`}>
@@ -153,10 +153,10 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
               else setText("");
             }
           }}
-          className="w-full bg-white text-gray-800 text-sm rounded-lg px-3 py-2 border border-gray-200 placeholder-gray-400 outline-none focus:border-blue-500"
+          className="w-full bg-white text-ink text-sm rounded-lg px-3 py-2 border border-line placeholder-gray-400 outline-none focus:border-blue-500"
         />
         {mentionQuery !== null && candidates.length > 0 && (
-          <div className="absolute z-10 left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+          <div className="absolute z-10 left-0 right-0 top-full mt-1 bg-white border border-line rounded-lg shadow-lg overflow-hidden">
             {candidates.map((s) => (
               <button
                 key={s.id}
@@ -164,8 +164,8 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
                 className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-blue-50"
               >
                 <StatusDot status={s.status} busy={s.busy} />
-                <span className="text-sm text-gray-800 truncate max-w-56">{s.name}</span>
-                <span className="text-[11px] text-gray-400 truncate flex-1">
+                <span className="text-sm text-ink truncate max-w-56">{s.name}</span>
+                <span className="text-[11px] text-ink-faint truncate flex-1">
                   {s.description ?? s.id.slice(0, 8)}
                 </span>
               </button>
