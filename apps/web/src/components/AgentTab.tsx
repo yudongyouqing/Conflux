@@ -1,24 +1,15 @@
 import { useState } from "react";
 import { Plus, Trash2, Bot, ChevronDown, ChevronUp, MessageSquare } from "lucide-react";
-import { useAgents, useCreateAgent, useDeleteAgent } from "../hooks";
+import { useAgents, useDeleteAgent } from "../hooks";
 import { ChatPanel } from "./ChatPanel";
+import { CreateAgentWizard } from "./CreateAgentWizard";
 import type { Agent } from "@conflux/shared";
-
-const PROVIDERS = ["anthropic", "openai", "google", "mistral", "local"];
 
 export function AgentTab() {
   const { data, isLoading } = useAgents();
-  const createMut = useCreateAgent();
   const deleteMut = useDeleteAgent();
 
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({
-    name: "",
-    description: "",
-    provider: "anthropic",
-    model: "",
-    system_prompt: "",
-  });
+  const [wizardOpen, setWizardOpen] = useState(false);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [chatAgent, setChatAgent] = useState<Agent | null>(null);
 
@@ -28,33 +19,6 @@ export function AgentTab() {
     return <ChatPanel agent={chatAgent} onBack={() => setChatAgent(null)} />;
   }
 
-  function handleCreate() {
-    if (!form.name || !form.model || !form.system_prompt) return;
-    createMut.mutate(
-      {
-        name: form.name,
-        system_prompt: form.system_prompt,
-        model_config: {
-          provider: form.provider,
-          model: form.model,
-        },
-        description: form.description || undefined,
-      },
-      {
-        onSuccess: () => {
-          setShowForm(false);
-          setForm({
-            name: "",
-            description: "",
-            provider: "anthropic",
-            model: "",
-            system_prompt: "",
-          });
-        },
-      },
-    );
-  }
-
   return (
     <div className="flex flex-col h-full bg-paper">
       <div className="flex items-center justify-between p-4 bg-white border-b border-line">
@@ -62,81 +26,18 @@ export function AgentTab() {
           Agents <span className="text-ink-faint font-normal">({agents.length})</span>
         </span>
         <button
-          onClick={() => setShowForm(!showForm)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white transition-colors shadow-sm"
+          onClick={() => setWizardOpen(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-accent hover:bg-blue-500 text-white transition-colors shadow-sm"
         >
-          <Plus size={13} /> 创建 Agent
+          <Plus size={13} /> 创建智能体
         </button>
       </div>
 
-      {showForm && (
-        <div className="p-4 bg-white border-b border-line space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <input
-              placeholder="名称 *"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              className="bg-white text-ink text-xs rounded-lg px-3 py-2 border border-line outline-none focus:border-blue-500"
-            />
-            <input
-              placeholder="描述"
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              className="bg-white text-ink text-xs rounded-lg px-3 py-2 border border-line outline-none focus:border-blue-500"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <select
-              value={form.provider}
-              onChange={(e) => setForm({ ...form, provider: e.target.value })}
-              className="bg-white text-ink text-xs rounded-lg px-3 py-2 border border-line outline-none focus:border-blue-500"
-            >
-              {PROVIDERS.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
-            <input
-              placeholder="模型 * (如 claude-sonnet-4-5)"
-              value={form.model}
-              onChange={(e) => setForm({ ...form, model: e.target.value })}
-              className="bg-white text-ink text-xs rounded-lg px-3 py-2 border border-line outline-none focus:border-blue-500"
-            />
-          </div>
-          <textarea
-            placeholder="System Prompt *"
-            value={form.system_prompt}
-            onChange={(e) => setForm({ ...form, system_prompt: e.target.value })}
-            rows={4}
-            className="w-full bg-white text-ink text-xs rounded-lg px-3 py-2 border border-line outline-none focus:border-blue-500 resize-y font-mono"
-          />
-          <div className="flex items-center justify-end gap-2">
-            <button
-              onClick={() => setShowForm(false)}
-              className="px-3 py-1.5 rounded-lg text-xs text-ink-muted hover:text-ink hover:bg-paper"
-            >
-              取消
-            </button>
-            <button
-              onClick={handleCreate}
-              disabled={!form.name || !form.model || !form.system_prompt || createMut.isPending}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-paper disabled:text-ink-faint text-white transition-colors"
-            >
-              {createMut.isPending ? "创建中..." : "创建"}
-            </button>
-          </div>
-          {createMut.isError && (
-            <div className="text-xs text-red-500">{(createMut.error as Error).message}</div>
-          )}
-        </div>
-      )}
-
       <div className="flex-1 overflow-y-auto p-4 space-y-2">
         {isLoading && <div className="text-ink-faint text-sm text-center mt-8">加载中...</div>}
-        {!isLoading && agents.length === 0 && !showForm && (
+        {!isLoading && agents.length === 0 && (
           <div className="text-ink-faint text-sm text-center mt-12">
-            暂无 Agent。点击"创建 Agent"新建一个。
+            暂无智能体。点「创建智能体」新建，或去「运行时」页启动真正的 CLI agent。
           </div>
         )}
         {agents.map((agent) => (
@@ -150,6 +51,8 @@ export function AgentTab() {
           />
         ))}
       </div>
+
+      <CreateAgentWizard open={wizardOpen} onClose={() => setWizardOpen(false)} />
     </div>
   );
 }
@@ -187,7 +90,7 @@ function AgentCard({
             e.stopPropagation();
             onChat();
           }}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white transition-colors shadow-sm"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-accent hover:bg-blue-500 text-white transition-colors shadow-sm"
         >
           <MessageSquare size={12} /> 对话
         </button>
