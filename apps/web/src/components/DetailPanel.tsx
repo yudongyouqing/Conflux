@@ -77,7 +77,7 @@ export function DetailPanel({
                   ? "bg-violet-50 text-violet-700 border border-violet-200"
                   : message.status === "replied"
                     ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                    : "bg-blue-50 text-blue-700 border border-blue-200"
+                    : "bg-accent-soft text-accent-deep border border-accent/30"
             }`}
           >
             {message.status}
@@ -191,12 +191,12 @@ function EdgeFlowView({
               if (e.key === "Enter" && !e.nativeEvent.isComposing) send();
             }}
             placeholder={`以 ${nameOf(from)} 身份在通道 #${edge.id} 发言…`}
-            className="flex-1 min-w-0 text-xs px-2.5 py-1.5 rounded-lg border border-line focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-300"
+            className="flex-1 min-w-0 text-xs px-2.5 py-1.5 rounded-lg border border-line focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
           />
           <button
             onClick={send}
             disabled={!text.trim() || ask.isPending}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-blue-700 transition-colors flex-shrink-0"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-accent text-white text-xs font-medium disabled:opacity-40 hover:bg-accent-deep transition-colors flex-shrink-0"
           >
             {ask.isPending ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
             发送
@@ -222,7 +222,7 @@ function EdgeFlowView({
                 <div
                   className={`p-3 rounded-2xl border max-w-[95%] shadow-sm ${
                     outgoing
-                      ? "bg-blue-500 border-blue-400 text-white"
+                      ? "bg-accent border-accent text-white"
                       : "bg-white border-line text-ink"
                   }`}
                 >
@@ -283,7 +283,7 @@ function SessionDetail({
         </div>
         {activity && (
           <div
-            className="text-xs text-blue-600 bg-blue-50 border border-blue-100 rounded-lg px-2 py-1 mb-1.5 truncate"
+            className="text-xs text-accent bg-accent-soft border border-accent/20 rounded-lg px-2 py-1 mb-1.5 truncate"
             title={activity}
           >
             正在: {activity}
@@ -369,7 +369,7 @@ function SessionDetail({
                     {e.tags.map((t) => (
                       <span
                         key={t}
-                        className="text-[10px] px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-600 border border-blue-100"
+                        className="text-[10px] px-1.5 py-0.5 rounded-md bg-accent-soft text-accent border border-accent/20"
                       >
                         {t}
                       </span>

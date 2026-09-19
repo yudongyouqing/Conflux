@@ -27,7 +27,7 @@ export function AgentTab() {
         </span>
         <button
           onClick={() => setWizardOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-accent hover:bg-blue-500 text-white transition-colors shadow-sm"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-accent hover:bg-accent-deep text-white transition-colors shadow-sm"
         >
           <Plus size={13} /> 创建智能体
         </button>
@@ -90,7 +90,7 @@ function AgentCard({
             e.stopPropagation();
             onChat();
           }}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-accent hover:bg-blue-500 text-white transition-colors shadow-sm"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-accent hover:bg-accent-deep text-white transition-colors shadow-sm"
         >
           <MessageSquare size={12} /> 对话
         </button>

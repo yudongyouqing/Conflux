@@ -229,7 +229,7 @@ export function GraphTab({
               onClick={() => setViewMode(m)}
               className={`px-3 py-1.5 transition-colors duration-200 ${
                 viewMode === m
-                  ? "bg-blue-600 text-white"
+                  ? "bg-accent text-white"
                   : "text-gray-600 hover:bg-slate-50 hover:text-gray-900"
               }`}
             >

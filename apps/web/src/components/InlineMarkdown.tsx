@@ -75,7 +75,7 @@ function render(seg: Seg, i: number): ReactNode {
           href={seg.href}
           target="_blank"
           rel="noreferrer"
-          className="text-blue-600 hover:underline underline-offset-2"
+          className="text-accent hover:underline underline-offset-2"
         >
           {seg.value}
         </a>
