@@ -26,6 +26,7 @@ Conflux 欢迎 Issue、文档改进和 Pull Request。中文说明在前，英�
 - **色彩语义**：绿=状态灯专用；琥珀脉冲=正在回复（busy）；中性灰=元数据。
 - **UI 改动必须截图验证**：playwright 截图 + 几何断言（boundingBox 测间距/重叠）比肉眼可靠；美学改动建议加视觉模型评审。
 - 布局常量改动同步核对：卡片 CSS 尺寸 ↔ layout.ts 的 NODE_* ↔ GraphTab 的 CELL_*。
+- **技能单一源**：`.agents/skills/` 为唯一编辑源；`.claude/skills/` 是生成产物（已 gitignore），改完技能跑 `npm run skills:sync` 镜像过去。别手改 `.claude/skills/`。
 
 ### 平台陷阱清单（Windows 实测）
 
