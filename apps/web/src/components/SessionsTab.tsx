@@ -71,14 +71,14 @@ export function SessionsTab({ onSelectSession, selectedSessionId }: SessionsTabP
 
   return (
     <div className="h-full overflow-y-auto bg-paper">
-      <div className="sticky top-0 bg-white border-b border-line p-3 z-10">
+      <div className="sticky top-0 bg-surface border-b border-line p-3 z-10">
         <div className="relative">
           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-faint" />
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="搜索名称 / 正在做什么 / 项目路径…"
-            className="w-full text-xs pl-7 pr-2 py-1.5 rounded-lg border border-line bg-white focus:outline-none focus:ring-2 focus:ring-accent/25 focus:border-accent"
+            className="w-full text-xs pl-7 pr-2 py-1.5 rounded-lg border border-line bg-surface focus:outline-none focus:ring-2 focus:ring-accent/25 focus:border-accent"
           />
         </div>
       </div>
@@ -104,8 +104,8 @@ export function SessionsTab({ onSelectSession, selectedSessionId }: SessionsTabP
                       onClick={() => onSelectSession(s.id)}
                       className={`w-full text-left px-3 py-2 rounded-xl border transition-colors ${
                         selected
-                          ? "bg-white border-accent/50 ring-2 ring-accent/25"
-                          : "bg-white border-line hover:border-line-strong hover:shadow-card"
+                          ? "bg-surface border-accent/50 ring-2 ring-accent/25"
+                          : "bg-surface border-line hover:border-line-strong hover:shadow-card"
                       }`}
                     >
                       <div className="flex items-center gap-2">

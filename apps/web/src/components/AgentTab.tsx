@@ -21,13 +21,13 @@ export function AgentTab() {
 
   return (
     <div className="flex flex-col h-full bg-paper">
-      <div className="flex items-center justify-between p-4 bg-white border-b border-line">
+      <div className="flex items-center justify-between p-4 bg-surface border-b border-line">
         <span className="text-sm text-ink font-medium">
           Agents <span className="text-ink-faint font-normal">({agents.length})</span>
         </span>
         <button
           onClick={() => setWizardOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-accent hover:bg-blue-500 text-white transition-colors shadow-sm"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-accent hover:bg-accent-deep text-white transition-colors shadow-sm"
         >
           <Plus size={13} /> 创建智能体
         </button>
@@ -71,7 +71,7 @@ function AgentCard({
   onDelete: () => void;
 }) {
   return (
-    <div className="rounded-xl border border-line bg-white overflow-hidden hover:shadow-sm transition-shadow">
+    <div className="rounded-xl border border-line bg-surface overflow-hidden hover:shadow-sm transition-shadow">
       <div className="flex items-center gap-3 p-4 cursor-pointer" onClick={onToggle}>
         <div className="w-9 h-9 rounded-lg bg-indigo-600 flex items-center justify-center flex-shrink-0">
           <Bot size={17} className="text-white" />
@@ -90,7 +90,7 @@ function AgentCard({
             e.stopPropagation();
             onChat();
           }}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-accent hover:bg-blue-500 text-white transition-colors shadow-sm"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-accent hover:bg-accent-deep text-white transition-colors shadow-sm"
         >
           <MessageSquare size={12} /> 对话
         </button>

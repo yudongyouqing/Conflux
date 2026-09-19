@@ -108,7 +108,7 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
   if (conv !== null) {
     return (
       <div className="flex flex-col h-full bg-paper">
-        <div className="flex items-center justify-between p-3 bg-white border-b border-line">
+        <div className="flex items-center justify-between p-3 bg-surface border-b border-line">
           <div className="flex items-center gap-2 text-xs text-ink-muted">
             <button
               className="inline-flex items-center gap-1 text-ink-faint hover:text-ink"
@@ -149,12 +149,12 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
                 <div className={`flex ${mine ? "justify-end" : "justify-start"}`}>
                   <div
                     className={`max-w-[68%] rounded-xl px-3 py-2 text-xs ${
-                      mine ? "bg-blue-500 text-white" : "bg-paper text-ink border border-line"
+                      mine ? "bg-accent text-white" : "bg-paper text-ink border border-line"
                     }`}
                   >
                     <MarkdownText tone={mine ? "blue" : "light"}>{m.question}</MarkdownText>
                     {mine && m.status === "pending" && (
-                      <div className="mt-1 text-[10px] text-blue-200">等待对方处理…</div>
+                      <div className="mt-1 text-[10px] text-white/70">等待对方处理…</div>
                     )}
                   </div>
                 </div>
@@ -171,7 +171,7 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
           </div>
         </div>
         {/* fixed-target composer */}
-        <div className="p-3 bg-white border-t border-line">
+        <div className="p-3 bg-surface border-t border-line">
           <div className="flex items-center gap-2 max-w-3xl mx-auto">
             <input
               type="text"
@@ -188,12 +188,12 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
                   sendDraft();
                 }
               }}
-              className="flex-1 bg-white text-ink text-sm rounded-lg px-3 py-2 border border-line placeholder-gray-400 outline-none focus:border-blue-500"
+              className="flex-1 bg-surface text-ink text-sm rounded-lg px-3 py-2 border border-line placeholder-gray-400 outline-none focus:border-accent"
             />
             <button
               onClick={sendDraft}
               disabled={!draft.trim() || sending}
-              className="inline-flex items-center gap-1.5 text-sm text-white bg-blue-500 hover:bg-blue-600 rounded-lg px-3 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="inline-flex items-center gap-1.5 text-sm text-white bg-accent hover:bg-accent-deep rounded-lg px-3 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Send size={13} /> 发送
             </button>
@@ -215,19 +215,19 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
   return (
     <div className="flex flex-col h-full bg-paper">
       {/* ---- @ composer ---- */}
-      <div className="p-3 bg-white border-b border-line">
+      <div className="p-3 bg-surface border-b border-line">
         <div className="max-w-3xl mx-auto">
           <MentionComposer onSent={(t) => openThread(t.id)} />
         </div>
       </div>
 
       {/* ---- list filters ---- */}
-      <div className="p-3 bg-white border-b border-line">
+      <div className="p-3 bg-surface border-b border-line">
         <div className="flex items-center gap-2 max-w-3xl mx-auto">
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="bg-white text-ink text-xs rounded-lg px-2.5 py-1.5 border border-line outline-none focus:border-blue-500"
+          className="bg-surface text-ink text-xs rounded-lg px-2.5 py-1.5 border border-line outline-none focus:border-accent"
         >
           <option value="all">全部状态</option>
           <option value="pending">待回复</option>
@@ -240,7 +240,7 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
           placeholder="搜索消息内容..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="flex-1 bg-white text-ink text-xs rounded-lg px-2.5 py-1.5 border border-line placeholder-gray-400 outline-none focus:border-blue-500"
+          className="flex-1 bg-surface text-ink text-xs rounded-lg px-2.5 py-1.5 border border-line placeholder-gray-400 outline-none focus:border-accent"
         />
         </div>
       </div>

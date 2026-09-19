@@ -121,7 +121,7 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
   return (
     <div className="flex flex-col h-full bg-paper">
       {/* Header */}
-      <div className="flex items-center gap-3 px-4 h-14 bg-white border-b border-line flex-shrink-0">
+      <div className="flex items-center gap-3 px-4 h-14 bg-surface border-b border-line flex-shrink-0">
         <button
           onClick={onBack}
           className="flex items-center gap-1 text-xs text-ink-muted hover:text-ink transition-colors"
@@ -177,7 +177,7 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
       </div>
 
       {/* Input */}
-      <div className="p-4 bg-white border-t border-line flex-shrink-0">
+      <div className="p-4 bg-surface border-t border-line flex-shrink-0">
         <div className="max-w-2xl mx-auto flex items-end gap-2">
           <textarea
             value={input}
@@ -186,13 +186,13 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
             placeholder={isStreaming ? "等待回复..." : `跟 ${agent.name} 聊天...`}
             disabled={isStreaming}
             rows={1}
-            className="flex-1 bg-white text-ink text-sm rounded-xl px-4 py-2.5 border border-line placeholder-gray-400 outline-none focus:border-blue-500 resize-none disabled:bg-paper disabled:opacity-60 shadow-sm"
+            className="flex-1 bg-surface text-ink text-sm rounded-xl px-4 py-2.5 border border-line placeholder-gray-400 outline-none focus:border-accent resize-none disabled:bg-paper disabled:opacity-60 shadow-sm"
             style={{ minHeight: "42px", maxHeight: "120px" }}
           />
           <button
             onClick={handleSend}
             disabled={!input.trim() || isStreaming}
-            className="flex items-center justify-center w-10 h-10 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-line disabled:text-ink-faint text-white transition-colors flex-shrink-0 shadow-sm"
+            className="flex items-center justify-center w-10 h-10 rounded-xl bg-accent hover:bg-accent-deep disabled:bg-line disabled:text-ink-faint text-white transition-colors flex-shrink-0 shadow-sm"
           >
             <Send size={16} />
           </button>
@@ -217,7 +217,7 @@ function MessageBubble({
     return (
       <div className={`flex gap-2.5 ${isUser ? "flex-row-reverse" : ""}`}>
         <div
-          className={`flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center ${isUser ? "bg-blue-600" : "bg-line"}`}
+          className={`flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center ${isUser ? "bg-accent" : "bg-line"}`}
         >
           {isUser ? (
             <User size={13} className="text-white" />
@@ -225,7 +225,7 @@ function MessageBubble({
             <Bot size={13} className="text-ink-muted" />
           )}
         </div>
-        <div className="px-4 py-2.5 rounded-xl bg-white border border-line shadow-sm">
+        <div className="px-4 py-2.5 rounded-xl bg-surface border border-line shadow-sm">
           <Loader2 size={14} className="text-ink-faint animate-spin" />
         </div>
       </div>
@@ -235,7 +235,7 @@ function MessageBubble({
   return (
     <div className={`flex gap-2.5 ${isUser ? "flex-row-reverse" : ""}`}>
       <div
-        className={`flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center ${isUser ? "bg-blue-600" : "bg-line"}`}
+        className={`flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center ${isUser ? "bg-accent" : "bg-line"}`}
       >
         {isUser ? (
           <User size={13} className="text-white" />
@@ -245,7 +245,7 @@ function MessageBubble({
       </div>
       <div
         className={`max-w-[75%] px-4 py-2.5 rounded-xl shadow-sm ${
-          isUser ? "bg-blue-600 text-white" : "bg-white text-ink border border-line"
+          isUser ? "bg-accent text-white" : "bg-surface text-ink border border-line"
         }`}
       >
         <MarkdownText tone={isUser ? "blue" : "light"}>{content}</MarkdownText>

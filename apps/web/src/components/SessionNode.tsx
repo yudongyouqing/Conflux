@@ -44,7 +44,7 @@ const RUNTIME_SKIN: Record<string, NodeSkin> = {
   codewiz: { icon: Terminal, block: "bg-teal-600", accent: "bg-teal-500" },
 };
 const AGENT_SKIN: NodeSkin = { icon: Bot, block: "bg-indigo-600", accent: "bg-indigo-500" };
-const WEB_SKIN: NodeSkin = { icon: Globe, block: "bg-blue-600", accent: "bg-blue-500" };
+const WEB_SKIN: NodeSkin = { icon: Globe, block: "bg-accent", accent: "bg-accent" };
 const DEFAULT_SKIN: NodeSkin = { icon: Terminal, block: "bg-gray-500", accent: "bg-gray-400" };
 
 function skinFor(d: SessionNodeData, isAgent: boolean, isWeb: boolean): NodeSkin {
@@ -80,11 +80,11 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
           .filter(Boolean)
           .join(" | ") || undefined
       }
-      className={`group relative w-[176px] rounded-xl bg-white border border-slate-200/70 overflow-hidden transition-all duration-200 ease-out cursor-grab active:cursor-grabbing ${
+      className={`group relative w-[176px] rounded-xl bg-surface border border-slate-200/70 overflow-hidden transition-all duration-200 ease-out cursor-grab active:cursor-grabbing ${
         dragging
-          ? "shadow-[0_12px_28px_rgba(16,24,40,0.18)] scale-[1.02] ring-2 ring-blue-500/30 border-slate-300"
+          ? "shadow-[0_12px_28px_rgba(16,24,40,0.18)] scale-[1.02] ring-2 ring-accent/30 border-slate-300"
           : selected
-            ? "shadow-[0_4px_16px_rgba(37,99,235,0.16)] ring-2 ring-blue-500"
+            ? "shadow-[0_4px_16px_rgba(37,99,235,0.16)] ring-2 ring-accent"
             : "shadow-[0_1px_2px_rgba(16,24,40,0.05),0_4px_12px_rgba(16,24,40,0.06)] hover:shadow-[0_8px_24px_rgba(16,24,40,0.12)] hover:border-slate-300 hover:-translate-y-0.5"
       } ${d.highlighted ? "ring-2 ring-amber-400/80" : ""}`}
     >
@@ -108,7 +108,7 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1">
               <span
-                className="text-gray-900 text-[12px] font-semibold truncate flex-1"
+                className="text-ink text-[12px] font-semibold truncate flex-1"
                 title={d.name}
               >
                 {d.name}
@@ -129,7 +129,7 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
         {/* body — hide boilerplate descriptions the server writes for unnamed sessions */}
         {d.description && !(PLACEHOLDER_DESCRIPTIONS as readonly string[]).includes(d.description) && (
             <div
-              className="text-[11px] text-gray-500 truncate mt-1.5 leading-4"
+              className="text-[11px] text-ink-muted truncate mt-1.5 leading-4"
               title={d.description}
             >
               {d.description}
@@ -140,7 +140,7 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
         <div className="flex items-center gap-1.5 mt-2 text-[10px]">
           {d.context_count > 0 && (
             <span
-              className="inline-flex items-center gap-1 rounded-md bg-slate-50 border border-slate-100 px-1.5 py-[1px] text-gray-500"
+              className="inline-flex items-center gap-1 rounded-md bg-slate-50 border border-slate-100 px-1.5 py-[1px] text-ink-muted"
               title="已发布上下文"
             >
               <FileText size={10} /> {d.context_count}

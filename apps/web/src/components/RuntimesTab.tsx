@@ -135,7 +135,7 @@ function KanbanColumn({
           {agents.map((a) => (
             <div
               key={a.id}
-              className="bg-white border border-line rounded-xl p-3 shadow-sm flex items-center gap-3"
+              className="bg-surface border border-line rounded-xl p-3 shadow-sm flex items-center gap-3"
             >
               <div className="w-8 h-8 rounded-lg bg-cyan-50 border border-cyan-200 flex items-center justify-center flex-shrink-0">
                 <Cpu size={15} className="text-cyan-600" />
