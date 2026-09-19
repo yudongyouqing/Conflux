@@ -9,8 +9,17 @@ import {
   Compass,
   ChevronDown,
 } from "lucide-react";
-import { useCreateAgent, useCreateRuntimeAgent, useSessions } from "../hooks";
+import { useCreateAgent, useCreateRuntimeAgent, useRuntimes, useSessions } from "../hooks";
 import { ClaudeIcon, OpenAIIcon } from "./brand-icons";
+import type { ComponentType } from "react";
+
+/** Brand glyph per known runtime id; unknown runtimes fall back to Terminal. */
+const RUNTIME_GLYPH: Record<string, ComponentType<{ size?: number; className?: string }>> = {
+  claude: ClaudeIcon,
+  codex: OpenAIIcon,
+};
+const runtimeGlyph = (id: string): ComponentType<{ size?: number; className?: string }> =>
+  RUNTIME_GLYPH[id] ?? Terminal;
 
 /**
  * Unified creation wizard for both agent kinds. Step 1 asks WHICH KIND —
@@ -217,7 +226,7 @@ function AgentCreateForm({ onClose }: { onClose: () => void }) {
 const EMPTY_RUNTIME_FORM = {
   interval_min: "",
   name: "",
-  runtime: "claude" as "claude" | "codex",
+  runtime: "",
   workdir: "",
   model: "",
   base_url: "",
@@ -242,10 +251,12 @@ function RuntimeCard({
   active,
   onClick,
   label,
+  icon: Glyph,
 }: {
   active: boolean;
   onClick: () => void;
   label: string;
+  icon: ComponentType<{ size?: number; className?: string }>;
 }) {
   return (
     <button
@@ -257,7 +268,7 @@ function RuntimeCard({
           : "border-line text-ink-muted hover:border-line-strong"
       }`}
     >
-      {label === "Claude Code" ? <ClaudeIcon size={14} /> : <OpenAIIcon size={14} />}
+      <Glyph size={14} />
       {label}
     </button>
   );
@@ -283,10 +294,25 @@ function useKnownProjectDirs(): string[] {
 
 function RuntimeCreateForm({ onClose }: { onClose: () => void }) {
   const create = useCreateRuntimeAgent();
+  const runtimes = useRuntimes();
   const [form, setForm] = useState(EMPTY_RUNTIME_FORM);
   const [advanced, setAdvanced] = useState(false);
   const knownDirs = useKnownProjectDirs();
   const canBrowse = typeof window.confluxDesktop?.pickDirectory === "function";
+
+  // Runtime choices come from the server's registry-derived catalog — adding
+  // a runtime to RUNTIME_REGISTRY makes it appear here automatically.
+  const runtimeCatalog = useMemo(
+    () => Object.entries(runtimes.data?.runtimes ?? {}).map(([id, r]) => ({ id, label: r.label })),
+    [runtimes.data],
+  );
+
+  // default to the first catalog entry once it loads
+  useEffect(() => {
+    if (!form.runtime && runtimeCatalog.length > 0) {
+      set("runtime", runtimeCatalog[0].id);
+    }
+  }, [runtimeCatalog, form.runtime]);
 
   const set = <K extends keyof typeof EMPTY_RUNTIME_FORM>(k: K, v: string) =>
     setForm((f) => ({ ...f, [k]: v }));
@@ -332,16 +358,15 @@ function RuntimeCreateForm({ onClose }: { onClose: () => void }) {
         </Field>
         <Field label="运行时 *">
           <div className="grid grid-cols-2 gap-1.5">
-            <RuntimeCard
-              active={form.runtime === "claude"}
-              onClick={() => set("runtime", "claude")}
-              label="Claude Code"
-            />
-            <RuntimeCard
-              active={form.runtime === "codex"}
-              onClick={() => set("runtime", "codex")}
-              label="Codex"
-            />
+            {runtimeCatalog.map((r) => (
+              <RuntimeCard
+                key={r.id}
+                active={form.runtime === r.id}
+                onClick={() => set("runtime", r.id)}
+                label={r.label}
+                icon={runtimeGlyph(r.id)}
+              />
+            ))}
           </div>
         </Field>
 
@@ -469,7 +494,7 @@ function RuntimeCreateForm({ onClose }: { onClose: () => void }) {
         </button>
         <button
           onClick={submit}
-          disabled={!form.name.trim() || create.isPending}
+          disabled={!form.name.trim() || !form.runtime || create.isPending}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent text-white text-xs hover:bg-blue-500 disabled:opacity-50"
         >
           {create.isPending && <Loader2 size={12} className="animate-spin" />}
