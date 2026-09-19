@@ -6,7 +6,13 @@ import type { RuntimeId } from "@conflux/shared";
 
 import { resolveConfig, type Scope } from "../config.js";
 import { openDb, type DB } from "../core/db.js";
-import { registerSession, listSessions, searchSessions, getSession } from "../core/sessions.js";
+import {
+  registerSession,
+  listSessions,
+  searchSessions,
+  sessionPriority,
+  getSession,
+} from "../core/sessions.js";
 import {
   MCP_HEARTBEAT_INTERVAL_MS,
   claimMcpConnection,
@@ -305,15 +311,22 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
           .describe(
             "Agent Card: what this session is good at (e.g. ['typescript','sql']) — shown on the graph so peers can route questions",
           ),
+        priority: z
+          .enum(["P0", "P1", "P2"])
+          .optional()
+          .describe(
+            "Ask priority tier: P0 critical (cannot be asked by lower tiers), P1 default, P2 background",
+          ),
       },
     },
-    async ({ name, description, skills }) => {
-      const r = await withAudit("register_session", { name, description, skills }, () => {
+    async ({ name, description, skills, priority }) => {
+      const r = await withAudit("register_session", { name, description, skills, priority }, () => {
         const session = registerSession(db, {
           id: sessionId,
           name,
           description: description ?? null,
           project_dir: projectDir,
+          priority: priority ?? null,
         });
         // Merge (not replace) so hook metadata (claude_pid, named, …) survives.
         if (skills && skills.length > 0) {
@@ -371,6 +384,7 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
                 name: s.name,
                 description: s.description,
                 status: s.status,
+                priority: sessionPriority(s.metadata),
                 skills: (() => {
                   try {
                     return JSON.parse(s.metadata ?? "{}")?.agent_card?.skills ?? [];

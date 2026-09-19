@@ -2,14 +2,21 @@ import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 import { STALE_AFTER_MS } from "../config.js";
 import {
+  DEFAULT_SESSION_PRIORITY,
   PLACEHOLDER_DESCRIPTIONS,
   WEB_CONSOLE_ID,
   type IdentitySource,
   type Session,
+  type SessionPriority,
   type SessionRuntime,
   type SessionSummary,
 } from "@conflux/shared";
-import { parseIdentitySource, parseRuntimePid, parseSessionRuntime } from "./session-identity.js";
+import {
+  parseIdentitySource,
+  parseRuntimePid,
+  parseSessionPriority,
+  parseSessionRuntime,
+} from "./session-identity.js";
 
 export type { Session, SessionSummary };
 
@@ -22,11 +29,16 @@ export interface RegisterInput {
   runtime?: SessionRuntime | null;
   identity_source?: IdentitySource | null;
   runtime_pid?: number | null;
+  /** Ask priority tier; stored as metadata.priority, P1 when omitted. */
+  priority?: SessionPriority | null;
 }
 
 export function registerSession(db: DB, input: RegisterInput): Session {
   const now = nowIso();
-  const meta = input.metadata ? JSON.stringify(input.metadata) : null;
+  const mergedMetadata = input.priority
+    ? { ...(input.metadata ?? {}), priority: input.priority }
+    : input.metadata;
+  const meta = mergedMetadata ? JSON.stringify(mergedMetadata) : null;
   const metadataIdentity = readMetadataIdentity(input.metadata);
   const runtime = parseSessionRuntime(input.runtime) ?? metadataIdentity.runtime;
   const identitySource =
@@ -102,7 +114,17 @@ function normalizeSession(row: Record<string, unknown>): Session {
     runtime: parseSessionRuntime(row.runtime),
     identity_source: parseIdentitySource(row.identity_source),
     runtime_pid: parseRuntimePid(row.runtime_pid),
+    priority: sessionPriority((row as { metadata?: string | null }).metadata ?? null),
   };
+}
+
+/** Ask priority derived from metadata.priority — P1 whenever unset/unknown. */
+export function sessionPriority(metadata: string | null): SessionPriority {
+  try {
+    return parseSessionPriority(JSON.parse(metadata ?? "{}")?.priority);
+  } catch {
+    return DEFAULT_SESSION_PRIORITY;
+  }
 }
 
 export function heartbeat(db: DB, id: string): void {

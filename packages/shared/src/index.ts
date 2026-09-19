@@ -8,6 +8,14 @@
 
 export type SessionStatus = "active" | "stale" | "ended";
 
+/**
+ * Ask priority, three tiers: P0 critical (main dev line) … P2 background.
+ * Asks flow high→low only — a lower-priority session asking a higher one is
+ * rejected. Human asks from the web console are exempt.
+ */
+export type SessionPriority = "P0" | "P1" | "P2";
+export const DEFAULT_SESSION_PRIORITY: SessionPriority = "P1";
+
 export type NodeType = "session" | "agent";
 
 export type SessionRuntime = "claude" | "codex" | "internal" | "web";
@@ -34,6 +42,8 @@ export interface Session {
   runtime: SessionRuntime | null;
   identity_source: IdentitySource | null;
   runtime_pid: number | null;
+  /** Derived from metadata.priority; P1 when unset. */
+  priority?: SessionPriority;
 }
 
 export interface SessionSummary extends Session {
@@ -156,6 +166,8 @@ export interface GraphNode {
   busy?: boolean;
   /** Agent Card: capability self-description (register_session skills). */
   skills?: string[];
+  /** Ask priority (metadata.priority; P1 default). */
+  priority?: SessionPriority;
 }
 
 /**

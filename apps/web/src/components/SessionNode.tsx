@@ -63,7 +63,14 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
 
   return (
     <div
-      title={d.skills?.length ? `技能: ${d.skills.join(" · ")}` : undefined}
+      title={
+        [
+          d.priority === "P0" ? "P0 重点会话" : d.priority === "P2" ? "P2 后台会话" : null,
+          d.skills?.length ? `技能: ${d.skills.join(" · ")}` : null,
+        ]
+          .filter(Boolean)
+          .join(" | ") || undefined
+      }
       className={`group relative w-[176px] rounded-xl bg-white border border-slate-200/70 overflow-hidden transition-all duration-200 ease-out cursor-grab active:cursor-grabbing ${
         dragging
           ? "shadow-[0_12px_28px_rgba(16,24,40,0.18)] scale-[1.02] ring-2 ring-blue-500/30 border-slate-300"
