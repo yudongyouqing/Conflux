@@ -176,7 +176,7 @@ export function SettingsTab() {
     <div className="h-full overflow-y-auto p-6">
       <div className="max-w-xl mx-auto space-y-5">
         <div>
-        <div className="bg-white border border-line rounded-xl p-4 space-y-3 shadow-sm">
+        <div className="bg-surface border border-line rounded-xl p-4 space-y-3 shadow-sm">
           <h3 className="text-ink font-medium text-sm">界面主题</h3>
           <div className="flex gap-1">
             {([["system", "跟随系统"], ["light", "工作台"], ["dark", "终端"]] as const).map(([value, label]) => (
@@ -229,7 +229,7 @@ export function SettingsTab() {
                 onChange={(e) => setImportText(e.target.value)}
                 rows={3}
                 placeholder='导入主题 JSON：{"name":"我的主题","colors":{"ink":"#182234","paper":"#f6f7f9","line":"#e4e8ef","accent":"#2563eb",…}}'
-                className="w-full bg-white text-ink text-xs rounded-lg px-2.5 py-2 border border-line placeholder-ink-faint outline-none focus:border-accent resize-y font-mono"
+                className="w-full bg-surface text-ink text-xs rounded-lg px-2.5 py-2 border border-line placeholder-ink-faint outline-none focus:border-accent resize-y font-mono"
               />
               {importError && <div className="text-xs text-red-500 mt-1">{importError}</div>}
               <button
@@ -255,7 +255,7 @@ export function SettingsTab() {
           </p>
         </div>
 
-        <div className="bg-white border border-line rounded-xl p-4 space-y-4 shadow-sm">
+        <div className="bg-surface border border-line rounded-xl p-4 space-y-4 shadow-sm">
           <label className="block">
             <span className="block text-xs font-medium text-ink mb-1.5">终端打开方式</span>
             <select
@@ -323,7 +323,7 @@ export function SettingsTab() {
           </div>
         </div>
 
-        <div className="bg-white border border-line rounded-xl p-4 space-y-3 shadow-sm">
+        <div className="bg-surface border border-line rounded-xl p-4 space-y-3 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <div>
               <h3 className="text-ink font-medium text-sm">数据备份</h3>
@@ -405,6 +405,6 @@ export function SettingsTab() {
 }
 
 const inputCls =
-  "w-full px-2.5 py-1.5 rounded-lg border border-line text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent bg-white";
+  "w-full px-2.5 py-1.5 rounded-lg border border-line text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent bg-surface";
 const selectCls =
-  "w-full px-2.5 py-2 rounded-lg border border-line text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent bg-white cursor-pointer";
+  "w-full px-2.5 py-2 rounded-lg border border-line text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent bg-surface cursor-pointer";

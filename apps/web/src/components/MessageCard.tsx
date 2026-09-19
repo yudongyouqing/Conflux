@@ -35,7 +35,7 @@ export function MessageCard({
       className={`p-3 rounded-xl border cursor-pointer transition-all ${
         selected
           ? "border-accent bg-accent-soft/50 shadow-sm"
-          : "border-line bg-white hover:border-line-strong hover:shadow-sm"
+          : "border-line bg-surface hover:border-line-strong hover:shadow-sm"
       }`}
     >
       <div className="flex items-center gap-2 text-xs mb-1">
