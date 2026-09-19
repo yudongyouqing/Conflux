@@ -8,7 +8,6 @@ import type {
   MessageStatus,
   ModelConfig,
   RuntimeAgent,
-  RuntimeId,
   SessionSummary,
   TerminalOption,
   TerminalSettings,
@@ -111,7 +110,8 @@ export const api = {
 
   createRuntimeAgent: (body: {
     name: string;
-    runtime: RuntimeId;
+    /** Any registry runtime id (server validates against RUNTIME_REGISTRY) */
+    runtime: string;
     workdir?: string;
     model?: string;
     base_url?: string;
