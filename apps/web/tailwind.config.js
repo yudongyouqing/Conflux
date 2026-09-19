@@ -4,23 +4,24 @@ export default {
   theme: {
     extend: {
       colors: {
-        /** 品牌文字色：蓝黑，呼应图拓扑画布的 navy 与 banner */
+        /** 品牌文字色：蓝黑，呼应图拓扑画布的 navy 与 banner。
+         *  令牌以 rgb 通道三元组存于 CSS 变量（:root），主题可运行时覆盖。 */
         ink: {
-          DEFAULT: "#182234",
-          muted: "#5C677D",
-          faint: "#8B94A7",
+          DEFAULT: "rgb(var(--tk-ink) / <alpha-value>)",
+          muted: "rgb(var(--tk-ink-muted) / <alpha-value>)",
+          faint: "rgb(var(--tk-ink-faint) / <alpha-value>)",
         },
         /** 画布底 / 卡片面的层级对 */
-        paper: "#F6F7F9",
+        paper: "rgb(var(--tk-paper) / <alpha-value>)",
         line: {
-          DEFAULT: "#E4E8EF",
-          strong: "#CBD3E0",
+          DEFAULT: "rgb(var(--tk-line) / <alpha-value>)",
+          strong: "rgb(var(--tk-line-strong) / <alpha-value>)",
         },
         /** 唯一强调色：汇流蓝。状态色（live/busy/ended）不在此列，只表达生命状态 */
         accent: {
-          DEFAULT: "#2563EB",
-          deep: "#1E4FC4",
-          soft: "#EBF1FE",
+          DEFAULT: "rgb(var(--tk-accent) / <alpha-value>)",
+          deep: "rgb(var(--tk-accent-deep) / <alpha-value>)",
+          soft: "rgb(var(--tk-accent-soft) / <alpha-value>)",
         },
       },
       fontFamily: {
