@@ -1,2 +1,3 @@
-import { installTheme } from './theme';
+import { installTheme, applySavedCustomTheme } from './theme';
 installTheme();
+applySavedCustomTheme();

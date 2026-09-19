@@ -51,6 +51,22 @@ body,
   margin: 0;
 }
 
+/* Design tokens as channel triplets (rgb(var(--tk-x) / α) pattern) so any
+ * alpha modifier works and custom themes can override at :root style level.
+ * Defaults = the 汇流蓝 baseline; custom themes replace via inline style. */
+:root {
+  --tk-ink: 24 34 52;
+  --tk-ink-muted: 92 103 125;
+  --tk-ink-faint: 139 148 167;
+  --tk-paper: 246 247 249;
+  --tk-surface: 255 255 255;
+  --tk-line: 228 232 239;
+  --tk-line-strong: 203 211 224;
+  --tk-accent: 37 99 235;
+  --tk-accent-deep: 30 79 196;
+  --tk-accent-soft: 235 241 254;
+}
+
 body {
   font-family:
     "IBM Plex Sans",
@@ -60,8 +76,8 @@ body {
     system-ui,
     sans-serif;
   -webkit-font-smoothing: antialiased;
-  background: #f6f7f9;
-  color: #182234;
+  background: rgb(var(--tk-paper));
+  color: rgb(var(--tk-ink));
 }
 
 /* React Flow light theme overrides */
