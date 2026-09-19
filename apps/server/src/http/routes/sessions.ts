@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import {
   registerSession,
   listSessions,
+  searchSessions,
   sessionBusy,
   getSession,
   heartbeat,
@@ -73,6 +74,17 @@ export function registerSessionRoutes(app: FastifyInstance, ctx: ServerContext):
         ...s,
         busy: sessionBusy(s.metadata),
       }));
+      return reply.send({ sessions });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // GET /sessions/search?q= — capability discovery (name/description/skills)
+  app.get<{ Querystring: { q?: string } }>("/sessions/search", {}, async (req, reply) => {
+    try {
+      const q = (req.query.q as string | undefined) ?? "";
+      const sessions = searchSessions(db, q);
       return reply.send({ sessions });
     } catch (err) {
       return sendError(reply, err);
