@@ -29,7 +29,8 @@
     "mcp": "npm run mcp -w apps/server",
     "start": "npm run build && npm run serve",
     "lint": "eslint apps/server/src apps/web/src packages/shared/src",
-    "format": "prettier --write \"apps/server/src/**/*.ts\" \"apps/web/src/**/*.{ts,tsx,css}\" \"packages/shared/src/**/*.ts\""
+    "format": "prettier --write \"apps/server/src/**/*.ts\" \"apps/web/src/**/*.{ts,tsx,css}\" \"packages/shared/src/**/*.ts\"",
+    "skills:sync": "node scripts/sync-skills.cjs"
   },
   "dependencies": {
     "conflux": "file:apps/server"
