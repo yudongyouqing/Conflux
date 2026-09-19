@@ -6,7 +6,7 @@ import type { RuntimeId } from "@conflux/shared";
 
 import { resolveConfig, type Scope } from "../config.js";
 import { openDb, type DB } from "../core/db.js";
-import { registerSession, listSessions, getSession } from "../core/sessions.js";
+import { registerSession, listSessions, searchSessions, getSession } from "../core/sessions.js";
 import {
   MCP_HEARTBEAT_INTERVAL_MS,
   claimMcpConnection,
@@ -343,6 +343,45 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
         listSessions(db, { status: status ?? "active" }),
       );
       return json(r.ok ? { sessions: r.result } : { error: r.error });
+    },
+  );
+
+  // 2b. search_sessions — capability discovery: find peers by what they say
+  // about themselves (name / description / register_session skills).
+  server.registerTool(
+    "search_sessions",
+    {
+      description:
+        "Discover which sessions can answer a question: substring-search their names, self-descriptions, and declared skills. Returns id/name/description/skills per match — ask one of them via ask_session.",
+      inputSchema: {
+        query: z
+          .string()
+          .min(1)
+          .max(100)
+          .describe("Capability or topic keyword, e.g. 'postgres', 'llm', '构建'"),
+      },
+    },
+    async ({ query }) => {
+      const r = await withAudit("search_sessions", { query }, () => searchSessions(db, query));
+      return json(
+        r.ok
+          ? {
+              results: r.result.map((s) => ({
+                id: s.id,
+                name: s.name,
+                description: s.description,
+                status: s.status,
+                skills: (() => {
+                  try {
+                    return JSON.parse(s.metadata ?? "{}")?.agent_card?.skills ?? [];
+                  } catch {
+                    return [];
+                  }
+                })(),
+              })),
+            }
+          : { error: r.error },
+      );
     },
   );
 

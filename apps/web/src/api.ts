@@ -83,6 +83,9 @@ export const api = {
   getSessions: (status = "all") =>
     get<{ sessions: SessionSummary[] }>(`/sessions?status=${encodeURIComponent(status)}`),
 
+  searchSessions: (q: string) =>
+    get<{ sessions: SessionSummary[] }>(`/sessions/search?q=${encodeURIComponent(q)}`),
+
   getPeerMessages: (peer: string) =>
     get<{ messages: Message[] }>(`/web/peer-messages?peer=${encodeURIComponent(peer)}`),
 
