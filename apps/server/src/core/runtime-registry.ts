@@ -41,6 +41,15 @@ export interface RuntimeDescriptor {
 
 const home = () => process.env.USERPROFILE || process.env.HOME || ".";
 
+/**
+ * Adding a new runtime = add one descriptor here. Everything downstream
+ * derives from this table: GET /runtimes catalog → web create wizard cards,
+ * launch/resume/headless command shapes (family-driven), label rendering.
+ * Optional follow-ups per runtime: a web skin entry (SessionNode
+ * RUNTIME_SKIN + graph-builders RUNTIME_DOT_COLOR), liveness tokens
+ * (runtime-identity.ts) and wake support when its session store is
+ * understood.
+ */
 export const RUNTIME_REGISTRY: Record<string, RuntimeDescriptor> = {
   claude: {
     id: "claude",

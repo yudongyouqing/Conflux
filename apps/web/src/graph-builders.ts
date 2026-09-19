@@ -4,6 +4,18 @@ import { layoutGraph } from "./layout";
 import type { SessionNodeData } from "./components/SessionNode";
 import type { GroupFrameData } from "./components/GroupFrame";
 
+/** Runtime dot color for cluster frames — keyed by runtime id, one line per
+ * runtime; unknown runtimes render web-blue. Keep in sync with
+ * SessionNode's RUNTIME_SKIN. */
+const RUNTIME_DOT_COLOR: Record<string, string> = {
+  claude: "bg-orange-500",
+  codex: "bg-slate-600",
+  cursor: "bg-violet-500",
+  codebuddy: "bg-pink-500",
+  codewiz: "bg-teal-500",
+  web: "bg-blue-500",
+};
+
 /**
  * Pure view builders for the graph tab. Everything here is a data-in →
  * data-out transformation with NO React, DOM, or localStorage access —
@@ -193,13 +205,7 @@ export function buildDirsView({ data, onSelectEdge, expandedKey }: DirsViewInput
     const { width, height } = frameGeometry(shown.length, !collapsed);
     const runtimeDots = row.nodes
       .filter((n) => n.status === "active" && n.type !== "agent")
-      .map((n) =>
-        n.runtime === "codex"
-          ? "bg-slate-600"
-          : n.runtime === "claude"
-            ? "bg-orange-500"
-            : "bg-blue-500",
-      )
+      .map((n) => RUNTIME_DOT_COLOR[n.runtime ?? ""] ?? "bg-blue-500")
       .slice(0, 4);
     const id = groupId(row.dir);
     outNodes.push({
