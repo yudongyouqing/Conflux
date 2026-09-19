@@ -25,6 +25,12 @@
       "skillPath": "skills/electron-development/SKILL.md",
       "computedHash": "dfc11196c7faf2cb72df4da39518bfa086743e20f6c03bea1dd1efcb3a015509"
     },
+    "theme-factory": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/theme-factory/SKILL.md",
+      "computedHash": "c35893e221e28895c52143cc11bf30e41a44817796b39d4b15727dadc9796552"
+    },
     "code-reviewer": {
       "source": "google-gemini/gemini-cli",
       "sourceType": "github",
