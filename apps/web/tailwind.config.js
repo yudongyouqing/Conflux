@@ -13,6 +13,7 @@ export default {
         },
         /** 画布底 / 卡片面的层级对 */
         paper: "rgb(var(--tk-paper) / <alpha-value>)",
+        surface: "rgb(var(--tk-surface) / <alpha-value>)",
         line: {
           DEFAULT: "rgb(var(--tk-line) / <alpha-value>)",
           strong: "rgb(var(--tk-line-strong) / <alpha-value>)",

@@ -88,7 +88,7 @@ export function DetailPanel({
           <div className="text-[10px] text-ink-faint mb-1.5 flex items-center gap-1">
             <Clock size={10} /> {new Date(message.created_at).toLocaleString()}
           </div>
-          <div className="bg-white p-3 rounded-2xl border border-line shadow-sm">
+          <div className="bg-surface p-3 rounded-2xl border border-line shadow-sm">
             {message.question}
           </div>
         </div>
@@ -99,7 +99,7 @@ export function DetailPanel({
               回复
               {message.replied_at && ` · ${new Date(message.replied_at).toLocaleString()}`}
             </div>
-            <div className="bg-white p-3 rounded-2xl border border-emerald-200 shadow-sm relative">
+            <div className="bg-surface p-3 rounded-2xl border border-emerald-200 shadow-sm relative">
               {message.reply}
             </div>
           </div>
@@ -223,7 +223,7 @@ function EdgeFlowView({
                   className={`p-3 rounded-2xl border max-w-[95%] shadow-sm ${
                     outgoing
                       ? "bg-accent border-accent text-white"
-                      : "bg-white border-line text-ink"
+                      : "bg-surface border-line text-ink"
                   }`}
                 >
                   <MarkdownText tone={outgoing ? "blue" : "light"}>{m.question}</MarkdownText>
@@ -231,7 +231,7 @@ function EdgeFlowView({
                 {m.status === "pending" ? (
                   <div className="text-[10px] text-amber-600 mt-0.5">等待回复…</div>
                 ) : m.reply ? (
-                  <div className="p-3 rounded-2xl border bg-white border-emerald-200 text-ink max-w-[95%] mt-1 shadow-sm relative">
+                  <div className="p-3 rounded-2xl border bg-surface border-emerald-200 text-ink max-w-[95%] mt-1 shadow-sm relative">
                     <div className="absolute -top-2 left-3 text-[10px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-full px-1.5">
                       回复
                     </div>

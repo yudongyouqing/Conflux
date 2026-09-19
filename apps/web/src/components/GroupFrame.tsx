@@ -100,7 +100,7 @@ export function GroupFrame({ data }: NodeProps) {
           {d.count} 个会话 · 点击展开
         </div>
       ) : (d.hiddenCount ?? 0) > 0 ? (
-        <div className="absolute bottom-1.5 right-3 text-[10px] font-medium text-slate-400 bg-white/80 border border-slate-200 rounded-full px-1.5">
+        <div className="absolute bottom-1.5 right-3 text-[10px] font-medium text-slate-400 bg-surface/80 border border-slate-200 rounded-full px-1.5">
           还有 {d.hiddenCount} 个未显示
         </div>
       ) : null}

@@ -46,10 +46,10 @@ export function CreateAgentWizard({ open, onClose }: { open: boolean; onClose: (
       onClick={onClose}
     >
       <div
-        className="bg-white border border-line rounded-2xl shadow-overlay w-full max-w-lg max-h-[88vh] overflow-y-auto"
+        className="bg-surface border border-line rounded-2xl shadow-overlay w-full max-w-lg max-h-[88vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-line sticky top-0 bg-white rounded-t-2xl">
+        <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-line sticky top-0 bg-surface rounded-t-2xl">
           <h3 className="text-sm font-semibold text-ink">
             {kind === null ? "创建智能体" : kind === "agent" ? "新建模型智能体" : "新建 CLI 运行时"}
           </h3>
@@ -197,7 +197,7 @@ function AgentCreateForm({ onClose }: { onClose: () => void }) {
         value={form.system_prompt}
         onChange={(e) => setForm({ ...form, system_prompt: e.target.value })}
         rows={4}
-        className="w-full bg-white text-ink text-xs rounded-lg px-3 py-2 border border-line outline-none focus:border-accent resize-y font-mono"
+        className="w-full bg-surface text-ink text-xs rounded-lg px-3 py-2 border border-line outline-none focus:border-accent resize-y font-mono"
       />
       <div className="flex items-center justify-end gap-2 pt-1">
         <button
@@ -236,7 +236,7 @@ const EMPTY_RUNTIME_FORM = {
 };
 
 const inputCls =
-  "w-full px-2.5 py-1.5 rounded-lg border border-line text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent bg-white";
+  "w-full px-2.5 py-1.5 rounded-lg border border-line text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent bg-surface";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -485,7 +485,7 @@ function RuntimeCreateForm({ onClose }: { onClose: () => void }) {
         )}
       </div>
 
-      <div className="flex justify-end gap-2 px-5 py-3 border-t border-line sticky bottom-0 bg-white rounded-b-2xl">
+      <div className="flex justify-end gap-2 px-5 py-3 border-t border-line sticky bottom-0 bg-surface rounded-b-2xl">
         <button
           onClick={onClose}
           className="px-3 py-1.5 rounded-lg text-xs text-ink-muted hover:bg-paper"
