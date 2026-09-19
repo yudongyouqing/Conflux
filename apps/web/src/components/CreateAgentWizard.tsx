@@ -197,7 +197,7 @@ function AgentCreateForm({ onClose }: { onClose: () => void }) {
         value={form.system_prompt}
         onChange={(e) => setForm({ ...form, system_prompt: e.target.value })}
         rows={4}
-        className="w-full bg-white text-ink text-xs rounded-lg px-3 py-2 border border-line outline-none focus:border-blue-500 resize-y font-mono"
+        className="w-full bg-white text-ink text-xs rounded-lg px-3 py-2 border border-line outline-none focus:border-accent resize-y font-mono"
       />
       <div className="flex items-center justify-end gap-2 pt-1">
         <button
@@ -209,7 +209,7 @@ function AgentCreateForm({ onClose }: { onClose: () => void }) {
         <button
           onClick={handleCreate}
           disabled={!form.name || !form.model || !form.system_prompt || createMut.isPending}
-          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-accent hover:bg-blue-500 disabled:bg-paper disabled:text-ink-faint text-white transition-colors"
+          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-accent hover:bg-accent-deep disabled:bg-paper disabled:text-ink-faint text-white transition-colors"
         >
           {createMut.isPending ? "创建中..." : "创建"}
         </button>
@@ -236,7 +236,7 @@ const EMPTY_RUNTIME_FORM = {
 };
 
 const inputCls =
-  "w-full px-2.5 py-1.5 rounded-lg border border-line text-xs text-ink focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 bg-white";
+  "w-full px-2.5 py-1.5 rounded-lg border border-line text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent bg-white";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -264,7 +264,7 @@ function RuntimeCard({
       onClick={onClick}
       className={`flex flex-col items-center gap-1 py-2 rounded-lg border text-[11px] font-medium transition-colors ${
         active
-          ? "border-blue-400 bg-blue-50 text-blue-700 ring-1 ring-blue-400/40"
+          ? "border-accent bg-accent-soft text-accent-deep ring-1 ring-accent/40"
           : "border-line text-ink-muted hover:border-line-strong"
       }`}
     >
@@ -399,7 +399,7 @@ function RuntimeCreateForm({ onClose }: { onClose: () => void }) {
                     key={dir}
                     onClick={() => set("workdir", dir)}
                     title={dir}
-                    className="max-w-full flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md bg-paper border border-line text-ink-muted hover:border-blue-300 hover:text-blue-600"
+                    className="max-w-full flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md bg-paper border border-line text-ink-muted hover:border-accent/60 hover:text-accent"
                   >
                     <FolderOpen size={9} className="flex-shrink-0" />
                     <span className="truncate">{dir}</span>
@@ -495,7 +495,7 @@ function RuntimeCreateForm({ onClose }: { onClose: () => void }) {
         <button
           onClick={submit}
           disabled={!form.name.trim() || !form.runtime || create.isPending}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent text-white text-xs hover:bg-blue-500 disabled:opacity-50"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent text-white text-xs hover:bg-accent-deep disabled:opacity-50"
         >
           {create.isPending && <Loader2 size={12} className="animate-spin" />}
           创建

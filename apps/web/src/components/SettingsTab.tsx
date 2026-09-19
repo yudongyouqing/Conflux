@@ -180,7 +180,7 @@ export function SettingsTab() {
           <h3 className="text-ink font-medium text-sm">界面主题</h3>
           <div className="flex gap-1">
             {([["system", "跟随系统"], ["light", "工作台"], ["dark", "终端"]] as const).map(([value, label]) => (
-              <button key={value} type="button" aria-pressed={theme === value} onClick={() => { setTheme(value); setThemePreference(value); }} className={`flex-1 px-2 py-1.5 rounded-md border text-xs ${theme === value ? "bg-blue-600 text-white border-blue-600" : "border-line text-ink-muted hover:bg-paper"}`}>{label}</button>
+              <button key={value} type="button" aria-pressed={theme === value} onClick={() => { setTheme(value); setThemePreference(value); }} className={`flex-1 px-2 py-1.5 rounded-md border text-xs ${theme === value ? "bg-accent text-white border-blue-600" : "border-line text-ink-muted hover:bg-paper"}`}>{label}</button>
             ))}
           </div>
           <div className="border-t border-line pt-3">
@@ -315,7 +315,7 @@ export function SettingsTab() {
             <button
               onClick={submit}
               disabled={save.isPending}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-blue-600 text-white text-xs hover:bg-blue-500 disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-accent text-white text-xs hover:bg-accent-deep disabled:opacity-50"
             >
               {save.isPending && <Loader2 size={12} className="animate-spin" />}
               保存
@@ -405,6 +405,6 @@ export function SettingsTab() {
 }
 
 const inputCls =
-  "w-full px-2.5 py-1.5 rounded-lg border border-line text-xs text-ink focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 bg-white";
+  "w-full px-2.5 py-1.5 rounded-lg border border-line text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent bg-white";
 const selectCls =
-  "w-full px-2.5 py-2 rounded-lg border border-line text-xs text-ink focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 bg-white cursor-pointer";
+  "w-full px-2.5 py-2 rounded-lg border border-line text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent bg-white cursor-pointer";

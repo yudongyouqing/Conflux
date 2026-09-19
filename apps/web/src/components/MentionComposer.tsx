@@ -123,11 +123,11 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
           </span>
         )}
         {target ? (
-          <span className="inline-flex items-center gap-1.5 text-xs bg-blue-50 text-blue-700 border border-blue-200 rounded-full pl-2 pr-1 py-1">
+          <span className="inline-flex items-center gap-1.5 text-xs bg-accent-soft text-accent-deep border border-accent/30 rounded-full pl-2 pr-1 py-1">
             <StatusDot status={target.status} busy={target.busy} />
             <span className="max-w-40 truncate">{target.name}</span>
             <button
-              className="text-blue-400 hover:text-blue-700 px-1"
+              className="text-blue-400 hover:text-accent-deep px-1"
               onClick={() => setTarget(null)}
               title="移除目标"
             >
@@ -168,7 +168,7 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
               else setText("");
             }
           }}
-          className="w-full bg-white text-ink text-sm rounded-lg px-3 py-2 border border-line placeholder-gray-400 outline-none focus:border-blue-500"
+          className="w-full bg-white text-ink text-sm rounded-lg px-3 py-2 border border-line placeholder-gray-400 outline-none focus:border-accent"
         />
         {mentionQuery !== null && candidates.length > 0 && (
           <div className="absolute z-10 left-0 right-0 top-full mt-1 bg-white border border-line rounded-lg shadow-lg overflow-hidden">
@@ -176,7 +176,7 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
               <button
                 key={s.id}
                 onClick={() => pickTarget(s)}
-                className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-blue-50"
+                className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-accent-soft"
               >
                 <StatusDot status={s.status} busy={s.busy} />
                 <span className="text-sm text-ink truncate max-w-56">{s.name}</span>
