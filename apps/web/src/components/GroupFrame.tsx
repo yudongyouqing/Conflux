@@ -41,13 +41,13 @@ export function GroupFrame({ data }: NodeProps) {
   const active = d.activeCount ?? 0;
 
   const shell = isDir
-    ? "bg-slate-50/70 border-slate-200/90 hover:border-blue-300/70 hover:bg-blue-50/40"
+    ? "bg-slate-50/70 border-slate-200/90 hover:border-accent/70 hover:bg-accent-soft/40"
     : "border-dashed border-slate-300/80 bg-slate-50/40 hover:border-slate-400";
 
   return (
     <div
       className={`group relative rounded-2xl border ${shell} cursor-pointer select-none overflow-hidden transition-colors ${
-        d.expanded ? "bg-blue-50/30 border-blue-200" : ""
+        d.expanded ? "bg-accent-soft/30 border-accent/30" : ""
       }`}
       style={{ width: d.width, height: d.height }}
     >
@@ -55,7 +55,7 @@ export function GroupFrame({ data }: NodeProps) {
         <div
           className={`w-6 h-6 rounded-md border flex items-center justify-center flex-shrink-0 ${
             isDir
-              ? "bg-blue-50 border-blue-100 text-blue-500"
+              ? "bg-accent-soft border-accent/20 text-accent"
               : "bg-slate-100 border-slate-200 text-slate-400"
           }`}
         >
@@ -100,7 +100,7 @@ export function GroupFrame({ data }: NodeProps) {
           {d.count} 个会话 · 点击展开
         </div>
       ) : (d.hiddenCount ?? 0) > 0 ? (
-        <div className="absolute bottom-1.5 right-3 text-[10px] font-medium text-slate-400 bg-white/80 border border-slate-200 rounded-full px-1.5">
+        <div className="absolute bottom-1.5 right-3 text-[10px] font-medium text-slate-400 bg-surface/80 border border-slate-200 rounded-full px-1.5">
           还有 {d.hiddenCount} 个未显示
         </div>
       ) : null}

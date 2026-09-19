@@ -51,6 +51,22 @@ body,
   margin: 0;
 }
 
+/* Design tokens as channel triplets (rgb(var(--tk-x) / α) pattern) so any
+ * alpha modifier works and custom themes can override at :root style level.
+ * Defaults = the 汇流蓝 baseline; custom themes replace via inline style. */
+:root {
+  --tk-ink: 24 34 52;
+  --tk-ink-muted: 92 103 125;
+  --tk-ink-faint: 139 148 167;
+  --tk-paper: 246 247 249;
+  --tk-surface: 255 255 255;
+  --tk-line: 228 232 239;
+  --tk-line-strong: 203 211 224;
+  --tk-accent: 37 99 235;
+  --tk-accent-deep: 30 79 196;
+  --tk-accent-soft: 235 241 254;
+}
+
 body {
   font-family:
     "IBM Plex Sans",
@@ -60,8 +76,8 @@ body {
     system-ui,
     sans-serif;
   -webkit-font-smoothing: antialiased;
-  background: #f6f7f9;
-  color: #182234;
+  background: rgb(var(--tk-paper));
+  color: rgb(var(--tk-ink));
 }
 
 /* React Flow light theme overrides */
@@ -92,21 +108,18 @@ body {
   animation: edge-flow 0.9s linear infinite;
 }
 
-:root, html[data-theme="light"] {
-  --canvas: #f2f4f7; --surface: #ffffff; --surface-raised: #ffffff;
-  --border-subtle: #e4e7ec; --text-primary: #101828; --text-muted: #667085;
-  --graph-edge-selected: #2563eb; --graph-edge-incident: #3b82f6; --graph-edge-dimmed: #d1d5db;
-  --question-bg: #2563eb; --reply-bg: #ffffff; --reply-border: #a7f3d0;
-}
+/* 深色主题：同一组 --tk-* 令牌的暗色取值（设置页 data-theme=dark 驱动）。
+ * 自定义主题（导入/预设）在其上再覆写。 */
 html[data-theme="dark"] {
-  color-scheme: dark; --canvas: #0b1220; --surface: #111827; --surface-raised: #182333;
-  --border-subtle: #273548; --text-primary: #d9e4ef; --text-muted: #90a4ba;
-  --graph-edge-selected: #22d3ee; --graph-edge-incident: #38bdf8; --graph-edge-dimmed: #496378;
-  --question-bg: #174a60; --reply-bg: #173d33; --reply-border: #2c7a62;
+  color-scheme: dark;
+  --tk-ink: 230 234 242;
+  --tk-ink-muted: 148 163 184;
+  --tk-ink-faint: 100 116 139;
+  --tk-paper: 13 18 28;
+  --tk-surface: 23 32 48;
+  --tk-line: 44 56 74;
+  --tk-line-strong: 62 76 98;
+  --tk-accent: 96 165 250;
+  --tk-accent-deep: 59 130 246;
+  --tk-accent-soft: 30 58 95;
 }
-body { background: var(--canvas); color: var(--text-primary); }
-html[data-theme="dark"] .bg-white { background-color: var(--surface) !important; }
-html[data-theme="dark"] .bg-gray-100, html[data-theme="dark"] .bg-gray-50 { background-color: var(--canvas) !important; }
-html[data-theme="dark"] .text-gray-900, html[data-theme="dark"] .text-gray-800 { color: var(--text-primary) !important; }
-html[data-theme="dark"] .text-gray-700, html[data-theme="dark"] .text-gray-600, html[data-theme="dark"] .text-gray-500, html[data-theme="dark"] .text-gray-400 { color: var(--text-muted) !important; }
-html[data-theme="dark"] .border-gray-100, html[data-theme="dark"] .border-gray-200 { border-color: var(--border-subtle) !important; }

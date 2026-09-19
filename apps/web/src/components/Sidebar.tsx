@@ -22,7 +22,7 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
   ];
 
   return (
-    <aside className="w-56 bg-white border-r border-line flex flex-col flex-shrink-0">
+    <aside className="w-56 bg-surface border-r border-line flex flex-col flex-shrink-0">
       {/* Logo */}
       <div className="flex items-center gap-2.5 px-5 h-14 border-b border-line">
         <div className="w-7 h-7 rounded-lg bg-accent flex items-center justify-center">

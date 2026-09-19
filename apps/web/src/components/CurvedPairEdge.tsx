@@ -184,8 +184,8 @@ export function CurvedPairEdge(props: EdgeProps) {
           title={manual ? "拖动调整弧度 · 双击复位" : undefined}
           className={`nodrag nopan touch-none select-none ${
             label
-              ? `px-2 py-0.5 rounded-full text-[10px] font-medium max-w-[140px] truncate border shadow-sm bg-white cursor-pointer hover:border-blue-300 ${
-                  isSelected ? "border-blue-300 text-blue-700" : "border-gray-200 text-gray-600"
+              ? `px-2 py-0.5 rounded-full text-[10px] font-medium max-w-[140px] truncate border shadow-sm bg-surface cursor-pointer hover:border-accent/60 ${
+                  isSelected ? "border-accent/60 text-accent-deep" : "border-gray-200 text-gray-600"
                 }${manual ? " active:cursor-grabbing" : ""}`
               : `w-2.5 h-2.5 rounded-full border ${
                   manual

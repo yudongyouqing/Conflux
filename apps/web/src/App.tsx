@@ -89,7 +89,7 @@ export default function App() {
          * agents/runtimes/settings are self-contained — no dead "select an
          * object" panel next to them. */}
         {(tab === "graph" || tab === "sessions") && (
-          <aside className="w-80 border-l border-line bg-white overflow-hidden flex-shrink-0">
+          <aside className="w-80 border-l border-line bg-surface overflow-hidden flex-shrink-0">
             <DetailPanel
               session={selectedSession}
               message={selectedMessage}
