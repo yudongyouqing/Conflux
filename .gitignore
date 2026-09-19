@@ -16,3 +16,7 @@ data-*-test*/
 .electron-dev/
 .worktrees/
 .superpowers/
+
+# generated from .agents/skills by scripts/sync-skills.cjs (Claude Code reads only this path)
+.claude/skills/
+.claude/settings.local.json
