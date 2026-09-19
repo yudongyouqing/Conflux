@@ -34,14 +34,23 @@ interface NodeSkin {
   accent: string; // top strip color
 }
 
+/** Runtime identity skins, keyed by runtime id. Adding a runtime = one map
+ * entry; unknown runtimes fall back to the neutral gray skin. */
+const RUNTIME_SKIN: Record<string, NodeSkin> = {
+  claude: { icon: ClaudeIcon, block: "bg-orange-600", accent: "bg-orange-500" },
+  codex: { icon: OpenAIIcon, block: "bg-slate-700", accent: "bg-slate-500" },
+  cursor: { icon: Terminal, block: "bg-violet-600", accent: "bg-violet-500" },
+  codebuddy: { icon: Terminal, block: "bg-pink-600", accent: "bg-pink-500" },
+  codewiz: { icon: Terminal, block: "bg-teal-600", accent: "bg-teal-500" },
+};
+const AGENT_SKIN: NodeSkin = { icon: Bot, block: "bg-indigo-600", accent: "bg-indigo-500" };
+const WEB_SKIN: NodeSkin = { icon: Globe, block: "bg-blue-600", accent: "bg-blue-500" };
+const DEFAULT_SKIN: NodeSkin = { icon: Terminal, block: "bg-gray-500", accent: "bg-gray-400" };
+
 function skinFor(d: SessionNodeData, isAgent: boolean, isWeb: boolean): NodeSkin {
-  if (isAgent) return { icon: Bot, block: "bg-indigo-600", accent: "bg-indigo-500" };
-  if (isWeb) return { icon: Globe, block: "bg-blue-600", accent: "bg-blue-500" };
-  if (d.runtime === "claude")
-    return { icon: ClaudeIcon, block: "bg-orange-600", accent: "bg-orange-500" };
-  if (d.runtime === "codex")
-    return { icon: OpenAIIcon, block: "bg-slate-700", accent: "bg-slate-500" };
-  return { icon: Terminal, block: "bg-gray-500", accent: "bg-gray-400" };
+  if (isAgent) return AGENT_SKIN;
+  if (isWeb) return WEB_SKIN;
+  return (d.runtime && RUNTIME_SKIN[d.runtime]) || DEFAULT_SKIN;
 }
 
 const STATUS_DOT: Record<string, string> = {
