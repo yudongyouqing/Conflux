@@ -1,9 +1,20 @@
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 import { recordEdge, touchEdge } from "./graph.js";
-import type { Message, MessageStatus } from "@conflux/shared";
+import { WEB_CONSOLE_ID, type Message, type MessageStatus } from "@conflux/shared";
+import { sessionPriority } from "./sessions.js";
 
 export type { Message, MessageStatus };
+
+/** P0 ranks 0 (most protected) … P2 ranks 2. Asks flow lower-rank → equal. */
+const PRIORITY_RANK: Record<string, number> = { P0: 0, P1: 1, P2: 2 };
+
+function metadataOf(db: DB, sessionId: string): string | null {
+  const row = db.prepare(`SELECT metadata FROM sessions WHERE id = ?`).get(sessionId) as
+    | { metadata: string | null }
+    | undefined;
+  return row?.metadata ?? null;
+}
 
 interface MessageRow {
   id: number;
@@ -27,6 +38,19 @@ export function askSession(
 ): Message {
   if (input.from_session === input.to_session) {
     throw new Error("cannot ask yourself");
+  }
+  // Priority gate: a lower-priority session may not interrupt a higher one.
+  // The human web console (from === WEB_CONSOLE_ID) is exempt — people can
+  // ask anything; session→session automation respects the tiers.
+  if (input.from_session !== WEB_CONSOLE_ID) {
+    const fromP = sessionPriority(metadataOf(db, input.from_session));
+    const toP = sessionPriority(metadataOf(db, input.to_session));
+    if ((PRIORITY_RANK[fromP] ?? 1) > (PRIORITY_RANK[toP] ?? 1)) {
+      throw new Error(
+        `ASK_PRIORITY_BLOCKED: ${fromP} session "${input.from_session}" cannot ask ` +
+          `${toP} session "${input.to_session}" — raise the asker's priority or ask a peer`,
+      );
+    }
   }
   // target row may have been pruned (e.g. offline cleanup) — fail with a
   // clear error instead of a raw FOREIGN KEY violation

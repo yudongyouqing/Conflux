@@ -2,7 +2,12 @@ import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 import { markStaleSessions } from "./sessions.js";
 import type { Graph, GraphEdge, GraphNode, NodeType } from "@conflux/shared";
-import { parseIdentitySource, parseRuntimePid, parseSessionRuntime } from "./session-identity.js";
+import {
+  parseIdentitySource,
+  parseRuntimePid,
+  parseSessionPriority,
+  parseSessionRuntime,
+} from "./session-identity.js";
 
 export type { Graph, GraphEdge, GraphNode, NodeType };
 
@@ -82,6 +87,7 @@ export function getGraph(
     let ownName = false;
     let busy = false;
     let skills: string[] | undefined;
+    let priority: GraphNode["priority"];
     try {
       const meta = n.metadata ? (JSON.parse(n.metadata) as Record<string, unknown>) : null;
       if (meta && typeof meta.agent_id === "number") {
@@ -111,6 +117,7 @@ export function getGraph(
           .filter((s): s is string => typeof s === "string")
           .slice(0, 20);
       }
+      priority = parseSessionPriority(meta?.priority);
     } catch {
       // malformed metadata — leave unannotated
     }
@@ -124,6 +131,7 @@ export function getGraph(
       identity_source: identitySource,
       runtime_pid: runtimePid,
       skills,
+      priority,
       busy,
     };
   };

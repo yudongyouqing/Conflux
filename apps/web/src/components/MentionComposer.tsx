@@ -180,6 +180,14 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
               >
                 <StatusDot status={s.status} busy={s.busy} />
                 <span className="text-sm text-ink truncate max-w-56">{s.name}</span>
+                {s.priority === "P0" && (
+                  <span
+                    title="重点会话"
+                    className="flex-shrink-0 rounded bg-accent-soft border border-accent/30 px-1 text-[10px] font-mono text-accent leading-4"
+                  >
+                    P0
+                  </span>
+                )}
                 <span className="text-[11px] text-ink-faint truncate flex-1">
                   {s.description
                     ? s.description
