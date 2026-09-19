@@ -165,6 +165,30 @@ export function endSession(db: DB, id: string): void {
   db.prepare(`UPDATE sessions SET status = 'ended' WHERE id = ?`).run(id);
 }
 
+/**
+ * Capability discovery: substring match over name, description, and the
+ * metadata blob (agent_card.skills lives there as JSON, so a LIKE catches
+ * skill terms too). Case-insensitive; dozens of sessions — LIKE is plenty,
+ * no FTS table warranted. Blank queries match nothing: callers must ask for
+ * something specific, not dump the whole registry.
+ */
+export function searchSessions(db: DB, query: string): Session[] {
+  const trimmed = query.trim().toLowerCase();
+  if (trimmed.length === 0) return [];
+  const needle = `%${trimmed}%`;
+  const rows = db
+    .prepare(
+      `SELECT * FROM sessions
+       WHERE lower(name) LIKE ?
+          OR lower(COALESCE(description, '')) LIKE ?
+          OR lower(COALESCE(metadata, '')) LIKE ?
+       ORDER BY last_heartbeat_at DESC
+       LIMIT 20`,
+    )
+    .all(needle, needle, needle) as Record<string, unknown>[];
+  return rows.map((row) => normalizeSession(row));
+}
+
 // ---- zero-turn session reaping ---------------------------------------------
 
 /**

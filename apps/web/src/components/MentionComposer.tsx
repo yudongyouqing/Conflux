@@ -1,6 +1,6 @@
 import { useMemo, useState, useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useSessions } from "../hooks";
+import { useGraph } from "../hooks";
 import { api } from "../api";
 import { StatusDot } from "./StatusDot";
 import { WEB_CONSOLE_ID, type Message, type SessionStatus } from "@conflux/shared";
@@ -32,7 +32,9 @@ interface MentionComposerProps {
  * fullwidth), then ask it a question as the web console.
  */
 export function MentionComposer({ onSent, className, sender }: MentionComposerProps) {
-  const sessions = useSessions("active");
+  // Candidates come from the graph, not /sessions: nodes carry the
+  // capability profile (description + skills) the matcher searches.
+  const graph = useGraph();
   const queryClient = useQueryClient();
 
   const [text, setText] = useState("");
@@ -49,14 +51,27 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
 
   const candidates = useMemo(() => {
     if (mentionQuery === null) return [];
-    return (sessions.data?.sessions ?? [])
-      .filter((s) => s.id !== WEB_CONSOLE_ID && !s.id.startsWith("agent-"))
+    const q = mentionQuery.toLowerCase();
+    const matches = (s: {
+      name: string;
+      id: string;
+      description?: string | null;
+      skills?: string[];
+    }) =>
+      s.name.toLowerCase().includes(q) ||
+      s.id.toLowerCase().includes(q) ||
+      (s.description ?? "").toLowerCase().includes(q) ||
+      (s.skills ?? []).some((k) => k.toLowerCase().includes(q));
+    return (graph.data?.nodes ?? [])
       .filter(
         (s) =>
-          s.name.toLowerCase().includes(mentionQuery) || s.id.toLowerCase().includes(mentionQuery),
+          s.id !== WEB_CONSOLE_ID &&
+          !s.id.startsWith("agent-") &&
+          s.status === "active" &&
+          matches(s),
       )
       .slice(0, 6);
-  }, [sessions.data, mentionQuery]);
+  }, [graph.data, mentionQuery]);
 
   const ask = useMutation({
     mutationFn: (body: { to_session: string; question: string }) => api.webAsk(body),
@@ -166,8 +181,17 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
                 <StatusDot status={s.status} busy={s.busy} />
                 <span className="text-sm text-ink truncate max-w-56">{s.name}</span>
                 <span className="text-[11px] text-ink-faint truncate flex-1">
-                  {s.description ?? s.id.slice(0, 8)}
+                  {s.description
+                    ? s.description
+                    : (s.skills?.length ?? 0) > 0
+                      ? s.skills!.join(", ")
+                      : s.id.slice(0, 8)}
                 </span>
+                {(s.skills?.length ?? 0) > 0 && (
+                  <span className="font-mono text-[10px] text-ink-faint flex-shrink-0">
+                    [{s.skills!.slice(0, 2).join(", ")}]
+                  </span>
+                )}
               </button>
             ))}
           </div>
