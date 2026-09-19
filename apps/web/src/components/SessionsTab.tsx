@@ -113,6 +113,22 @@ export function SessionsTab({ onSelectSession, selectedSessionId }: SessionsTabP
                         <span className="text-xs font-medium text-ink truncate flex-1">
                           {s.name}
                         </span>
+                        {s.priority === "P0" && (
+                          <span
+                            title="重点会话：低优先级会话无法向它提问"
+                            className="flex-shrink-0 rounded bg-accent-soft border border-accent/30 px-1 text-[10px] font-mono text-accent leading-4"
+                          >
+                            P0
+                          </span>
+                        )}
+                        {s.priority === "P2" && (
+                          <span
+                            title="后台会话"
+                            className="flex-shrink-0 rounded bg-paper border border-line px-1 text-[10px] font-mono text-ink-faint leading-4"
+                          >
+                            P2
+                          </span>
+                        )}
                         <span className="text-[10px] text-ink-faint flex-shrink-0">
                           {relative(s.last_heartbeat_at)}
                         </span>
