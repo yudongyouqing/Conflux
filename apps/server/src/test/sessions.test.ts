@@ -13,6 +13,7 @@ import {
   listSessions,
   endSession,
   pruneAbandonedSessions,
+  searchSessions,
 } from "../core/sessions.js";
 import { publishContext } from "../core/context.js";
 import { askSession } from "../core/messages.js";
@@ -306,4 +307,35 @@ test("pruneAbandonedSessions claudePid mode reaps the /resume-away predecessor i
   assert.ok(removed >= 1);
   assert.equal(getSession(db, "abandoned-id"), null, "same-pid unnamed predecessor is reaped");
   assert.ok(getSession(db, "current-id"), "the session being registered is kept");
+});
+
+test("searchSessions matches name, description, and metadata skills", () => {
+  registerSession(db, {
+    id: "search-a",
+    name: "sql 专家",
+    description: "postgres tuning and schema design",
+    metadata: { agent_card: { skills: ["sql", "postgres"] } },
+  });
+  registerSession(db, {
+    id: "search-b",
+    name: "前端实现",
+    description: null,
+    metadata: { agent_card: { skills: ["react", "tailwind"] } },
+  });
+  registerSession(db, { id: "search-c", name: "旁路会话", description: null });
+
+  assert.deepEqual(
+    searchSessions(db, "postgres").map((s) => s.id),
+    ["search-a"],
+  );
+  assert.deepEqual(
+    searchSessions(db, "react").map((s) => s.id),
+    ["search-b"],
+  );
+  assert.deepEqual(
+    searchSessions(db, "专家").map((s) => s.id),
+    ["search-a"],
+  );
+  // blank query matches nothing — callers must not dump the whole table
+  assert.deepEqual(searchSessions(db, "   "), []);
 });

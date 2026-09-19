@@ -36,7 +36,10 @@ export function SessionsTab({ onSelectSession, selectedSessionId }: SessionsTabP
       return (
         s.name.toLowerCase().includes(needle) ||
         (s.description ?? "").toLowerCase().includes(needle) ||
-        (s.project_dir ?? "").toLowerCase().includes(needle)
+        (s.project_dir ?? "").toLowerCase().includes(needle) ||
+        // skills live in the metadata JSON (agent_card) — a raw catch-all
+        // match keeps capability search working without a new column
+        (s.metadata ?? "").toLowerCase().includes(needle)
       );
     });
     const byProject = new Map<string, SessionSummary[]>();
