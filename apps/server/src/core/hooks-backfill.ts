@@ -8,6 +8,7 @@ import type { DB } from "./db.js";
 import { getSession, mergeSessionMeta, registerSession } from "./sessions.js";
 import { findSessionByRuntimePid, promptExcerpt } from "./live.js";
 import { setSetting } from "./app-settings.js";
+import { probeRuntimePids } from "./liveness.js";
 
 /**
  * Backfill for sessions that were already running when hooks got installed:
@@ -108,7 +109,7 @@ export function scanRecentTranscripts(claudeHome: string): BackfillCandidate[] {
   const projectsDir = join(claudeHome, "projects");
   const cutoff = Date.now() - BACKFILL_WINDOW_MS;
   const out: BackfillCandidate[] = [];
-  let dirs: string[] = [];
+  let dirs: string[];
   try {
     dirs = readdirSync(projectsDir);
   } catch {
@@ -116,7 +117,7 @@ export function scanRecentTranscripts(claudeHome: string): BackfillCandidate[] {
   }
   for (const dir of dirs) {
     const full = join(projectsDir, dir);
-    let files: string[] = [];
+    let files: string[];
     try {
       files = readdirSync(full).filter((f) => f.endsWith(".jsonl"));
     } catch {
@@ -233,4 +234,55 @@ export async function backfillLiveClaudeSessions(
     report.registered.push({ id: best.sessionId, pid, name });
   }
   return report;
+}
+
+// ---- real IO adapters ---------------------------------------------------------
+
+const execFileAsync = promisify(execFile);
+
+/** CLAUDE_CONFIG_DIR-aware Claude home, same rule as claudeSettingsPath(). */
+export function resolveClaudeHome(): string {
+  return process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
+}
+
+/**
+ * Process cwd (lsof) + start time (ps lstart, local tz). null fields mean
+ * "could not determine" — the matcher treats them as unverifiable. win32
+ * returns null outright: Phase 1 is macOS/Linux (issue #75 boundary note).
+ */
+export async function runtimeProcInfo(pid: number): Promise<RuntimeProcInfo | null> {
+  if (platform() === "win32") return null;
+  let cwd: string | null = null;
+  let startedAtMs: number | null = null;
+  try {
+    const { stdout } = await execFileAsync("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"]);
+    const line = stdout.split("\n").find((l) => l.startsWith("n/"));
+    if (line) cwd = line.slice(1);
+  } catch {
+    // lsof failed — cwd unknown
+  }
+  try {
+    const { stdout } = await execFileAsync("/bin/ps", ["-o", "lstart=", "-p", String(pid)]);
+    const t = Date.parse(stdout.trim());
+    if (!Number.isNaN(t)) startedAtMs = t;
+  } catch {
+    // ps failed — start unknown
+  }
+  if (cwd === null && startedAtMs === null) return null;
+  return { pid, cwd, startedAtMs };
+}
+
+/** Real-IO composition: live probe + on-demand transcript scan. */
+export async function runBackfill(
+  db: DB,
+  claudeHome: string = resolveClaudeHome(),
+): Promise<BackfillReport> {
+  const snapshot = await probeRuntimePids();
+  const livePids = snapshot?.claude ?? new Set<number>();
+  let cache: BackfillCandidate[] | null = null;
+  return backfillLiveClaudeSessions(db, {
+    livePids,
+    procInfo: (pid) => runtimeProcInfo(pid),
+    recentTranscripts: async () => (cache ??= scanRecentTranscripts(claudeHome)),
+  });
 }
