@@ -8,6 +8,7 @@ import { resolveConfig, type Scope, DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT } from 
 import { openDb, type DB } from "../core/db.js";
 import { migrateDataDir, readMigrationStatus } from "../core/config-migration.js";
 import { handleHookEvent, readJsonFile } from "../core/live.js";
+import { clearData, getClearableCounts } from "../core/data-clear.js";
 import { runBackfill } from "../core/hooks-backfill.js";
 import { logger } from "../log.js";
 import { registerSession, listSessions, endSession } from "../core/sessions.js";
@@ -175,6 +176,46 @@ export function buildCli(argv?: string | readonly string[]): Command {
         "POST",
         "/data/import",
         { bundle, conflict },
+      );
+      console.log(JSON.stringify(result, null, 2));
+    });
+
+  data
+    .command("counts")
+    .description("show clearable per-category data counts")
+    .action(async function (this: Command) {
+      const o = this.optsWithGlobals() as CliOpts;
+      const result = await runOp(program, () => getClearableCounts(openDbFrom(o)), "GET", "/data/counts");
+      console.log(JSON.stringify(result));
+    });
+
+  data
+    .command("clear")
+    .description("auto-backup a full bundle, then clear selected categories")
+    .option("--sessions", "clear session nodes (cascades their messages/context)")
+    .option("--messages", "clear cross-session messages, keep nodes")
+    .option("--context", "clear published context notes")
+    .action(async function (this: Command) {
+      const o = this.optsWithGlobals() as CliOpts & {
+        sessions?: boolean;
+        messages?: boolean;
+        context?: boolean;
+      };
+      const categories = {
+        sessions: o.sessions === true,
+        messages: o.messages === true,
+        context: o.context === true,
+      };
+      if (!categories.sessions && !categories.messages && !categories.context) {
+        throw new Error("pick at least one of --sessions/--messages/--context");
+      }
+      const cfg = resolveConfig(normaliseScope(o.scope), o.dataDir);
+      const result = await runOp(
+        program,
+        () => clearData(openDb(cfg), categories, join(cfg.dataDir, "backups")),
+        "POST",
+        "/data/clear",
+        { categories },
       );
       console.log(JSON.stringify(result, null, 2));
     });

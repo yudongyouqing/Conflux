@@ -1,7 +1,9 @@
 import type { FastifyInstance } from "fastify";
+import { join } from "node:path";
 import { getGraph } from "../../core/graph.js";
 import { queryAudit } from "../../core/audit.js";
 import { exportData, importData, type ImportConflictStrategy } from "../../core/data-transfer.js";
+import { clearData, getClearableCounts, type ClearCategories } from "../../core/data-clear.js";
 import { logAudit } from "../../core/audit.js";
 import type { ServerContext } from "../context.js";
 
@@ -18,9 +20,12 @@ interface DataImportBody {
   bundle: Record<string, unknown>;
   conflict?: string;
 }
+interface DataClearBody {
+  categories?: ClearCategories;
+}
 
 export function registerSystemRoutes(app: FastifyInstance, ctx: ServerContext): void {
-  const { db, sendError, sendHttpError } = ctx;
+  const { db, dataDir, sendError, sendHttpError } = ctx;
 
   // GET /graph — return nodes (sessions) + edges (communication links)
   app.get<{ Querystring: { status?: string } }>("/graph", {}, async (req, reply) => {
@@ -51,6 +56,40 @@ export function registerSystemRoutes(app: FastifyInstance, ctx: ServerContext): 
       });
       reply.header("Content-Disposition", 'attachment; filename="conflux-data-v1.json"');
       return reply.send(bundle);
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // GET /data/counts - clearable-data counters for the settings page
+  app.get("/data/counts", {}, async (_req, reply) => {
+    try {
+      return reply.send(getClearableCounts(db));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // POST /data/clear - auto-backup a full bundle, then delete the
+  // selected categories (issue #79)
+  app.post<{ Body: DataClearBody }>("/data/clear", {}, async (req, reply) => {
+    const categories = req.body?.categories ?? {};
+    if (!categories.sessions && !categories.messages && !categories.context) {
+      return sendHttpError(
+        reply,
+        400,
+        "categories: pick at least one of sessions/messages/context",
+      );
+    }
+    try {
+      const result = clearData(db, categories, join(dataDir, "backups"));
+      logAudit(db, {
+        interface: "http",
+        action: "clear_data",
+        args: { ...categories },
+        result,
+      });
+      return reply.send(result);
     } catch (err) {
       return sendError(reply, err);
     }
