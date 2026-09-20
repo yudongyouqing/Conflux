@@ -35,7 +35,7 @@ test("conflux data counts + data clear via CLI", async (t) => {
 
   await runCli(["--data-dir", dataDir, "data", "clear", "--sessions"]);
 
-  const left = db.prepare("SELECT COUNT(*) AS n FROM sessions").get().n;
+  const left = (db.prepare("SELECT COUNT(*) AS n FROM sessions").get() as { n: number }).n;
   assert.equal(left, 1, "web-console 保留，s1 清除");
   const backups = readdirSync(join(dataDir, "backups"));
   assert.equal(backups.length, 1, "清除前自动备份");
