@@ -58,13 +58,13 @@ test("clearing sessions cascades messages/context/edges, keeps web-console + pre
   assert.equal(r.cleared.sessions, 2);
   assert.equal(r.cleared.messages, 1, "级联删除的消息计数");
   assert.equal(r.cleared.contextEntries, 1);
-  const ids = db.prepare("SELECT id FROM sessions").all().map((x) => x.id);
+  const ids = (db.prepare("SELECT id FROM sessions").all() as { id: string }[]).map((x) => x.id);
   assert.deepEqual(ids, ["web-console"]);
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM messages").get().n, 0);
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM edges").get().n, 0);
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM context_entries").get().n, 0);
+  assert.equal((db.prepare("SELECT COUNT(*) AS n FROM messages").get() as { n: number }).n, 0);
+  assert.equal((db.prepare("SELECT COUNT(*) AS n FROM edges").get() as { n: number }).n, 0);
+  assert.equal((db.prepare("SELECT COUNT(*) AS n FROM context_entries").get() as { n: number }).n, 0);
   assert.equal(
-    db.prepare("SELECT COUNT(*) AS n FROM runtime_agents").get().n,
+    (db.prepare("SELECT COUNT(*) AS n FROM runtime_agents").get() as { n: number }).n,
     1,
     "runtime agent 预设不受影响",
   );
@@ -73,7 +73,7 @@ test("clearing sessions cascades messages/context/edges, keeps web-console + pre
   assert.equal(files.length, 1);
   const bundle = JSON.parse(readFileSync(join(backupDir, files[0]), "utf8"));
   importData(db, bundle, { conflict: "skip" });
-  const restored = db.prepare("SELECT COUNT(*) AS n FROM sessions").get().n;
+  const restored = (db.prepare("SELECT COUNT(*) AS n FROM sessions").get() as { n: number }).n;
   assert.equal(restored, 3, "导入后 s1/s2/web-console 回来");
   rmSync(backupDir, { recursive: true, force: true });
 });
@@ -92,12 +92,12 @@ test("clearing messages keeps session nodes; clearing context keeps sessions+mes
   seed(db);
   const backupDir = tmpBackupDir();
   clearData(db, { messages: true }, backupDir);
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM messages").get().n, 0);
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM sessions").get().n, 3, "节点保留");
+  assert.equal((db.prepare("SELECT COUNT(*) AS n FROM messages").get() as { n: number }).n, 0);
+  assert.equal((db.prepare("SELECT COUNT(*) AS n FROM sessions").get() as { n: number }).n, 3, "节点保留");
 
   clearData(db, { context: true }, backupDir);
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM context_entries").get().n, 0);
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM sessions").get().n, 3);
+  assert.equal((db.prepare("SELECT COUNT(*) AS n FROM context_entries").get() as { n: number }).n, 0);
+  assert.equal((db.prepare("SELECT COUNT(*) AS n FROM sessions").get() as { n: number }).n, 3);
   rmSync(backupDir, { recursive: true, force: true });
 });
 

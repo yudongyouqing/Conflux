@@ -87,7 +87,12 @@ export function registerSystemRoutes(app: FastifyInstance, ctx: ServerContext): 
         interface: "http",
         action: "clear_data",
         args: { ...categories },
-        result,
+        result: {
+          backupPath: result.backupPath,
+          clearedSessions: result.cleared.sessions,
+          clearedMessages: result.cleared.messages,
+          clearedContextEntries: result.cleared.contextEntries,
+        },
       });
       return reply.send(result);
     } catch (err) {
