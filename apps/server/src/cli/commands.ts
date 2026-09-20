@@ -8,6 +8,8 @@ import { resolveConfig, type Scope, DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT } from 
 import { openDb, type DB } from "../core/db.js";
 import { migrateDataDir, readMigrationStatus } from "../core/config-migration.js";
 import { handleHookEvent, readJsonFile } from "../core/live.js";
+import { clearData, getClearableCounts } from "../core/data-clear.js";
+import { runBackfill } from "../core/hooks-backfill.js";
 import { logger } from "../log.js";
 import { registerSession, listSessions, endSession } from "../core/sessions.js";
 import { publishContext, updateContext, deleteContext, listMyContext } from "../core/context.js";
@@ -174,6 +176,46 @@ export function buildCli(argv?: string | readonly string[]): Command {
         "POST",
         "/data/import",
         { bundle, conflict },
+      );
+      console.log(JSON.stringify(result, null, 2));
+    });
+
+  data
+    .command("counts")
+    .description("show clearable per-category data counts")
+    .action(async function (this: Command) {
+      const o = this.optsWithGlobals() as CliOpts;
+      const result = await runOp(program, () => getClearableCounts(openDbFrom(o)), "GET", "/data/counts");
+      console.log(JSON.stringify(result));
+    });
+
+  data
+    .command("clear")
+    .description("auto-backup a full bundle, then clear selected categories")
+    .option("--sessions", "clear session nodes (cascades their messages/context)")
+    .option("--messages", "clear cross-session messages, keep nodes")
+    .option("--context", "clear published context notes")
+    .action(async function (this: Command) {
+      const o = this.optsWithGlobals() as CliOpts & {
+        sessions?: boolean;
+        messages?: boolean;
+        context?: boolean;
+      };
+      const categories = {
+        sessions: o.sessions === true,
+        messages: o.messages === true,
+        context: o.context === true,
+      };
+      if (!categories.sessions && !categories.messages && !categories.context) {
+        throw new Error("pick at least one of --sessions/--messages/--context");
+      }
+      const cfg = resolveConfig(normaliseScope(o.scope), o.dataDir);
+      const result = await runOp(
+        program,
+        () => clearData(openDb(cfg), categories, join(cfg.dataDir, "backups")),
+        "POST",
+        "/data/clear",
+        { categories },
       );
       console.log(JSON.stringify(result, null, 2));
     });
@@ -785,7 +827,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
   hooks
     .command("install")
     .description("install Conflux hooks into ~/.claude/settings.json (backs up first)")
-    .action(function (this: Command) {
+    .action(async function (this: Command) {
       const settingsPath = claudeSettingsPath();
       const settings = readJsonFile(settingsPath);
       const hooksCfg = (settings.hooks ?? {}) as Record<string, unknown>;
@@ -828,6 +870,43 @@ export function buildCli(argv?: string | readonly string[]): Command {
           `entry: ${base}\n` +
           `new Claude Code sessions will now register themselves (id = conversation id, name = first prompt).`,
       );
+
+      // Backfill sessions that were already running before hooks existed —
+      // they never saw SessionStart and would otherwise surface as stale or
+      // not at all (issue #75). Best-effort: install must not fail here.
+      try {
+        const report = await runBackfill(openDb(resolveConfig("global")));
+        if (report.registered.length > 0 || report.refreshed > 0) {
+          console.log(
+            `backfilled ${report.registered.length} running session(s)` +
+              (report.refreshed > 0
+                ? `, refreshed pid on ${report.refreshed} existing`
+                : ""),
+          );
+        }
+      } catch (err) {
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          "post-install backfill failed (non-fatal)",
+        );
+      }
+    });
+
+  hooks
+    .command("backfill")
+    .description("register still-running Claude Code sessions that predate hooks install")
+    .action(async function (this: Command) {
+      const report = await runBackfill(openDb(resolveConfig("global")));
+      for (const r of report.registered) {
+        console.log(`registered ${r.id} (pid ${r.pid}) as "${r.name}"`);
+      }
+      if (report.refreshed > 0)
+        console.log(`refreshed pid on ${report.refreshed} existing session(s)`);
+      if (report.skippedBound > 0) console.log(`${report.skippedBound} process(es) already tracked`);
+      if (report.unmatchedPids > 0)
+        console.log(`${report.unmatchedPids} process(es) had no verifiable transcript`);
+      if (report.registered.length === 0 && report.refreshed === 0)
+        console.log("nothing to backfill");
     });
 
   hooks

@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useTerminalSettings, useSaveTerminalSettings } from "../hooks";
 import { api } from "../api";
 import type { ConfluxDataBundle, TerminalChoice } from "@conflux/shared";
-import { Settings, Loader2, Check, Download, Upload } from "lucide-react";
+import { Settings, Loader2, Check, Download, Upload, Trash2 } from "lucide-react";
 import {
   BUILTIN_THEMES,
   deleteCustomTheme,
@@ -37,6 +37,56 @@ export function SettingsTab() {
   const [activeCustom, setActiveCustom] = useState<string | null>(() => getActiveCustomThemeName());
   const [importText, setImportText] = useState("");
   const [importError, setImportError] = useState<string | null>(null);
+  const [clearCounts, setClearCounts] = useState<{
+    sessions: number;
+    messages: number;
+    contextEntries: number;
+  } | null>(null);
+  const [clearPending, setClearPending] = useState(false);
+  const [clearNotice, setClearNotice] = useState<string | null>(null);
+
+  const refreshClearCounts = () =>
+    api
+      .dataCounts()
+      .then(setClearCounts)
+      .catch(() => setClearCounts(null));
+  useEffect(() => {
+    refreshClearCounts();
+  }, []);
+
+  type ClearKey = "sessions" | "messages" | "context";
+  const countOf = (key: ClearKey): number =>
+    clearCounts === null ? 0 : key === "context" ? clearCounts.contextEntries : clearCounts[key];
+
+  const runClear = async (key: ClearKey, label: string) => {
+    const n = countOf(key);
+    const scopeText =
+      key === "sessions"
+        ? "其消息与上下文笔记将一并清除，图谱节点保留 web-console"
+        : key === "messages"
+          ? "跨会话消息记录将清除，会话节点保留"
+          : "已发布的共享上下文笔记将清除";
+    if (
+      !window.confirm(
+        `清除${label}（${n} 条）？\n${scopeText}。\n\n清除前会自动备份全量数据（服务端保留最近 5 份），之后可通过「导入 JSON」恢复。`,
+      )
+    ) {
+      return;
+    }
+    setClearPending(true);
+    setClearNotice(null);
+    try {
+      const r = await api.dataClear({ [key]: true });
+      const clearedN = key === "context" ? r.cleared.contextEntries : r.cleared[key];
+      setClearNotice(`已清除 ${clearedN} 条 · 备份：${r.backupPath ?? "无"}`);
+      await refreshClearCounts();
+      queryClient.invalidateQueries();
+    } catch (err) {
+      setClearNotice(`清除失败：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setClearPending(false);
+    }
+  };
 
   const applyImport = () => {
     try {
@@ -391,6 +441,55 @@ export function SettingsTab() {
                 <Check size={12} />
               )}
               {transferNotice}
+            </span>
+          )}
+        </div>
+
+        <div className="bg-surface border border-line rounded-xl p-4 space-y-3 shadow-sm">
+          <div>
+            <h3 className="text-ink font-medium text-sm">数据清除</h3>
+            <p className="text-[11px] text-ink-faint mt-0.5">
+              这些都是原会话上下文的本地副本。清除前自动备份全量数据（服务端保留最近 5
+              份），可用上方「导入 JSON」恢复
+            </p>
+          </div>
+          {(
+            [
+              ["sessions", "会话节点", "级联清除其消息与上下文，web-console 保留"],
+              ["messages", "消息", "跨会话问答记录，会话节点保留"],
+              ["context", "上下文笔记", "已发布的共享上下文"],
+            ] as const
+          ).map(([key, label, desc]) => (
+            <div key={key} className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <span className="text-xs text-ink">{label}</span>
+                <span className="text-[11px] text-ink-faint ml-2 hidden sm:inline">{desc}</span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-[11px] text-ink-faint tabular-nums">
+                  {clearCounts ? countOf(key) : "—"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => runClear(key, label)}
+                  disabled={clearPending || !clearCounts || countOf(key) === 0}
+                  title={`清除${label}`}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-300 text-red-600 text-xs hover:bg-red-50 disabled:opacity-40"
+                >
+                  {clearPending ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                  清除
+                </button>
+              </div>
+            </div>
+          ))}
+          {clearNotice && (
+            <span
+              className={`text-xs ${
+                clearNotice.startsWith("清除失败") ? "text-red-600" : "text-emerald-600"
+              } flex items-center gap-1`}
+            >
+              {!clearNotice.startsWith("清除失败") && <Check size={12} />}
+              {clearNotice}
             </span>
           )}
         </div>
