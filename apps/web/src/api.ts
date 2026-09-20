@@ -178,6 +178,15 @@ export const api = {
       copied: number;
     }>("/data/import", { bundle, conflict }),
 
+  dataCounts: () =>
+    get<{ sessions: number; messages: number; contextEntries: number }>("/data/counts"),
+
+  dataClear: (categories: { sessions?: boolean; messages?: boolean; context?: boolean }) =>
+    post<{
+      backupPath: string | null;
+      cleared: { sessions: number; messages: number; contextEntries: number };
+    }>("/data/clear", { categories }),
+
   streamChat: async (
     agentId: number,
     message: string,
