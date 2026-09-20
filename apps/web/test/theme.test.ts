@@ -8,6 +8,8 @@ import {
   saveCustomTheme,
   deleteCustomTheme,
   setActiveCustomTheme,
+  setThemePreference,
+  refreshTokenApplication,
   BUILTIN_THEMES,
 } from "../src/theme.ts";
 
@@ -93,3 +95,26 @@ test("setActiveCustomTheme persists the name; null clears", () => {
 function fakeStyleRecorder() {
   return { style: { setProperty: () => {}, removeProperty: () => {} } };
 }
+
+test("dark mode clears palette inline vars; light re-applies them", () => {
+  const storage = fakeStorage();
+  const written = new Map<string, string>();
+  const root = {
+    dataset: {} as Record<string, string>,
+    style: {
+      setProperty: (k: string, v: string) => void written.set(k, v),
+      removeProperty: (k: string) => void written.delete(k),
+    },
+  };
+  // 激活色板 → 内联写色板
+  setActiveCustomTheme("海洋深处", storage, root);
+  assert.ok(written.get("--tk-accent"));
+  // 切深色 → 内联被清（深色组经 data-theme 选择器生效）
+  storage.setItem("conflux.theme", "dark");
+  refreshTokenApplication(storage, root);
+  assert.equal(written.get("--tk-accent"), undefined, "深色优先于色板");
+  // 切回浅色 → 色板恢复
+  storage.setItem("conflux.theme", "light");
+  refreshTokenApplication(storage, root);
+  assert.ok(written.get("--tk-accent"), "浅色恢复色板");
+});
