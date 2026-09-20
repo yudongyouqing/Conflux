@@ -6,7 +6,9 @@ export const LEGACY_THEME_KEY = "muiltchat.theme";
 export function normalizeThemePreference(value: unknown): ThemePreference { return value === "light" || value === "dark" || value === "system" ? value : "system"; }
 export function resolveTheme(preference: ThemePreference, prefersDark: boolean): ResolvedTheme { return preference === "dark" || (preference === "system" && prefersDark) ? "dark" : "light"; }
 export function getThemePreference(storage: Storage = window.localStorage): ThemePreference { try { return normalizeThemePreference(storage.getItem(THEME_KEY) ?? storage.getItem(LEGACY_THEME_KEY)); } catch { return "system"; } }
-export function applyTheme(root: HTMLElement, preference: ThemePreference, prefersDark: boolean): ResolvedTheme { const resolved = resolveTheme(preference, prefersDark); root.dataset.theme = resolved; return resolved; }
+/** 可注入的主题根：真实 HTMLElement 或测试用的结构化替身 */
+type ThemeRoot = { dataset: Record<string, string | undefined>; style: { setProperty(key: string, value: string): void; removeProperty(key: string): void } };
+export function applyTheme(root: ThemeRoot, preference: ThemePreference, prefersDark: boolean): ResolvedTheme { const resolved = resolveTheme(preference, prefersDark); root.dataset.theme = resolved; return resolved; }
 export function setThemePreference(preference: ThemePreference, win: Window = window): ResolvedTheme { const normalized = normalizeThemePreference(preference); try { win.localStorage.setItem(THEME_KEY, normalized); } catch { /* storage unavailable (private mode) */ } const resolved = applyTheme(win.document.documentElement, normalized, win.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false); refreshTokenApplication(win.localStorage, win.document.documentElement); return resolved; }
 export function installTheme(win: Window = window): () => void { let preference = getThemePreference(win.localStorage); const media = win.matchMedia?.("(prefers-color-scheme: dark)"); const update = () => applyTheme(win.document.documentElement, preference, media?.matches ?? false); update(); const listener = () => { preference = getThemePreference(win.localStorage); if (preference === "system") update(); }; media?.addEventListener?.("change", listener); return () => media?.removeEventListener?.("change", listener); }
 
@@ -57,7 +59,7 @@ export function normalizeThemeColors(value: unknown): ThemeColors | null {
   return out as ThemeColors;
 }
 
-type StyleTarget = { style: { setProperty(key: string, value: string): void; removeProperty(key: string): void } };
+type StyleTarget = ThemeRoot;
 
 /** 把色板写入 CSS 变量；null = 清除覆盖，回到 :root 默认（汇流蓝） */
 export function applyThemeColors(root: StyleTarget = document.documentElement, colors: ThemeColors | null): void {
@@ -72,13 +74,24 @@ export function applyThemeColors(root: StyleTarget = document.documentElement, c
   }
 }
 
-// 内置预设：浅色系转译自 theme-factory 主题规格（Ocean Depths / Forest Canopy / Desert Rose）
+// 内置预设：浅色系转译自 theme-factory 主题规格（Ocean Depths / Forest Canopy / Desert Rose / Tech Innovation），
+// 终端深色 = 暗色令牌组的色板化（选中即全站深色）
 export const BUILTIN_THEMES: CustomTheme[] = [
   { name: "汇流蓝（默认）", colors: { ink: "#182234", inkMuted: "#5c677d", inkFaint: "#8b94a7", paper: "#f6f7f9", surface: "#ffffff", line: "#e4e8ef", lineStrong: "#cbd3e0", accent: "#2563eb", accentDeep: "#1e4fc4", accentSoft: "#ebf1fe" } },
   { name: "海洋深处", colors: { ink: "#0f2440", inkMuted: "#4a6079", inkFaint: "#7d93ac", paper: "#eef4f8", surface: "#ffffff", line: "#d8e3ec", lineStrong: "#b9cbdc", accent: "#0e7490", accentDeep: "#0b5a6e", accentSoft: "#e0f2f7" } },
   { name: "森林树冠", colors: { ink: "#1d2a20", inkMuted: "#52645a", inkFaint: "#84968b", paper: "#f1f6f1", surface: "#ffffff", line: "#dce7dc", lineStrong: "#b9cdb9", accent: "#2f6b4f", accentDeep: "#24523c", accentSoft: "#e3f0e6" } },
   { name: "沙漠玫瑰", colors: { ink: "#33272b", inkMuted: "#6e5a60", inkFaint: "#a08c92", paper: "#faf4f1", surface: "#ffffff", line: "#ecdfda", lineStrong: "#d6bfb8", accent: "#b76e79", accentDeep: "#96545f", accentSoft: "#f7e8e6" } },
+  { name: "科技创新", colors: { ink: "#1e1e1e", inkMuted: "#555555", inkFaint: "#8a8a8a", paper: "#f5f7fa", surface: "#ffffff", line: "#e2e8f0", lineStrong: "#c4cfda", accent: "#0066ff", accentDeep: "#0052cc", accentSoft: "#e5eeff" } },
+  { name: "终端深色", colors: { ink: "#e6eaf2", inkMuted: "#94a3b8", inkFaint: "#64748b", paper: "#0d121c", surface: "#172030", line: "#2c384a", lineStrong: "#3e4c62", accent: "#60a5fa", accentDeep: "#3b82f6", accentSoft: "#1e3a5f" } },
 ];
+
+/** 纸面色亮度判定：paper 偏暗即视为深色主题（决定 data-theme 联动） */
+function isDarkPaper(colors: ThemeColors): boolean {
+  const channels = hexToChannels(colors.paper);
+  if (!channels) return false;
+  const [r, g, b] = channels.split(" ").map(Number);
+  return 0.299 * r + 0.587 * g + 0.114 * b < 128;
+}
 
 export const CUSTOM_THEMES_KEY = "conflux.custom-themes";
 export const ACTIVE_CUSTOM_THEME_KEY = "conflux.active-custom-theme";
@@ -112,15 +125,20 @@ export function getActiveCustomThemeName(storage: Storage = window.localStorage)
   return storage.getItem(ACTIVE_CUSTOM_THEME_KEY);
 }
 
-/** 激活某个自定义主题（写偏好并立即应用）；null 回到默认汇流蓝 */
+/** 激活某个主题（写偏好并立即应用）；null 回到默认汇流蓝。
+ *  深色色板会联动 data-theme（原生控件 color-scheme 跟随）。 */
 export function setActiveCustomTheme(name: string | null, storage: Storage = window.localStorage, root: StyleTarget = document.documentElement): void {
   if (name !== null) {
     const theme = listCustomThemes(storage).find((t) => t.name === name) ?? BUILTIN_THEMES.find((t) => t.name === name);
     if (!theme) return;
     storage.setItem(ACTIVE_CUSTOM_THEME_KEY, name);
-  } else {
-    storage.removeItem(ACTIVE_CUSTOM_THEME_KEY);
+    const mode = isDarkPaper(theme.colors) ? "dark" : "light";
+    storage.setItem(THEME_KEY, mode);
+    applyTheme(root, mode, false);
+    applyThemeColors(root, theme.colors);
+    return;
   }
+  storage.removeItem(ACTIVE_CUSTOM_THEME_KEY);
   refreshTokenApplication(storage, root);
 }
 
@@ -139,6 +157,14 @@ export function applySavedCustomTheme(storage: Storage = window.localStorage, ro
 export function refreshTokenApplication(storage: Storage = window.localStorage, root: StyleTarget = document.documentElement): void {
   const preference = getThemePreference(storage);
   if (preference === "dark") {
+    // 深色模式：激活的色板若本身是深色板则保留其内联，否则清内联走暗色组
+    const name = getActiveCustomThemeName(storage);
+    const theme = name === null ? null : listCustomThemes(storage).find((t) => t.name === name) ?? BUILTIN_THEMES.find((t) => t.name === name) ?? null;
+    if (theme && isDarkPaper(theme.colors)) {
+      applyThemeColors(root, theme.colors);
+      root.dataset.theme = "dark";
+      return;
+    }
     applyThemeColors(root, null);
     return;
   }
