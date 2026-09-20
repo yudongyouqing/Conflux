@@ -7,7 +7,7 @@ export function normalizeThemePreference(value: unknown): ThemePreference { retu
 export function resolveTheme(preference: ThemePreference, prefersDark: boolean): ResolvedTheme { return preference === "dark" || (preference === "system" && prefersDark) ? "dark" : "light"; }
 export function getThemePreference(storage: Storage = window.localStorage): ThemePreference { try { return normalizeThemePreference(storage.getItem(THEME_KEY) ?? storage.getItem(LEGACY_THEME_KEY)); } catch { return "system"; } }
 export function applyTheme(root: HTMLElement, preference: ThemePreference, prefersDark: boolean): ResolvedTheme { const resolved = resolveTheme(preference, prefersDark); root.dataset.theme = resolved; return resolved; }
-export function setThemePreference(preference: ThemePreference, win: Window = window): ResolvedTheme { const normalized = normalizeThemePreference(preference); try { win.localStorage.setItem(THEME_KEY, normalized); } catch { /* storage unavailable (private mode) */ } return applyTheme(win.document.documentElement, normalized, win.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false); }
+export function setThemePreference(preference: ThemePreference, win: Window = window): ResolvedTheme { const normalized = normalizeThemePreference(preference); try { win.localStorage.setItem(THEME_KEY, normalized); } catch { /* storage unavailable (private mode) */ } const resolved = applyTheme(win.document.documentElement, normalized, win.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false); refreshTokenApplication(win.localStorage, win.document.documentElement); return resolved; }
 export function installTheme(win: Window = window): () => void { let preference = getThemePreference(win.localStorage); const media = win.matchMedia?.("(prefers-color-scheme: dark)"); const update = () => applyTheme(win.document.documentElement, preference, media?.matches ?? false); update(); const listener = () => { preference = getThemePreference(win.localStorage); if (preference === "system") update(); }; media?.addEventListener?.("change", listener); return () => media?.removeEventListener?.("change", listener); }
 
 // ---- 自定义主题（#71）：令牌色板可导入/可切换 ------------------------------
@@ -114,22 +114,39 @@ export function getActiveCustomThemeName(storage: Storage = window.localStorage)
 
 /** 激活某个自定义主题（写偏好并立即应用）；null 回到默认汇流蓝 */
 export function setActiveCustomTheme(name: string | null, storage: Storage = window.localStorage, root: StyleTarget = document.documentElement): void {
-  if (name === null) {
+  if (name !== null) {
+    const theme = listCustomThemes(storage).find((t) => t.name === name) ?? BUILTIN_THEMES.find((t) => t.name === name);
+    if (!theme) return;
+    storage.setItem(ACTIVE_CUSTOM_THEME_KEY, name);
+  } else {
     storage.removeItem(ACTIVE_CUSTOM_THEME_KEY);
-    applyThemeColors(root, null);
-    return;
   }
-  const theme = listCustomThemes(storage).find((t) => t.name === name) ?? BUILTIN_THEMES.find((t) => t.name === name) ?? null;
-  if (!theme) return;
-  storage.setItem(ACTIVE_CUSTOM_THEME_KEY, name);
-  applyThemeColors(root, theme.colors);
+  refreshTokenApplication(storage, root);
 }
 
 /** 启动时恢复上次激活的自定义主题（无则保持 :root 默认） */
 export function applySavedCustomTheme(storage: Storage = window.localStorage, root: StyleTarget = document.documentElement): void {
+  refreshTokenApplication(storage, root);
+}
+
+/**
+ * 令牌应用的唯一入口：按「深色优先于色板」解析并落到 CSS 变量。
+ * - 深色（终端）→ 清内联，令牌走 html[data-theme=dark] 暗色组
+ * - 浅色/系统 + 激活色板 → 色板写内联
+ * setThemePreference 与 setActiveCustomTheme 都必须经过这里，否则
+ * 色板的内联变量会遮蔽深色组（内联 > 选择器）。
+ */
+export function refreshTokenApplication(storage: Storage = window.localStorage, root: StyleTarget = document.documentElement): void {
+  const preference = getThemePreference(storage);
+  if (preference === "dark") {
+    applyThemeColors(root, null);
+    return;
+  }
   const name = getActiveCustomThemeName(storage);
-  if (name === null) return;
-  const theme = name === BUILTIN_THEMES[0].name ? null : listCustomThemes(storage).find((t) => t.name === name) ?? BUILTIN_THEMES.find((t) => t.name === name);
-  if (name === BUILTIN_THEMES[0].name || !theme) { applyThemeColors(root, null); return; }
-  applyThemeColors(root, theme.colors);
+  if (name === null) {
+    applyThemeColors(root, null);
+    return;
+  }
+  const theme = name === BUILTIN_THEMES[0].name ? null : listCustomThemes(storage).find((t) => t.name === name) ?? BUILTIN_THEMES.find((t) => t.name === name) ?? null;
+  applyThemeColors(root, theme?.colors ?? null);
 }
