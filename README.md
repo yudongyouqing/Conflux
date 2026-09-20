@@ -160,7 +160,7 @@ npx tsx apps/server/src/index.ts hooks install     # 安装（自动备份 setti
 npx tsx apps/server/src/index.ts hooks uninstall   # 卸载
 ```
 
-Hooks 把会话生命周期事件与身份关联起来并持续更新在线状态，支持 `SessionStart`、`UserPromptSubmit`、`Stop` 三类事件；同时维护自定义标题、`/resume` 会话继承和未投递消息。Claude Code 使用自定义配置目录时，通过 `CLAUDE_CONFIG_DIR` 指定。
+Hooks 把会话生命周期事件与身份关联起来并持续更新在线状态，支持 `SessionStart`、`UserPromptSubmit`、`Stop` 三类事件；同时维护自定义标题、`/resume` 会话继承和未投递消息。Claude Code 使用自定义配置目录时，通过 `CLAUDE_CONFIG_DIR` 指定。安装时会自动补录当时已在运行的 Claude Code 会话（也可单独执行 `hooks backfill`）；Codex 会话暂不支持补录。
 
 ### Codex CLI
 
