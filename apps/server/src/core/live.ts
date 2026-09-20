@@ -422,6 +422,13 @@ export function handleHookEvent(
     mergeSessionMeta(db, id, { busy: true }); // UserPromptSubmit: a turn began
     return;
   }
+  // A hooks-late session (hooks installed after this conversation started)
+  // only ever fires prompt: record the ancestor pid here too or liveness
+  // falls back to the 2-min heartbeat TTL and the row flips stale while the
+  // process is still alive (issue #76). session-start remains the
+  // authoritative pid source — it re-resolves on every resume.
+  const claudePid =
+    getClaudePid() ?? (typeof meta.claude_pid === "number" ? meta.claude_pid : null);
   registerSession(db, {
     id,
     name: title ?? excerpt ?? existing?.name ?? "claude",
@@ -432,10 +439,12 @@ export function handleHookEvent(
       ...meta,
       ...agentTag,
       ...(title ? { custom_title: true } : {}),
+      claude_pid: claudePid,
       named: true,
       busy: true,
     },
   });
+  if (claudePid !== null) setSetting(db, `claude-current:${claudePid}`, id);
 }
 
 /**
