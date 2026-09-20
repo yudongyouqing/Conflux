@@ -93,7 +93,7 @@ test("setActiveCustomTheme persists the name; null clears", () => {
 });
 
 function fakeStyleRecorder() {
-  return { style: { setProperty: () => {}, removeProperty: () => {} } };
+  return { dataset: {} as Record<string, string>, style: { setProperty: () => {}, removeProperty: () => {} } };
 }
 
 test("dark mode clears palette inline vars; light re-applies them", () => {
@@ -117,4 +117,28 @@ test("dark mode clears palette inline vars; light re-applies them", () => {
   storage.setItem("conflux.theme", "light");
   refreshTokenApplication(storage, root);
   assert.ok(written.get("--tk-accent"), "浅色恢复色板");
+});
+
+test("内置主题含终端深色，isDarkPaper 判定深浅", () => {
+  const dark = BUILTIN_THEMES.find((t) => t.name === "终端深色");
+  assert.ok(dark, "终端深色预设存在");
+  assert.equal(hexToChannels(dark.colors.paper), "13 18 28");
+});
+
+test("激活深色色板联动 data-theme=dark，切浅色板联动回 light", () => {
+  const storage = fakeStorage();
+  const dataset = {} as Record<string, string>;
+  const written = new Map<string, string>();
+  const root = {
+    dataset,
+    style: {
+      setProperty: (k: string, v: string) => void written.set(k, v),
+      removeProperty: (k: string) => void written.delete(k),
+    },
+  };
+  setActiveCustomTheme("终端深色", storage, root);
+  assert.equal(dataset.theme, "dark", "深色色板联动 data-theme");
+  assert.equal(written.get("--tk-paper"), "13 18 28");
+  setActiveCustomTheme("汇流蓝（默认）", storage, root);
+  assert.equal(dataset.theme, "light", "浅色色板联动回 light");
 });
