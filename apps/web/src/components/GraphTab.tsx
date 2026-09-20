@@ -219,10 +219,10 @@ export function GraphTab({
       fitView
       fitViewOptions={{ padding: 0.3, maxZoom: 1, duration: 400 }}
       proOptions={{ hideAttribution: true }}
-      className="bg-[#F7F8FA]"
+      className="bg-paper"
     >
       <Panel position="top-left" className="!m-2">
-        <div className="flex bg-surface border border-slate-200/80 rounded-lg shadow-[0_2px_10px_rgba(16,24,40,0.08)] overflow-hidden text-xs">
+        <div className="flex bg-surface border border-line rounded-lg shadow-[0_2px_10px_rgba(16,24,40,0.08)] overflow-hidden text-xs">
           {(Object.keys(VIEW_LABELS) as ViewMode[]).map((m) => (
             <button
               key={m}
@@ -230,7 +230,7 @@ export function GraphTab({
               className={`px-3 py-1.5 transition-colors duration-200 ${
                 viewMode === m
                   ? "bg-accent text-white"
-                  : "text-ink-muted hover:bg-slate-50 hover:text-ink"
+                  : "text-ink-muted hover:bg-paper hover:text-ink"
               }`}
             >
               {VIEW_LABELS[m]}
@@ -246,18 +246,18 @@ export function GraphTab({
           </div>
         </Panel>
       )}
-      <Background color="#D9DFE8" gap={22} size={1.2} />
+      <Background color="rgb(var(--tk-line))" gap={22} size={1.2} />
       <Controls
-        className="!bg-surface !border !border-slate-200/80 !rounded-lg !shadow-[0_2px_10px_rgba(16,24,40,0.1)] !overflow-hidden [&_button]:!bg-surface [&_button]:!border-slate-100 [&_button]:!text-slate-500 [&_button:hover]:!bg-slate-50 [&_button:hover]:!text-slate-700"
+        className="!bg-surface !border !border-line !rounded-lg !shadow-[0_2px_10px_rgba(16,24,40,0.1)] !overflow-hidden [&_button]:!bg-surface [&_button]:!border-line [&_button]:!text-ink-muted [&_button:hover]:!bg-paper [&_button:hover]:!text-ink"
       />
       <MiniMap
         pannable
         zoomable
-        bgColor="#F7F8FA"
+        bgColor="rgb(var(--tk-paper))"
         nodeColor="#CBD5E1"
         nodeStrokeColor="#94A3B8"
-        maskColor="rgba(247,248,250,0.7)"
-        className="!border !border-slate-200/80 !rounded-lg !shadow-[0_2px_10px_rgba(16,24,40,0.1)]"
+        maskColor="rgb(var(--tk-paper) / 0.7)"
+        className="!border !border-line !rounded-lg !shadow-[0_2px_10px_rgba(16,24,40,0.1)]"
       />
     </ReactFlow>
   );
