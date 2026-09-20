@@ -3,6 +3,11 @@ import { promisify } from "node:util";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { homedir, platform } from "node:os";
+import { HOOK_SESSION_DESCRIPTION } from "@conflux/shared";
+import type { DB } from "./db.js";
+import { getSession, mergeSessionMeta, registerSession } from "./sessions.js";
+import { findSessionByRuntimePid, promptExcerpt } from "./live.js";
+import { setSetting } from "./app-settings.js";
 
 /**
  * Backfill for sessions that were already running when hooks got installed:
@@ -138,4 +143,94 @@ export function scanRecentTranscripts(claudeHome: string): BackfillCandidate[] {
     }
   }
   return out;
+}
+
+// ---- matching & registration --------------------------------------------------
+
+export interface RuntimeProcInfo {
+  pid: number;
+  cwd: string | null;
+  startedAtMs: number | null;
+}
+
+export interface BackfillReport {
+  registered: { id: string; pid: number; name: string }[];
+  refreshed: number;
+  skippedBound: number;
+  unmatchedPids: number;
+}
+
+export interface BackfillIo {
+  livePids: Set<number>;
+  procInfo(pid: number): Promise<RuntimeProcInfo | null>;
+  recentTranscripts(): Promise<BackfillCandidate[]>;
+}
+
+/**
+ * Match live claude pids against recent transcripts and register the
+ * winners exactly the way SessionStart would (same metadata shape, same
+ * claude-current:<pid> marker for MCP adoption). Matching rule: transcript
+ * cwd equals the process cwd AND the transcript was active after the
+ * process started; the most recently active candidate wins a contested pid.
+ * Rows that already exist (prompt-created, pid-less) only get the pid
+ * merged — names are never overwritten (issue #75 idempotency clause).
+ */
+export async function backfillLiveClaudeSessions(
+  db: DB,
+  io: BackfillIo,
+): Promise<BackfillReport> {
+  const report: BackfillReport = {
+    registered: [],
+    refreshed: 0,
+    skippedBound: 0,
+    unmatchedPids: 0,
+  };
+  const claimed = new Set<string>();
+  const transcripts = await io.recentTranscripts();
+  for (const pid of io.livePids) {
+    if (findSessionByRuntimePid(db, "claude", pid)) {
+      report.skippedBound++;
+      continue;
+    }
+    const info = await io.procInfo(pid);
+    if (!info || info.cwd === null || info.startedAtMs === null) {
+      report.unmatchedPids++;
+      continue;
+    }
+    const matches = transcripts
+      .filter(
+        (c) =>
+          c.projectDir === info.cwd &&
+          c.lastActivityMs !== null &&
+          c.lastActivityMs >= info.startedAtMs! &&
+          !claimed.has(c.sessionId),
+      )
+      .sort((a, b) => (b.lastActivityMs ?? 0) - (a.lastActivityMs ?? 0));
+    const best = matches[0];
+    if (!best) {
+      report.unmatchedPids++;
+      continue;
+    }
+    claimed.add(best.sessionId);
+    const existing = getSession(db, best.sessionId);
+    if (existing) {
+      mergeSessionMeta(db, best.sessionId, { claude_pid: pid });
+      setSetting(db, `claude-current:${pid}`, best.sessionId);
+      report.refreshed++;
+      continue;
+    }
+    const name =
+      promptExcerpt(best.firstPrompt ?? undefined) ??
+      (info.cwd ? basename(info.cwd) : "claude");
+    registerSession(db, {
+      id: best.sessionId,
+      name,
+      description: HOOK_SESSION_DESCRIPTION,
+      project_dir: best.projectDir,
+      metadata: { source: "claude-hook", claude_pid: pid, busy: false, named: true },
+    });
+    setSetting(db, `claude-current:${pid}`, best.sessionId);
+    report.registered.push({ id: best.sessionId, pid, name });
+  }
+  return report;
 }
