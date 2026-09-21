@@ -2,7 +2,7 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { makeDb } from "./helpers.js";
 import type { DB } from "../core/db.js";
 import { registerSession } from "../core/sessions.js";
@@ -125,6 +125,6 @@ test("backup rotation keeps only the newest 5 files", () => {
   assert.ok(r.backupPath);
   const files = readdirSync(backupDir).filter((f) => f.startsWith("clear-backup-"));
   assert.equal(files.length, 5, "滚动保留 5 份");
-  assert.ok(files.some((f) => f === r.backupPath!.split("/").pop()), "新备份在内");
+  assert.ok(files.some((f) => f === basename(r.backupPath!)), "新备份在内");
   rmSync(backupDir, { recursive: true, force: true });
 });

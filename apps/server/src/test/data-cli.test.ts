@@ -22,12 +22,23 @@ async function runCli(args: string[]): Promise<string> {
 
 test("conflux data counts + data clear via CLI", async (t) => {
   const dataDir = mkdtempSync(join(tmpdir(), "muiltchat-data-cli-"));
-  t.after(() => rmSync(dataDir, { recursive: true, force: true }));
 
   const db = openDb({ dataDir, dbPath: join(dataDir, "data.db"), scope: "global" });
-  t.after(() => db.close());
   registerSession(db, { id: "s1", name: "one" });
   registerSession(db, { id: "web-console", name: "Web 控制台" });
+
+  // node:test runs t.after hooks in REGISTRATION order (FIFO), and a
+  // throwing hook skips every hook after it — so connections must close
+  // before the directory delete (Windows: deleting an open data.db gives
+  // EBUSY), and the delete itself must never throw.
+  t.after(() => db.close());
+  t.after(() => {
+    try {
+      rmSync(dataDir, { recursive: true, force: true });
+    } catch {
+      // disposable temp dir — leave it behind rather than fail the test
+    }
+  });
 
   const counts = await runCli(["--data-dir", dataDir, "data", "counts"]);
   assert.match(counts, /"sessions":1/);

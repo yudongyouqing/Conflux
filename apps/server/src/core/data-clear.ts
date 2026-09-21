@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DB } from "./db.js";
 import { exportData } from "./data-transfer.js";
@@ -64,9 +64,13 @@ function rotateBackups(backupDir: string): void {
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
   for (const f of files.slice(CLEAR_BACKUP_KEEP)) {
     try {
-      unlinkSync(f.p);
+      // Windows: AV / search indexer can briefly hold a freshly written
+      // file (ERROR_SHARING_VIOLATION → EBUSY). rmSync retries those
+      // natively; force covers already-gone.
+      rmSync(f.p, { force: true, maxRetries: 3, retryDelay: 100 });
     } catch {
-      // already gone — fine
+      // still locked after retries — leave it for the next rotation; the
+      // deletion itself already happened and must not fail the clear
     }
   }
 }
