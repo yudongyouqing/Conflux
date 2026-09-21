@@ -183,6 +183,32 @@ function mungeProjectDir(cwd: string): string {
  * early, transcripts grow large), so we read it whole and scan backwards.
  * Hooks fire once per turn — a multi-MB read (~10ms) is fine there.
  */
+/**
+ * Claude Code keeps its own per-process session name — the source of the
+ * terminal tab title — at <claudeHome>/sessions/<pid>.json as
+ * {name, nameSource}. nameSource is "derived" (project-shortname + counter,
+ * assigned at start) or "user" (a /rename). Reading the store (not the
+ * terminal escape sequence) keeps behavior identical on macOS and Windows.
+ * Missing/corrupt file or unknown pid → null (caller falls back).
+ */
+export function readRuntimeSessionName(
+  claudeHome: string | undefined,
+  pid: number | null,
+): string | null {
+  if (pid === null || !Number.isInteger(pid) || pid <= 0) return null;
+  const home = claudeHome ?? join(process.env.USERPROFILE || process.env.HOME || ".", ".claude");
+  try {
+    const raw = readFileSync(join(home, "sessions", `${pid}.json`), "utf8");
+    const j = JSON.parse(raw) as { name?: unknown };
+    if (typeof j.name === "string" && j.name.trim()) {
+      return j.name.replace(/\s+/g, " ").trim().slice(0, 64);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export function readCustomTitle(
   sessionId: string,
   cwd?: string | null,
@@ -350,6 +376,12 @@ export function handleHookEvent(
         id,
         typeof meta.claude_pid === "number" ? meta.claude_pid : null,
       );
+      // /rename (and the derived auto-title) land in the runtime name store
+      // — sync the node name to whatever Claude Code itself calls this now.
+      const runtimeName = readRuntimeSessionName(claudeHome, pid);
+      if (!title && runtimeName && runtimeName !== existing.name) {
+        renameSession(db, id, runtimeName);
+      }
       if (pid !== null) setSetting(db, `claude-current:${pid}`, id);
     }
     return;
@@ -364,10 +396,14 @@ export function handleHookEvent(
     // stored pid — liveness probing keys off this value.
     const claudePid =
       getClaudePid() ?? (typeof meta.claude_pid === "number" ? meta.claude_pid : null);
+    // Prefer Claude Code's own name for this conversation (the terminal
+    // title source) over the cwd basename for fresh starts.
+    const runtimeName = readRuntimeSessionName(claudeHome, claudePid);
     registerSession(db, {
       id,
       name:
         title ??
+        runtimeName ??
         (typeof meta.named === "boolean" && meta.named && existing
           ? existing.name
           : basename(payload.cwd || "") || "claude"),
@@ -418,6 +454,12 @@ export function handleHookEvent(
       id,
       typeof meta.claude_pid === "number" ? meta.claude_pid : null,
     );
+    // keep the node name glued to Claude Code's own name for the process
+    // (auto-derived at start, updated on /rename) — issue #92
+    const runtimeName = readRuntimeSessionName(claudeHome, pid);
+    if (!title && runtimeName && runtimeName !== existing.name) {
+      renameSession(db, id, runtimeName);
+    }
     if (pid !== null) setSetting(db, `claude-current:${pid}`, id);
     mergeSessionMeta(db, id, { busy: true }); // UserPromptSubmit: a turn began
     return;
@@ -429,9 +471,10 @@ export function handleHookEvent(
   // authoritative pid source — it re-resolves on every resume.
   const claudePid =
     getClaudePid() ?? (typeof meta.claude_pid === "number" ? meta.claude_pid : null);
+  const runtimeName = readRuntimeSessionName(claudeHome, claudePid);
   registerSession(db, {
     id,
-    name: title ?? excerpt ?? existing?.name ?? "claude",
+    name: title ?? runtimeName ?? excerpt ?? existing?.name ?? "claude",
     description: excerpt ?? existing?.description ?? HOOK_SESSION_DESCRIPTION,
     project_dir: payload.cwd ?? existing?.project_dir ?? null,
     metadata: {

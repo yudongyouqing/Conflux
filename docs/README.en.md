@@ -160,7 +160,7 @@ npx tsx apps/server/src/index.ts hooks install     # install (backs up settings.
 npx tsx apps/server/src/index.ts hooks uninstall   # remove
 ```
 
-Hooks associate lifecycle events with session identity and keep liveness current, supporting `SessionStart`, `UserPromptSubmit`, and `Stop`; they also maintain custom titles, `/resume` lineage, and undelivered messages. Set `CLAUDE_CONFIG_DIR` when Claude Code uses a custom configuration directory. Installing also backfills Claude Code sessions that were already running at that moment (or run `hooks backfill` standalone); Codex backfill is not supported yet.
+Hooks associate lifecycle events with session identity and keep liveness current, supporting `SessionStart`, `UserPromptSubmit`, and `Stop`; they also maintain custom titles, `/resume` lineage, and undelivered messages; node names follow Claude Code's own session title (the one the terminal tab shows, synced after `/rename`). Set `CLAUDE_CONFIG_DIR` when Claude Code uses a custom configuration directory. Installing also backfills Claude Code sessions that were already running at that moment (or run `hooks backfill` standalone); Codex backfill is not supported yet.
 
 ### Codex CLI
 

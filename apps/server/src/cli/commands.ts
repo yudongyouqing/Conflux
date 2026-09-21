@@ -877,7 +877,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
       console.log(
         `installed hooks for [${HOOK_EVENTS.join(", ")}] -> ${settingsPath}\n` +
           `entry: ${base}\n` +
-          `new Claude Code sessions will now register themselves (id = conversation id, name = first prompt).`,
+          `new Claude Code sessions will now register themselves (id = conversation id, name follows Claude Code's own session title).`,
       );
 
       // Backfill sessions that were already running before hooks existed —
