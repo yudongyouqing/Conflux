@@ -185,7 +185,14 @@ export function buildCli(argv?: string | readonly string[]): Command {
     .description("show clearable per-category data counts")
     .action(async function (this: Command) {
       const o = this.optsWithGlobals() as CliOpts;
-      const result = await runOp(program, () => getClearableCounts(openDbFrom(o)), "GET", "/data/counts");
+      const result = await runOp(
+        program,
+        // close the one-shot connection: leaked handles keep data.db locked
+        // on Windows (tests delete the data dir while the CLI still "runs")
+        () => withDb(openDbFrom(o), (db) => getClearableCounts(db)),
+        "GET",
+        "/data/counts",
+      );
       console.log(JSON.stringify(result));
     });
 
@@ -212,7 +219,9 @@ export function buildCli(argv?: string | readonly string[]): Command {
       const cfg = resolveConfig(normaliseScope(o.scope), o.dataDir);
       const result = await runOp(
         program,
-        () => clearData(openDb(cfg), categories, join(cfg.dataDir, "backups")),
+        // close the one-shot connection: leaked handles keep data.db locked
+        // on Windows (tests delete the data dir while the CLI still "runs")
+        () => withDb(openDb(cfg), (db) => clearData(db, categories, join(cfg.dataDir, "backups"))),
         "POST",
         "/data/clear",
         { categories },
@@ -1086,6 +1095,19 @@ interface CliOpts {
 function openDbFrom(o: CliOpts): DB {
   const cfg = resolveConfig(normaliseScope(o.scope), o.dataDir);
   return openDb(cfg);
+}
+
+/**
+ * Run a one-shot read/write against a fresh connection and always close it.
+ * A leaked better-sqlite3 handle keeps data.db locked on Windows long
+ * after the command's work is done (issue #83).
+ */
+function withDb<T>(db: DB, fn: (db: DB) => T): T {
+  try {
+    return fn(db);
+  } finally {
+    db.close();
+  }
 }
 
 /**
