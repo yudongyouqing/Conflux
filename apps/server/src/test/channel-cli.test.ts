@@ -2,7 +2,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
-import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -18,7 +17,7 @@ interface ChannelFixture {
   edgeId: number;
 }
 
-function createFixture(): ChannelFixture {
+function createFixture(messageCount = 2): ChannelFixture {
   const dataDir = mkdtempSync(join(tmpdir(), "muiltchat-channel-cli-"));
   const db = openDb({ dataDir, dbPath: join(dataDir, "data.db"), scope: "global" });
   try {
@@ -29,11 +28,13 @@ function createFixture(): ChannelFixture {
       to_session: "channel-to",
       question: "first",
     });
-    askSession(db, {
-      from_session: "channel-from",
-      to_session: "channel-to",
-      question: "second",
-    });
+    for (let index = 2; index <= messageCount; index += 1) {
+      askSession(db, {
+        from_session: "channel-from",
+        to_session: "channel-to",
+        question: index === 2 ? "second" : `message ${index}`,
+      });
+    }
     replyAsk(db, first.id, "channel-to", "first reply");
     assert.ok(first.edge_id);
     return { dataDir, edgeId: first.edge_id };
@@ -119,6 +120,42 @@ test("channel show uses the existing HTTP edge endpoint when --http is set", asy
       String(fixture.edgeId),
     ]);
     assert.equal((JSON.parse(output) as ChannelSnapshot).edge.id, fixture.edgeId);
+  } finally {
+    if (app) await app.close();
+    rmSync(fixture.dataDir, { recursive: true, force: true });
+  }
+});
+
+test("channel show returns every local message, not the edge-panel preview limit", async () => {
+  const fixture = createFixture(501);
+  try {
+    const output = await runCli(["--data-dir", fixture.dataDir, "channel", "show", String(fixture.edgeId)]);
+    const result = JSON.parse(output) as ChannelSnapshot;
+    assert.equal(result.messages.length, 501);
+    assert.equal(result.messages[0]!.question, "first");
+    assert.equal(result.messages.at(-1)!.question, "message 501");
+  } finally {
+    rmSync(fixture.dataDir, { recursive: true, force: true });
+  }
+});
+
+test("channel show requests every message through HTTP", async () => {
+  const fixture = createFixture(501);
+  let app: Awaited<ReturnType<typeof startHttpServer>> | undefined;
+  try {
+    app = await startHttpServer({ host: "127.0.0.1", port: 0, overrideDataDir: fixture.dataDir });
+    const address = app.server.address();
+    assert.ok(address && typeof address !== "string");
+    const output = await runCli([
+      "--http",
+      `http://127.0.0.1:${address.port}`,
+      "channel",
+      "show",
+      String(fixture.edgeId),
+    ]);
+    const result = JSON.parse(output) as ChannelSnapshot;
+    assert.equal(result.messages.length, 501);
+    assert.equal(result.messages.at(-1)!.question, "message 501");
   } finally {
     if (app) await app.close();
     rmSync(fixture.dataDir, { recursive: true, force: true });

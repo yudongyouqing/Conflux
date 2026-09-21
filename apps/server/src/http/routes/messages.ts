@@ -153,14 +153,14 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
   // ---- edge channels (directed conversation channels) ----
 
   // GET /edges/:id/messages — the channel's exchange history
-  app.get<{ Params: { id: string } }>("/edges/:id/messages", {}, async (req, reply) => {
+  app.get<{ Params: { id: string }; Querystring: { all?: string } }>("/edges/:id/messages", {}, async (req, reply) => {
     try {
       const edgeId = Number(req.params.id);
       const edge = getEdge(db, edgeId);
       if (!edge) return sendHttpError(reply, 404, "edge not found");
       return reply.send({
         edge: { id: edge.id, from: edge.from_session, to: edge.to_session },
-        messages: listEdgeMessages(db, edgeId),
+        messages: listEdgeMessages(db, edgeId, req.query.all === "true" ? null : undefined),
       });
     } catch (err) {
       return sendError(reply, err);
