@@ -56,7 +56,7 @@ export default function App() {
   }, []);
 
   return (
-    <div className="flex h-full bg-gray-100">
+    <div className="flex h-full bg-paper">
       <Sidebar activeTab={tab} onTabChange={setTab} />
       <div className="flex flex-1 overflow-hidden">
         <main className="flex-1 overflow-hidden">
@@ -84,16 +84,22 @@ export default function App() {
           {tab === "runtimes" && <RuntimesTab />}
           {tab === "settings" && <SettingsTab />}
         </main>
-        <aside className="w-80 border-l border-gray-200 bg-white overflow-hidden flex-shrink-0">
-          <DetailPanel
-            session={selectedSession}
-            message={selectedMessage}
-            edge={selectedEdge}
-            sessionNameLookup={sessionNameLookup}
-            sessionStatusLookup={sessionStatusLookup}
-            onOpenEdge={handleSelectEdge}
-          />
-        </aside>
+        {/* The detail rail belongs to the graph and session views (node/edge
+         * inspection). Messages own their full-screen conversation view,
+         * agents/runtimes/settings are self-contained — no dead "select an
+         * object" panel next to them. */}
+        {(tab === "graph" || tab === "sessions") && (
+          <aside className="w-80 border-l border-line bg-surface overflow-hidden flex-shrink-0">
+            <DetailPanel
+              session={selectedSession}
+              message={selectedMessage}
+              edge={selectedEdge}
+              sessionNameLookup={sessionNameLookup}
+              sessionStatusLookup={sessionStatusLookup}
+              onOpenEdge={handleSelectEdge}
+            />
+          </aside>
+        )}
       </div>
     </div>
   );

@@ -46,25 +46,25 @@ function render(seg: Seg, i: number): ReactNode {
   switch (seg.kind) {
     case "code":
       return (
-        <code key={i} className="font-mono text-[11px] px-1 py-px rounded bg-gray-100 text-pink-600">
+        <code key={i} className="font-mono text-[11px] px-1 py-px rounded bg-paper text-pink-600">
           {seg.value}
         </code>
       );
     case "bold":
       return (
-        <strong key={i} className="font-semibold text-gray-900">
+        <strong key={i} className="font-semibold text-ink">
           {seg.value}
         </strong>
       );
     case "italic":
       return (
-        <em key={i} className="text-gray-600">
+        <em key={i} className="text-ink-muted">
           {seg.value}
         </em>
       );
     case "strike":
       return (
-        <span key={i} className="line-through text-gray-400">
+        <span key={i} className="line-through text-ink-faint">
           {seg.value}
         </span>
       );
@@ -75,7 +75,7 @@ function render(seg: Seg, i: number): ReactNode {
           href={seg.href}
           target="_blank"
           rel="noreferrer"
-          className="text-blue-600 hover:underline underline-offset-2"
+          className="text-accent hover:underline underline-offset-2"
         >
           {seg.value}
         </a>

@@ -55,4 +55,4 @@ npm run format             # prettier
 2. `node --test apps/desktop/test/*.test.cjs`（改动桌面运行时时）
 3. `npm run build`
 4. `npm run lint`（保持 0 error）
-5. UI 改动：`npx playwright screenshot` 截图自查（playwright 已是 devDependency）
+5. UI 改动：`npx playwright screenshot` 截图自查（playwright 已是 devDependency）；新组件遵守 [docs/DESIGN-TOKENS.md](docs/DESIGN-TOKENS.md)（令牌强制、禁裸灰阶、反模式清单）

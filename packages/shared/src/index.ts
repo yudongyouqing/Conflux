@@ -8,6 +8,14 @@
 
 export type SessionStatus = "active" | "stale" | "ended";
 
+/**
+ * Ask priority, three tiers: P0 critical (main dev line) … P2 background.
+ * Asks flow high→low only — a lower-priority session asking a higher one is
+ * rejected. Human asks from the web console are exempt.
+ */
+export type SessionPriority = "P0" | "P1" | "P2";
+export const DEFAULT_SESSION_PRIORITY: SessionPriority = "P1";
+
 export type NodeType = "session" | "agent";
 
 export type SessionRuntime = "claude" | "codex" | "internal" | "web";
@@ -34,6 +42,8 @@ export interface Session {
   runtime: SessionRuntime | null;
   identity_source: IdentitySource | null;
   runtime_pid: number | null;
+  /** Derived from metadata.priority; P1 when unset. */
+  priority?: SessionPriority;
 }
 
 export interface SessionSummary extends Session {
@@ -156,6 +166,8 @@ export interface GraphNode {
   busy?: boolean;
   /** Agent Card: capability self-description (register_session skills). */
   skills?: string[];
+  /** Ask priority (metadata.priority; P1 default). */
+  priority?: SessionPriority;
 }
 
 /**
@@ -230,3 +242,26 @@ export interface ConfluxDataBundle {
   turns: Turn[];
   runtime_agents: ExportedRuntimeAgent[];
 }
+
+/**
+ * Well-known session identities shared by the server (which registers them)
+ * and the web app (which styles/filters them). String literals must never
+ * drift between the two sides.
+ */
+export const WEB_CONSOLE_ID = "web-console";
+export const WEB_CONSOLE_NAME = "Web 控制台";
+
+/**
+ * Boilerplate descriptions the server writes for sessions that have no
+ * user-facing name yet. Writers reference the named constants; consumers
+ * (SQL filters, card renderers) match against PLACEHOLDER_DESCRIPTIONS.
+ */
+export const HOOK_SESSION_DESCRIPTION = "Claude Code session (hook)";
+export const AUTO_REGISTERED_DESCRIPTION = "Claude Code session (auto-registered)";
+export const WEB_CONSOLE_DESCRIPTION = "浏览器界面身份(从会话详情抽屉发起的对话)";
+
+export const PLACEHOLDER_DESCRIPTIONS = [
+  HOOK_SESSION_DESCRIPTION,
+  AUTO_REGISTERED_DESCRIPTION,
+  WEB_CONSOLE_DESCRIPTION,
+] as const;

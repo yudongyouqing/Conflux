@@ -1,9 +1,9 @@
 import { useMemo, useState, useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useSessions } from "../hooks";
+import { useGraph } from "../hooks";
 import { api } from "../api";
 import { StatusDot } from "./StatusDot";
-import type { Message, SessionStatus } from "@conflux/shared";
+import { WEB_CONSOLE_ID, type Message, type SessionStatus } from "@conflux/shared";
 
 /** Minimal session identity the composer needs (GraphNode and SessionSummary both satisfy it). */
 export interface ComposerTarget {
@@ -14,7 +14,7 @@ export interface ComposerTarget {
 }
 
 function targetBadge(s: ComposerTarget): { text: string; color: string } {
-  if (s.status !== "active") return { text: "离线 · 异步投递", color: "text-gray-400" };
+  if (s.status !== "active") return { text: "离线 · 异步投递", color: "text-ink-faint" };
   if (s.busy) return { text: "在线 · 正在回复", color: "text-amber-600" };
   return { text: "在线", color: "text-emerald-600" };
 }
@@ -32,7 +32,9 @@ interface MentionComposerProps {
  * fullwidth), then ask it a question as the web console.
  */
 export function MentionComposer({ onSent, className, sender }: MentionComposerProps) {
-  const sessions = useSessions("active");
+  // Candidates come from the graph, not /sessions: nodes carry the
+  // capability profile (description + skills) the matcher searches.
+  const graph = useGraph();
   const queryClient = useQueryClient();
 
   const [text, setText] = useState("");
@@ -49,14 +51,27 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
 
   const candidates = useMemo(() => {
     if (mentionQuery === null) return [];
-    return (sessions.data?.sessions ?? [])
-      .filter((s) => s.id !== "web-console" && !s.id.startsWith("agent-"))
+    const q = mentionQuery.toLowerCase();
+    const matches = (s: {
+      name: string;
+      id: string;
+      description?: string | null;
+      skills?: string[];
+    }) =>
+      s.name.toLowerCase().includes(q) ||
+      s.id.toLowerCase().includes(q) ||
+      (s.description ?? "").toLowerCase().includes(q) ||
+      (s.skills ?? []).some((k) => k.toLowerCase().includes(q));
+    return (graph.data?.nodes ?? [])
       .filter(
         (s) =>
-          s.name.toLowerCase().includes(mentionQuery) || s.id.toLowerCase().includes(mentionQuery),
+          s.id !== WEB_CONSOLE_ID &&
+          !s.id.startsWith("agent-") &&
+          s.status === "active" &&
+          matches(s),
       )
       .slice(0, 6);
-  }, [sessions.data, mentionQuery]);
+  }, [graph.data, mentionQuery]);
 
   const ask = useMutation({
     mutationFn: (body: { to_session: string; question: string }) => api.webAsk(body),
@@ -92,27 +107,27 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
     ask.mutate({
       to_session: target.id,
       question,
-      ...(sender && sender.id !== "web-console" ? { from_session: sender.id } : {}),
+      ...(sender && sender.id !== WEB_CONSOLE_ID ? { from_session: sender.id } : {}),
     });
   };
 
   return (
-    <div className={`p-3 bg-white border border-gray-200 rounded-lg shadow-sm ${className ?? ""}`}>
+    <div className={`p-3 bg-surface border border-line rounded-lg shadow-sm ${className ?? ""}`}>
       <div className="flex items-center gap-2">
-        {sender && sender.id !== "web-console" && (
+        {sender && sender.id !== WEB_CONSOLE_ID && (
           <span
-            className="text-xs text-gray-500 whitespace-nowrap truncate max-w-32"
+            className="text-xs text-ink-muted whitespace-nowrap truncate max-w-32"
             title={`以 ${sender.name} 的身份发送`}
           >
             {sender.name} →
           </span>
         )}
         {target ? (
-          <span className="inline-flex items-center gap-1.5 text-xs bg-blue-50 text-blue-700 border border-blue-200 rounded-full pl-2 pr-1 py-1">
+          <span className="inline-flex items-center gap-1.5 text-xs bg-accent-soft text-accent-deep border border-accent/30 rounded-full pl-2 pr-1 py-1">
             <StatusDot status={target.status} busy={target.busy} />
             <span className="max-w-40 truncate">{target.name}</span>
             <button
-              className="text-blue-400 hover:text-blue-700 px-1"
+              className="text-blue-400 hover:text-accent-deep px-1"
               onClick={() => setTarget(null)}
               title="移除目标"
             >
@@ -120,7 +135,7 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
             </button>
           </span>
         ) : (
-          <span className="text-xs text-gray-400 whitespace-nowrap">输入 @ 选择会话</span>
+          <span className="text-xs text-ink-faint whitespace-nowrap">输入 @ 选择会话</span>
         )}
         {target && (
           <span className={`text-[11px] ${targetBadge(target).color}`}>
@@ -153,21 +168,38 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
               else setText("");
             }
           }}
-          className="w-full bg-white text-gray-800 text-sm rounded-lg px-3 py-2 border border-gray-200 placeholder-gray-400 outline-none focus:border-blue-500"
+          className="w-full bg-surface text-ink text-sm rounded-lg px-3 py-2 border border-line placeholder-gray-400 outline-none focus:border-accent"
         />
         {mentionQuery !== null && candidates.length > 0 && (
-          <div className="absolute z-10 left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+          <div className="absolute z-10 left-0 right-0 top-full mt-1 bg-surface border border-line rounded-lg shadow-lg overflow-hidden">
             {candidates.map((s) => (
               <button
                 key={s.id}
                 onClick={() => pickTarget(s)}
-                className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-blue-50"
+                className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-accent-soft"
               >
                 <StatusDot status={s.status} busy={s.busy} />
-                <span className="text-sm text-gray-800 truncate max-w-56">{s.name}</span>
-                <span className="text-[11px] text-gray-400 truncate flex-1">
-                  {s.description ?? s.id.slice(0, 8)}
+                <span className="text-sm text-ink truncate max-w-56">{s.name}</span>
+                {s.priority === "P0" && (
+                  <span
+                    title="重点会话"
+                    className="flex-shrink-0 rounded bg-accent-soft border border-accent/30 px-1 text-[10px] font-mono text-accent leading-4"
+                  >
+                    P0
+                  </span>
+                )}
+                <span className="text-[11px] text-ink-faint truncate flex-1">
+                  {s.description
+                    ? s.description
+                    : (s.skills?.length ?? 0) > 0
+                      ? s.skills!.join(", ")
+                      : s.id.slice(0, 8)}
                 </span>
+                {(s.skills?.length ?? 0) > 0 && (
+                  <span className="font-mono text-[10px] text-ink-faint flex-shrink-0">
+                    [{s.skills!.slice(0, 2).join(", ")}]
+                  </span>
+                )}
               </button>
             ))}
           </div>

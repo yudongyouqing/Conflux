@@ -6,7 +6,13 @@ import type { RuntimeId } from "@conflux/shared";
 
 import { resolveConfig, type Scope } from "../config.js";
 import { openDb, type DB } from "../core/db.js";
-import { registerSession, listSessions, getSession } from "../core/sessions.js";
+import {
+  registerSession,
+  listSessions,
+  searchSessions,
+  sessionPriority,
+  getSession,
+} from "../core/sessions.js";
 import {
   MCP_HEARTBEAT_INTERVAL_MS,
   claimMcpConnection,
@@ -305,15 +311,22 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
           .describe(
             "Agent Card: what this session is good at (e.g. ['typescript','sql']) — shown on the graph so peers can route questions",
           ),
+        priority: z
+          .enum(["P0", "P1", "P2"])
+          .optional()
+          .describe(
+            "Ask priority tier: P0 critical (cannot be asked by lower tiers), P1 default, P2 background",
+          ),
       },
     },
-    async ({ name, description, skills }) => {
-      const r = await withAudit("register_session", { name, description, skills }, () => {
+    async ({ name, description, skills, priority }) => {
+      const r = await withAudit("register_session", { name, description, skills, priority }, () => {
         const session = registerSession(db, {
           id: sessionId,
           name,
           description: description ?? null,
           project_dir: projectDir,
+          priority: priority ?? null,
         });
         // Merge (not replace) so hook metadata (claude_pid, named, …) survives.
         if (skills && skills.length > 0) {
@@ -343,6 +356,46 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
         listSessions(db, { status: status ?? "active" }),
       );
       return json(r.ok ? { sessions: r.result } : { error: r.error });
+    },
+  );
+
+  // 2b. search_sessions — capability discovery: find peers by what they say
+  // about themselves (name / description / register_session skills).
+  server.registerTool(
+    "search_sessions",
+    {
+      description:
+        "Discover which sessions can answer a question: substring-search their names, self-descriptions, and declared skills. Returns id/name/description/skills per match — ask one of them via ask_session.",
+      inputSchema: {
+        query: z
+          .string()
+          .min(1)
+          .max(100)
+          .describe("Capability or topic keyword, e.g. 'postgres', 'llm', '构建'"),
+      },
+    },
+    async ({ query }) => {
+      const r = await withAudit("search_sessions", { query }, () => searchSessions(db, query));
+      return json(
+        r.ok
+          ? {
+              results: r.result.map((s) => ({
+                id: s.id,
+                name: s.name,
+                description: s.description,
+                status: s.status,
+                priority: sessionPriority(s.metadata),
+                skills: (() => {
+                  try {
+                    return JSON.parse(s.metadata ?? "{}")?.agent_card?.skills ?? [];
+                  } catch {
+                    return [];
+                  }
+                })(),
+              })),
+            }
+          : { error: r.error },
+      );
     },
   );
 

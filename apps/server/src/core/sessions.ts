@@ -1,8 +1,22 @@
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 import { STALE_AFTER_MS } from "../config.js";
-import type { IdentitySource, Session, SessionRuntime, SessionSummary } from "@conflux/shared";
-import { parseIdentitySource, parseRuntimePid, parseSessionRuntime } from "./session-identity.js";
+import {
+  DEFAULT_SESSION_PRIORITY,
+  PLACEHOLDER_DESCRIPTIONS,
+  WEB_CONSOLE_ID,
+  type IdentitySource,
+  type Session,
+  type SessionPriority,
+  type SessionRuntime,
+  type SessionSummary,
+} from "@conflux/shared";
+import {
+  parseIdentitySource,
+  parseRuntimePid,
+  parseSessionPriority,
+  parseSessionRuntime,
+} from "./session-identity.js";
 
 export type { Session, SessionSummary };
 
@@ -15,11 +29,16 @@ export interface RegisterInput {
   runtime?: SessionRuntime | null;
   identity_source?: IdentitySource | null;
   runtime_pid?: number | null;
+  /** Ask priority tier; stored as metadata.priority, P1 when omitted. */
+  priority?: SessionPriority | null;
 }
 
 export function registerSession(db: DB, input: RegisterInput): Session {
   const now = nowIso();
-  const meta = input.metadata ? JSON.stringify(input.metadata) : null;
+  const mergedMetadata = input.priority
+    ? { ...(input.metadata ?? {}), priority: input.priority }
+    : input.metadata;
+  const meta = mergedMetadata ? JSON.stringify(mergedMetadata) : null;
   const metadataIdentity = readMetadataIdentity(input.metadata);
   const runtime = parseSessionRuntime(input.runtime) ?? metadataIdentity.runtime;
   const identitySource =
@@ -95,7 +114,17 @@ function normalizeSession(row: Record<string, unknown>): Session {
     runtime: parseSessionRuntime(row.runtime),
     identity_source: parseIdentitySource(row.identity_source),
     runtime_pid: parseRuntimePid(row.runtime_pid),
+    priority: sessionPriority((row as { metadata?: string | null }).metadata ?? null),
   };
+}
+
+/** Ask priority derived from metadata.priority — P1 whenever unset/unknown. */
+export function sessionPriority(metadata: string | null): SessionPriority {
+  try {
+    return parseSessionPriority(JSON.parse(metadata ?? "{}")?.priority);
+  } catch {
+    return DEFAULT_SESSION_PRIORITY;
+  }
 }
 
 export function heartbeat(db: DB, id: string): void {
@@ -158,6 +187,30 @@ export function endSession(db: DB, id: string): void {
   db.prepare(`UPDATE sessions SET status = 'ended' WHERE id = ?`).run(id);
 }
 
+/**
+ * Capability discovery: substring match over name, description, and the
+ * metadata blob (agent_card.skills lives there as JSON, so a LIKE catches
+ * skill terms too). Case-insensitive; dozens of sessions — LIKE is plenty,
+ * no FTS table warranted. Blank queries match nothing: callers must ask for
+ * something specific, not dump the whole registry.
+ */
+export function searchSessions(db: DB, query: string): Session[] {
+  const trimmed = query.trim().toLowerCase();
+  if (trimmed.length === 0) return [];
+  const needle = `%${trimmed}%`;
+  const rows = db
+    .prepare(
+      `SELECT * FROM sessions
+       WHERE lower(name) LIKE ?
+          OR lower(COALESCE(description, '')) LIKE ?
+          OR lower(COALESCE(metadata, '')) LIKE ?
+       ORDER BY last_heartbeat_at DESC
+       LIMIT 20`,
+    )
+    .all(needle, needle, needle) as Record<string, unknown>[];
+  return rows.map((row) => normalizeSession(row));
+}
+
 // ---- zero-turn session reaping ---------------------------------------------
 
 /**
@@ -190,15 +243,15 @@ export function pruneAbandonedSessions(
        WHERE COALESCE(metadata, '') NOT LIKE '%"named":true%'
          AND COALESCE(metadata, '') NOT LIKE '%"agent_id":%'
          AND (
-           description IN ('Claude Code session (hook)', 'Claude Code session (auto-registered)')
+           description IN (${PLACEHOLDER_DESCRIPTIONS.map(() => "?").join(", ")})
            OR COALESCE(metadata, '') LIKE '%"temp":true%'
          )`,
     )
-    .all() as { id: string; status: string; metadata: string | null }[];
+    .all(...PLACEHOLDER_DESCRIPTIONS) as { id: string; status: string; metadata: string | null }[];
 
   let deleted = 0;
   for (const row of candidates) {
-    if (row.id === "web-console" || row.id === opts.keepId) continue;
+    if (row.id === WEB_CONSOLE_ID || row.id === opts.keepId) continue;
     if (opts.claudePid !== undefined) {
       let meta: Record<string, unknown> = {};
       try {

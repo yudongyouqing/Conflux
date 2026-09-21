@@ -13,7 +13,10 @@ import {
   listSessions,
   endSession,
   pruneAbandonedSessions,
+  searchSessions,
+  sessionPriority,
 } from "../core/sessions.js";
+import { WEB_CONSOLE_ID } from "@conflux/shared";
 import { publishContext } from "../core/context.js";
 import { askSession } from "../core/messages.js";
 
@@ -306,4 +309,75 @@ test("pruneAbandonedSessions claudePid mode reaps the /resume-away predecessor i
   assert.ok(removed >= 1);
   assert.equal(getSession(db, "abandoned-id"), null, "same-pid unnamed predecessor is reaped");
   assert.ok(getSession(db, "current-id"), "the session being registered is kept");
+});
+
+test("searchSessions matches name, description, and metadata skills", () => {
+  registerSession(db, {
+    id: "search-a",
+    name: "sql 专家",
+    description: "postgres tuning and schema design",
+    metadata: { agent_card: { skills: ["sql", "postgres"] } },
+  });
+  registerSession(db, {
+    id: "search-b",
+    name: "前端实现",
+    description: null,
+    metadata: { agent_card: { skills: ["react", "tailwind"] } },
+  });
+  registerSession(db, { id: "search-c", name: "旁路会话", description: null });
+
+  assert.deepEqual(
+    searchSessions(db, "postgres").map((s) => s.id),
+    ["search-a"],
+  );
+  assert.deepEqual(
+    searchSessions(db, "react").map((s) => s.id),
+    ["search-b"],
+  );
+  assert.deepEqual(
+    searchSessions(db, "专家").map((s) => s.id),
+    ["search-a"],
+  );
+  // blank query matches nothing — callers must not dump the whole table
+  assert.deepEqual(searchSessions(db, "   "), []);
+});
+
+test("sessionPriority parses metadata and defaults to P1", () => {
+  assert.equal(sessionPriority('{"priority":"P0"}'), "P0");
+  assert.equal(sessionPriority("{}"), "P1");
+  assert.equal(sessionPriority(null), "P1");
+  assert.equal(sessionPriority('{"priority":"P9"}'), "P1", "unknown value falls back");
+});
+
+test("registerSession persists an explicit priority", () => {
+  const s = registerSession(db, { id: "prio-p0", name: "main line", priority: "P0" });
+  assert.equal(s.priority, "P0");
+  assert.equal(sessionPriority(getSession(db, "prio-p0")!.metadata), "P0");
+});
+
+test("askSession blocks lower→higher priority but allows equal/higher→lower", () => {
+  registerSession(db, { id: "gate-p0", name: "critical", priority: "P0" });
+  registerSession(db, { id: "gate-p1a", name: "default a" });
+  registerSession(db, { id: "gate-p2", name: "background", priority: "P2" });
+
+  // P1 asks P0 — blocked with a stable, greppable prefix
+  assert.throws(
+    () => askSession(db, { from_session: "gate-p1a", to_session: "gate-p0", question: "hi" }),
+    /ASK_PRIORITY_BLOCKED/,
+  );
+  // P2 asks P0 — blocked too
+  assert.throws(
+    () => askSession(db, { from_session: "gate-p2", to_session: "gate-p0", question: "hi" }),
+    /ASK_PRIORITY_BLOCKED/,
+  );
+  // P0 asks P1 — allowed (high→low); P2 asks P1 — blocked (low→high)
+  askSession(db, { from_session: "gate-p0", to_session: "gate-p1a", question: "q" });
+  assert.throws(
+    () => askSession(db, { from_session: "gate-p2", to_session: "gate-p1a", question: "q" }),
+    /ASK_PRIORITY_BLOCKED/,
+  );
+  registerSession(db, { id: "gate-p1a2", name: "default b" });
+  askSession(db, { from_session: "gate-p1a", to_session: "gate-p1a2", question: "q" });
+  // human web console is exempt
+  askSession(db, { from_session: WEB_CONSOLE_ID, to_session: "gate-p0", question: "q" });
 });

@@ -11,6 +11,7 @@ import {
   findSessionByRuntimePid,
 } from "../core/live.js";
 import { getSession, registerSession } from "../core/sessions.js";
+import { getSetting } from "../core/app-settings.js";
 import { askSession, listMessages } from "../core/messages.js";
 import { makeDb } from "./helpers.js";
 
@@ -376,6 +377,25 @@ describe("cross-process resume lineage (transcript matching)", () => {
       1,
       "unrelated conversation keeps its own mail",
     );
+    disposeHome(home);
+  });
+});
+
+describe("prompt path records the runtime pid (issue #76)", () => {
+  it("prompt-created session stores the ancestor claude pid + claude-current marker", () => {
+    const home = fakeHome();
+    const SID = "76767676-7676-7676-7676-767676767676";
+    handleHookEvent(
+      db,
+      "prompt",
+      { session_id: SID, cwd: "/tmp/proj76", prompt: "补录场景的第一条消息" },
+      join(home),
+    );
+    const row = getSession(db, SID)!;
+    assert.ok(row, "registration must not be blocked by pid resolution");
+    const meta = JSON.parse(row.metadata!);
+    assert.equal(meta.claude_pid, TEST_CLAUDE_PID, "pid recorded on the prompt fallback path");
+    assert.equal(getSetting(db, `claude-current:${TEST_CLAUDE_PID}`), SID);
     disposeHome(home);
   });
 });

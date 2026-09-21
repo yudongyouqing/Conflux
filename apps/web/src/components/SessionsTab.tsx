@@ -4,7 +4,7 @@ import { api } from "../api";
 import { StatusDot } from "./StatusDot";
 import { InlineMarkdown } from "./InlineMarkdown";
 import { Search, Inbox } from "lucide-react";
-import type { SessionSummary } from "@conflux/shared";
+import { PLACEHOLDER_DESCRIPTIONS, type SessionSummary } from "@conflux/shared";
 
 interface SessionsTabProps {
   onSelectSession: (sessionId: string) => void;
@@ -36,7 +36,10 @@ export function SessionsTab({ onSelectSession, selectedSessionId }: SessionsTabP
       return (
         s.name.toLowerCase().includes(needle) ||
         (s.description ?? "").toLowerCase().includes(needle) ||
-        (s.project_dir ?? "").toLowerCase().includes(needle)
+        (s.project_dir ?? "").toLowerCase().includes(needle) ||
+        // skills live in the metadata JSON (agent_card) — a raw catch-all
+        // match keeps capability search working without a new column
+        (s.metadata ?? "").toLowerCase().includes(needle)
       );
     });
     const byProject = new Map<string, SessionSummary[]>();
@@ -67,27 +70,27 @@ export function SessionsTab({ onSelectSession, selectedSessionId }: SessionsTabP
     );
 
   return (
-    <div className="h-full overflow-y-auto bg-gray-50">
-      <div className="sticky top-0 bg-white border-b border-gray-200 p-3 z-10">
+    <div className="h-full overflow-y-auto bg-paper">
+      <div className="sticky top-0 bg-surface border-b border-line p-3 z-10">
         <div className="relative">
-          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-faint" />
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="搜索名称 / 正在做什么 / 项目路径…"
-            className="w-full text-xs pl-7 pr-2 py-1.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-300"
+            className="w-full text-xs pl-7 pr-2 py-1.5 rounded-lg border border-line bg-surface focus:outline-none focus:ring-2 focus:ring-accent/25 focus:border-accent"
           />
         </div>
       </div>
 
       {groups.length === 0 ? (
-        <div className="p-6 text-center text-xs text-gray-400">没有匹配的会话</div>
+        <div className="p-6 text-center text-xs text-ink-faint">没有匹配的会话</div>
       ) : (
         <div className="p-3 space-y-4">
           {groups.map((g) => (
             <div key={g.dir}>
               <div
-                className="text-[11px] font-medium text-gray-500 truncate mb-1.5 px-1"
+                className="font-mono text-[11px] text-ink-muted truncate mb-1.5 px-1"
                 title={g.dir}
               >
                 {g.dir}
@@ -101,27 +104,46 @@ export function SessionsTab({ onSelectSession, selectedSessionId }: SessionsTabP
                       onClick={() => onSelectSession(s.id)}
                       className={`w-full text-left px-3 py-2 rounded-xl border transition-colors ${
                         selected
-                          ? "bg-white border-blue-300 ring-2 ring-blue-500/30"
-                          : "bg-white border-gray-200 hover:border-gray-300 hover:shadow-sm"
+                          ? "bg-surface border-accent/50 ring-2 ring-accent/25"
+                          : "bg-surface border-line hover:border-line-strong hover:shadow-card"
                       }`}
                     >
                       <div className="flex items-center gap-2">
                         <StatusDot status={s.status} busy={s.busy} />
-                        <span className="text-xs font-medium text-gray-900 truncate flex-1">
+                        <span className="text-xs font-medium text-ink truncate flex-1">
                           {s.name}
                         </span>
-                        <span className="text-[10px] text-gray-400 flex-shrink-0">
+                        {s.priority === "P0" && (
+                          <span
+                            title="重点会话：低优先级会话无法向它提问"
+                            className="flex-shrink-0 rounded bg-accent-soft border border-accent/30 px-1 text-[10px] font-mono text-accent leading-4"
+                          >
+                            P0
+                          </span>
+                        )}
+                        {s.priority === "P2" && (
+                          <span
+                            title="后台会话"
+                            className="flex-shrink-0 rounded bg-paper border border-line px-1 text-[10px] font-mono text-ink-faint leading-4"
+                          >
+                            P2
+                          </span>
+                        )}
+                        <span className="text-[10px] text-ink-faint flex-shrink-0">
                           {relative(s.last_heartbeat_at)}
                         </span>
                       </div>
-                      {s.description && s.description !== "Claude Code session (hook)" && (
-                        <div
-                          className="text-[11px] text-gray-500 truncate mt-0.5"
-                          title={s.description}
-                        >
-                          <InlineMarkdown>{s.description}</InlineMarkdown>
-                        </div>
-                      )}
+                      {s.description &&
+                        !(PLACEHOLDER_DESCRIPTIONS as readonly string[]).includes(
+                          s.description,
+                        ) && (
+                          <div
+                            className="text-[11px] text-ink-muted truncate mt-0.5"
+                            title={s.description}
+                          >
+                            <InlineMarkdown>{s.description}</InlineMarkdown>
+                          </div>
+                        )}
                       {s.pending_inbox > 0 && (
                         <div className="flex items-center gap-1 text-[10px] text-amber-600 mt-0.5">
                           <Inbox size={10} /> {s.pending_inbox} 待回复

@@ -22,13 +22,13 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
   ];
 
   return (
-    <aside className="w-56 bg-white border-r border-gray-200 flex flex-col flex-shrink-0">
+    <aside className="w-56 bg-surface border-r border-line flex flex-col flex-shrink-0">
       {/* Logo */}
-      <div className="flex items-center gap-2.5 px-5 h-14 border-b border-gray-100">
-        <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center">
+      <div className="flex items-center gap-2.5 px-5 h-14 border-b border-line">
+        <div className="w-7 h-7 rounded-lg bg-accent flex items-center justify-center">
           <Boxes size={15} className="text-white" />
         </div>
-        <span className="font-semibold text-[15px] text-gray-900 tracking-tight">Conflux</span>
+        <span className="font-semibold text-[15px] text-ink tracking-tight">Conflux</span>
       </div>
 
       {/* Nav */}
@@ -42,11 +42,11 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
               onClick={() => onTabChange(item.id)}
               className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium transition-colors ${
                 active
-                  ? "bg-blue-50 text-blue-600"
-                  : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                  ? "bg-accent-soft text-accent"
+                  : "text-ink-muted hover:bg-paper hover:text-ink"
               }`}
             >
-              <Icon size={16} className={active ? "text-blue-600" : "text-gray-400"} />
+              <Icon size={16} className={active ? "text-accent" : "text-ink-faint"} />
               {item.label}
             </button>
           );
@@ -54,8 +54,8 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
       </nav>
 
       {/* Status */}
-      <div className="p-4 border-t border-gray-100">
-        <div className="flex items-center gap-2 text-xs text-gray-500">
+      <div className="p-4 border-t border-line">
+        <div className="flex items-center gap-2 text-xs text-ink-muted">
           <span className={`w-2 h-2 rounded-full ${online ? "bg-emerald-500" : "bg-red-500"}`} />
           {online ? "daemon 在线" : "daemon 离线"}
         </div>

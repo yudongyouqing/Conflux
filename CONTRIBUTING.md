@@ -19,12 +19,14 @@ Conflux 欢迎 Issue、文档改进和 Pull Request。中文说明在前，英�
 
 ### UI 开发规范
 
+- **设计令牌强制**：新组件用 `ink/paper/line/accent` 等令牌，禁止裸灰阶（`text-gray-*` 等）；字体 IBM Plex Sans（终端数据用 Plex Mono）；阴影三级只给浮起物；字号 10px 地板。完整规范见 [docs/DESIGN-TOKENS.md](docs/DESIGN-TOKENS.md)，含反模式清单。
 - **安静容器，彩色身份卡**：分组框/瓦片用细边框近透明底，视觉重量留给会话卡。
-- **类型身份系统**：claude=橙(Terminal)、codex=石墨(Code2)、web=蓝(Globe)、内置智能体=靛(Bot)。
+- **类型身份系统**：claude=橙(品牌星芒标)、codex=石墨(OpenAI 结花标)、web=蓝(Globe)、内置智能体=靛(Bot)——品牌 glyph 在 `brand-icons.tsx`，身份色由色块提供。
 - **渐进式披露**：总览恒定密度（目录=一枚瓦片），详情点击下钻；画布管结构，内容按需展开。
 - **色彩语义**：绿=状态灯专用；琥珀脉冲=正在回复（busy）；中性灰=元数据。
 - **UI 改动必须截图验证**：playwright 截图 + 几何断言（boundingBox 测间距/重叠）比肉眼可靠；美学改动建议加视觉模型评审。
 - 布局常量改动同步核对：卡片 CSS 尺寸 ↔ layout.ts 的 NODE_* ↔ GraphTab 的 CELL_*。
+- **技能单一源**：`.agents/skills/` 为唯一编辑源；`.claude/skills/` 是生成产物（已 gitignore），改完技能跑 `npm run skills:sync` 镜像过去。别手改 `.claude/skills/`。
 
 ### 平台陷阱清单（Windows 实测）
 
@@ -146,6 +148,6 @@ Keep business rules in `apps/server/src/core`, keep the web app on the HTTP boun
 
 Never commit SQLite files, `.muiltchat`, `.electron-dev`, build output, `.env` files, or real credentials. Export bundles must not contain API keys. Redact credentials, personal paths, and database contents before sharing logs. A pull request should explain user-visible behavior, include focused tests, pass the server suite, build, desktop tests, secret scan, and `git diff --check`.
 
-All work happens on purpose-named branches (feat/, fix/, refactor/, docs/, chore/) cut from the latest main; direct commits to main are only allowed for trivial typo-level fixes, and branches are deleted right after merge. Feature work follows an eight-step flow: clarify the request, sketch the design, write a reproducing test for lifecycle bugs, implement in core, run the local verification chain, commit with a rationale, merge only with green CI, and sync both READMEs. UI changes require Playwright screenshot verification plus geometry assertions; the design language is quiet containers with colored identity cards and progressive disclosure. Platform rules: wake prompts ride stdin (cmd quoting corrupts them), Codex MCP children get a scrubbed environment (identity rides pid pinning), source line endings are LF, and hot event paths must not perform synchronous I/O.
+All work happens on purpose-named branches (feat/, fix/, refactor/, docs/, chore/) cut from the latest main; direct commits to main are only allowed for trivial typo-level fixes, and branches are deleted right after merge. Feature work follows an eight-step flow: clarify the request, sketch the design, write a reproducing test for lifecycle bugs, implement in core, run the local verification chain, commit with a rationale, merge only with green CI, and sync both READMEs. UI changes require Playwright screenshot verification plus geometry assertions; the design language is quiet containers with colored identity cards and progressive disclosure, and every component must use the design tokens in docs/DESIGN-TOKENS.md (no raw gray scales, IBM Plex type, three-tier shadows, 10px floor). Platform rules: wake prompts ride stdin (cmd quoting corrupts them), Codex MCP children get a scrubbed environment (identity rides pid pinning), source line endings are LF, and hot event paths must not perform synchronous I/O.
 
 Use Conventional Commit subjects such as `feat:`, `fix:`, `docs:`, `test:`, `build:`, and `ci:` so release notes remain easy to generate.

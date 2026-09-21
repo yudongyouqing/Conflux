@@ -8,7 +8,6 @@ import type {
   MessageStatus,
   ModelConfig,
   RuntimeAgent,
-  RuntimeId,
   SessionSummary,
   TerminalOption,
   TerminalSettings,
@@ -83,6 +82,9 @@ export const api = {
   getSessions: (status = "all") =>
     get<{ sessions: SessionSummary[] }>(`/sessions?status=${encodeURIComponent(status)}`),
 
+  searchSessions: (q: string) =>
+    get<{ sessions: SessionSummary[] }>(`/sessions/search?q=${encodeURIComponent(q)}`),
+
   getPeerMessages: (peer: string) =>
     get<{ messages: Message[] }>(`/web/peer-messages?peer=${encodeURIComponent(peer)}`),
 
@@ -108,7 +110,8 @@ export const api = {
 
   createRuntimeAgent: (body: {
     name: string;
-    runtime: RuntimeId;
+    /** Any registry runtime id (server validates against RUNTIME_REGISTRY) */
+    runtime: string;
     workdir?: string;
     model?: string;
     base_url?: string;
@@ -174,6 +177,15 @@ export const api = {
       overwritten: number;
       copied: number;
     }>("/data/import", { bundle, conflict }),
+
+  dataCounts: () =>
+    get<{ sessions: number; messages: number; contextEntries: number }>("/data/counts"),
+
+  dataClear: (categories: { sessions?: boolean; messages?: boolean; context?: boolean }) =>
+    post<{
+      backupPath: string | null;
+      cleared: { sessions: number; messages: number; contextEntries: number };
+    }>("/data/clear", { categories }),
 
   streamChat: async (
     agentId: number,

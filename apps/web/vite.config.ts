@@ -1,10 +1,21 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { fileURLToPath } from "node:url";
 
 const API_TARGET = "http://127.0.0.1:9527";
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      // Bundle the shared workspace package from TS source: the web app's
+      // first RUNTIME import from it tripped rollup's CJS interop on the
+      // tsc-emitted dist, and source aliasing keeps dev/build identical.
+      "@conflux/shared": fileURLToPath(
+        new URL("../../packages/shared/src/index.ts", import.meta.url),
+      ),
+    },
+  },
   server: {
     port: 5173,
     proxy: {

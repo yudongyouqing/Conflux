@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import type { RuntimeId } from "@conflux/shared";
+import { HOOK_SESSION_DESCRIPTION, type RuntimeId } from "@conflux/shared";
 import type { DB } from "./db.js";
 import {
   registerSession,
@@ -371,7 +371,7 @@ export function handleHookEvent(
         (typeof meta.named === "boolean" && meta.named && existing
           ? existing.name
           : basename(payload.cwd || "") || "claude"),
-      description: meta.named && existing ? existing.description : "Claude Code session (hook)",
+      description: meta.named && existing ? existing.description : HOOK_SESSION_DESCRIPTION,
       project_dir: payload.cwd ?? existing?.project_dir ?? null,
       metadata: {
         source: "claude-hook",
@@ -422,20 +422,29 @@ export function handleHookEvent(
     mergeSessionMeta(db, id, { busy: true }); // UserPromptSubmit: a turn began
     return;
   }
+  // A hooks-late session (hooks installed after this conversation started)
+  // only ever fires prompt: record the ancestor pid here too or liveness
+  // falls back to the 2-min heartbeat TTL and the row flips stale while the
+  // process is still alive (issue #76). session-start remains the
+  // authoritative pid source — it re-resolves on every resume.
+  const claudePid =
+    getClaudePid() ?? (typeof meta.claude_pid === "number" ? meta.claude_pid : null);
   registerSession(db, {
     id,
     name: title ?? excerpt ?? existing?.name ?? "claude",
-    description: excerpt ?? existing?.description ?? "Claude Code session (hook)",
+    description: excerpt ?? existing?.description ?? HOOK_SESSION_DESCRIPTION,
     project_dir: payload.cwd ?? existing?.project_dir ?? null,
     metadata: {
       source: "claude-hook",
       ...meta,
       ...agentTag,
       ...(title ? { custom_title: true } : {}),
+      claude_pid: claudePid,
       named: true,
       busy: true,
     },
   });
+  if (claudePid !== null) setSetting(db, `claude-current:${claudePid}`, id);
 }
 
 /**

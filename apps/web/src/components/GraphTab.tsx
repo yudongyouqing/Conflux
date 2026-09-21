@@ -3,6 +3,7 @@ import {
   ReactFlow,
   Background,
   Controls,
+  MiniMap,
   Panel,
   useNodesState,
   useEdgesState,
@@ -176,7 +177,7 @@ export function GraphTab({
 
   if (isLoading)
     return (
-      <div className="flex items-center justify-center h-full text-gray-400 text-sm">
+      <div className="flex items-center justify-center h-full text-ink-faint text-sm">
         加载图中...
       </div>
     );
@@ -190,10 +191,10 @@ export function GraphTab({
 
   if (nodes.length === 0)
     return (
-      <div className="flex items-center justify-center h-full text-gray-400 text-sm text-center px-8">
+      <div className="flex items-center justify-center h-full text-ink-faint text-sm text-center px-8">
         暂无会话。
         <br />用 CLI 注册一个会话:
-        <code className="text-gray-500 ml-1 bg-gray-100 px-1 rounded">
+        <code className="text-ink-muted ml-1 bg-paper px-1 rounded">
           conflux sessions register --name "test"
         </code>
       </div>
@@ -216,18 +217,20 @@ export function GraphTab({
       minZoom={0.2}
       maxZoom={1.25}
       fitView
-      fitViewOptions={{ padding: 0.3, maxZoom: 1 }}
+      fitViewOptions={{ padding: 0.3, maxZoom: 1, duration: 400 }}
       proOptions={{ hideAttribution: true }}
-      className="bg-gray-50"
+      className="bg-paper"
     >
       <Panel position="top-left" className="!m-2">
-        <div className="flex bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden text-xs">
+        <div className="flex bg-surface border border-line rounded-lg shadow-[0_2px_10px_rgba(16,24,40,0.08)] overflow-hidden text-xs">
           {(Object.keys(VIEW_LABELS) as ViewMode[]).map((m) => (
             <button
               key={m}
               onClick={() => setViewMode(m)}
-              className={`px-3 py-1.5 transition-colors ${
-                viewMode === m ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-50"
+              className={`px-3 py-1.5 transition-colors duration-200 ${
+                viewMode === m
+                  ? "bg-accent text-white"
+                  : "text-ink-muted hover:bg-paper hover:text-ink"
               }`}
             >
               {VIEW_LABELS[m]}
@@ -238,13 +241,24 @@ export function GraphTab({
       {/* no edges in view: say WHY instead of looking like a broken graph */}
       {edges.length === 0 && nodes.length > 0 && (
         <Panel position="bottom-center" className="!mb-4">
-          <div className="text-[11px] text-gray-400 bg-white/85 border border-gray-100 rounded-full px-3 py-1 shadow-sm">
+          <div className="text-[11px] text-ink-faint bg-surface/90 backdrop-blur-sm border border-slate-100 rounded-full px-3 py-1 shadow-[0_2px_10px_rgba(16,24,40,0.08)]">
             当前视图暂无会话间消息通道 —— 发起一次对话即可建立连线
           </div>
         </Panel>
       )}
-      <Background color="#cbd5e1" gap={24} />
-      <Controls className="!bg-white !border !border-gray-200 !rounded-lg !shadow-sm [&_button]:!bg-white [&_button]:!border-gray-200 [&_button]:!text-gray-600 [&_button:hover]:!bg-gray-50" />
+      <Background color="rgb(var(--tk-line))" gap={22} size={1.2} />
+      <Controls
+        className="!bg-surface !border !border-line !rounded-lg !shadow-[0_2px_10px_rgba(16,24,40,0.1)] !overflow-hidden [&_button]:!bg-surface [&_button]:!border-line [&_button]:!text-ink-muted [&_button:hover]:!bg-paper [&_button:hover]:!text-ink"
+      />
+      <MiniMap
+        pannable
+        zoomable
+        bgColor="rgb(var(--tk-paper))"
+        nodeColor="#CBD5E1"
+        nodeStrokeColor="#94A3B8"
+        maskColor="rgb(var(--tk-paper) / 0.7)"
+        className="!border !border-line !rounded-lg !shadow-[0_2px_10px_rgba(16,24,40,0.1)]"
+      />
     </ReactFlow>
   );
 }

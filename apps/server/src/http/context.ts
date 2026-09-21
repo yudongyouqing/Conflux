@@ -3,6 +3,7 @@ import { publicError, type DB, type PublicErrorCode } from "../core/db.js";
 import { heartbeat } from "../core/sessions.js";
 import { logAudit } from "../core/audit.js";
 import { logger } from "../log.js";
+import { WEB_CONSOLE_ID } from "@conflux/shared";
 
 /**
  * Shared per-server context handed to every route module: the DB handle,
@@ -12,7 +13,7 @@ import { logger } from "../log.js";
  */
 
 /** The browser UI acts as one fixed pseudo-session. */
-export const WEB_CONSOLE_ID = "web-console";
+export { WEB_CONSOLE_ID };
 
 export interface ServerContext {
   db: DB;
