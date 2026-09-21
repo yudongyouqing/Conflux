@@ -138,10 +138,11 @@ describe("handleHookEvent title sync", () => {
   it("custom-title wins over prompt excerpt", () => {
     const home = fakeHome();
     const sid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
-    const cwd = "C:\\work\\titled";
-    // prompt names the node first...
+    const cwd = "/work/titled";
+    // prompt names the node after the directory (terminal parity, #92)...
     handleHookEvent(db, "prompt", { session_id: sid, cwd, prompt: "很长的第一句话" }, join(home));
-    assert.equal(getSession(db, sid)!.name, "很长的第一句话");
+    assert.equal(getSession(db, sid)!.name, "titled");
+    assert.equal(getSession(db, sid)!.description, "很长的第一句话");
     // ...then the user renames: the title must take over on the next event
     writeTranscript(home, cwd, sid, [{ type: "custom-title", customTitle: "my new title" }]);
     handleHookEvent(db, "stop", { session_id: sid, cwd }, join(home));
@@ -159,13 +160,13 @@ describe("handleHookEvent title sync", () => {
     disposeHome(home);
   });
 
-  it("prompt excerpt still applies when there is no title", () => {
+  it("prompt excerpt still applies when there is no cwd", () => {
     const home = fakeHome();
     const sid = "55555555-6666-7777-8888-999999999999";
     handleHookEvent(
       db,
       "prompt",
-      { session_id: sid, cwd: "C:\\work\\untitled", prompt: "second line\nmore" },
+      { session_id: sid, prompt: "second line\nmore" },
       join(home),
     );
     assert.equal(getSession(db, sid)!.name, "second line");
@@ -178,17 +179,17 @@ describe("handleHookEvent title sync", () => {
     handleHookEvent(
       db,
       "prompt",
-      { session_id: sid, cwd: "C:\\work\\d", prompt: "first task" },
+      { session_id: sid, cwd: "/work/d", prompt: "first task" },
       join(home),
     );
     handleHookEvent(
       db,
       "prompt",
-      { session_id: sid, cwd: "C:\\work\\d", prompt: "now doing something else" },
+      { session_id: sid, cwd: "/work/d", prompt: "now doing something else" },
       join(home),
     );
     const s = getSession(db, sid)!;
-    assert.equal(s.name, "first task"); // name stable after first prompt
+    assert.equal(s.name, "d"); // name stable after first prompt (directory)
     assert.equal(s.description, "now doing something else"); // description tracks latest
     disposeHome(home);
   });
