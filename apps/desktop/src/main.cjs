@@ -26,6 +26,9 @@ const { createServiceHealthMonitor, probeHttp } = require("./service-health.cjs"
 
 const repoRoot = path.resolve(__dirname, "../../..");
 const PRODUCTION_URL = `http://${PRODUCTION_HOST}:${PRODUCTION_PORT}/`;
+// Same expression works in dev (apps/desktop/src → ../build) and in the
+// asar bundle (nativeImage reads asar-internal paths transparently).
+const ICON_PATH = path.join(__dirname, "..", "build", "icon.png");
 const children = [];
 let mainWindow;
 let tray;
@@ -220,6 +223,8 @@ function createWindow(webUrl) {
     minWidth: 960,
     minHeight: 640,
     show: false,
+    // window/taskbar icon on Windows + Linux (macOS windows don't show one)
+    icon: ICON_PATH,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -330,6 +335,15 @@ if (!hasSingleInstanceLock) {
 
   app.whenReady().then(() => {
     log("app ready");
+    // macOS Dock icon: dev mode has no .app bundle icns to inherit, so the
+    // Dock would show the generic Electron placeholder without this.
+    if (process.platform === "darwin" && app.dock) {
+      try {
+        app.dock.setIcon(ICON_PATH);
+      } catch (error) {
+        log(`dock icon not applied: ${error instanceof Error ? error.message : error}`);
+      }
+    }
     tray = createTray({
       showWindow: focusMainWindow,
       quit: () => app.quit(),
