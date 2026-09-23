@@ -8,14 +8,11 @@ import {
   BUILTIN_THEMES,
   deleteCustomTheme,
   getActiveCustomThemeName,
-  getThemePreference,
   listCustomThemes,
   normalizeThemeColors,
   saveCustomTheme,
   setActiveCustomTheme,
-  setThemePreference,
   type CustomTheme,
-  type ThemePreference,
 } from "../theme";
 
 export function SettingsTab() {
@@ -31,7 +28,6 @@ export function SettingsTab() {
   const [transferNotice, setTransferNotice] = useState<string | null>(null);
   const [transferPending, setTransferPending] = useState(false);
   const [importConflict, setImportConflict] = useState<"skip" | "overwrite" | "copy">("skip");
-  const [theme, setTheme] = useState<ThemePreference>(() => getThemePreference());
 
   const [customThemes, setCustomThemes] = useState<CustomTheme[]>(() => listCustomThemes());
   const [activeCustom, setActiveCustom] = useState<string | null>(() => getActiveCustomThemeName());
@@ -227,14 +223,9 @@ export function SettingsTab() {
       <div className="max-w-xl mx-auto space-y-5">
         <div>
         <div className="bg-surface border border-line rounded-xl p-4 space-y-3 shadow-sm">
-          <h3 className="text-ink font-medium text-sm">界面主题</h3>
-          <div className="flex gap-1">
-            {([["system", "跟随系统"], ["light", "工作台"], ["dark", "终端"]] as const).map(([value, label]) => (
-              <button key={value} type="button" aria-pressed={theme === value} onClick={() => { setTheme(value); setThemePreference(value); }} className={`flex-1 px-2 py-1.5 rounded-md border text-xs ${theme === value ? "bg-accent text-white border-blue-600" : "border-line text-ink-muted hover:bg-paper"}`}>{label}</button>
-            ))}
-          </div>
-          <div className="border-t border-line pt-3">
-            <h4 className="text-xs font-medium text-ink mb-2">主题色板</h4>
+          <h3 className="text-ink font-medium text-sm">主题</h3>
+          <div>
+            <p className="text-[11px] text-ink-faint mb-2">明暗随色板自动切换——选深色色板即全站深色</p>
             <div className="grid grid-cols-2 gap-1.5">
               {allThemes.map((t) => {
                 const active = activeCustom === t.name;

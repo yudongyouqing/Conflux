@@ -1,16 +1,8 @@
-export type ThemePreference = "system" | "light" | "dark";
-export type ResolvedTheme = "light" | "dark";
-export const THEME_KEY = "conflux.theme";
-// pre-rename storage key — read once for migration, never written again
-export const LEGACY_THEME_KEY = "muiltchat.theme";
-export function normalizeThemePreference(value: unknown): ThemePreference { return value === "light" || value === "dark" || value === "system" ? value : "system"; }
-export function resolveTheme(preference: ThemePreference, prefersDark: boolean): ResolvedTheme { return preference === "dark" || (preference === "system" && prefersDark) ? "dark" : "light"; }
-export function getThemePreference(storage: Storage = window.localStorage): ThemePreference { try { return normalizeThemePreference(storage.getItem(THEME_KEY) ?? storage.getItem(LEGACY_THEME_KEY)); } catch { return "system"; } }
 /** 可注入的主题根：真实 HTMLElement 或测试用的结构化替身 */
 type ThemeRoot = { dataset: Record<string, string | undefined>; style: { setProperty(key: string, value: string): void; removeProperty(key: string): void } };
-export function applyTheme(root: ThemeRoot, preference: ThemePreference, prefersDark: boolean): ResolvedTheme { const resolved = resolveTheme(preference, prefersDark); root.dataset.theme = resolved; return resolved; }
-export function setThemePreference(preference: ThemePreference, win: Window = window): ResolvedTheme { const normalized = normalizeThemePreference(preference); try { win.localStorage.setItem(THEME_KEY, normalized); } catch { /* storage unavailable (private mode) */ } const resolved = applyTheme(win.document.documentElement, normalized, win.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false); refreshTokenApplication(win.localStorage, win.document.documentElement); return resolved; }
-export function installTheme(win: Window = window): () => void { let preference = getThemePreference(win.localStorage); const media = win.matchMedia?.("(prefers-color-scheme: dark)"); const update = () => applyTheme(win.document.documentElement, preference, media?.matches ?? false); update(); const listener = () => { preference = getThemePreference(win.localStorage); if (preference === "system") update(); }; media?.addEventListener?.("change", listener); return () => media?.removeEventListener?.("change", listener); }
+/** 启动即按激活色板落令牌（bootstrap 随后会再走一次 refresh，幂等）。
+ *  旧 system/light/dark 偏好与媒体查询监听随三段钮一起移除（#95）。 */
+export function installTheme(win: Window = window): () => void { refreshTokenApplication(win.localStorage, win.document.documentElement); return () => {}; }
 
 // ---- 自定义主题（#71）：令牌色板可导入/可切换 ------------------------------
 
@@ -132,9 +124,7 @@ export function setActiveCustomTheme(name: string | null, storage: Storage = win
     const theme = listCustomThemes(storage).find((t) => t.name === name) ?? BUILTIN_THEMES.find((t) => t.name === name);
     if (!theme) return;
     storage.setItem(ACTIVE_CUSTOM_THEME_KEY, name);
-    const mode = isDarkPaper(theme.colors) ? "dark" : "light";
-    storage.setItem(THEME_KEY, mode);
-    applyTheme(root, mode, false);
+    root.dataset.theme = isDarkPaper(theme.colors) ? "dark" : "light";
     applyThemeColors(root, theme.colors);
     return;
   }
@@ -148,31 +138,21 @@ export function applySavedCustomTheme(storage: Storage = window.localStorage, ro
 }
 
 /**
- * 令牌应用的唯一入口：按「深色优先于色板」解析并落到 CSS 变量。
- * - 深色（终端）→ 清内联，令牌走 html[data-theme=dark] 暗色组
- * - 浅色/系统 + 激活色板 → 色板写内联
- * setThemePreference 与 setActiveCustomTheme 都必须经过这里，否则
- * 色板的内联变量会遮蔽深色组（内联 > 选择器）。
+ * 令牌应用的唯一入口：色板是明暗的唯一真相源（issue #95 起）。
+ * - 激活深色色板 → 内联令牌 + data-theme=dark（原生控件跟随）
+ * - 激活浅色色板 → 内联令牌 + data-theme=light
+ * - 无激活色板 → 清内联走默认浅色；旧 conflux.theme 偏好不再读取
  */
 export function refreshTokenApplication(storage: Storage = window.localStorage, root: StyleTarget = document.documentElement): void {
-  const preference = getThemePreference(storage);
-  if (preference === "dark") {
-    // 深色模式：激活的色板若本身是深色板则保留其内联，否则清内联走暗色组
-    const name = getActiveCustomThemeName(storage);
-    const theme = name === null ? null : listCustomThemes(storage).find((t) => t.name === name) ?? BUILTIN_THEMES.find((t) => t.name === name) ?? null;
-    if (theme && isDarkPaper(theme.colors)) {
-      applyThemeColors(root, theme.colors);
-      root.dataset.theme = "dark";
-      return;
-    }
-    applyThemeColors(root, null);
-    return;
-  }
   const name = getActiveCustomThemeName(storage);
-  if (name === null) {
-    applyThemeColors(root, null);
+  const theme = name === null || name === BUILTIN_THEMES[0].name
+    ? null
+    : listCustomThemes(storage).find((t) => t.name === name) ?? BUILTIN_THEMES.find((t) => t.name === name) ?? null;
+  if (theme) {
+    root.dataset.theme = isDarkPaper(theme.colors) ? "dark" : "light";
+    applyThemeColors(root, theme.colors);
     return;
   }
-  const theme = name === BUILTIN_THEMES[0].name ? null : listCustomThemes(storage).find((t) => t.name === name) ?? BUILTIN_THEMES.find((t) => t.name === name) ?? null;
-  applyThemeColors(root, theme?.colors ?? null);
+  root.dataset.theme = "light";
+  applyThemeColors(root, null);
 }

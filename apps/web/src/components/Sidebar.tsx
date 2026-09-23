@@ -22,7 +22,7 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
   ];
 
   return (
-    <aside className="w-56 bg-surface border-r border-line flex flex-col flex-shrink-0">
+    <aside className="w-56 bg-paper border-r border-line flex flex-col flex-shrink-0">
       {/* Logo */}
       <div className="flex items-center gap-2.5 px-5 h-14 border-b border-line">
         <div className="w-7 h-7 rounded-lg bg-accent flex items-center justify-center">
@@ -43,7 +43,7 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
               className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium transition-colors ${
                 active
                   ? "bg-accent-soft text-accent"
-                  : "text-ink-muted hover:bg-paper hover:text-ink"
+                  : "text-ink-muted hover:bg-surface hover:text-ink"
               }`}
             >
               <Icon size={16} className={active ? "text-accent" : "text-ink-faint"} />

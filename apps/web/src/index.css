@@ -80,6 +80,13 @@ body {
   color: rgb(var(--tk-ink));
 }
 
+/* React Flow 默认底色（--xy-background-color 默认 #E2E2E2）会盖出"画布比
+   侧栏/内容深一截"的色差（#95）——统一钉到 paper 令牌 */
+.react-flow {
+  --xy-background-color: rgb(var(--tk-paper));
+  background-color: rgb(var(--tk-paper));
+}
+
 /* React Flow light theme overrides */
 .react-flow__node {
   font-size: 12px;
