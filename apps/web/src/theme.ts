@@ -1,5 +1,13 @@
 /** 可注入的主题根：真实 HTMLElement 或测试用的结构化替身 */
 type ThemeRoot = { dataset: Record<string, string | undefined>; style: { setProperty(key: string, value: string): void; removeProperty(key: string): void } };
+/** 深浅同步到 Electron 原生控件（macOS 菜单栏/右键菜单跟随应用主题而非 OS 外观）；
+ *  纯浏览器环境没有该桥，静默跳过 */
+function syncNativeChrome(mode: "dark" | "light"): void {
+  const bridge = (globalThis as { confluxDesktop?: { setNativeTheme?: (mode: string) => void } })
+    .confluxDesktop;
+  bridge?.setNativeTheme?.(mode);
+}
+
 /** 启动即按激活色板落令牌（bootstrap 随后会再走一次 refresh，幂等）。
  *  旧 system/light/dark 偏好与媒体查询监听随三段钮一起移除（#95）。 */
 export function installTheme(win: Window = window): () => void { refreshTokenApplication(win.localStorage, win.document.documentElement); return () => {}; }
@@ -124,7 +132,9 @@ export function setActiveCustomTheme(name: string | null, storage: Storage = win
     const theme = listCustomThemes(storage).find((t) => t.name === name) ?? BUILTIN_THEMES.find((t) => t.name === name);
     if (!theme) return;
     storage.setItem(ACTIVE_CUSTOM_THEME_KEY, name);
-    root.dataset.theme = isDarkPaper(theme.colors) ? "dark" : "light";
+    const mode = isDarkPaper(theme.colors) ? "dark" : "light";
+    root.dataset.theme = mode;
+    syncNativeChrome(mode);
     applyThemeColors(root, theme.colors);
     return;
   }
@@ -149,10 +159,13 @@ export function refreshTokenApplication(storage: Storage = window.localStorage, 
     ? null
     : listCustomThemes(storage).find((t) => t.name === name) ?? BUILTIN_THEMES.find((t) => t.name === name) ?? null;
   if (theme) {
-    root.dataset.theme = isDarkPaper(theme.colors) ? "dark" : "light";
+    const mode = isDarkPaper(theme.colors) ? "dark" : "light";
+    root.dataset.theme = mode;
+    syncNativeChrome(mode);
     applyThemeColors(root, theme.colors);
     return;
   }
   root.dataset.theme = "light";
+  syncNativeChrome("light");
   applyThemeColors(root, null);
 }

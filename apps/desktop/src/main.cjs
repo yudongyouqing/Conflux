@@ -1,6 +1,6 @@
 const path = require("node:path");
 const { spawn } = require("node:child_process");
-const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } = require("electron");
 
 const {
   createDevServiceSpecs,
@@ -318,6 +318,11 @@ if (!hasSingleInstanceLock) {
 } else {
   app.on("second-instance", () => focusMainWindow());
   ipcMain.on("conflux:show-window", focusMainWindow);
+  // Dark palette → native chrome (macOS menu bar / context menus / dialogs)
+  // follows the app theme instead of the OS appearance (#95)
+  ipcMain.on("conflux:native-theme", (_event, mode) => {
+    nativeTheme.themeSource = mode === "dark" ? "dark" : "light";
+  });
   ipcMain.handle("conflux:pick-directory", async (event) => {
     if (!mainWindow || event.sender !== mainWindow.webContents) return null;
     const result = await dialog.showOpenDialog(mainWindow, {
