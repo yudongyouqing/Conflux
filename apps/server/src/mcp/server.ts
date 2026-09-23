@@ -332,6 +332,9 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
         if (skills && skills.length > 0) {
           mergeSessionMeta(db, sessionId, { agent_card: { skills } });
         }
+        // An explicitly chosen name is user intent — protect it from the
+        // hook's directory naming on the next prompt (#103).
+        mergeSessionMeta(db, sessionId, { user_named: true });
         return session;
       });
       return json(r.ok ? { session_id: sessionId, session: r.result } : { error: r.error });
