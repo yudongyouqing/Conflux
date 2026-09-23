@@ -246,11 +246,15 @@ function pickNodeName(
     cwd?: string | null;
     userNamed: boolean;
     fallback: string;
+    /** name the session already carries — a user_named session keeps it
+     *  (#103: MCP register_session names must survive hook re-register) */
+    existingName?: string | null;
   },
 ): string {
   if (opts.title) return opts.title;
   if (opts.userNamed) {
-    return opts.runtime?.source === "user" ? opts.runtime.name : opts.fallback;
+    if (opts.runtime?.source === "user") return opts.runtime.name;
+    return opts.existingName ?? opts.fallback;
   }
   if (opts.runtime?.source === "user") return opts.runtime.name;
   const base = opts.cwd ? basename(opts.cwd) : "";
@@ -462,6 +466,7 @@ export function handleHookEvent(
           typeof meta.named === "boolean" && meta.named && existing
             ? existing.name
             : "claude",
+        existingName: existing?.name ?? null,
       }),
       description: meta.named && existing ? existing.description : HOOK_SESSION_DESCRIPTION,
       project_dir: payload.cwd ?? existing?.project_dir ?? null,
@@ -545,6 +550,7 @@ export function handleHookEvent(
       cwd: payload.cwd,
       userNamed: meta.user_named === true,
       fallback: excerpt ?? existing?.name ?? "claude",
+      existingName: existing?.name ?? null,
     }),
     description: excerpt ?? existing?.description ?? HOOK_SESSION_DESCRIPTION,
     project_dir: payload.cwd ?? existing?.project_dir ?? null,
