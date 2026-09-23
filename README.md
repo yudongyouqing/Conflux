@@ -7,6 +7,7 @@
   <p><b>让每一个 AI 编程会话，汇入同一个工作空间。</b></p>
   <p>本地优先的桌面工作空间 · 连接 AI 编程会话、智能体、消息与共享上下文</p>
   <p>简体中文 ｜ <a href="./docs/README.en.md">English</a></p>
+  <p><a href="#-核心特性">核心特性</a> · <a href="#-快速开始">快速开始</a> · <a href="#-架构">架构</a> · <a href="#-跨会话对话">跨会话对话</a> · <a href="#-接入-claude-code">接入 Claude Code</a> · <a href="#-数据与配置">数据与配置</a> · <a href="#-路线图">路线图</a></p>
   <p>
     <img src="https://img.shields.io/badge/Electron-37-47848F?logo=electron&logoColor=white" alt="Electron">
     <img src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white" alt="React">
@@ -41,6 +42,10 @@ AI 编程助手通常以彼此隔离的进程运行，于是这些简单的问�
 | 🔀   | **多接口同核**   | MCP、HTTP REST、CLI 三接口调用同一套 core，行为完全一致                  |
 | 💾   | **本地优先**     | SQLite（WAL 模式）保存全部状态，零外部服务依赖                           |
 | 🖥️   | **桌面客户端**   | Electron 窗口运行 React 工作空间，自动管理本地服务生命周期               |
+| 🎨   | **主题系统**     | 设计令牌驱动的深浅色主题，设置页可导入自定义色板                         |
+| 🚦   | **会话优先级**   | P0/P1/P2 三级——低优先级向高优先级提问会被拒绝，支持人工豁免              |
+| 🔍   | **能力检索**     | `search_sessions` 按会话自述能力搜索，提问前先找到对的会话                |
+| 🧹   | **数据管理**     | 设置页分类清除会话/消息/上下文，清除前自动全量备份可恢复                  |
 
 ## 🚀 快速开始
 
@@ -151,7 +156,7 @@ Web 工作空间可以直接发起和观察 AI 会话之间的对话，不必回
 
 > 同一配置只保留一个 server key（新配置用 `conflux`，旧项目可继续用 `muiltchat`）；保留两个会启动两份 server。修改 `.mcp.json` 后必须**完全重启 MCP 宿主**，刷新网页不会重建 stdio 连接。
 
-MCP 会话可用的工具：`publish_context` · `query_context` · `ask_session` · `reply_ask` · `check_inbox` · `check_replies` · `get_graph`。每个会话都会注册到图谱中，并可以参与共享上下文和异步消息。
+MCP 会话可用的工具：`publish_context` · `query_context` · `ask_session` · `reply_ask` · `check_inbox` · `check_replies` · `get_graph` · `search_sessions`（按能力检索其他会话）。每个会话都会注册到图谱中，并可以参与共享上下文和异步消息。
 
 ### Hooks
 
@@ -206,6 +211,10 @@ npx tsx apps/server/src/index.ts migrate --status --to <conflux-dir>
 # 备份 / 恢复（导入先校验，单事务写入，失败整体回滚）
 npx tsx apps/server/src/index.ts data export --output ./conflux-backup.json
 npx tsx apps/server/src/index.ts data import --file <bundle.json> --conflict skip|overwrite|copy
+
+# 分类清除（设置页同款；每次清除先自动备份到 <数据目录>/backups，滚动保留 5 份）
+npx tsx apps/server/src/index.ts data counts
+npx tsx apps/server/src/index.ts data clear --sessions --messages --context
 ```
 
 <details>
@@ -236,6 +245,8 @@ npm run package:desktop       # Windows NSIS 安装包
 - ✅ Claude Code / Codex 存活探测、恢复继承、异步协作消息、自动唤醒
 - ✅ 版本化数据导入导出、旧目录迁移、稳定错误码与敏感信息扫描
 - ✅ 内部标识更名 Conflux，兼容层保留（CLI 双入口、env 双变量）
+- ✅ 主题系统（设计令牌 + 自定义主题导入）、数据管理（分类清除 + 自动备份）
+- ✅ 会话优先级 P0/P1/P2、能力检索 `search_sessions`、channel watch CLI、hooks 存量会话补录
 - 🚧 自动更新与代码签名
 - 🚧 macOS / Linux 正式安装包发行
 
@@ -272,6 +283,7 @@ node --test apps/desktop/test/dev-services.test.cjs apps/desktop/test/runtime-co
 
 | 文档                                   | 内容                       |
 | -------------------------------------- | -------------------------- |
+| [新机环境搭建](docs/SETUP.md)           | 从零配置开发环境清单（双语） |
 | [迁移指南](docs/MIGRATION.md)           | 新旧命名/目录兼容与迁移步骤 |
 | [故障排查](docs/TROUBLESHOOTING.md)     | 端口、数据库、MCP、数据恢复 |
 | [贡献指南](CONTRIBUTING.md)             | 开发规范与 PR 流程          |
