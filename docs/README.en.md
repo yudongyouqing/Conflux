@@ -7,6 +7,7 @@
   <p><b>Every AI coding session, flowing into one workspace.</b></p>
   <p>A local-first desktop workspace for connecting AI coding sessions, agents, messages, and shared context</p>
   <p><a href="../README.md">简体中文</a> ｜ English</p>
+  <p><a href="#-features">Features</a> · <a href="#-quick-start">Quick start</a> · <a href="#-architecture">Architecture</a> · <a href="#-cross-session-conversations">Cross-session chat</a> · <a href="#-claude-code-integration">Claude Code</a> · <a href="#-data-and-configuration">Data</a> · <a href="#-roadmap">Roadmap</a></p>
   <p>
     <img src="https://img.shields.io/badge/Electron-37-47848F?logo=electron&logoColor=white" alt="Electron">
     <img src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white" alt="React">
@@ -41,6 +42,10 @@ The public project name, CLI entry, and npm package names are all `Conflux` (`co
 | 🔀   | **One core, many UIs**  | MCP, HTTP REST, and the CLI all call the same core for consistent behavior          |
 | 💾   | **Local-first storage** | All state in SQLite with WAL mode; zero external service dependencies               |
 | 🖥️   | **Desktop client**      | Run the React workspace in an Electron window with managed local services           |
+| 🎨   | **Theming**             | Design-token light/dark themes with custom palette import in settings                |
+| 🚦   | **Session priority**    | P0/P1/P2 tiers — lower priority asking higher is rejected, with manual override      |
+| 🔍   | **Capability search**   | `search_sessions` finds peers by what they do, before you ask                        |
+| 🧹   | **Data management**     | Category-scoped clear of sessions/messages/context, automatic full backup (restorable) first             |
 
 ## 🚀 Quick Start
 
@@ -151,7 +156,7 @@ Add Conflux to the `.mcp.json` used by a Claude Code project:
 
 > Keep exactly one server key per configuration (`conflux` for new setups; legacy projects may keep `muiltchat`) — two keys start two servers. After changing `.mcp.json`, **fully restart the MCP host**; reloading the web page does not recreate the stdio connection.
 
-Tools available to MCP sessions: `publish_context` · `query_context` · `ask_session` · `reply_ask` · `check_inbox` · `check_replies` · `get_graph`. Each session registers itself in the graph and can participate in shared context and async messaging.
+Tools available to MCP sessions: `publish_context` · `query_context` · `ask_session` · `reply_ask` · `check_inbox` · `check_replies` · `get_graph` · `search_sessions` (find sessions by capability). Each session registers itself in the graph and can participate in shared context and async messaging.
 
 ### Hooks
 
@@ -206,6 +211,11 @@ npx tsx apps/server/src/index.ts migrate --status --to <conflux-dir>
 # Backup / restore (imports are validated, then written in one transaction — all or nothing)
 npx tsx apps/server/src/index.ts data export --output ./conflux-backup.json
 npx tsx apps/server/src/index.ts data import --file <bundle.json> --conflict skip|overwrite|copy
+
+# Category-scoped clear (same as the settings page; every clear auto-backs up
+# to <data-dir>/backups first, keeping the latest 5)
+npx tsx apps/server/src/index.ts data counts
+npx tsx apps/server/src/index.ts data clear --sessions --messages --context
 ```
 
 <details>
@@ -236,6 +246,8 @@ Artifacts are written to `release/` (ignored by Git). Native `better-sqlite3` pa
 - ✅ Claude Code / Codex liveness, resume lineage, async collaboration messages, auto-wake
 - ✅ Versioned data transfer, legacy directory migration, stable error codes, secret scanning
 - ✅ Internal rename to Conflux with the compatibility layer retained (dual CLI entries, dual env vars)
+- ✅ Theming (design tokens + custom palette import), data management (scoped clear + auto backup)
+- ✅ Session priority P0/P1/P2, capability search `search_sessions`, channel watch CLI, hooks backfill for running sessions
 - 🚧 Automatic updates and code signing
 - 🚧 Official installer distribution for macOS and Linux
 
@@ -272,6 +284,7 @@ Issues, ideas, and pull requests are welcome. Read the [contribution guide](../C
 
 | Doc                                          | Contents                                            |
 | -------------------------------------------- | --------------------------------------------------- |
+| [Machine setup](SETUP.md)                     | From-scratch dev environment checklist (bilingual) |
 | [Migration guide](MIGRATION.md)              | Legacy naming/directory compatibility and migration |
 | [Troubleshooting](TROUBLESHOOTING.md)        | Ports, database, MCP, data recovery                 |
 | [Contributing](../CONTRIBUTING.md)           | Development standards and PR process                |
