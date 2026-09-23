@@ -365,7 +365,7 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
     "search_sessions",
     {
       description:
-        "Discover which sessions can answer a question: substring-search their names, self-descriptions, and declared skills. Returns id/name/description/skills per match — ask one of them via ask_session.",
+        "Discover which sessions can answer a question: substring-search their names, self-descriptions, and declared skills (a session's self-description is its capability index). Only LIVE sessions you are ALLOWED to ask are returned — priority never strictly higher than yours — so every result can go straight into ask_session.",
       inputSchema: {
         query: z
           .string()
@@ -375,7 +375,9 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
       },
     },
     async ({ query }) => {
-      const r = await withAudit("search_sessions", { query }, () => searchSessions(db, query));
+      const r = await withAudit("search_sessions", { query }, () =>
+        searchSessions(db, query, { activeOnly: true, askableFrom: sessionId }),
+      );
       return json(
         r.ok
           ? {

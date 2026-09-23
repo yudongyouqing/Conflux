@@ -2,12 +2,12 @@ import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 import { recordEdge, touchEdge } from "./graph.js";
 import { WEB_CONSOLE_ID, type Message, type MessageStatus } from "@conflux/shared";
-import { sessionPriority } from "./sessions.js";
+import { PRIORITY_RANK, sessionPriority } from "./sessions.js";
 
 export type { Message, MessageStatus };
 
 /** P0 ranks 0 (most protected) … P2 ranks 2. Asks flow lower-rank → equal. */
-const PRIORITY_RANK: Record<string, number> = { P0: 0, P1: 1, P2: 2 };
+
 
 function metadataOf(db: DB, sessionId: string): string | null {
   const row = db.prepare(`SELECT metadata FROM sessions WHERE id = ?`).get(sessionId) as

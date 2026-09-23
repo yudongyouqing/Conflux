@@ -194,7 +194,25 @@ export function endSession(db: DB, id: string): void {
  * no FTS table warranted. Blank queries match nothing: callers must ask for
  * something specific, not dump the whole registry.
  */
-export function searchSessions(db: DB, query: string): Session[] {
+/** Priority tier ranking (P0 highest). Single source — messages.ts gates
+ *  asks with it, searchSessions filters askable targets with it. */
+export const PRIORITY_RANK: Record<string, number> = { P0: 0, P1: 1, P2: 2 };
+
+export interface SearchSessionsOptions {
+  /** Only live sessions (status = 'active'). */
+  activeOnly?: boolean;
+  /** Caller's session id: keep only targets this caller may actually ask —
+   *  priority not strictly higher than the caller's — and drop the caller
+   *  itself. A session's self-description (name/description/skills) is its
+   *  capability index; this keeps every returned result directly askable. */
+  askableFrom?: string;
+}
+
+export function searchSessions(
+  db: DB,
+  query: string,
+  opts: SearchSessionsOptions = {},
+): Session[] {
   const trimmed = query.trim().toLowerCase();
   if (trimmed.length === 0) return [];
   const needle = `%${trimmed}%`;
@@ -208,7 +226,18 @@ export function searchSessions(db: DB, query: string): Session[] {
        LIMIT 20`,
     )
     .all(needle, needle, needle) as Record<string, unknown>[];
-  return rows.map((row) => normalizeSession(row));
+  let out = rows.map((row) => normalizeSession(row));
+  if (opts.activeOnly) out = out.filter((s) => s.status === "active");
+  if (opts.askableFrom) {
+    const caller = getSession(db, opts.askableFrom);
+    const callerRank = PRIORITY_RANK[sessionPriority(caller?.metadata ?? null)] ?? 1;
+    out = out.filter(
+      (s) =>
+        s.id !== opts.askableFrom &&
+        (PRIORITY_RANK[sessionPriority(s.metadata)] ?? 1) >= callerRank,
+    );
+  }
+  return out;
 }
 
 // ---- zero-turn session reaping ---------------------------------------------
