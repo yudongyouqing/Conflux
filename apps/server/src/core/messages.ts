@@ -286,8 +286,8 @@ export function formatInboxNotice(db: DB, sessionId: string): string | null {
   //    (#102: the asker's CLI must see the answer without check_replies)
   const replies = db
     .prepare(
-      `SELECT m.id, m.reply, m.question, s.name, substr(m.from_session, 1, 8) AS sid8
-       FROM messages m LEFT JOIN sessions s ON s.id = m.from_session
+      `SELECT m.id, m.reply, m.question, s.name, substr(m.to_session, 1, 8) AS sid8
+       FROM messages m LEFT JOIN sessions s ON s.id = m.to_session
        WHERE m.from_session = ? AND m.reply IS NOT NULL AND m.reply_seen_at IS NULL
        ORDER BY m.id ASC LIMIT 3`,
     )
