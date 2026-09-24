@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { cleanTerminalEnv } from "../terminal.js";
 import { resolveConfig } from "../../config.js";
 import { withMcpConfig } from "./commands.js";
@@ -53,7 +53,7 @@ export function wakeShell(platform: NodeJS.Platform = process.platform): {
  */
 export function ensureWakeMcpConfig(dataDir?: string, serverEntry?: string): string {
   const dir = dataDir ?? resolveConfig("global").dataDir;
-  const entry = serverEntry ?? process.argv[1] ?? "";
+  const entry = serverEntry ?? defaultServerEntry();
   const path = join(dir, "wake-mcp.json");
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   writeFileSync(
@@ -62,6 +62,20 @@ export function ensureWakeMcpConfig(dataDir?: string, serverEntry?: string): str
     "utf8",
   );
   return path;
+}
+
+/**
+ * The server entry that can host the MCP server: resolved from THIS module's
+ * location (src via tsx → index.ts, compiled dist → index.js). Never from
+ * process.argv — that breaks whenever the wake is launched from a script
+ * whose argv[1] is not the server entry (observed: empty entry in the
+ * generated config, headless run started with a dead MCP mount).
+ */
+function defaultServerEntry(): string {
+  // __filename is available in both compiled CJS and under tsx (shimmed);
+  // tsconfig targets CommonJS so import.meta is off the table here.
+  const here = __filename;
+  return join(dirname(here), "..", "..", here.endsWith(".ts") ? "index.ts" : "index.js");
 }
 
 export function launchWakeRun(req: LaunchRequest): LaunchResult {
