@@ -270,19 +270,24 @@ export function resolveOnPath(
   if (/[\\/]/.test(exe)) return existsSync(exe) ? exe : null;
   // macOS has no where.exe; /usr/bin/which covers it (no Store-alias quirks).
   const resolver = platform === "darwin" ? "/usr/bin/which" : "where.exe";
-  try {
-    const r = spawnSync(resolver, [exe], {
-      encoding: "utf8",
-      timeout: 5000,
-      env: baseEnv,
-      windowsHide: true,
-    });
-    if (r.status === 0) {
-      const first = (r.stdout || "").trim().split(/\r?\n/)[0];
-      return first || null;
+  // one retry: under load (CI runners, cold AV scans) where/which can blow
+  // the timeout once and come back fine — availability detection must not
+  // flap on that (observed flake: windows-latest, 2026-09-24)
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const r = spawnSync(resolver, [exe], {
+        encoding: "utf8",
+        timeout: 8000,
+        env: baseEnv,
+        windowsHide: true,
+      });
+      if (r.status === 0) {
+        const first = (r.stdout || "").trim().split(/\r?\n/)[0];
+        return first || null;
+      }
+    } catch {
+      // resolver unavailable — treat as unresolved
     }
-  } catch {
-    // resolver unavailable — treat as unresolved
   }
   return null;
 }
