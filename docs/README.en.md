@@ -7,7 +7,8 @@
   <p><b>Every AI coding session, flowing into one workspace.</b></p>
   <p>A local-first desktop workspace for connecting AI coding sessions, agents, messages, and shared context</p>
   <p><a href="../README.md">简体中文</a> ｜ English</p>
-  <p><a href="#-features">Features</a> · <a href="#-quick-start">Quick start</a> · <a href="#-architecture">Architecture</a> · <a href="#-cross-session-conversations">Cross-session chat</a> · <a href="#-claude-code-integration">Claude Code</a> · <a href="#-data-and-configuration">Data</a> · <a href="#-roadmap">Roadmap</a></p>
+  <p><b>Local-first · Session graph · Async messaging · MCP/HTTP/CLI, one core · macOS/Windows/Linux</b></p>
+  <p><a href="#screenshots">Screenshots</a> · <a href="#not-a-chat-shell-a-graph-of-sessions">Why</a> · <a href="#-quick-start">Quick start</a> · <a href="#-architecture">Architecture</a> · <a href="#-claude-code-integration">Claude Code</a> · <a href="#-data-and-configuration">Data</a> · <a href="#-roadmap">Roadmap</a></p>
   <p>
     <img src="https://img.shields.io/badge/Electron-37-47848F?logo=electron&logoColor=white" alt="Electron">
     <img src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white" alt="React">
@@ -29,23 +30,43 @@ AI coding assistants usually run as isolated processes, which makes simple quest
 
 The public project name, CLI entry, and npm package names are all `Conflux` (`conflux` / `@conflux/shared`). The legacy `muiltchat` CLI entry, environment variables, and default data directory remain supported for compatibility.
 
-## ✨ Features
+## Screenshots
 
-|      | Capability              | Description                                                                        |
-| ---- | ----------------------- | ---------------------------------------------------------------------------------- |
-| 🕸️   | **Session graph**       | Browse sessions, agents, and directed conversation channels as a live graph         |
-| 📚   | **Shared context**      | Publish searchable notes and query context owned by other sessions                  |
-| ✉️   | **Async messaging**     | Ask another session a question and receive the reply later, across `/resume` too    |
-| 🤖   | **Internal agents**     | Define model-backed agents with a system prompt and chat from the workspace         |
-| 🛠️   | **Runtime agents**      | Configure Claude Code / Codex CLI presets and launch them in clean terminals        |
-| 🔌   | **Claude integration**  | Connect Claude Code sessions through MCP and optional lifecycle hooks               |
-| 🔀   | **One core, many UIs**  | MCP, HTTP REST, and the CLI all call the same core for consistent behavior          |
-| 💾   | **Local-first storage** | All state in SQLite with WAL mode; zero external service dependencies               |
-| 🖥️   | **Desktop client**      | Run the React workspace in an Electron window with managed local services           |
-| 🎨   | **Theming**             | Design-token light/dark themes with custom palette import in settings                |
-| 🚦   | **Session priority**    | P0/P1/P2 tiers — lower priority asking higher is rejected, with manual override      |
-| 🔍   | **Capability search**   | `search_sessions` finds peers by what they do, before you ask                        |
-| 🧹   | **Data management**     | Category-scoped clear of sessions/messages/context, automatic full backup (restorable) first             |
+<table>
+<tr>
+<td width="50%"><img src="assets/screenshots/graph-light.png" alt="Session graph — light" /><p align="center"><sub>Nodes are sessions, edges are conversations — who's online, busy, talking to whom</sub></p></td>
+<td width="50%"><img src="assets/screenshots/messages-light.png" alt="Message flow — light" /><p align="center"><sub>Cross-session Q&A with auto-wake replies, without leaving the workspace</sub></p></td>
+</tr>
+<tr>
+<td width="50%"><img src="assets/screenshots/detail-light.png" alt="Detail drawer" /><p align="center"><sub>Click to inspect: context, channels, priority — resume in a terminal in one click</sub></p></td>
+<td width="50%"><img src="assets/screenshots/graph-dark.png" alt="Dark theme" /><p align="center"><sub>Design-token light/dark themes; import a custom palette to reskin</sub></p></td>
+</tr>
+</table>
+
+## Not a chat shell — a graph of sessions
+
+```text
+Claude Code (voice-agent) ──asks──▶ Codex (winGhostty)
+        ▲                               │
+        └────────────── reply ◀─────────┘
+   ▲ publishes a note → searchable by any session via search_sessions
+```
+
+- **Session graph**: nodes are sessions (liveness + busy state), edges are directed conversation channels
+- **Async messaging**: ask another session, offline targets are headlessly woken, `/resume` lineage carries over
+- **Capability search**: a session's self-description (name/description/skills) is its index — `search_sessions` returns only live sessions you're allowed to ask
+- **Priority**: P0/P1/P2 — lower tiers cannot ask higher ones; the web console is the human override
+
+## Three interfaces, one core
+
+```text
+MCP ─┐
+HTTP ─┼─▶ core (single source of truth) ─▶ SQLite · WAL (~/.muiltchat)
+CLI  ─┘        │
+               └─ wake system: busy/idle/offline triage → headless resume of the real conversation
+```
+
+Identical behavior: the `conflux` CLI, REST API (OpenAPI at `/docs`), and MCP tools share one core. No external database, no message broker, no telemetry.
 
 ## 🚀 Quick Start
 
@@ -295,7 +316,9 @@ Issues, ideas, and pull requests are welcome. Read the [contribution guide](../C
 
 <div align="center">
 
-Conflux is released under the [MIT License](../LICENSE)
+**Bring every AI coding session into one workspace.**
+
+Conflux is released under the [MIT License](../LICENSE) · screenshots generated by the [capture rig](../scripts/capture/capture.mjs)
 
 **Local-first · Session confluence · Zero external dependencies**
 
