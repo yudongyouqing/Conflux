@@ -15,7 +15,7 @@ export function installTheme(win: Window = window): () => void { refreshTokenApp
 // ---- 自定义主题（#71）：令牌色板可导入/可切换 ------------------------------
 
 export interface ThemeColors {
-  ink: string; inkMuted: string; inkFaint: string;
+  ink: string;
   paper: string; surface: string;
   line: string; lineStrong: string;
   accent: string; accentDeep: string; accentSoft: string;
@@ -24,7 +24,7 @@ export interface CustomTheme { name: string; colors: ThemeColors }
 
 const HEX = /^#[0-9a-f]{6}$/i;
 const COLOR_KEYS = [
-  "ink", "inkMuted", "inkFaint",
+  "ink",
   "paper", "surface",
   "line", "lineStrong",
   "accent", "accentDeep", "accentSoft",
@@ -33,11 +33,12 @@ type ColorKey = (typeof COLOR_KEYS)[number];
 
 /** CSS 变量名映射（:root 里以 rgb 通道三元组存放，支持 α 修饰符） */
 const CSS_VAR: Record<ColorKey, string> = {
-  ink: "--tk-ink", inkMuted: "--tk-ink-muted", inkFaint: "--tk-ink-faint",
+  ink: "--tk-ink",
   paper: "--tk-paper", surface: "--tk-surface",
   line: "--tk-line", lineStrong: "--tk-line-strong",
   accent: "--tk-accent", accentDeep: "--tk-accent-deep", accentSoft: "--tk-accent-soft",
 };
+
 
 export function hexToChannels(hex: string): string | null {
   const m = HEX.exec(hex.trim());
@@ -46,7 +47,7 @@ export function hexToChannels(hex: string): string | null {
   return `${(n >> 16) & 255} ${(n >> 8) & 255} ${n & 255}`;
 }
 
-/** 全部 10 个键都是合法 hex 才通过；多退少补不猜默认值（导入要显式） */
+/** 全部 8 个必需键都是合法 hex 才通过；legacy 键忽略，多退少补不猜默认值 */
 export function normalizeThemeColors(value: unknown): ThemeColors | null {
   if (!value || typeof value !== "object") return null;
   const src = value as Record<string, unknown>;
@@ -77,12 +78,12 @@ export function applyThemeColors(root: StyleTarget = document.documentElement, c
 // 内置预设：浅色系转译自 theme-factory 主题规格（Ocean Depths / Forest Canopy / Desert Rose / Tech Innovation），
 // 终端深色 = 暗色令牌组的色板化（选中即全站深色）
 export const BUILTIN_THEMES: CustomTheme[] = [
-  { name: "汇流蓝（默认）", colors: { ink: "#182234", inkMuted: "#5c677d", inkFaint: "#8b94a7", paper: "#f6f7f9", surface: "#ffffff", line: "#e4e8ef", lineStrong: "#cbd3e0", accent: "#2563eb", accentDeep: "#1e4fc4", accentSoft: "#ebf1fe" } },
-  { name: "海洋深处", colors: { ink: "#0f2440", inkMuted: "#4a6079", inkFaint: "#7d93ac", paper: "#eef4f8", surface: "#ffffff", line: "#d8e3ec", lineStrong: "#b9cbdc", accent: "#0e7490", accentDeep: "#0b5a6e", accentSoft: "#e0f2f7" } },
-  { name: "森林树冠", colors: { ink: "#1d2a20", inkMuted: "#52645a", inkFaint: "#84968b", paper: "#f1f6f1", surface: "#ffffff", line: "#dce7dc", lineStrong: "#b9cdb9", accent: "#2f6b4f", accentDeep: "#24523c", accentSoft: "#e3f0e6" } },
-  { name: "沙漠玫瑰", colors: { ink: "#33272b", inkMuted: "#6e5a60", inkFaint: "#a08c92", paper: "#faf4f1", surface: "#ffffff", line: "#ecdfda", lineStrong: "#d6bfb8", accent: "#b76e79", accentDeep: "#96545f", accentSoft: "#f7e8e6" } },
-  { name: "科技创新", colors: { ink: "#1e1e1e", inkMuted: "#555555", inkFaint: "#8a8a8a", paper: "#f5f7fa", surface: "#ffffff", line: "#e2e8f0", lineStrong: "#c4cfda", accent: "#0066ff", accentDeep: "#0052cc", accentSoft: "#e5eeff" } },
-  { name: "终端深色", colors: { ink: "#e6eaf2", inkMuted: "#94a3b8", inkFaint: "#64748b", paper: "#0d121c", surface: "#172030", line: "#2c384a", lineStrong: "#3e4c62", accent: "#60a5fa", accentDeep: "#3b82f6", accentSoft: "#1e3a5f" } },
+  { name: "汇流蓝（默认）", colors: { ink: "#182234", paper: "#f6f7f9", surface: "#ffffff", line: "#e4e8ef", lineStrong: "#cbd3e0", accent: "#2563eb", accentDeep: "#1e4fc4", accentSoft: "#ebf1fe" } },
+  { name: "海洋深处", colors: { ink: "#0f2440", paper: "#eef4f8", surface: "#ffffff", line: "#d8e3ec", lineStrong: "#b9cbdc", accent: "#0e7490", accentDeep: "#0b5a6e", accentSoft: "#e0f2f7" } },
+  { name: "森林树冠", colors: { ink: "#1d2a20", paper: "#f1f6f1", surface: "#ffffff", line: "#dce7dc", lineStrong: "#b9cdb9", accent: "#2f6b4f", accentDeep: "#24523c", accentSoft: "#e3f0e6" } },
+  { name: "沙漠玫瑰", colors: { ink: "#33272b", paper: "#faf4f1", surface: "#ffffff", line: "#ecdfda", lineStrong: "#d6bfb8", accent: "#b76e79", accentDeep: "#96545f", accentSoft: "#f7e8e6" } },
+  { name: "科技创新", colors: { ink: "#1e1e1e", paper: "#f5f7fa", surface: "#ffffff", line: "#e2e8f0", lineStrong: "#c4cfda", accent: "#0066ff", accentDeep: "#0052cc", accentSoft: "#e5eeff" } },
+  { name: "终端深色", colors: { ink: "#e6eaf2", paper: "#0d121c", surface: "#172030", line: "#2c384a", lineStrong: "#3e4c62", accent: "#60a5fa", accentDeep: "#3b82f6", accentSoft: "#1e3a5f" } },
 ];
 
 /** 纸面色亮度判定：paper 偏暗即视为深色主题（决定 data-theme 联动） */

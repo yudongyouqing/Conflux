@@ -70,7 +70,7 @@ export function DetailPanel({
             {sessionNameLookup(message.to_session) ?? message.to_session.slice(0, 8)}
           </span>
           <span
-            className={`ml-auto px-1.5 py-0.5 rounded-md text-[10px] font-medium ${
+            className={`ml-auto px-1.5 py-0.5 rounded-md text-2xs font-medium ${
               message.status === "pending"
                 ? "bg-amber-50 text-amber-700 border border-amber-200"
                 : message.status === "seen"
@@ -85,7 +85,7 @@ export function DetailPanel({
         </div>
 
         <div>
-          <div className="text-[10px] text-ink-faint mb-1.5 flex items-center gap-1">
+          <div className="text-2xs text-ink-faint mb-1.5 flex items-center gap-1">
             <Clock size={10} /> {new Date(message.created_at).toLocaleString()}
           </div>
           <div className="bg-surface p-3 rounded-2xl border border-line shadow-sm">
@@ -95,7 +95,7 @@ export function DetailPanel({
 
         {message.reply && (
           <div>
-            <div className="text-[10px] text-ink-faint mb-1.5">
+            <div className="text-2xs text-ink-faint mb-1.5">
               回复
               {message.replied_at && ` · ${new Date(message.replied_at).toLocaleString()}`}
             </div>
@@ -156,7 +156,7 @@ function EdgeFlowView({
   return (
     <div className="p-5 space-y-4 overflow-y-auto h-full">
       <div>
-        <h2 className="text-ink font-semibold text-[15px] flex items-center gap-1.5">
+        <h2 className="text-ink font-semibold text-base-plus flex items-center gap-1.5">
           <ArrowLeftRight size={14} className="text-ink-faint" />
           对话通道 #{edge.id}
         </h2>
@@ -172,14 +172,14 @@ function EdgeFlowView({
           </span>
           <span className="text-ink-faint">· {messages.length} 条 · 最新在上</span>
         </div>
-        <div className="text-[10px] text-ink-faint mt-0.5">
+        <div className="text-2xs text-ink-faint mt-0.5">
           {nameOf(from)} 发起的通道:{nameOf(from)} 提问,{nameOf(to)} 回答,回复留在本通道。
         </div>
       </div>
 
       <div>
         {targetOffline && (
-          <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mb-1.5">
+          <div className="text-2xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mb-1.5">
             ⚠ {nameOf(to)} 当前离线。发送后将自动 headless 唤醒它回复(若可恢复)。
           </div>
         )}
@@ -203,7 +203,7 @@ function EdgeFlowView({
           </button>
         </div>
         {ask.isError && (
-          <p className="text-[10px] text-red-500 mt-1">{(ask.error as Error).message}</p>
+          <p className="text-2xs text-red-500 mt-1">{(ask.error as Error).message}</p>
         )}
       </div>
 
@@ -215,7 +215,7 @@ function EdgeFlowView({
             const outgoing = m.from_session === from;
             return (
               <div key={m.id} className={`flex flex-col ${outgoing ? "items-end" : "items-start"}`}>
-                <div className="text-[10px] text-ink-faint mb-0.5">
+                <div className="text-2xs text-ink-faint mb-0.5">
                   {nameOf(m.from_session)} → {nameOf(m.to_session)} ·{" "}
                   {new Date(m.created_at).toLocaleString()}
                 </div>
@@ -229,10 +229,10 @@ function EdgeFlowView({
                   <MarkdownText tone={outgoing ? "blue" : "light"}>{m.question}</MarkdownText>
                 </div>
                 {m.status === "pending" ? (
-                  <div className="text-[10px] text-amber-600 mt-0.5">等待回复…</div>
+                  <div className="text-2xs text-amber-600 mt-0.5">等待回复…</div>
                 ) : m.reply ? (
                   <div className="p-3 rounded-2xl border bg-surface border-emerald-200 text-ink max-w-[95%] mt-1 shadow-sm relative">
-                    <div className="absolute -top-2 left-3 text-[10px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-full px-1.5">
+                    <div className="absolute -top-2 left-3 text-2xs font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-full px-1.5">
                       回复
                     </div>
                     <MarkdownText>{m.reply}</MarkdownText>
@@ -279,7 +279,7 @@ function SessionDetail({
       <div>
         <div className="flex items-center gap-2 mb-1.5">
           <StatusDot status={session.status} busy={session.busy} />
-          <h2 className="text-ink font-semibold text-[15px] break-all">{session.name}</h2>
+          <h2 className="text-ink font-semibold text-base-plus break-all">{session.name}</h2>
         </div>
         {activity && (
           <div
@@ -289,10 +289,10 @@ function SessionDetail({
             正在: {activity}
           </div>
         )}
-        <div className="text-[10px] text-ink-faint font-mono break-all">{session.id}</div>
+        <div className="text-2xs text-ink-faint font-mono break-all">{session.id}</div>
         {session.project_dir && (
           <div
-            className="text-[11px] text-ink-muted mt-1 flex items-center gap-1 min-w-0"
+            className="text-2xs text-ink-muted mt-1 flex items-center gap-1 min-w-0"
             title={session.project_dir}
           >
             <FolderOpen size={11} className="flex-shrink-0" />
@@ -304,7 +304,7 @@ function SessionDetail({
             {session.skills.map((s) => (
               <span
                 key={s}
-                className="text-[10px] px-1.5 py-0.5 rounded-md bg-cyan-50 text-cyan-700 border border-cyan-200"
+                className="text-2xs px-1.5 py-0.5 rounded-md bg-cyan-50 text-cyan-700 border border-cyan-200"
                 title="Agent Card 技能"
               >
                 {s}
@@ -346,7 +346,7 @@ function SessionDetail({
             )}
             在终端打开
           </button>
-          {openNote && <div className="text-[11px] text-ink-muted mt-1.5">{openNote}</div>}
+          {openNote && <div className="text-2xs text-ink-muted mt-1.5">{openNote}</div>}
         </div>
       )}
 
@@ -363,13 +363,13 @@ function SessionDetail({
             {contextEntries.entries.map((e) => (
               <div key={e.id} className="p-3 rounded-xl bg-paper border border-line">
                 <div className="text-xs text-ink font-medium">{e.title}</div>
-                <div className="text-[11px] text-ink-muted mt-1 line-clamp-3">{e.content}</div>
+                <div className="text-2xs text-ink-muted mt-1 line-clamp-3">{e.content}</div>
                 {e.tags && e.tags.length > 0 && (
                   <div className="flex gap-1 mt-1.5 flex-wrap">
                     {e.tags.map((t) => (
                       <span
                         key={t}
-                        className="text-[10px] px-1.5 py-0.5 rounded-md bg-accent-soft text-accent border border-accent/20"
+                        className="text-2xs px-1.5 py-0.5 rounded-md bg-accent-soft text-accent border border-accent/20"
                       >
                         {t}
                       </span>
@@ -399,7 +399,7 @@ function InitiateConversation({
         <ArrowRight size={12} /> 发起对话通道
       </h3>
       {session.status !== "active" && (
-        <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mb-2">
+        <div className="text-2xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mb-2">
           ⚠ 对方当前{session.status === "ended" ? "已结束" : "离线"}。发送后将尝试自动唤醒它回复。
         </div>
       )}

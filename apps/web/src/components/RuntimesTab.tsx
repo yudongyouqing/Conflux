@@ -126,10 +126,10 @@ function KanbanColumn({
     <div className={`rounded-xl border ${accent} p-3 min-h-[120px]`}>
       <div className="flex items-center justify-between mb-2.5 px-1">
         <span className={`text-xs font-semibold ${countAccent}`}>{title}</span>
-        <span className={`text-[10px] ${countAccent}`}>{agents.length}</span>
+        <span className={`text-2xs ${countAccent}`}>{agents.length}</span>
       </div>
       {agents.length === 0 ? (
-        <div className="text-[11px] text-ink-faint text-center py-6">{emptyHint}</div>
+        <div className="text-2xs text-ink-faint text-center py-6">{emptyHint}</div>
       ) : (
         <div className="space-y-2">
           {agents.map((a) => (
@@ -143,15 +143,15 @@ function KanbanColumn({
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-ink truncate">{a.name}</span>
-                  <span className="text-[10px] px-1.5 py-px rounded bg-cyan-50 text-cyan-700 border border-cyan-200 font-medium">
+                  <span className="text-2xs px-1.5 py-px rounded bg-cyan-50 text-cyan-700 border border-cyan-200 font-medium">
                     {runtimeLabel(a.runtime)}
                   </span>
                   {a.model && (
-                    <span className="text-[10px] text-ink-faint font-mono truncate">{a.model}</span>
+                    <span className="text-2xs text-ink-faint font-mono truncate">{a.model}</span>
                   )}
                   {(a.interval_min ?? 0) > 0 && (
                     <span
-                      className="text-[10px] px-1.5 py-px rounded bg-violet-50 text-violet-700 border border-violet-200 font-medium flex items-center gap-0.5 flex-shrink-0"
+                      className="text-2xs px-1.5 py-px rounded bg-violet-50 text-violet-700 border border-violet-200 font-medium flex items-center gap-0.5 flex-shrink-0"
                       title={
                         a.last_scheduled_run
                           ? `上次自动运行 ${new Date(a.last_scheduled_run).toLocaleString()}`
@@ -162,7 +162,7 @@ function KanbanColumn({
                     </span>
                   )}
                 </div>
-                <div className="text-[11px] text-ink-muted flex items-center gap-1 mt-0.5 min-w-0">
+                <div className="text-2xs text-ink-muted flex items-center gap-1 mt-0.5 min-w-0">
                   <FolderOpen size={10} className="flex-shrink-0" />
                   <span className="truncate" title={a.workdir ?? ""}>
                     {a.workdir || "(未设置目录)"}

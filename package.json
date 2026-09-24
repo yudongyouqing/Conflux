@@ -16,7 +16,7 @@
     "package:desktop": "npm run build:desktop && electron-builder --projectDir apps/desktop --config electron-builder.yml",
     "package:desktop:dir": "npm run build:desktop && electron-builder --projectDir apps/desktop --config electron-builder.yml --dir",
     "test:desktop": "node --test apps/desktop/test/*.test.cjs",
-    "ci:test": "npm test -w apps/server && npm run test:desktop && node --test scripts/release-config.test.cjs",
+    "ci:test": "npm test -w apps/server && npm run test:desktop && node --test scripts/release-config.test.cjs && npm run check:tokens",
     "ci:build": "npm run build",
     "verify:desktop-package": "node apps/desktop/test/package-smoke.cjs",
     "check:secrets": "node scripts/check-secrets.cjs",
@@ -30,7 +30,8 @@
     "start": "npm run build && npm run serve",
     "lint": "eslint apps/server/src apps/web/src packages/shared/src",
     "format": "prettier --write \"apps/server/src/**/*.ts\" \"apps/web/src/**/*.{ts,tsx,css}\" \"packages/shared/src/**/*.ts\"",
-    "skills:sync": "node scripts/sync-skills.cjs"
+    "skills:sync": "node scripts/sync-skills.cjs",
+    "check:tokens": "node scripts/check-style-tokens.mjs"
   },
   "dependencies": {
     "conflux": "file:apps/server"

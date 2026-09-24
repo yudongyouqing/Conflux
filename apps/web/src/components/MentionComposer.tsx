@@ -138,7 +138,7 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
           <span className="text-xs text-ink-faint whitespace-nowrap">输入 @ 选择会话</span>
         )}
         {target && (
-          <span className={`text-[11px] ${targetBadge(target).color}`}>
+          <span className={`text-2xs ${targetBadge(target).color}`}>
             {targetBadge(target).text}
           </span>
         )}
@@ -183,12 +183,12 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
                 {s.priority === "P0" && (
                   <span
                     title="重点会话"
-                    className="flex-shrink-0 rounded bg-accent-soft border border-accent/30 px-1 text-[10px] font-mono text-accent leading-4"
+                    className="flex-shrink-0 rounded bg-accent-soft border border-accent/30 px-1 text-2xs font-mono text-accent leading-4"
                   >
                     P0
                   </span>
                 )}
-                <span className="text-[11px] text-ink-faint truncate flex-1">
+                <span className="text-2xs text-ink-faint truncate flex-1">
                   {s.description
                     ? s.description
                     : (s.skills?.length ?? 0) > 0
@@ -196,7 +196,7 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
                       : s.id.slice(0, 8)}
                 </span>
                 {(s.skills?.length ?? 0) > 0 && (
-                  <span className="font-mono text-[10px] text-ink-faint flex-shrink-0">
+                  <span className="font-mono text-2xs text-ink-faint flex-shrink-0">
                     [{s.skills!.slice(0, 2).join(", ")}]
                   </span>
                 )}

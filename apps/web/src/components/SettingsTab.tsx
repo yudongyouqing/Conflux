@@ -91,7 +91,7 @@ export function SettingsTab() {
       const rawName = (parsed as CustomTheme)?.name;
       const name = typeof rawName === "string" && rawName.trim() ? rawName.trim() : null;
       if (!colors || !name) {
-        setImportError("格式无效：需要 name 与全部 10 个 #rrggbb 颜色");
+        setImportError("格式无效：需要 name 与全部 8 个 #rrggbb 颜色");
         return;
       }
       if (BUILTIN_THEMES.some((b) => b.name === name)) {
@@ -225,7 +225,7 @@ export function SettingsTab() {
         <div className="bg-surface border border-line rounded-xl p-4 space-y-3 shadow-sm">
           <h3 className="text-ink font-medium text-sm">主题</h3>
           <div>
-            <p className="text-[11px] text-ink-faint mb-2">明暗随色板自动切换——选深色色板即全站深色</p>
+            <p className="text-2xs text-ink-faint mb-2">明暗随色板自动切换——选深色色板即全站深色</p>
             <div className="grid grid-cols-2 gap-1.5">
               {allThemes.map((t) => {
                 const active = activeCustom === t.name;
@@ -269,7 +269,7 @@ export function SettingsTab() {
                 value={importText}
                 onChange={(e) => setImportText(e.target.value)}
                 rows={3}
-                placeholder='导入主题 JSON：{"name":"我的主题","colors":{"ink":"#182234","paper":"#f6f7f9","line":"#e4e8ef","accent":"#2563eb",…}}'
+                placeholder='导入主题 JSON：{"name":"我的主题","colors":{"ink":"#182234","paper":"#f6f7f9","line":"#e4e8ef","accent":"#2563eb",…}（8 键）}'
                 className="w-full bg-surface text-ink text-xs rounded-lg px-2.5 py-2 border border-line placeholder-ink-faint outline-none focus:border-accent resize-y font-mono"
               />
               {importError && <div className="text-xs text-red-500 mt-1">{importError}</div>}
@@ -281,8 +281,8 @@ export function SettingsTab() {
               >
                 导入主题
               </button>
-              <span className="text-[10px] text-ink-faint ml-2">
-                需要 name + 10 个 #rrggbb 颜色（ink/inkMuted/inkFaint/paper/surface/line/lineStrong/accent/accentDeep/accentSoft）
+              <span className="text-2xs text-ink-faint ml-2">
+                需要 name + 8 个 #rrggbb 颜色（ink/paper/surface/line/lineStrong/accent/accentDeep/accentSoft；次级文字色由 ink 自动派生）
               </span>
             </div>
           </div>
@@ -312,7 +312,7 @@ export function SettingsTab() {
               ))}
             </select>
             {selected && (
-              <span className="block text-[11px] text-ink-faint mt-1.5">
+              <span className="block text-2xs text-ink-faint mt-1.5">
                 {selected.hint}
                 {selected.available ? "" : " · 本机未检测到,保存后走回退链"}
               </span>
@@ -321,7 +321,7 @@ export function SettingsTab() {
 
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
-              <span className="block text-[11px] text-ink-muted mb-1">claude 可执行文件</span>
+              <span className="block text-2xs text-ink-muted mb-1">claude 可执行文件</span>
               <input
                 value={claudePath}
                 onChange={(e) => setClaudePath(e.target.value)}
@@ -330,7 +330,7 @@ export function SettingsTab() {
               />
             </label>
             <label className="block">
-              <span className="block text-[11px] text-ink-muted mb-1">codex 可执行文件</span>
+              <span className="block text-2xs text-ink-muted mb-1">codex 可执行文件</span>
               <input
                 value={codexPath}
                 onChange={(e) => setCodexPath(e.target.value)}
@@ -368,7 +368,7 @@ export function SettingsTab() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <h3 className="text-ink font-medium text-sm">数据备份</h3>
-              <p className="text-[11px] text-ink-faint mt-0.5">导出不包含 API key</p>
+              <p className="text-2xs text-ink-faint mt-0.5">导出不包含 API key</p>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -376,7 +376,7 @@ export function SettingsTab() {
                 onClick={exportWorkspace}
                 disabled={transferPending}
                 title="导出数据"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line text-ink text-xs hover:bg-paper disabled:opacity-50"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line text-ink text-xs hover:bg-tile-hover disabled:opacity-50"
               >
                 {transferPending ? (
                   <Loader2 size={13} className="animate-spin" />
@@ -390,7 +390,7 @@ export function SettingsTab() {
                 onClick={() => importInput.current?.click()}
                 disabled={transferPending}
                 title="导入 JSON 数据"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line text-ink text-xs hover:bg-paper disabled:opacity-50"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line text-ink text-xs hover:bg-tile-hover disabled:opacity-50"
               >
                 <Upload size={13} />
                 导入 JSON
@@ -405,7 +405,7 @@ export function SettingsTab() {
             </div>
           </div>
           <div className="flex items-center justify-between gap-3">
-            <label className="text-[11px] text-ink-muted" htmlFor="import-conflict">
+            <label className="text-2xs text-ink-muted" htmlFor="import-conflict">
               冲突处理
             </label>
             <select
@@ -439,7 +439,7 @@ export function SettingsTab() {
         <div className="bg-surface border border-line rounded-xl p-4 space-y-3 shadow-sm">
           <div>
             <h3 className="text-ink font-medium text-sm">数据清除</h3>
-            <p className="text-[11px] text-ink-faint mt-0.5">
+            <p className="text-2xs text-ink-faint mt-0.5">
               这些都是原会话上下文的本地副本。清除前自动备份全量数据（服务端保留最近 5
               份），可用上方「导入 JSON」恢复
             </p>
@@ -454,10 +454,10 @@ export function SettingsTab() {
             <div key={key} className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <span className="text-xs text-ink">{label}</span>
-                <span className="text-[11px] text-ink-faint ml-2 hidden sm:inline">{desc}</span>
+                <span className="text-2xs text-ink-faint ml-2 hidden sm:inline">{desc}</span>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <span className="text-[11px] text-ink-faint tabular-nums">
+                <span className="text-2xs text-ink-faint tabular-nums">
                   {clearCounts ? countOf(key) : "—"}
                 </span>
                 <button
@@ -485,7 +485,7 @@ export function SettingsTab() {
           )}
         </div>
 
-        <p className="text-[11px] text-ink-faint">
+        <p className="text-2xs text-ink-faint">
           提示:可执行文件留空使用默认值(从 PATH 解析)。点击图上任意会话 →
           右侧面板「在终端打开」即可在新终端窗口 resume 该对话。
         </p>

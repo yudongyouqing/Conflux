@@ -108,7 +108,7 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1">
               <span
-                className="text-ink text-[12px] font-semibold truncate flex-1"
+                className="text-ink text-xs font-semibold truncate flex-1"
                 title={d.name}
               >
                 {d.name}
@@ -121,7 +121,7 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
               />
             </div>
             {d.runtime && !isAgent && (
-              <div className="font-mono text-[10px] text-slate-400 leading-3">{d.runtime}</div>
+              <div className="font-mono text-2xs text-slate-400 leading-3">{d.runtime}</div>
             )}
           </div>
         </div>
@@ -129,7 +129,7 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
         {/* body — hide boilerplate descriptions the server writes for unnamed sessions */}
         {d.description && !(PLACEHOLDER_DESCRIPTIONS as readonly string[]).includes(d.description) && (
             <div
-              className="text-[11px] text-ink-muted truncate mt-1.5 leading-4"
+              className="text-2xs text-ink-muted truncate mt-1.5 leading-4"
               title={d.description}
             >
               {d.description}
@@ -137,7 +137,7 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
           )}
 
         {/* footer meta — quiet metric chips */}
-        <div className="flex items-center gap-1.5 mt-2 text-[10px]">
+        <div className="flex items-center gap-1.5 mt-2 text-2xs">
           {d.context_count > 0 && (
             <span
               className="inline-flex items-center gap-1 rounded-md bg-slate-50 border border-slate-100 px-1.5 py-[1px] text-ink-muted"

@@ -154,7 +154,7 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
                   >
                     <MarkdownText tone={mine ? "blue" : "light"}>{m.question}</MarkdownText>
                     {mine && m.status === "pending" && (
-                      <div className="mt-1 text-[10px] text-white/70">等待对方处理…</div>
+                      <div className="mt-1 text-2xs text-white/70">等待对方处理…</div>
                     )}
                   </div>
                 </div>
