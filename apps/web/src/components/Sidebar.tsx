@@ -28,7 +28,7 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
         <div className="w-7 h-7 rounded-lg bg-accent flex items-center justify-center">
           <Boxes size={15} className="text-white" />
         </div>
-        <span className="font-semibold text-[15px] text-ink tracking-tight">Conflux</span>
+        <span className="font-semibold text-base-plus text-ink tracking-tight">Conflux</span>
       </div>
 
       {/* Nav */}
@@ -40,10 +40,10 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
             <button
               key={item.id}
               onClick={() => onTabChange(item.id)}
-              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium transition-colors ${
+              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-md-plus font-medium transition-colors ${
                 active
                   ? "bg-accent-soft text-accent"
-                  : "text-ink-muted hover:bg-surface hover:text-ink"
+                  : "text-ink-muted hover:bg-tile-hover hover:text-ink"
               }`}
             >
               <Icon size={16} className={active ? "text-accent" : "text-ink-faint"} />

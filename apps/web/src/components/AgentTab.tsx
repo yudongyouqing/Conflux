@@ -78,7 +78,7 @@ function AgentCard({
         </div>
         <div className="flex-1 min-w-0">
           <div className="text-sm text-ink font-medium truncate">{agent.name}</div>
-          <div className="flex items-center gap-2 text-[10px] text-ink-muted mt-0.5">
+          <div className="flex items-center gap-2 text-2xs text-ink-muted mt-0.5">
             <span className="px-1.5 py-0.5 rounded-md bg-paper text-ink-muted border border-line">
               {agent.model_config.provider}
             </span>
@@ -104,12 +104,12 @@ function AgentCard({
         <div className="px-4 pb-4 space-y-3">
           {agent.description && <div className="text-xs text-ink-muted">{agent.description}</div>}
           <div>
-            <div className="text-[10px] text-ink-faint mb-1.5">System Prompt</div>
-            <pre className="text-[11px] text-ink-muted font-mono whitespace-pre-wrap bg-paper p-3 rounded-lg border border-line max-h-40 overflow-y-auto">
+            <div className="text-2xs text-ink-faint mb-1.5">System Prompt</div>
+            <pre className="text-2xs text-ink-muted font-mono whitespace-pre-wrap bg-paper p-3 rounded-lg border border-line max-h-40 overflow-y-auto">
               {agent.system_prompt}
             </pre>
           </div>
-          <div className="flex items-center justify-between text-[10px] text-ink-faint">
+          <div className="flex items-center justify-between text-2xs text-ink-faint">
             <span>
               ID: {agent.id} · 更新于 {new Date(agent.updated_at).toLocaleString()}
             </span>

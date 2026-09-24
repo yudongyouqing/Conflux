@@ -230,7 +230,7 @@ export function GraphTab({
               className={`px-3 py-1.5 transition-colors duration-200 ${
                 viewMode === m
                   ? "bg-accent text-white"
-                  : "text-ink-muted hover:bg-paper hover:text-ink"
+                  : "text-ink-muted hover:bg-tile-hover hover:text-ink"
               }`}
             >
               {VIEW_LABELS[m]}
@@ -241,7 +241,7 @@ export function GraphTab({
       {/* no edges in view: say WHY instead of looking like a broken graph */}
       {edges.length === 0 && nodes.length > 0 && (
         <Panel position="bottom-center" className="!mb-4">
-          <div className="text-[11px] text-ink-faint bg-surface/90 backdrop-blur-sm border border-slate-100 rounded-full px-3 py-1 shadow-[0_2px_10px_rgba(16,24,40,0.08)]">
+          <div className="text-2xs text-ink-faint bg-surface/90 backdrop-blur-sm border border-slate-100 rounded-full px-3 py-1 shadow-[0_2px_10px_rgba(16,24,40,0.08)]">
             当前视图暂无会话间消息通道 —— 发起一次对话即可建立连线
           </div>
         </Panel>

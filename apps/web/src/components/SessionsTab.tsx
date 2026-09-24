@@ -90,7 +90,7 @@ export function SessionsTab({ onSelectSession, selectedSessionId }: SessionsTabP
           {groups.map((g) => (
             <div key={g.dir}>
               <div
-                className="font-mono text-[11px] text-ink-muted truncate mb-1.5 px-1"
+                className="font-mono text-2xs text-ink-muted truncate mb-1.5 px-1"
                 title={g.dir}
               >
                 {g.dir}
@@ -116,7 +116,7 @@ export function SessionsTab({ onSelectSession, selectedSessionId }: SessionsTabP
                         {s.priority === "P0" && (
                           <span
                             title="重点会话：低优先级会话无法向它提问"
-                            className="flex-shrink-0 rounded bg-accent-soft border border-accent/30 px-1 text-[10px] font-mono text-accent leading-4"
+                            className="flex-shrink-0 rounded bg-accent-soft border border-accent/30 px-1 text-2xs font-mono text-accent leading-4"
                           >
                             P0
                           </span>
@@ -124,12 +124,12 @@ export function SessionsTab({ onSelectSession, selectedSessionId }: SessionsTabP
                         {s.priority === "P2" && (
                           <span
                             title="后台会话"
-                            className="flex-shrink-0 rounded bg-paper border border-line px-1 text-[10px] font-mono text-ink-faint leading-4"
+                            className="flex-shrink-0 rounded bg-paper border border-line px-1 text-2xs font-mono text-ink-faint leading-4"
                           >
                             P2
                           </span>
                         )}
-                        <span className="text-[10px] text-ink-faint flex-shrink-0">
+                        <span className="text-2xs text-ink-faint flex-shrink-0">
                           {relative(s.last_heartbeat_at)}
                         </span>
                       </div>
@@ -138,14 +138,14 @@ export function SessionsTab({ onSelectSession, selectedSessionId }: SessionsTabP
                           s.description,
                         ) && (
                           <div
-                            className="text-[11px] text-ink-muted truncate mt-0.5"
+                            className="text-2xs text-ink-muted truncate mt-0.5"
                             title={s.description}
                           >
                             <InlineMarkdown>{s.description}</InlineMarkdown>
                           </div>
                         )}
                       {s.pending_inbox > 0 && (
-                        <div className="flex items-center gap-1 text-[10px] text-amber-600 mt-0.5">
+                        <div className="flex items-center gap-1 text-2xs text-amber-600 mt-0.5">
                           <Inbox size={10} /> {s.pending_inbox} 待回复
                         </div>
                       )}

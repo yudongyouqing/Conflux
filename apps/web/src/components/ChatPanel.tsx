@@ -134,7 +134,7 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
           </div>
           <span className="text-sm text-ink font-medium">{agent.name}</span>
         </div>
-        <span className="ml-auto text-[10px] px-2 py-1 rounded-md bg-paper text-ink-muted border border-line">
+        <span className="ml-auto text-2xs px-2 py-1 rounded-md bg-paper text-ink-muted border border-line">
           {agent.model_config.provider}/{agent.model_config.model}
         </span>
       </div>
