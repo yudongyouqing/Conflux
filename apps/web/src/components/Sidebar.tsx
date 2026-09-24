@@ -53,6 +53,10 @@ export function Sidebar({
   onSelectSession,
 }: SidebarProps) {
   const health = useDaemonHealth();
+  // Electron preload 注入的平台标识；纯浏览器为 undefined（无玻璃/拖拽）
+  const isDarwin =
+    (globalThis as { confluxDesktop?: { platform?: string } }).confluxDesktop?.platform ===
+    "darwin";
   const online = health.data?.ok === true;
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
@@ -83,10 +87,18 @@ export function Sidebar({
   ];
 
   return (
-    <aside className="w-60 bg-paper border-r border-line flex flex-col flex-shrink-0 min-h-0">
-      {/* Brand */}
-      <div className="flex items-center gap-2.5 px-4 h-12 border-b border-line flex-shrink-0">
-        <div className="w-[26px] h-[26px] rounded-lg bg-accent flex items-center justify-center">
+    <aside
+      className={`${
+        isDarwin ? "glass-sidebar" : "bg-paper"
+      } w-60 border-r border-line flex flex-col flex-shrink-0 min-h-0`}
+    >
+      {/* Brand — darwin 上是窗口拖拽区并给红绿灯让位（#111） */}
+      <div
+        className={`flex items-center gap-2.5 h-12 border-b border-line flex-shrink-0 ${
+          isDarwin ? "app-drag pl-[84px] pr-4" : "px-4"
+        }`}
+      >
+        <div className="w-[26px] h-[26px] rounded-lg bg-accent flex items-center justify-center app-no-drag">
           <Boxes size={14} className="text-white" />
         </div>
         <span className="font-semibold text-sm text-ink tracking-tight">Conflux</span>
@@ -155,12 +167,12 @@ export function Sidebar({
                       <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDot(s)}`} />
                       <span className="truncate flex-1">{s.name}</span>
                       {s.priority === "P0" && (
-                        <span className="text-[10px] font-semibold text-red-500 flex-shrink-0">
+                        <span className="text-2xs font-semibold text-red-500 flex-shrink-0">
                           P0
                         </span>
                       )}
                       {s.priority === "P2" && (
-                        <span className="text-[10px] text-ink-faint flex-shrink-0">P2</span>
+                        <span className="text-2xs text-ink-faint flex-shrink-0">P2</span>
                       )}
                     </button>
                   );
