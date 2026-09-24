@@ -31,7 +31,8 @@
     "lint": "eslint apps/server/src apps/web/src packages/shared/src",
     "format": "prettier --write \"apps/server/src/**/*.ts\" \"apps/web/src/**/*.{ts,tsx,css}\" \"packages/shared/src/**/*.ts\"",
     "skills:sync": "node scripts/sync-skills.cjs",
-    "check:tokens": "node scripts/check-style-tokens.mjs"
+    "check:tokens": "node scripts/check-style-tokens.mjs",
+    "capture:screens": "node scripts/capture/capture.mjs"
   },
   "dependencies": {
     "conflux": "file:apps/server"
