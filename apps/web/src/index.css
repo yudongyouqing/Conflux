@@ -56,8 +56,6 @@ body,
  * Defaults = the 汇流蓝 baseline; custom themes replace via inline style. */
 :root {
   --tk-ink: 24 34 52;
-  --tk-ink-muted: 92 103 125;
-  --tk-ink-faint: 139 148 167;
   --tk-paper: 246 247 249;
   --tk-surface: 255 255 255;
   --tk-line: 228 232 239;
@@ -120,8 +118,6 @@ body {
 html[data-theme="dark"] {
   color-scheme: dark;
   --tk-ink: 230 234 242;
-  --tk-ink-muted: 148 163 184;
-  --tk-ink-faint: 100 116 139;
   --tk-paper: 13 18 28;
   --tk-surface: 23 32 48;
   --tk-line: 44 56 74;

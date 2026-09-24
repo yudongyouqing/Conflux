@@ -103,10 +103,10 @@ export function Sidebar({
                 key={item.id}
                 onClick={() => onTabChange(item.id)}
                 aria-pressed={active}
-                className={`flex flex-col items-center gap-1 py-2 rounded-lg text-[11px] font-medium transition-colors ${
+                className={`flex flex-col items-center gap-1 py-2 rounded-lg text-2xs font-medium transition-colors ${
                   active
                     ? "bg-accent-soft text-accent"
-                    : "text-ink-muted hover:bg-surface hover:text-ink"
+                    : "text-ink-muted hover:bg-tile-hover hover:text-ink"
                 }`}
               >
                 <Icon size={16} className={active ? "text-accent" : "text-ink-faint"} />
@@ -118,7 +118,7 @@ export function Sidebar({
       </div>
 
       {/* Session list: the sidebar's main body (#107) */}
-      <div className="px-3 pb-1 pt-2 text-[11px] font-medium text-ink-faint flex-shrink-0">
+      <div className="px-3 pb-1 pt-2 text-2xs font-medium text-ink-faint flex-shrink-0">
         会话 · {listable.length}
       </div>
       <div className="flex-1 overflow-y-auto px-2 pb-2 min-h-0">
@@ -129,7 +129,7 @@ export function Sidebar({
           const hidden = items.length - shown.length;
           return (
             <div key={group} className="mb-2">
-              <div className="flex items-center gap-1 px-2 py-1 text-[11px] text-ink-faint">
+              <div className="flex items-center gap-1 px-2 py-1 text-2xs text-ink-faint">
                 {open ? (
                   <ChevronDown size={11} className="text-ink-faint" />
                 ) : (
@@ -149,7 +149,7 @@ export function Sidebar({
                       className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-colors text-left ${
                         selected
                           ? "bg-accent-soft text-accent"
-                          : "text-ink hover:bg-surface"
+                          : "text-ink hover:bg-tile-hover"
                       }`}
                     >
                       <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDot(s)}`} />
@@ -168,7 +168,7 @@ export function Sidebar({
                 {hidden > 0 && (
                   <button
                     onClick={() => setExpanded((prev) => ({ ...prev, [group]: true }))}
-                    className="w-full px-2 py-1 text-left text-[11px] text-ink-faint hover:text-ink"
+                    className="w-full px-2 py-1 text-left text-2xs text-ink-faint hover:text-ink"
                   >
                     显示更多 {hidden} 个
                   </button>
@@ -192,7 +192,7 @@ export function Sidebar({
           className={`w-2 h-2 rounded-full flex-shrink-0 ${online ? "bg-emerald-500" : "bg-red-500"}`}
           title={online ? "daemon 在线" : "daemon 离线"}
         />
-        <span className="text-[11px] text-ink-muted flex-1 truncate">
+        <span className="text-2xs text-ink-muted flex-1 truncate">
           {online ? "在线" : "离线"}
         </span>
         {(
@@ -210,7 +210,8 @@ export function Sidebar({
               aria-label={label}
               aria-pressed={active}
               className={`p-1.5 rounded-lg transition-colors ${
-                active ? "bg-accent-soft text-accent" : "text-ink-faint hover:bg-surface hover:text-ink"
+                active ? "bg-accent-soft text-accent" : "text-ink-faint hover:bg-tile-hover hover:text-ink"
+              }`}
               }`}
             >
               <Icon size={15} />
