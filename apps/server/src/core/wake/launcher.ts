@@ -1,5 +1,9 @@
 import { execFile, spawn } from "node:child_process";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { cleanTerminalEnv } from "../terminal.js";
+import { resolveConfig } from "../../config.js";
+import { withMcpConfig } from "./commands.js";
 import { setSetting } from "../app-settings.js";
 import { psMatchClauses } from "../runtime-identity.js";
 import { logger } from "../../log.js";
@@ -26,6 +30,40 @@ export interface LaunchRequest {
 
 export type LaunchResult = { ok: true; command: string } | { ok: false; error: string };
 
+/**
+ * Shell for headless wake launches. Windows runs the command string through
+ * cmd.exe; everywhere else it must be /bin/sh — `process.env.comspec ??
+ * "cmd.exe"` unconditionally spawns a nonexistent cmd.exe on macOS/Linux
+ * and the wake silently never starts (#105).
+ */
+export function wakeShell(platform: NodeJS.Platform = process.platform): {
+  command: string;
+  args: string[];
+} {
+  if (platform === "win32") {
+    return { command: process.env.comspec ?? "cmd.exe", args: ["/d", "/s", "/c"] };
+  }
+  return { command: "/bin/sh", args: ["-c"] };
+}
+
+/**
+ * Write (idempotently) a minimal MCP mount config pointing at THIS server
+ * install, so a woken claude always has check_inbox/reply_ask even when the
+ * target project never mounted Conflux in its own .mcp.json (#105).
+ */
+export function ensureWakeMcpConfig(dataDir?: string, serverEntry?: string): string {
+  const dir = dataDir ?? resolveConfig("global").dataDir;
+  const entry = serverEntry ?? process.argv[1] ?? "";
+  const path = join(dir, "wake-mcp.json");
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    path,
+    JSON.stringify({ mcpServers: { conflux: { command: "npx", args: ["tsx", entry, "mcp"] } } }),
+    "utf8",
+  );
+  return path;
+}
+
 export function launchWakeRun(req: LaunchRequest): LaunchResult {
   if (req.dryRun) return { ok: true, command: req.command };
 
@@ -38,7 +76,12 @@ export function launchWakeRun(req: LaunchRequest): LaunchResult {
   //     before the first tryAdopt), and the wake run acts as the target.
   const env = cleanTerminalEnv();
   env.MUILTCHAT_ASSUME_SESSION = req.sessionId;
-  const child = spawn(process.env.comspec ?? "cmd.exe", ["/d", "/s", "/c", req.command], {
+  // claude wakes (pinCodex === false) get an explicit MCP mount so the
+  // headless run can always reach check_inbox/reply_ask (#105)
+  const command =
+    req.pinCodex ? req.command : withMcpConfig(req.command, ensureWakeMcpConfig());
+  const shell = wakeShell();
+  const child = spawn(shell.command, [...shell.args, command], {
     detached: process.platform !== "win32",
     stdio: ["pipe", "ignore", "ignore"],
     env,

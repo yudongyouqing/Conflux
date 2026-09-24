@@ -57,11 +57,26 @@ export function wakeCommand(
   runtime: "claude" | "codex",
   sessionId: string,
   executable: string,
+  mcpConfigPath?: string | null,
 ): string {
   if (runtime === "codex") {
     return `${cmdQuote(executable)} exec resume ${sessionId} ${CODEX_WAKE_FLAGS} -`;
   }
-  return `${resumeCommand("claude", sessionId, executable)} --allowedTools ${cmdQuote(
-    HEADLESS_ALLOWED_TOOLS,
-  )} -p`;
+  return withMcpConfig(
+    `${resumeCommand("claude", sessionId, executable)} --allowedTools ${cmdQuote(
+      HEADLESS_ALLOWED_TOOLS,
+    )} -p`,
+    mcpConfigPath,
+  );
+}
+
+/**
+ * Append `--mcp-config` so the headless run always has the Conflux MCP
+ * tools available even when the target project never mounted them in its
+ * own .mcp.json (issue #105: a woken session without check_inbox/reply_ask
+ * can never answer). Optional — omitted when no config file is provided.
+ */
+export function withMcpConfig(command: string, mcpConfigPath?: string | null): string {
+  if (!mcpConfigPath) return command;
+  return `${command} --mcp-config ${cmdQuote(mcpConfigPath)}`;
 }
