@@ -202,6 +202,8 @@ export interface Message {
   status: MessageStatus;
   created_at: string;
   replied_at: string | null;
+  /** When the asker's CLI was last pushed this reply via hooks (#102). */
+  reply_seen_at?: string | null;
 }
 
 export interface Conversation {

@@ -270,3 +270,46 @@ test("formatInboxNotice is silent when read, nagging when pending", () => {
   checkInbox(db, "notice-target");
   assert.equal(formatInboxNotice(db, "notice-target"), null, "seen mail stops nagging");
 });
+
+test("formatInboxNotice pushes full unseen replies with clear marking (#102)", () => {
+  const { db, cleanup: c } = makeDb();
+  try {
+    registerSession(db, { id: "asker-1", name: "提问方" });
+    registerSession(db, { id: "peer-1", name: "AgentRecall" });
+    askSession(db, { from_session: "asker-1", to_session: "peer-1", question: "状态如何" });
+    // 未回复时：提问方无未读 → 静默（不 nag 提问方）
+    assert.equal(formatInboxNotice(db, "asker-1"), null);
+
+    // 回复到达：下一次 hook 必须把全文推进提问方对话
+    replyAsk(db, 1, "peer-1", "冒烟通过 ✅ 本会话已完成 AgentRecall 仓库的启动验证，一切正常。");
+    const push = formatInboxNotice(db, "asker-1");
+    assert.ok(push, "回复到达后必须产生推送");
+    assert.ok(push!.includes("📬"), "醒目标记");
+    assert.ok(push!.includes("AgentRecall"), "来源标记");
+    assert.ok(push!.includes("冒烟通过 ✅"), "全文而非摘要");
+    assert.ok(push!.includes("[Conflux]"), "身份前缀，AI 可识别为系统注入");
+
+    // 已推送过的回复不再重复（下一轮 hook 静默）
+    const after = formatInboxNotice(db, "asker-1");
+    assert.equal(after, null, "已见回复不重复推送");
+  } finally {
+    c();
+  }
+});
+
+test("long replies are truncated with a pointer to the full channel", () => {
+  const { db, cleanup: c } = makeDb();
+  try {
+    registerSession(db, { id: "asker-2", name: "a2" });
+    registerSession(db, { id: "peer-2", name: "p2" });
+    askSession(db, { from_session: "asker-2", to_session: "peer-2", question: "长回复" });
+    const long = "细节".repeat(2000);
+    replyAsk(db, 1, "peer-2", long);
+    const push = formatInboxNotice(db, "asker-2");
+    assert.ok((push?.length ?? 0) < 2000, "超长回复截断");
+    assert.ok(push!.includes("channel show"), "截断后给出看全文的指引");
+    assert.equal(formatInboxNotice(db, "asker-2"), null, "同样只推一次");
+  } finally {
+    c();
+  }
+});

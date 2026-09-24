@@ -26,6 +26,7 @@ interface MessageRow {
   status: MessageStatus;
   created_at: string;
   replied_at: string | null;
+  reply_seen_at: string | null;
 }
 
 function toMsg(row: MessageRow): Message {
@@ -279,6 +280,45 @@ export function forwardInboxFromPid(db: DB, claudePid: number, successorId: stri
  * stops once the session actually runs check_inbox.
  */
 export function formatInboxNotice(db: DB, sessionId: string): string | null {
+  const notices: string[] = [];
+
+  // 1) replies to MY questions — pushed in FULL with clear marking, once
+  //    (#102: the asker's CLI must see the answer without check_replies)
+  const replies = db
+    .prepare(
+      `SELECT m.id, m.reply, m.question, s.name, substr(m.from_session, 1, 8) AS sid8
+       FROM messages m LEFT JOIN sessions s ON s.id = m.from_session
+       WHERE m.from_session = ? AND m.reply IS NOT NULL AND m.reply_seen_at IS NULL
+       ORDER BY m.id ASC LIMIT 3`,
+    )
+    .all(sessionId) as {
+    id: number;
+    reply: string;
+    question: string;
+    name: string | null;
+    sid8: string;
+  }[];
+  const REPLY_LIMIT = 1200;
+  for (const r of replies) {
+    const from = r.name ?? r.sid8;
+    const full = r.reply.replace(/\s+/g, " ").trim();
+    const body =
+      full.length > REPLY_LIMIT
+        ? full.slice(0, REPLY_LIMIT) + `…(截断，channel show ${r.id} 看全文)`
+        : full;
+    notices.push(
+      `📬 [Conflux] 「${from}」回复了你的提问（msg #${r.id}，问的是「${r.question.replace(/\s+/g, " ").slice(0, 40)}」）：\n` +
+        `${body}\n` +
+        `(以上是对方回复的完整转达；需要追问可继续 ask_session)`,
+    );
+  }
+  if (replies.length > 0) {
+    db.prepare(
+      `UPDATE messages SET reply_seen_at = ? WHERE id IN (${replies.map(() => "?").join(",")})`,
+    ).run(nowIso(), ...replies.map((r) => r.id));
+  }
+
+  // 2) still-pending questions addressed to me (existing behavior)
   const rows = db
     .prepare(
       `SELECT m.question, s.name, substr(m.from_session, 1, 8) AS sid8
@@ -287,14 +327,17 @@ export function formatInboxNotice(db: DB, sessionId: string): string | null {
        ORDER BY m.id ASC`,
     )
     .all(sessionId) as { question: string; name: string | null; sid8: string }[];
-  if (rows.length === 0) return null;
-  const first = rows[0];
-  const excerpt = first.question.replace(/\s+/g, " ").slice(0, 60);
-  const from = first.name ?? first.sid8;
-  return (
-    `[Conflux] 收件箱有 ${rows.length} 条未读消息(最新来自「${from}」: ${excerpt}…)。` +
-    `请调用 Conflux 的 check_inbox 工具查看并 reply_ask 回复。`
-  );
+  if (rows.length > 0) {
+    const first = rows[0];
+    const excerpt = first.question.replace(/\s+/g, " ").slice(0, 60);
+    const from = first.name ?? first.sid8;
+    notices.push(
+      `[Conflux] 收件箱有 ${rows.length} 条未读消息(最新来自「${from}」: ${excerpt}…)。` +
+        `请调用 Conflux 的 check_inbox 工具查看并 reply_ask 回复。`,
+    );
+  }
+
+  return notices.length === 0 ? null : notices.join("\n\n");
 }
 
 /**
