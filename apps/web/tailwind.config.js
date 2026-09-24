@@ -34,6 +34,16 @@ export default {
           soft: "rgb(var(--tk-accent-soft) / <alpha-value>)",
         },
       },
+      /** 动效节拍（#111）：transition-* 不写时长即走这组默认 */
+      transitionDuration: {
+        DEFAULT: "200ms",
+        "motion-fast": "150ms",
+        "motion-slow": "300ms",
+      },
+      transitionTimingFunction: {
+        DEFAULT: "cubic-bezier(0.22, 1, 0.36, 1)",
+        "in-expo": "cubic-bezier(0.64, 0, 0.78, 0)",
+      },
       /** 半步字阶（#109）：10.5 地板给 kbd/微标签，12 起 = 列表正文 */
       fontSize: {
         "2xs": ["11px", { lineHeight: "15px" }],

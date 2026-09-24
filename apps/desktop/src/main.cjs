@@ -223,6 +223,17 @@ function createWindow(webUrl) {
     minWidth: 960,
     minHeight: 640,
     show: false,
+    // macOS 窗口质感（#111）：标题栏内嵌 + 侧栏毛玻璃材质；深浅随
+    // nativeTheme（palette→IPC 已联动）。Windows/Linux 保持系统标题栏。
+    ...(process.platform === "darwin"
+      ? {
+          titleBarStyle: "hiddenInset",
+          vibrancy: "sidebar",
+          visualEffectState: "followWindow",
+          transparent: true,
+          backgroundColor: "#00000000",
+        }
+      : {}),
     // window/taskbar icon on Windows + Linux (macOS windows don't show one)
     icon: ICON_PATH,
     webPreferences: {

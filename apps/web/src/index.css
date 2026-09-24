@@ -126,3 +126,49 @@ html[data-theme="dark"] {
   --tk-accent-deep: 59 130 246;
   --tk-accent-soft: 30 58 95;
 }
+
+
+/* ---- Motion tokens（#111）: durations/easings live in tailwind config as
+   DEFAULTS so every transition-* shares one beat. Reduced motion gets out
+   of the way entirely. ---------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* 毛玻璃侧栏（#111 darwin vibrancy）：透出窗口材质，色相跟色板走 */
+.glass-sidebar {
+  background: rgb(var(--tk-paper) / 0.72);
+}
+.app-drag {
+  -webkit-app-region: drag;
+}
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* 流式打字机末尾光标（#111）：跟在最后一个块级内容之后呼吸 */
+.smooth-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  background: rgb(var(--tk-ink) / 0.7);
+  animation: smooth-caret-blink 1s steps(2, start) infinite;
+}
+@keyframes smooth-caret-blink {
+  to {
+    visibility: hidden;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .smooth-caret {
+    animation: none;
+    opacity: 0.7;
+  }
+}
