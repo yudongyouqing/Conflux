@@ -1,3 +1,4 @@
+import { useSmoothText } from "../use-smooth-text";
 import { useState, useRef, useCallback } from "react";
 import { ArrowLeft, Send, Bot, User, Wrench, Loader2 } from "lucide-react";
 import { api } from "../api";
@@ -212,6 +213,8 @@ function MessageBubble({
   streaming?: boolean;
 }) {
   const isUser = role === "user";
+  // streaming assistant text runs through the typewriter pacer (#111)
+  const paced = useSmoothText(content, { active: !!streaming && !isUser });
 
   if (!content && streaming) {
     return (
@@ -248,10 +251,8 @@ function MessageBubble({
           isUser ? "bg-accent text-white" : "bg-surface text-ink border border-line"
         }`}
       >
-        <MarkdownText tone={isUser ? "blue" : "light"}>{content}</MarkdownText>
-        {streaming && (
-          <span className="inline-block w-1.5 h-3.5 ml-0.5 bg-gray-400 animate-pulse align-text-bottom" />
-        )}
+        <MarkdownText tone={isUser ? "blue" : "light"}>{paced}</MarkdownText>
+        {streaming && paced.length < content.length && <span className="smooth-caret" />}
       </div>
     </div>
   );
