@@ -130,3 +130,15 @@ html[data-theme="dark"] {
   --tk-accent-deep: 59 130 246;
   --tk-accent-soft: 30 58 95;
 }
+
+/* ---- Tab keep-alive (#107): views stay mounted so viewport/scroll state
+   survives switching; hidden views skip paint and hit-testing. ---------- */
+.tab-surface {
+  position: absolute;
+  inset: 0;
+}
+.tab-surface[data-active="false"] {
+  visibility: hidden;
+  content-visibility: hidden;
+  pointer-events: none;
+}
