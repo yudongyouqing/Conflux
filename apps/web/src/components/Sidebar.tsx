@@ -212,7 +212,6 @@ export function Sidebar({
               className={`p-1.5 rounded-lg transition-colors ${
                 active ? "bg-accent-soft text-accent" : "text-ink-faint hover:bg-tile-hover hover:text-ink"
               }`}
-              }`}
             >
               <Icon size={15} />
             </button>
