@@ -35,6 +35,7 @@ import { registerAgentRoutes } from "./routes/agents.js";
 import { registerRuntimeRoutes } from "./routes/runtimes.js";
 import { registerSettingsRoutes } from "./routes/settings.js";
 import { registerSystemRoutes } from "./routes/system.js";
+import { registerWakeStreamRoutes } from "./routes/wake-stream.js";
 
 export interface HttpServerOptions {
   host?: string;
@@ -186,6 +187,8 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   registerRuntimeRoutes(app, ctx);
   registerSettingsRoutes(app, ctx);
   registerSystemRoutes(app, ctx);
+
+  registerWakeStreamRoutes(app, ctx);
 
   try {
     await app.listen({ host, port });
