@@ -5,11 +5,18 @@ const TRAY_ICON_DATA_URL =
   );
 
 function createTray({ electron = require("electron"), showWindow, quit, icon } = {}) {
-  const trayIcon =
-    icon ??
-    (electron.nativeImage?.createFromDataURL
-      ? electron.nativeImage.createFromDataURL(TRAY_ICON_DATA_URL)
-      : electron.nativeImage?.createEmpty?.());
+  // createFromDataURL does NOT support SVG on macOS (silently empty — that
+  // is why the menu-bar tray was invisible); use the brand PNG instead.
+  const brandIcon = () => {
+    try {
+      return electron.nativeImage
+        .createFromPath(require("node:path").join(__dirname, "..", "build", "icon.png"))
+        .resize({ width: 16, height: 16 });
+    } catch {
+      return electron.nativeImage?.createEmpty?.();
+    }
+  };
+  const trayIcon = icon ?? brandIcon();
   const tray = new electron.Tray(trayIcon);
   const displayWindow = typeof showWindow === "function" ? showWindow : () => {};
   const exit = typeof quit === "function" ? quit : () => {};
