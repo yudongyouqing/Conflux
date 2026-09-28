@@ -307,9 +307,9 @@ export function formatInboxNotice(db: DB, sessionId: string): string | null {
         ? full.slice(0, REPLY_LIMIT) + `…(截断，channel show ${r.id} 看全文)`
         : full;
     notices.push(
-      `📬 [Conflux] 「${from}」回复了你的提问（msg #${r.id}，问的是「${r.question.replace(/\s+/g, " ").slice(0, 40)}」）：\n` +
-        `${body}\n` +
-        `(以上是对方回复的完整转达；需要追问可继续 ask_session)`,
+      `── Conflux · 回复 ← ${from} (msg #${r.id}) ──\n` +
+        `  ${body}\n` +
+        `── 追问 ask_session · 查通道 channel show ${r.id} ──`,
     );
   }
   if (replies.length > 0) {
@@ -339,8 +339,9 @@ export function formatInboxNotice(db: DB, sessionId: string): string | null {
         ? full.slice(0, QUESTION_LIMIT) + `…(截断，channel show ${q.id} 看全文)`
         : full;
     notices.push(
-      `📮 [Conflux] 「${from}」向你提问（msg #${q.id}）：\n${body}\n` +
-        `(以上是问题全文；请结合本会话上下文用 reply_ask 回复)`,
+      `── Conflux · 提问 → 你 (msg #${q.id}) 来自 ${from} ──\n` +
+        `  ${body}\n` +
+        `── 回复 reply_ask ──`,
     );
     db.prepare(`UPDATE messages SET status = 'seen' WHERE id = ?`).run(q.id);
   }
