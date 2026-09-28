@@ -252,7 +252,7 @@ test("forwardInboxFromPid re-addresses undelivered mail to the resume successor"
   );
 });
 
-test("formatInboxNotice is silent when read, nagging when pending", () => {
+test("empty inbox is silent; pushed questions arrive in full and stop nagging (#102)", () => {
   registerSession(db, { id: "notice-target", name: "nt" });
   assert.equal(formatInboxNotice(db, "notice-target"), null, "empty inbox → no stdout noise");
 
@@ -262,13 +262,12 @@ test("formatInboxNotice is silent when read, nagging when pending", () => {
     question: "你好,\n   多行问题 内容",
   });
   const notice = formatInboxNotice(db, "notice-target");
-  assert.ok(notice && notice.includes("1 条未读"), "mentions the count");
-  assert.ok(notice!.includes("多行问题"), "excerpt collapses whitespace");
-  assert.ok(notice!.includes("check_inbox"), "tells the model what to call");
+  assert.ok(notice && notice.includes("📮"), "question marker");
+  assert.ok(notice!.includes("多行问题"), "full question text collapses whitespace");
+  assert.ok(notice!.includes("reply_ask"), "tells the model what to call");
 
-  // once the session has actually LOOKED (checkInbox → seen), the nag stops
-  checkInbox(db, "notice-target");
-  assert.equal(formatInboxNotice(db, "notice-target"), null, "seen mail stops nagging");
+  // the full text was already pushed → marked seen → no repeat nag
+  assert.equal(formatInboxNotice(db, "notice-target"), null, "pushed mail stops nagging");
 });
 
 test("formatInboxNotice pushes full unseen replies with clear marking (#102)", () => {
@@ -309,6 +308,31 @@ test("long replies are truncated with a pointer to the full channel", () => {
     assert.ok((push?.length ?? 0) < 2000, "超长回复截断");
     assert.ok(push!.includes("channel show"), "截断后给出看全文的指引");
     assert.equal(formatInboxNotice(db, "asker-2"), null, "同样只推一次");
+  } finally {
+    c();
+  }
+});
+
+test("pending questions are pushed in full with marking, then marked seen (#102 target side)", () => {
+  const { db, cleanup: c } = makeDb();
+  try {
+    registerSession(db, { id: "target-9", name: "接收方" });
+    registerSession(db, { id: "asker-9", name: "远端提问方" });
+    askSession(db, {
+      from_session: "asker-9",
+      to_session: "target-9",
+      question: "请评估一下 rust 侧 TUI 渲染管线在脏区刷新下的性能瓶颈，给个结论。",
+    });
+    const push = formatInboxNotice(db, "target-9");
+    assert.ok(push, "必须推送");
+    assert.ok(push.includes("📮"), "问题推送有独立标记");
+    assert.ok(push.includes("[Conflux]"), "身份前缀");
+    assert.ok(push.includes("性能瓶颈"), "问题全文而非 60 字摘要");
+    assert.ok(push.includes("reply_ask"), "告知回复通道");
+
+    // 全文已推 → 标记 seen，不再每轮 nag 全文
+    const again = formatInboxNotice(db, "target-9");
+    assert.equal(again, null, "推过全文后静默");
   } finally {
     c();
   }

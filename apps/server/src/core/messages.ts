@@ -318,23 +318,36 @@ export function formatInboxNotice(db: DB, sessionId: string): string | null {
     ).run(nowIso(), ...replies.map((r) => r.id));
   }
 
-  // 2) still-pending questions addressed to me (existing behavior)
+  // 2) pending questions addressed to me — pushed in FULL (#102 target
+  //    side): the AI reads the question directly in its context and can
+  //    reply_ask without a check_inbox round trip. Marked seen so the full
+  //    text never repeats; the asker's "对方已看" receipt is honest too.
   const rows = db
     .prepare(
-      `SELECT m.question, s.name, substr(m.from_session, 1, 8) AS sid8
+      `SELECT m.id, m.question, s.name, substr(m.from_session, 1, 8) AS sid8
        FROM messages m LEFT JOIN sessions s ON s.id = m.from_session
        WHERE m.to_session = ? AND m.status = 'pending'
-       ORDER BY m.id ASC`,
+       ORDER BY m.id ASC LIMIT 2`,
     )
-    .all(sessionId) as { question: string; name: string | null; sid8: string }[];
-  if (rows.length > 0) {
-    const first = rows[0];
-    const excerpt = first.question.replace(/\s+/g, " ").slice(0, 60);
-    const from = first.name ?? first.sid8;
+    .all(sessionId) as { id: number; question: string; name: string | null; sid8: string }[];
+  const QUESTION_LIMIT = 1200;
+  for (const q of rows) {
+    const from = q.name ?? q.sid8;
+    const full = q.question.replace(/\s+/g, " ").trim();
+    const body =
+      full.length > QUESTION_LIMIT
+        ? full.slice(0, QUESTION_LIMIT) + `…(截断，channel show ${q.id} 看全文)`
+        : full;
     notices.push(
-      `[Conflux] 收件箱有 ${rows.length} 条未读消息(最新来自「${from}」: ${excerpt}…)。` +
-        `请调用 Conflux 的 check_inbox 工具查看并 reply_ask 回复。`,
+      `📮 [Conflux] 「${from}」向你提问（msg #${q.id}）：\n${body}\n` +
+        `(以上是问题全文；请结合本会话上下文用 reply_ask 回复)`,
     );
+    db.prepare(`UPDATE messages SET status = 'seen' WHERE id = ?`).run(q.id);
+  }
+  if (rows.length > 0) {
+    db.prepare(
+      `UPDATE messages SET status = 'seen' WHERE to_session = ? AND status = 'pending'`,
+    ).run(sessionId);
   }
 
   return notices.length === 0 ? null : notices.join("\n\n");
