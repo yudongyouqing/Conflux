@@ -1,6 +1,6 @@
 const path = require("node:path");
 const { spawn } = require("node:child_process");
-const { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } = require("electron");
 
 const {
   createDevServiceSpecs,
@@ -351,6 +351,20 @@ if (!hasSingleInstanceLock) {
 
   app.whenReady().then(() => {
     log("app ready");
+    // macOS menu bar shows the FIRST menu's label where the app name goes —
+    // dev mode runs the raw Electron binary, so without this it reads
+    // "Electron" with Electron's default menus instead of Conflux branding
+    app.setName("Conflux");
+    Menu.setApplicationMenu(
+      Menu.buildFromTemplate([
+        {
+          label: "Conflux",
+          submenu: [{ role: "about" }, { type: "separator" }, { role: "quit" }],
+        },
+        { role: "editMenu" },
+        { role: "windowMenu" },
+      ]),
+    );
     // macOS Dock icon: dev mode has no .app bundle icns to inherit, so the
     // Dock would show the generic Electron placeholder without this.
     if (process.platform === "darwin" && app.dock) {
