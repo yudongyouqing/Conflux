@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, writeFileSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { cleanTerminalEnv } from "../terminal.js";
 import { resolveConfig } from "../../config.js";
@@ -18,6 +18,8 @@ import type { DB } from "../db.js";
 export interface LaunchRequest {
   db: DB;
   sessionId: string;
+  /** data dir for wake-log capture (#102 streaming) */
+  dataDir?: string;
   projectDir: string | null;
   command: string;
   prompt: string;
@@ -95,14 +97,21 @@ export function launchWakeRun(req: LaunchRequest): LaunchResult {
   const command =
     req.pinCodex ? req.command : withMcpConfig(req.command, ensureWakeMcpConfig());
   const shell = wakeShell();
+  // stdout piped for wake-log capture (#102 streaming); falls back to
+  // "ignore" when the data dir is unknown (shouldn't happen — resolveConfig
+  // is always available)
+  const captureStdout = !!req.dataDir;
   const child = spawn(shell.command, [...shell.args, command], {
     detached: process.platform !== "win32",
-    stdio: ["pipe", "ignore", "ignore"],
+    stdio: ["pipe", captureStdout ? "pipe" : "ignore", "ignore"],
     env,
     cwd: req.projectDir ?? undefined,
     windowsVerbatimArguments: process.platform === "win32",
     windowsHide: true,
   });
+  if (captureStdout && req.dataDir) {
+    pipeWakeLog(child, req.dataDir, req.sessionId);
+  }
   // deliver the wake prompt via stdin — see commands.ts docblock
   child.stdin?.on("error", () => {});
   child.stdin?.end(req.prompt);
@@ -159,4 +168,38 @@ export function pinCodexDescendants(db: DB, launcherPid: number, sessionId: stri
       }
     },
   );
+}
+
+
+/** Append the spawned child's stdout to <dataDir>/wake-logs/<sessionId>.log */
+function pipeWakeLog(child: ReturnType<typeof spawn>, dataDir: string, sessionId: string): void {
+  try {
+    const dir = join(dataDir, "wake-logs");
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    const fd = openSync(join(dir, `${sessionId}.log`), "a");
+    child.stdout?.on("data", (chunk: Buffer) => {
+      try {
+        writeSync(fd, chunk);
+      } catch {
+        // disk full — the wake already succeeded
+      }
+    });
+    child.stdout?.on("end", () => {
+      try {
+        writeSync(fd, `\n[wake ended ${new Date().toISOString()}]\n`);
+        closeSync(fd);
+      } catch {
+        // already closed
+      }
+    });
+    child.on("error", () => {
+      try {
+        closeSync(fd);
+      } catch {
+        // already closed
+      }
+    });
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : err }, "wake log open failed");
+  }
 }

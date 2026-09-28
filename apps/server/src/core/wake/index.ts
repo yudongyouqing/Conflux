@@ -7,6 +7,7 @@ import { AUTO_WAKE_PROMPT } from "./commands.js";
 import { planClaudeWake } from "./claude.js";
 import { planCodexWake } from "./codex.js";
 import { launchWakeRun } from "./launcher.js";
+import { resolveConfig } from "../../config.js";
 
 /**
  * Wake a session so it processes its inbox:
@@ -83,6 +84,7 @@ export function wakeSessionForMail(
   const launch = launchWakeRun({
     db,
     sessionId,
+    dataDir: resolveConfig("global").dataDir,
     projectDir: session.project_dir,
     command: plan.command,
     prompt: plan.prompt ?? AUTO_WAKE_PROMPT,
