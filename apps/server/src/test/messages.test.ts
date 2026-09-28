@@ -262,7 +262,7 @@ test("empty inbox is silent; pushed questions arrive in full and stop nagging (#
     question: "你好,\n   多行问题 内容",
   });
   const notice = formatInboxNotice(db, "notice-target");
-  assert.ok(notice && notice.includes("📮"), "question marker");
+  assert.ok(notice && notice.includes("提问 → 你"), "direction verb");
   assert.ok(notice!.includes("多行问题"), "full question text collapses whitespace");
   assert.ok(notice!.includes("reply_ask"), "tells the model what to call");
 
@@ -283,10 +283,10 @@ test("formatInboxNotice pushes full unseen replies with clear marking (#102)", (
     replyAsk(db, 1, "peer-1", "冒烟通过 ✅ 本会话已完成 AgentRecall 仓库的启动验证，一切正常。");
     const push = formatInboxNotice(db, "asker-1");
     assert.ok(push, "回复到达后必须产生推送");
-    assert.ok(push!.includes("📬"), "醒目标记");
+    assert.ok(push!.includes("── Conflux · 回复 ←"), "分隔线块+方向动词");
     assert.ok(push!.includes("AgentRecall"), "来源标记");
     assert.ok(push!.includes("冒烟通过 ✅"), "全文而非摘要");
-    assert.ok(push!.includes("[Conflux]"), "身份前缀，AI 可识别为系统注入");
+    assert.ok(push!.includes("──"), "分隔线结构，AI 可识别为系统注入");
 
     // 已推送过的回复不再重复（下一轮 hook 静默）
     const after = formatInboxNotice(db, "asker-1");
@@ -325,8 +325,8 @@ test("pending questions are pushed in full with marking, then marked seen (#102 
     });
     const push = formatInboxNotice(db, "target-9");
     assert.ok(push, "必须推送");
-    assert.ok(push.includes("📮"), "问题推送有独立标记");
-    assert.ok(push.includes("[Conflux]"), "身份前缀");
+    assert.ok(push.includes("── Conflux · 提问 → 你"), "问题推送有方向动词");
+    assert.ok(push.includes("──"), "分隔线结构");
     assert.ok(push.includes("性能瓶颈"), "问题全文而非 60 字摘要");
     assert.ok(push.includes("reply_ask"), "告知回复通道");
 
