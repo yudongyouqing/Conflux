@@ -1,6 +1,6 @@
 const path = require("node:path");
 const { spawn } = require("node:child_process");
-const { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, shell } = require("electron");
 
 const {
   createDevServiceSpecs,
@@ -20,6 +20,7 @@ const { assertPortAvailable } = require("./port-diagnostics.cjs");
 const { resolveRuntimePaths } = require("./runtime-paths.cjs");
 const { configureElectronRuntime } = require("./runtime-config.cjs");
 const { createTray } = require("./tray.cjs");
+const { startMessageNotifications } = require("./desktop-notify.cjs");
 const { externalLinkDecision } = require("./security.cjs");
 const { createRendererWatchdog } = require("./renderer-watchdog.cjs");
 const { createServiceHealthMonitor, probeHttp } = require("./service-health.cjs");
@@ -32,6 +33,7 @@ const ICON_PATH = path.join(__dirname, "..", "build", "icon.png");
 const children = [];
 let mainWindow;
 let tray;
+let stopMessageNotifications = null;
 let isQuitting = false;
 let servicesStopped = false;
 let focusWhenReady = false;
@@ -377,6 +379,23 @@ if (!hasSingleInstanceLock) {
     tray = createTray({
       showWindow: focusMainWindow,
       quit: () => app.quit(),
+    });
+    // OS notifications for cross-session traffic (#119): the hook channel
+    // only injects at turn boundaries, so a reply can sit unseen for a full
+    // turn. This raises a native notification the moment a message lands;
+    // click focuses the workspace window.
+    stopMessageNotifications = startMessageNotifications({
+      baseUrl: PRODUCTION_URL.replace(/\/$/, ""),
+      onNotify: ({ title, body }) => {
+        try {
+          if (!Notification.isSupported()) return;
+          const n = new Notification({ title, body, silent: false });
+          n.on("click", focusMainWindow);
+          n.show();
+        } catch {
+          // notification center unavailable — the web view still shows it
+        }
+      },
     });
     return start(startupController.signal);
   }).catch((error) => {
