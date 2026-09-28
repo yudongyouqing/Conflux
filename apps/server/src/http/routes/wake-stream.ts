@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { readFileSync } from "node:fs";
+import { closeSync, openSync, readFileSync, readSync } from "node:fs";
 import type { ServerContext } from "../context.js";
 
 /**
@@ -28,16 +28,15 @@ export function registerWakeStreamRoutes(app: FastifyInstance, ctx: ServerContex
     }
 
     let offset = 0;
-    const encoder = new TextEncoder();
     const timer = setInterval(() => {
       try {
         if (!existsSync(logPath)) return;
         const size = statSync(logPath).size;
         if (size <= offset) return;
-        const fd = require("node:fs").openSync(logPath, "r");
+        const fd = openSync(logPath, "r");
         const buf = Buffer.alloc(size - offset);
-        require("node:fs").readSync(fd, buf, 0, buf.length, offset);
-        require("node:fs").closeSync(fd);
+        readSync(fd, buf, 0, buf.length, offset);
+        closeSync(fd);
         offset = size;
         // SSE data lines must not contain raw newlines — encode as JSON
         const chunk = JSON.stringify(buf.toString("utf8"));
