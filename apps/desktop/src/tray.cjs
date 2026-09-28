@@ -14,7 +14,7 @@ function createTray({ electron = require("electron"), showWindow, quit, icon } =
         require("node:path").join(__dirname, "..", "build", "tray-template.png"),
       );
       img.setTemplateImage(true);
-      return img.resize({ width: 16, height: 16 });
+      return img.resize({ width: 18, height: 18 });
     } catch {
       return electron.nativeImage?.createEmpty?.();
     }
