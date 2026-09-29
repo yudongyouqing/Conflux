@@ -9,6 +9,7 @@ import {
   type SessionStatus,
 } from "@conflux/shared";
 import { StatusDot } from "./StatusDot";
+import { useWakeStream } from "../use-wake-stream";
 import { MarkdownText } from "./MarkdownText";
 import {
   FileText,
@@ -146,6 +147,8 @@ function EdgeFlowView({
   const nameOf = (id: string) => sessionNameLookup(id) ?? id.slice(0, 8);
   // every channel is speakable — the UI continues it on the initiator's behalf
   const targetOffline = sessionStatusLookup(to) && sessionStatusLookup(to) !== "active";
+  // #102 live: tail the target's wake log while the panel is open
+  const wake = useWakeStream(to);
 
   const send = () => {
     const question = text.trim();
@@ -173,8 +176,25 @@ function EdgeFlowView({
           <span className="text-ink-faint">· {messages.length} 条 · 最新在上</span>
         </div>
         <div className="text-2xs text-ink-faint mt-0.5">
-          {nameOf(from)} 发起的通道:{nameOf(from)} 提问,{nameOf(to)} 回答,回复留在本通道。
+          {nameOf(from)} 发起的通道:{nameOf(from)} 提问,{nameOf(to)} 回复,回复留在本通道。
         </div>
+        {(wake.live || wake.text) && (
+          <div className="mt-2 rounded-lg border border-line bg-tile px-3 py-2">
+            <div className="flex items-center gap-1.5 text-2xs text-ink-muted mb-1">
+              {wake.live ? (
+                <>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  唤醒直播中 · {nameOf(to)} 的无头运行 stdout
+                </>
+              ) : (
+                <>上次唤醒输出</>
+              )}
+            </div>
+            <pre className="text-2xs text-ink-muted whitespace-pre-wrap break-all max-h-32 overflow-y-auto font-mono">
+              {wake.text || "(等待输出…)"}
+            </pre>
+          </div>
+        )}
       </div>
 
       <div>
