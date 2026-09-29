@@ -2,12 +2,12 @@ import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 import { recordEdge, touchEdge } from "./graph.js";
 import { WEB_CONSOLE_ID, type Message, type MessageStatus } from "@conflux/shared";
-import { sessionPriority } from "./sessions.js";
+import { PRIORITY_RANK, sessionPriority } from "./sessions.js";
 
 export type { Message, MessageStatus };
 
 /** P0 ranks 0 (most protected) … P2 ranks 2. Asks flow lower-rank → equal. */
-const PRIORITY_RANK: Record<string, number> = { P0: 0, P1: 1, P2: 2 };
+
 
 function metadataOf(db: DB, sessionId: string): string | null {
   const row = db.prepare(`SELECT metadata FROM sessions WHERE id = ?`).get(sessionId) as
@@ -26,6 +26,7 @@ interface MessageRow {
   status: MessageStatus;
   created_at: string;
   replied_at: string | null;
+  reply_seen_at: string | null;
 }
 
 function toMsg(row: MessageRow): Message {
@@ -279,29 +280,91 @@ export function forwardInboxFromPid(db: DB, claudePid: number, successorId: stri
  * stops once the session actually runs check_inbox.
  */
 export function formatInboxNotice(db: DB, sessionId: string): string | null {
+  const notices: string[] = [];
+
+  // 1) replies to MY questions — pushed in FULL with clear marking, once
+  //    (#102: the asker's CLI must see the answer without check_replies)
+  const replies = db
+    .prepare(
+      `SELECT m.id, m.reply, m.question, s.name, substr(m.from_session, 1, 8) AS sid8
+       FROM messages m LEFT JOIN sessions s ON s.id = m.from_session
+       WHERE m.from_session = ? AND m.reply IS NOT NULL AND m.reply_seen_at IS NULL
+       ORDER BY m.id ASC LIMIT 3`,
+    )
+    .all(sessionId) as {
+    id: number;
+    reply: string;
+    question: string;
+    name: string | null;
+    sid8: string;
+  }[];
+  const REPLY_LIMIT = 1200;
+  for (const r of replies) {
+    const from = r.name ?? r.sid8;
+    const full = r.reply.replace(/\s+/g, " ").trim();
+    const body =
+      full.length > REPLY_LIMIT
+        ? full.slice(0, REPLY_LIMIT) + `…(截断，channel show ${r.id} 看全文)`
+        : full;
+    notices.push(
+      `── Conflux · 回复 ← ${from} (msg #${r.id}) ──\n` +
+        `  ${body}\n` +
+        `── 追问 ask_session · 查通道 channel show ${r.id} ──`,
+    );
+  }
+  if (replies.length > 0) {
+    db.prepare(
+      `UPDATE messages SET reply_seen_at = ? WHERE id IN (${replies.map(() => "?").join(",")})`,
+    ).run(nowIso(), ...replies.map((r) => r.id));
+  }
+
+  // 2) pending questions addressed to me — pushed in FULL (#102 target
+  //    side): the AI reads the question directly in its context and can
+  //    reply_ask without a check_inbox round trip. Marked seen so the full
+  //    text never repeats; the asker's "对方已看" receipt is honest too.
   const rows = db
     .prepare(
-      `SELECT m.question, s.name, substr(m.from_session, 1, 8) AS sid8
+      `SELECT m.id, m.question, s.name, substr(m.from_session, 1, 8) AS sid8
        FROM messages m LEFT JOIN sessions s ON s.id = m.from_session
        WHERE m.to_session = ? AND m.status = 'pending'
-       ORDER BY m.id ASC`,
+       ORDER BY m.id ASC LIMIT 2`,
     )
-    .all(sessionId) as { question: string; name: string | null; sid8: string }[];
-  if (rows.length === 0) return null;
-  const first = rows[0];
-  const excerpt = first.question.replace(/\s+/g, " ").slice(0, 60);
-  const from = first.name ?? first.sid8;
-  return (
-    `[Conflux] 收件箱有 ${rows.length} 条未读消息(最新来自「${from}」: ${excerpt}…)。` +
-    `请调用 Conflux 的 check_inbox 工具查看并 reply_ask 回复。`
-  );
+    .all(sessionId) as { id: number; question: string; name: string | null; sid8: string }[];
+  const QUESTION_LIMIT = 1200;
+  for (const q of rows) {
+    const from = q.name ?? q.sid8;
+    const full = q.question.replace(/\s+/g, " ").trim();
+    const body =
+      full.length > QUESTION_LIMIT
+        ? full.slice(0, QUESTION_LIMIT) + `…(截断，channel show ${q.id} 看全文)`
+        : full;
+    notices.push(
+      `── Conflux · 提问 → 你 (msg #${q.id}) 来自 ${from} ──\n` +
+        `  ${body}\n` +
+        `── 回复 reply_ask ──`,
+    );
+    db.prepare(`UPDATE messages SET status = 'seen' WHERE id = ?`).run(q.id);
+  }
+  if (rows.length > 0) {
+    db.prepare(
+      `UPDATE messages SET status = 'seen' WHERE to_session = ? AND status = 'pending'`,
+    ).run(sessionId);
+  }
+
+  return notices.length === 0 ? null : notices.join("\n\n");
 }
 
 /**
  * The full exchange history of one conversation channel (edge), oldest
  * first — the edge-panel view.
  */
-export function listEdgeMessages(db: DB, edgeId: number, limit = 200): Message[] {
+export function listEdgeMessages(db: DB, edgeId: number, limit: number | null = 200): Message[] {
+  if (limit === null) {
+    const rows = db
+      .prepare(`SELECT * FROM messages WHERE edge_id = ? ORDER BY id ASC`)
+      .all(edgeId) as MessageRow[];
+    return rows.map(toMsg);
+  }
   const rows = db
     .prepare(`SELECT * FROM messages WHERE edge_id = ? ORDER BY id DESC LIMIT ?`)
     .all(edgeId, Math.min(Math.max(limit, 1), 500)) as MessageRow[];

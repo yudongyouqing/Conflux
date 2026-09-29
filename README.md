@@ -7,6 +7,8 @@
   <p><b>让每一个 AI 编程会话，汇入同一个工作空间。</b></p>
   <p>本地优先的桌面工作空间 · 连接 AI 编程会话、智能体、消息与共享上下文</p>
   <p>简体中文 ｜ <a href="./docs/README.en.md">English</a></p>
+  <p><b>本地优先 · 会话图谱 · 异步消息 · MCP/HTTP/CLI 同核 · macOS/Windows/Linux</b></p>
+  <p><a href="#界面预览">界面预览</a> · <a href="#不是一个聊天壳是一张会话图">为什么</a> · <a href="#-快速开始">快速开始</a> · <a href="#-架构">架构</a> · <a href="#-接入-claude-code">接入 Claude Code</a> · <a href="#-数据与配置">数据与配置</a> · <a href="#-路线图">路线图</a></p>
   <p>
     <img src="https://img.shields.io/badge/Electron-37-47848F?logo=electron&logoColor=white" alt="Electron">
     <img src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white" alt="React">
@@ -28,19 +30,43 @@ AI 编程助手通常以彼此隔离的进程运行，于是这些简单的问�
 
 公开项目名、CLI 入口和 npm package 名称均为 `Conflux`（`conflux` / `@conflux/shared`）。旧 CLI 入口 `muiltchat`、环境变量和默认数据目录继续保留兼容性。
 
-## ✨ 核心特性
+## 界面预览
 
-|      | 能力             | 说明                                                                 |
-| ---- | ---------------- | -------------------------------------------------------------------- |
-| 🕸️   | **会话图谱**     | 以图谱方式浏览会话、智能体和有向对话通道，节点即会话，连线即对话        |
-| 📚   | **共享上下文**   | 发布可搜索的笔记，查询其他会话拥有的上下文                              |
-| ✉️   | **异步消息**     | 向其他会话提问并异步接收回复，支持 `/resume` 之后的会话继承              |
-| 🤖   | **内置智能体**   | 定义带有系统提示词的模型智能体，在工作空间中直接对话                     |
-| 🛠️   | **运行时智能体** | 配置 Claude Code / Codex CLI 预设，在独立终端环境中启动                  |
-| 🔌   | **Claude 集成**  | 通过 MCP 与可选的生命周期 Hooks 接入 Claude Code 会话                   |
-| 🔀   | **多接口同核**   | MCP、HTTP REST、CLI 三接口调用同一套 core，行为完全一致                  |
-| 💾   | **本地优先**     | SQLite（WAL 模式）保存全部状态，零外部服务依赖                           |
-| 🖥️   | **桌面客户端**   | Electron 窗口运行 React 工作空间，自动管理本地服务生命周期               |
+<table>
+<tr>
+<td width="50%"><img src="docs/assets/screenshots/graph-light.png" alt="会话图谱——浅色" /><p align="center"><sub>节点即会话，连线即对话——谁在线、谁在忙、谁问过谁</sub></p></td>
+<td width="50%"><img src="docs/assets/screenshots/messages-light.png" alt="消息流——浅色" /><p align="center"><sub>跨会话问答与自动唤醒回复，不用回到终端</sub></p></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/assets/screenshots/detail-light.png" alt="会话详情抽屉" /><p align="center"><sub>选中即检视：上下文、通道、优先级，一键在终端 resume</sub></p></td>
+<td width="50%"><img src="docs/assets/screenshots/graph-dark.png" alt="深色主题" /><p align="center"><sub>设计令牌驱动的深浅主题，导入自定义色板即换肤</sub></p></td>
+</tr>
+</table>
+
+## 不是一个聊天壳，是一张会话图
+
+```text
+Claude Code (voice-agent) ──问──▶ Codex (winGhostty)
+        ▲                            │
+        └────────── 回复 ◀───────────┘
+   ▲ 发布「唤醒系统架构」笔记 → 其他会话 search_sessions 可检索
+```
+
+- **会话图谱**：节点即会话（存活探测 + busy 状态），连线即有向对话通道
+- **异步消息**：向其他会话提问、离线自动无头唤醒、`/resume` 后会话继承
+- **能力检索**：会话的自述（name/description/skills）即技能索引——`search_sessions` 只返回存活且你有权提问的目标
+- **优先级**：P0/P1/P2——低向高提问被拒，Web 控制台人工豁免
+
+## 三接口一个核
+
+```text
+MCP ─┐
+HTTP ─┼─▶ core（唯一业务规则源） ─▶ SQLite · WAL (~/.muiltchat)
+CLI  ─┘        │
+               └─ 唤醒系统：忙/空闲/离线 三分诊 → 无头 resume 真实对话
+```
+
+行为完全一致：`conflux` CLI、REST API（`/docs` 有 OpenAPI）、MCP 工具共用同一套 core；零外部数据库、零消息代理、零遥测。
 
 ## 🚀 快速开始
 
@@ -151,7 +177,7 @@ Web 工作空间可以直接发起和观察 AI 会话之间的对话，不必回
 
 > 同一配置只保留一个 server key（新配置用 `conflux`，旧项目可继续用 `muiltchat`）；保留两个会启动两份 server。修改 `.mcp.json` 后必须**完全重启 MCP 宿主**，刷新网页不会重建 stdio 连接。
 
-MCP 会话可用的工具：`publish_context` · `query_context` · `ask_session` · `reply_ask` · `check_inbox` · `check_replies` · `get_graph`。每个会话都会注册到图谱中，并可以参与共享上下文和异步消息。
+MCP 会话可用的工具：`publish_context` · `query_context` · `ask_session` · `reply_ask` · `check_inbox` · `check_replies` · `get_graph` · `search_sessions`（按能力检索其他会话）。每个会话都会注册到图谱中，并可以参与共享上下文和异步消息。
 
 ### Hooks
 
@@ -160,7 +186,7 @@ npx tsx apps/server/src/index.ts hooks install     # 安装（自动备份 setti
 npx tsx apps/server/src/index.ts hooks uninstall   # 卸载
 ```
 
-Hooks 把会话生命周期事件与身份关联起来并持续更新在线状态，支持 `SessionStart`、`UserPromptSubmit`、`Stop` 三类事件；同时维护自定义标题、`/resume` 会话继承和未投递消息。Claude Code 使用自定义配置目录时，通过 `CLAUDE_CONFIG_DIR` 指定。安装时会自动补录当时已在运行的 Claude Code 会话（也可单独执行 `hooks backfill`）；Codex 会话暂不支持补录。
+Hooks 把会话生命周期事件与身份关联起来并持续更新在线状态，支持 `SessionStart`、`UserPromptSubmit`、`Stop` 三类事件；同时维护自定义标题、`/resume` 会话继承和未投递消息；节点名取项目目录名（与终端标签的目录显示一致，同目录多会话自动加序号），`/rename` 后自动同步为自定义名。Claude Code 使用自定义配置目录时，通过 `CLAUDE_CONFIG_DIR` 指定。安装时会自动补录当时已在运行的 Claude Code 会话（也可单独执行 `hooks backfill`）；Codex 会话暂不支持补录。
 
 ### Codex CLI
 
@@ -206,6 +232,10 @@ npx tsx apps/server/src/index.ts migrate --status --to <conflux-dir>
 # 备份 / 恢复（导入先校验，单事务写入，失败整体回滚）
 npx tsx apps/server/src/index.ts data export --output ./conflux-backup.json
 npx tsx apps/server/src/index.ts data import --file <bundle.json> --conflict skip|overwrite|copy
+
+# 分类清除（设置页同款；每次清除先自动备份到 <数据目录>/backups，滚动保留 5 份）
+npx tsx apps/server/src/index.ts data counts
+npx tsx apps/server/src/index.ts data clear --sessions --messages --context
 ```
 
 <details>
@@ -236,6 +266,8 @@ npm run package:desktop       # Windows NSIS 安装包
 - ✅ Claude Code / Codex 存活探测、恢复继承、异步协作消息、自动唤醒
 - ✅ 版本化数据导入导出、旧目录迁移、稳定错误码与敏感信息扫描
 - ✅ 内部标识更名 Conflux，兼容层保留（CLI 双入口、env 双变量）
+- ✅ 主题系统（设计令牌 + 自定义主题导入）、数据管理（分类清除 + 自动备份）
+- ✅ 会话优先级 P0/P1/P2、能力检索 `search_sessions`、channel watch CLI、hooks 存量会话补录
 - 🚧 自动更新与代码签名
 - 🚧 macOS / Linux 正式安装包发行
 
@@ -272,6 +304,7 @@ node --test apps/desktop/test/dev-services.test.cjs apps/desktop/test/runtime-co
 
 | 文档                                   | 内容                       |
 | -------------------------------------- | -------------------------- |
+| [新机环境搭建](docs/SETUP.md)           | 从零配置开发环境清单（双语） |
 | [迁移指南](docs/MIGRATION.md)           | 新旧命名/目录兼容与迁移步骤 |
 | [故障排查](docs/TROUBLESHOOTING.md)     | 端口、数据库、MCP、数据恢复 |
 | [贡献指南](CONTRIBUTING.md)             | 开发规范与 PR 流程          |
@@ -282,8 +315,8 @@ node --test apps/desktop/test/dev-services.test.cjs apps/desktop/test/runtime-co
 
 <div align="center">
 
-Conflux 使用 [MIT License](./LICENSE) 发布
+**让每一个 AI 编程会话，汇入同一个工作空间。**
 
-**本地优先 · 会话汇流 · 零外部依赖**
+Conflux 使用 [MIT License](./LICENSE) 发布 · 界面截图由 [capture rig](scripts/capture/capture.mjs) 自动生成
 
 </div>

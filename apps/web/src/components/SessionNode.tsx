@@ -80,16 +80,17 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
           .filter(Boolean)
           .join(" | ") || undefined
       }
-      className={`group relative w-[176px] rounded-xl bg-surface border border-slate-200/70 overflow-hidden transition-all duration-200 ease-out cursor-grab active:cursor-grabbing ${
+      className={`group relative w-[176px] rounded-xl bg-surface overflow-hidden transition-all duration-200 ease-out cursor-grab active:cursor-grabbing ${
+        d.status !== "active" ? "opacity-50 saturate-50 border-0 shadow-none " : ""}${
         dragging
-          ? "shadow-[0_12px_28px_rgba(16,24,40,0.18)] scale-[1.02] ring-2 ring-accent/30 border-slate-300"
+          ? "shadow-[0_12px_28px_rgba(16,24,40,0.18)] scale-[1.02] ring-2 ring-accent/30 ring-2 ring-accent/20"
           : selected
             ? "shadow-[0_4px_16px_rgba(37,99,235,0.16)] ring-2 ring-accent"
-            : "shadow-[0_1px_2px_rgba(16,24,40,0.05),0_4px_12px_rgba(16,24,40,0.06)] hover:shadow-[0_8px_24px_rgba(16,24,40,0.12)] hover:border-slate-300 hover:-translate-y-0.5"
+            : "shadow-[0_1px_2px_rgba(16,24,40,0.05),0_4px_12px_rgba(16,24,40,0.06)] hover:shadow-[0_8px_24px_rgba(16,24,40,0.12)] hover:-translate-y-0.5"
       } ${d.highlighted ? "ring-2 ring-amber-400/80" : ""}`}
     >
-      {/* signature top accent strip */}
-      <div className={`h-[2.5px] ${skin.accent}`} />
+      {/* signature accent: left vertical strip (#node-ui) */}
+      <div className={`absolute left-0 top-0 bottom-0 w-[3px] ${skin.accent} rounded-l-xl`} />
 
       <Handle
         type="target"
@@ -108,7 +109,7 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1">
               <span
-                className="text-ink text-[12px] font-semibold truncate flex-1"
+                className="text-ink text-xs font-semibold truncate flex-1"
                 title={d.name}
               >
                 {d.name}
@@ -121,7 +122,7 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
               />
             </div>
             {d.runtime && !isAgent && (
-              <div className="font-mono text-[10px] text-slate-400 leading-3">{d.runtime}</div>
+              <div className="font-mono text-2xs text-slate-400 leading-3">{d.runtime}</div>
             )}
           </div>
         </div>
@@ -129,7 +130,7 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
         {/* body — hide boilerplate descriptions the server writes for unnamed sessions */}
         {d.description && !(PLACEHOLDER_DESCRIPTIONS as readonly string[]).includes(d.description) && (
             <div
-              className="text-[11px] text-ink-muted truncate mt-1.5 leading-4"
+              className="text-2xs text-ink-muted truncate mt-1.5 leading-4"
               title={d.description}
             >
               {d.description}
@@ -137,7 +138,7 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
           )}
 
         {/* footer meta — quiet metric chips */}
-        <div className="flex items-center gap-1.5 mt-2 text-[10px]">
+        <div className="flex items-center gap-1.5 mt-2 text-2xs">
           {d.context_count > 0 && (
             <span
               className="inline-flex items-center gap-1 rounded-md bg-slate-50 border border-slate-100 px-1.5 py-[1px] text-ink-muted"

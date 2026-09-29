@@ -94,6 +94,7 @@ const messageSchema = z
     status: z.enum(["pending", "seen", "replied", "read"]),
     created_at: isoTimestamp,
     replied_at: isoTimestamp.nullable(),
+    reply_seen_at: isoTimestamp.nullable().optional(),
   })
   .strict();
 
@@ -927,6 +928,7 @@ function insertMessage(
     row.status,
     row.created_at,
     row.replied_at,
+    row.reply_seen_at ?? null,
     edgeId,
   ];
   const result =
@@ -934,15 +936,15 @@ function insertMessage(
       ? db
           .prepare(
             `INSERT INTO messages
-             (from_session, to_session, question, reply, status, created_at, replied_at, edge_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+             (from_session, to_session, question, reply, status, created_at, replied_at, reply_seen_at, edge_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(...values)
       : db
           .prepare(
             `INSERT INTO messages
-             (id, from_session, to_session, question, reply, status, created_at, replied_at, edge_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             (id, from_session, to_session, question, reply, status, created_at, replied_at, reply_seen_at, edge_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(id, ...values);
   return Number(result.lastInsertRowid);
@@ -958,8 +960,8 @@ function updateMessage(
 ): void {
   db.prepare(
     `UPDATE messages SET from_session = ?, to_session = ?, question = ?, reply = ?,
-       status = ?, created_at = ?, replied_at = ?, edge_id = ? WHERE id = ?`,
-  ).run(from, to, row.question, row.reply, row.status, row.created_at, row.replied_at, edgeId, id);
+       status = ?, created_at = ?, replied_at = ?, reply_seen_at = ?, edge_id = ? WHERE id = ?`,
+  ).run(from, to, row.question, row.reply, row.status, row.created_at, row.replied_at, row.reply_seen_at ?? null, edgeId, id);
 }
 
 function copyId(db: DB, table: string, original: string): string {

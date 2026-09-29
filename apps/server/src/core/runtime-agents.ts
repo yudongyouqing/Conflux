@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 
 import type { DB } from "./db.js";
@@ -270,13 +270,49 @@ export function startRuntimeAgent(
   const args = buildRuntimeArgs(agent);
   const command = [cmdQuote(executable), ...args.map(cmdQuote)].join(" ");
 
+  // #128: prefer tmux — a named session (conflux/agent-<id>) lets the wake
+  // system inject prompts into the LIVE process later, instead of spawning
+  // a headless zombie with a diverged context
+  const env = buildRuntimeEnv(agent, cleanTerminalEnv());
+  const envPrefix = Object.entries(env)
+    .filter(([k]) => k !== "PATH" && k !== "HOME")
+    .map(([k, v]) => `${k}=${cmdQuote(String(v))}`)
+    .join(" ");
+  const fullCommand = envPrefix ? `${envPrefix} ${command}` : command;
+
+  if (platform === "darwin") {
+    try {
+      
+      const sessionName = `conflux/agent-${id}`;
+      execFileSync(
+        "tmux",
+        [
+          "new-session", "-d", "-s", sessionName,
+          ...(agent.workdir ? ["-c", agent.workdir] : []),
+          "sh", "-c", cmdQuote(fullCommand),
+        ],
+        { timeout: 5000, stdio: "ignore" },
+      );
+      // attach a visible window so the user can see it (non-blocking)
+      execFileSync(
+        "tmux",
+        ["new-window", "-t", sessionName, "-n", `attach-${agent.name}`],
+        { timeout: 3000, stdio: "ignore" },
+      ).toString();
+      logger.info({ agentId: id, sessionName }, "runtime agent launched in tmux (injectable)");
+      return { started: true };
+    } catch {
+      logger.info({ agentId: id }, "tmux launch failed, falling back to terminal");
+    }
+  }
+
   openInTerminal(
     settings,
     {
       command,
       cwd: agent.workdir || undefined,
       title: `Conflux · ${agent.name}`,
-      env: buildRuntimeEnv(agent, cleanTerminalEnv()),
+      env,
     },
     opts,
   );

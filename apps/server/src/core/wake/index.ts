@@ -7,6 +7,8 @@ import { AUTO_WAKE_PROMPT } from "./commands.js";
 import { planClaudeWake } from "./claude.js";
 import { planCodexWake } from "./codex.js";
 import { launchWakeRun } from "./launcher.js";
+import { tmuxAvailable, tmuxSessionAlive, tmuxInject, findTmuxSession } from "./tmux-inject.js";
+import { resolveConfig } from "../../config.js";
 
 /**
  * Wake a session so it processes its inbox:
@@ -26,7 +28,9 @@ import { launchWakeRun } from "./launcher.js";
 
 const AUTO_WAKE_DEDUP_MS = 90_000;
 
-export type WakeResult = { woke: true; command: string } | { woke: false; reason: string };
+export type WakeResult =
+  | { woke: true; command?: string }
+  | { woke: false; reason: string };
 
 export function wakeSessionForMail(
   db: DB,
@@ -45,6 +49,26 @@ export function wakeSessionForMail(
   const last = getSetting(db, `auto-wake:${sessionId}`);
   if (last && now - Date.parse(last) < AUTO_WAKE_DEDUP_MS) {
     return { woke: false, reason: "wake already in flight" };
+  }
+
+  // #128: if the target runs in a Conflux-managed tmux session, inject the
+  // prompt into the LIVE process — no headless zombie. The live process
+  // answers with its CURRENT context, exactly like the user typed it.
+  const sessionMeta = (() => {
+    try { return JSON.parse(session.metadata ?? "{}") as { agent_id?: unknown }; }
+    catch { return {}; }
+  })();
+  const tmuxTarget = findTmuxSession(sessionMeta) ?? sessionId;
+  if (!opts.dryRun && tmuxAvailable() && tmuxSessionAlive(tmuxTarget)) {
+    const injected = tmuxInject(
+      tmuxTarget,
+      "你收到一条来自其他会话的消息,请用 Conflux 的 check_inbox 查看,用 reply_ask 回复后结束本轮。",
+    );
+    if (injected) {
+      setSetting(db, `auto-wake:${sessionId}`, new Date(now).toISOString());
+      return { woke: true };
+    }
+    // injection failed — fall through to headless resume
   }
 
   let runtime: "claude" | "codex" = "claude";
@@ -83,6 +107,7 @@ export function wakeSessionForMail(
   const launch = launchWakeRun({
     db,
     sessionId,
+    dataDir: resolveConfig("global").dataDir,
     projectDir: session.project_dir,
     command: plan.command,
     prompt: plan.prompt ?? AUTO_WAKE_PROMPT,

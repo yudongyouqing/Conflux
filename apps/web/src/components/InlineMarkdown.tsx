@@ -46,7 +46,7 @@ function render(seg: Seg, i: number): ReactNode {
   switch (seg.kind) {
     case "code":
       return (
-        <code key={i} className="font-mono text-[11px] px-1 py-px rounded bg-paper text-pink-600">
+        <code key={i} className="font-mono text-2xs px-1 py-px rounded bg-paper text-pink-600">
           {seg.value}
         </code>
       );

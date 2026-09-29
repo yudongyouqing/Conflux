@@ -95,7 +95,7 @@ function safePublicMessage(value: string, fallback: string): string {
   return message;
 }
 
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10; // v10: messages.reply_seen_at（回复推送一次性标记）
 
 // Keep checkpoint timers tied to their database handles. A process can open
 // more than one temporary database during tests and interface operations.
@@ -324,6 +324,9 @@ function migrate(db: DB): void {
     // v8: edge-centric channels — messages link to their channel edge, and
     // reply-created reverse edges are collapsed (replies stay on the channel)
     ensureColumn("messages", "edge_id", "edge_id INTEGER");
+    // v10: asker-side reply push (#102) — a reply surfaced to the asker's
+    // CLI via the hook channel is marked seen so it never repeats
+    ensureColumn("messages", "reply_seen_at", "reply_seen_at TEXT");
     db.exec(`
       INSERT OR IGNORE INTO edges (from_session, to_session, weight, last_interact_at)
         SELECT from_session, to_session, COUNT(*), MAX(COALESCE(replied_at, created_at))

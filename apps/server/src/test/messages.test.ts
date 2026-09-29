@@ -252,7 +252,7 @@ test("forwardInboxFromPid re-addresses undelivered mail to the resume successor"
   );
 });
 
-test("formatInboxNotice is silent when read, nagging when pending", () => {
+test("empty inbox is silent; pushed questions arrive in full and stop nagging (#102)", () => {
   registerSession(db, { id: "notice-target", name: "nt" });
   assert.equal(formatInboxNotice(db, "notice-target"), null, "empty inbox → no stdout noise");
 
@@ -262,11 +262,78 @@ test("formatInboxNotice is silent when read, nagging when pending", () => {
     question: "你好,\n   多行问题 内容",
   });
   const notice = formatInboxNotice(db, "notice-target");
-  assert.ok(notice && notice.includes("1 条未读"), "mentions the count");
-  assert.ok(notice!.includes("多行问题"), "excerpt collapses whitespace");
-  assert.ok(notice!.includes("check_inbox"), "tells the model what to call");
+  assert.ok(notice && notice.includes("提问 → 你"), "direction verb");
+  assert.ok(notice!.includes("多行问题"), "full question text collapses whitespace");
+  assert.ok(notice!.includes("reply_ask"), "tells the model what to call");
 
-  // once the session has actually LOOKED (checkInbox → seen), the nag stops
-  checkInbox(db, "notice-target");
-  assert.equal(formatInboxNotice(db, "notice-target"), null, "seen mail stops nagging");
+  // the full text was already pushed → marked seen → no repeat nag
+  assert.equal(formatInboxNotice(db, "notice-target"), null, "pushed mail stops nagging");
+});
+
+test("formatInboxNotice pushes full unseen replies with clear marking (#102)", () => {
+  const { db, cleanup: c } = makeDb();
+  try {
+    registerSession(db, { id: "asker-1", name: "提问方" });
+    registerSession(db, { id: "peer-1", name: "AgentRecall" });
+    askSession(db, { from_session: "asker-1", to_session: "peer-1", question: "状态如何" });
+    // 未回复时：提问方无未读 → 静默（不 nag 提问方）
+    assert.equal(formatInboxNotice(db, "asker-1"), null);
+
+    // 回复到达：下一次 hook 必须把全文推进提问方对话
+    replyAsk(db, 1, "peer-1", "冒烟通过 ✅ 本会话已完成 AgentRecall 仓库的启动验证，一切正常。");
+    const push = formatInboxNotice(db, "asker-1");
+    assert.ok(push, "回复到达后必须产生推送");
+    assert.ok(push!.includes("── Conflux · 回复 ←"), "分隔线块+方向动词");
+    assert.ok(push!.includes("AgentRecall"), "来源标记");
+    assert.ok(push!.includes("冒烟通过 ✅"), "全文而非摘要");
+    assert.ok(push!.includes("──"), "分隔线结构，AI 可识别为系统注入");
+
+    // 已推送过的回复不再重复（下一轮 hook 静默）
+    const after = formatInboxNotice(db, "asker-1");
+    assert.equal(after, null, "已见回复不重复推送");
+  } finally {
+    c();
+  }
+});
+
+test("long replies are truncated with a pointer to the full channel", () => {
+  const { db, cleanup: c } = makeDb();
+  try {
+    registerSession(db, { id: "asker-2", name: "a2" });
+    registerSession(db, { id: "peer-2", name: "p2" });
+    askSession(db, { from_session: "asker-2", to_session: "peer-2", question: "长回复" });
+    const long = "细节".repeat(2000);
+    replyAsk(db, 1, "peer-2", long);
+    const push = formatInboxNotice(db, "asker-2");
+    assert.ok((push?.length ?? 0) < 2000, "超长回复截断");
+    assert.ok(push!.includes("channel show"), "截断后给出看全文的指引");
+    assert.equal(formatInboxNotice(db, "asker-2"), null, "同样只推一次");
+  } finally {
+    c();
+  }
+});
+
+test("pending questions are pushed in full with marking, then marked seen (#102 target side)", () => {
+  const { db, cleanup: c } = makeDb();
+  try {
+    registerSession(db, { id: "target-9", name: "接收方" });
+    registerSession(db, { id: "asker-9", name: "远端提问方" });
+    askSession(db, {
+      from_session: "asker-9",
+      to_session: "target-9",
+      question: "请评估一下 rust 侧 TUI 渲染管线在脏区刷新下的性能瓶颈，给个结论。",
+    });
+    const push = formatInboxNotice(db, "target-9");
+    assert.ok(push, "必须推送");
+    assert.ok(push.includes("── Conflux · 提问 → 你"), "问题推送有方向动词");
+    assert.ok(push.includes("──"), "分隔线结构");
+    assert.ok(push.includes("性能瓶颈"), "问题全文而非 60 字摘要");
+    assert.ok(push.includes("reply_ask"), "告知回复通道");
+
+    // 全文已推 → 标记 seen，不再每轮 nag 全文
+    const again = formatInboxNotice(db, "target-9");
+    assert.equal(again, null, "推过全文后静默");
+  } finally {
+    c();
+  }
 });

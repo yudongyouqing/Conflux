@@ -18,6 +18,7 @@ const desktopApi = Object.freeze({
     const picked = await ipcRenderer.invoke("conflux:pick-directory");
     return typeof picked === "string" ? picked : null;
   },
+  setNativeTheme: (mode) => ipcRenderer.send("conflux:native-theme", mode),
 });
 
 contextBridge.exposeInMainWorld("confluxDesktop", desktopApi);

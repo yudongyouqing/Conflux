@@ -5,11 +5,21 @@ const TRAY_ICON_DATA_URL =
   );
 
 function createTray({ electron = require("electron"), showWindow, quit, icon } = {}) {
-  const trayIcon =
-    icon ??
-    (electron.nativeImage?.createFromDataURL
-      ? electron.nativeImage.createFromDataURL(TRAY_ICON_DATA_URL)
-      : electron.nativeImage?.createEmpty?.());
+  // menu-bar tray = TEMPLATE image (#121 follow-up): monochrome black glyph
+  // on transparency; setTemplateImage lets macOS tint it to match the
+  // light/dark menu bar automatically, like native status icons.
+  const templateIcon = () => {
+    try {
+      const img = electron.nativeImage.createFromPath(
+        require("node:path").join(__dirname, "..", "build", "tray-template.png"),
+      );
+      img.setTemplateImage(true);
+      return img.resize({ width: 18, height: 18 });
+    } catch {
+      return electron.nativeImage?.createEmpty?.();
+    }
+  };
+  const trayIcon = icon ?? templateIcon();
   const tray = new electron.Tray(trayIcon);
   const displayWindow = typeof showWindow === "function" ? showWindow : () => {};
   const exit = typeof quit === "function" ? quit : () => {};

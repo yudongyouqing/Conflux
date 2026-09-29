@@ -877,7 +877,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
       console.log(
         `installed hooks for [${HOOK_EVENTS.join(", ")}] -> ${settingsPath}\n` +
           `entry: ${base}\n` +
-          `new Claude Code sessions will now register themselves (id = conversation id, name = first prompt).`,
+          `new Claude Code sessions will now register themselves (id = conversation id, node named after the project directory, matching the terminal tab; /rename still overrides).`,
       );
 
       // Backfill sessions that were already running before hooks existed —
@@ -1178,11 +1178,11 @@ async function readChannelSnapshot(
       if (!edge) throw new Error("edge not found");
       return {
         edge: { id: edge.id, from: edge.from_session, to: edge.to_session },
-        messages: listEdgeMessages(db, edgeId),
+        messages: listEdgeMessages(db, edgeId, null),
       };
     },
     "GET",
-    `/edges/${edgeId}/messages`,
+    `/edges/${edgeId}/messages?all=true`,
   );
   return normalizeChannelSnapshot(result);
 }

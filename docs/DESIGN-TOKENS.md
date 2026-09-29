@@ -123,3 +123,11 @@
 - UI 改动：`npx playwright screenshot` 截图自查（CLAUDE.md 验证清单第 5 条）
 - 新增界面过一遍第六节反模式清单
 - 令牌值变更：先改本文档 → 再改 `tailwind.config.js` → PR 里两处一起出现
+
+
+## P2 令牌升级（#109，2026-09-24）
+
+- **次级文字 alpha 派生**：`ink-muted` = `rgb(var(--tk-ink) / 0.72)`、`ink-faint` = `/ 0.50`——不再独立取色。任何色板（含导入的自定义主题）自动获得正确的文字层级；色板导入格式从 10 键减为 8 键（inkMuted/inkFaint 退役，旧 bundle 兼容忽略）。
+- **tile 色块三档**：`bg-tile` = ink/3.5%、`bg-tile-hover` = /6%、`bg-tile-active` = /9%。行级内嵌结构（列表行、工具行、设置行）用色块分层，不用描边；行 hover 统一 `hover:bg-tile-hover`。
+- **字阶**：新增 `text-2xs`(11px)、`text-md-plus`(13.5px)、`text-base-plus`(15px)；**11px 为任意值字号的地板**（`npm run check:tokens` 守卫，随 ci:test 执行）。主列表内容最低 `text-xs`(12px)。
+- **阴影原则不变**：浮起物才有影；行内分层优先 tile 色块。

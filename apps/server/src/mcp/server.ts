@@ -30,6 +30,7 @@ import { mergeSessionMeta } from "../core/sessions.js";
 import { logAudit } from "../core/audit.js";
 import { getRuntimePid, findSessionByRuntimePid, deleteUnreferencedSession } from "../core/live.js";
 import { askAndMaybeWake } from "../core/ask.js";
+import { askAndReplySync } from "../core/ask-sync.js";
 import { refreshCodexSessionTitles } from "../core/codex-titles.js";
 import { logger } from "../log.js";
 
@@ -332,6 +333,9 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
         if (skills && skills.length > 0) {
           mergeSessionMeta(db, sessionId, { agent_card: { skills } });
         }
+        // An explicitly chosen name is user intent — protect it from the
+        // hook's directory naming on the next prompt (#103).
+        mergeSessionMeta(db, sessionId, { user_named: true });
         return session;
       });
       return json(r.ok ? { session_id: sessionId, session: r.result } : { error: r.error });
@@ -365,7 +369,7 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
     "search_sessions",
     {
       description:
-        "Discover which sessions can answer a question: substring-search their names, self-descriptions, and declared skills. Returns id/name/description/skills per match — ask one of them via ask_session.",
+        "Discover which sessions can answer a question: substring-search their names, self-descriptions, and declared skills (a session's self-description is its capability index). Only LIVE sessions you are ALLOWED to ask are returned — priority never strictly higher than yours — so every result can go straight into ask_session.",
       inputSchema: {
         query: z
           .string()
@@ -375,7 +379,9 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
       },
     },
     async ({ query }) => {
-      const r = await withAudit("search_sessions", { query }, () => searchSessions(db, query));
+      const r = await withAudit("search_sessions", { query }, () =>
+        searchSessions(db, query, { activeOnly: true, askableFrom: sessionId }),
+      );
       return json(
         r.ok
           ? {
@@ -516,6 +522,53 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
         askAndMaybeWake(db, { from_session: sessionId, to_session, question }),
       );
       return json(r.ok ? { message: r.result.message, wake: r.result.wake } : { error: r.error });
+    },
+  );
+
+  // 8b. ask_session_sync — synchronous variant (#102): wait in-turn for the
+  //  reply. The asking AI gets the answer as the tool result of the SAME
+  //  turn; on timeout the message stays delivered and the async layers
+  //  (hook push / OS notification / check_replies) take over.
+  server.registerTool(
+    "ask_session_sync",
+    {
+      description:
+        "Ask another session and WAIT for the reply in this same turn (headless auto-wake included). Use this when you need the answer now; use ask_session when fire-and-forget is fine. On timeout the message is still delivered and will surface via the usual async channels.",
+      inputSchema: {
+        to_session: z.string().min(1).describe("Target session id"),
+        question: z.string().min(1).max(20_000).describe("The question"),
+        timeout_s: z
+          .number()
+          .int()
+          .min(5)
+          .max(600)
+          .optional()
+          .describe("How long to wait (seconds, default 120)"),
+      },
+    },
+    async ({ to_session, question, timeout_s }) => {
+      const r = await withAudit(
+        "ask_session_sync",
+        { to_session, questionLen: question.length, timeout_s: timeout_s ?? 120 },
+        () =>
+          askAndReplySync(db, {
+            from_session: sessionId,
+            to_session,
+            question,
+            timeoutMs: (timeout_s ?? 120) * 1_000,
+          }),
+      );
+      return json(
+        r.ok
+          ? {
+              status: r.result.status,
+              message_id: r.result.message_id,
+              reply: r.result.reply,
+              waited_ms: r.result.waitedMs,
+              wake: r.result.wake,
+            }
+          : { error: r.error },
+      );
     },
   );
 

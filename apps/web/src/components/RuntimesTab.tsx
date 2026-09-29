@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useRuntimes, useDeleteRuntimeAgent, useStartRuntimeAgent } from "../hooks";
 import { Terminal, FolderOpen, Cpu, Trash2, Plus, Loader2, Clock } from "lucide-react";
 import { CreateAgentWizard } from "./CreateAgentWizard";
+import { PtyPanel } from "./PtyPanel";
 
 export function RuntimesTab() {
   const { data, isLoading, error } = useRuntimes();
@@ -9,6 +10,7 @@ export function RuntimesTab() {
   const start = useStartRuntimeAgent();
 
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const agents = data?.agents ?? [];
@@ -79,6 +81,7 @@ export function RuntimesTab() {
               launch={launch}
               del={del}
               start={start}
+              onSelect={setSelectedAgentId}
               emptyHint="没有存活的实例 — 启动一个预设或等心跳超时后回这里。"
             />
             <KanbanColumn
@@ -90,11 +93,21 @@ export function RuntimesTab() {
               launch={launch}
               del={del}
               start={start}
+              onSelect={setSelectedAgentId}
               emptyHint="全部在跑,没有离线预设。"
             />
           </div>
         )}
       </div>
+
+      {selectedAgentId !== null && (
+        <div className="mt-4 border border-line rounded-xl overflow-hidden bg-surface h-[300px] flex-shrink-0">
+          <PtyPanel
+            agentId={selectedAgentId}
+            agentName={agents?.find((a) => a.id === selectedAgentId)?.name ?? `Agent #${selectedAgentId}`}
+          />
+        </div>
+      )}
 
       <CreateAgentWizard open={wizardOpen} onClose={() => setWizardOpen(false)} />
     </div>
@@ -111,6 +124,7 @@ function KanbanColumn({
   del,
   start,
   emptyHint,
+  onSelect,
 }: {
   title: string;
   accent: string;
@@ -121,21 +135,22 @@ function KanbanColumn({
   del: ReturnType<typeof useDeleteRuntimeAgent>;
   start: ReturnType<typeof useStartRuntimeAgent>;
   emptyHint: string;
+  onSelect: (id: number) => void;
 }) {
   return (
     <div className={`rounded-xl border ${accent} p-3 min-h-[120px]`}>
       <div className="flex items-center justify-between mb-2.5 px-1">
         <span className={`text-xs font-semibold ${countAccent}`}>{title}</span>
-        <span className={`text-[10px] ${countAccent}`}>{agents.length}</span>
+        <span className={`text-2xs ${countAccent}`}>{agents.length}</span>
       </div>
       {agents.length === 0 ? (
-        <div className="text-[11px] text-ink-faint text-center py-6">{emptyHint}</div>
+        <div className="text-2xs text-ink-faint text-center py-6">{emptyHint}</div>
       ) : (
         <div className="space-y-2">
           {agents.map((a) => (
             <div
               key={a.id}
-              className="bg-surface border border-line rounded-xl p-3 shadow-sm flex items-center gap-3"
+              onClick={() => onSelect(a.id)} className="bg-surface border border-line rounded-xl p-3 shadow-sm flex items-center gap-3 cursor-pointer"
             >
               <div className="w-8 h-8 rounded-lg bg-cyan-50 border border-cyan-200 flex items-center justify-center flex-shrink-0">
                 <Cpu size={15} className="text-cyan-600" />
@@ -143,15 +158,15 @@ function KanbanColumn({
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-ink truncate">{a.name}</span>
-                  <span className="text-[10px] px-1.5 py-px rounded bg-cyan-50 text-cyan-700 border border-cyan-200 font-medium">
+                  <span className="text-2xs px-1.5 py-px rounded bg-cyan-50 text-cyan-700 border border-cyan-200 font-medium">
                     {runtimeLabel(a.runtime)}
                   </span>
                   {a.model && (
-                    <span className="text-[10px] text-ink-faint font-mono truncate">{a.model}</span>
+                    <span className="text-2xs text-ink-faint font-mono truncate">{a.model}</span>
                   )}
                   {(a.interval_min ?? 0) > 0 && (
                     <span
-                      className="text-[10px] px-1.5 py-px rounded bg-violet-50 text-violet-700 border border-violet-200 font-medium flex items-center gap-0.5 flex-shrink-0"
+                      className="text-2xs px-1.5 py-px rounded bg-violet-50 text-violet-700 border border-violet-200 font-medium flex items-center gap-0.5 flex-shrink-0"
                       title={
                         a.last_scheduled_run
                           ? `上次自动运行 ${new Date(a.last_scheduled_run).toLocaleString()}`
@@ -162,7 +177,7 @@ function KanbanColumn({
                     </span>
                   )}
                 </div>
-                <div className="text-[11px] text-ink-muted flex items-center gap-1 mt-0.5 min-w-0">
+                <div className="text-2xs text-ink-muted flex items-center gap-1 mt-0.5 min-w-0">
                   <FolderOpen size={10} className="flex-shrink-0" />
                   <span className="truncate" title={a.workdir ?? ""}>
                     {a.workdir || "(未设置目录)"}

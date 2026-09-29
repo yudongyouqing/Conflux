@@ -2,13 +2,17 @@ name: CI
 
 on:
   push:
-    branches: [main, dev, "feature/**", "refactor/**", "fix/**", "docs/**"]
+    branches: [main, dev, "feat/**", "feature/**", "refactor/**", "fix/**", "docs/**"]
   pull_request:
     branches: [main, dev]
 
 jobs:
   server-tests:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -22,7 +26,11 @@ jobs:
       - run: npm test -w apps/server
 
   desktop-tests:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5

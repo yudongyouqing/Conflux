@@ -67,10 +67,10 @@ export function GroupFrame({ data }: NodeProps) {
         >
           {title}
         </span>
-        <span className="text-[10px] text-slate-400 tabular-nums flex-shrink-0">{d.count}</span>
+        <span className="text-2xs text-slate-400 tabular-nums flex-shrink-0">{d.count}</span>
         {isDir && (
           <span
-            className={`flex items-center gap-1 text-[10px] font-medium flex-shrink-0 ${
+            className={`flex items-center gap-1 text-2xs font-medium flex-shrink-0 ${
               active > 0 ? "text-emerald-600" : "text-slate-400"
             }`}
             title={active > 0 ? `${active} 个会话在线` : "该目录暂无在线会话"}
@@ -96,11 +96,11 @@ export function GroupFrame({ data }: NodeProps) {
       </div>
 
       {!d.expanded ? (
-        <div className="px-3 pb-2 text-[10px] text-slate-400">
+        <div className="px-3 pb-2 text-2xs text-slate-400">
           {d.count} 个会话 · 点击展开
         </div>
       ) : (d.hiddenCount ?? 0) > 0 ? (
-        <div className="absolute bottom-1.5 right-3 text-[10px] font-medium text-slate-400 bg-surface/80 border border-slate-200 rounded-full px-1.5">
+        <div className="absolute bottom-1.5 right-3 text-2xs font-medium text-slate-400 bg-surface/80 border border-slate-200 rounded-full px-1.5">
           还有 {d.hiddenCount} 个未显示
         </div>
       ) : null}

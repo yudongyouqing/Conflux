@@ -56,8 +56,6 @@ body,
  * Defaults = the 汇流蓝 baseline; custom themes replace via inline style. */
 :root {
   --tk-ink: 24 34 52;
-  --tk-ink-muted: 92 103 125;
-  --tk-ink-faint: 139 148 167;
   --tk-paper: 246 247 249;
   --tk-surface: 255 255 255;
   --tk-line: 228 232 239;
@@ -78,6 +76,13 @@ body {
   -webkit-font-smoothing: antialiased;
   background: rgb(var(--tk-paper));
   color: rgb(var(--tk-ink));
+}
+
+/* React Flow 默认底色（--xy-background-color 默认 #E2E2E2）会盖出"画布比
+   侧栏/内容深一截"的色差（#95）——统一钉到 paper 令牌 */
+.react-flow {
+  --xy-background-color: rgb(var(--tk-paper));
+  background-color: rgb(var(--tk-paper));
 }
 
 /* React Flow light theme overrides */
@@ -113,8 +118,6 @@ body {
 html[data-theme="dark"] {
   color-scheme: dark;
   --tk-ink: 230 234 242;
-  --tk-ink-muted: 148 163 184;
-  --tk-ink-faint: 100 116 139;
   --tk-paper: 13 18 28;
   --tk-surface: 23 32 48;
   --tk-line: 44 56 74;
@@ -122,4 +125,62 @@ html[data-theme="dark"] {
   --tk-accent: 96 165 250;
   --tk-accent-deep: 59 130 246;
   --tk-accent-soft: 30 58 95;
+}
+
+
+/* ---- Motion tokens（#111）: durations/easings live in tailwind config as
+   DEFAULTS so every transition-* shares one beat. Reduced motion gets out
+   of the way entirely. ---------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* 毛玻璃侧栏（#111 darwin vibrancy）：透出窗口材质，色相跟色板走 */
+.glass-sidebar {
+  background: rgb(var(--tk-paper) / 0.72);
+}
+.app-drag {
+  -webkit-app-region: drag;
+}
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* 流式打字机末尾光标（#111）：跟在最后一个块级内容之后呼吸 */
+.smooth-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  background: rgb(var(--tk-ink) / 0.7);
+  animation: smooth-caret-blink 1s steps(2, start) infinite;
+}
+@keyframes smooth-caret-blink {
+  to {
+    visibility: hidden;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .smooth-caret {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+
+/* ---- Tab keep-alive (#107): views stay mounted so viewport/scroll state
+   survives switching; hidden views skip paint and hit-testing. ---------- */
+.tab-surface {
+  position: absolute;
+  inset: 0;
+}
+.tab-surface[data-active="false"] {
+  visibility: hidden;
+  content-visibility: hidden;
+  pointer-events: none;
 }

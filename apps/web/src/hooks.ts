@@ -81,27 +81,6 @@ export function useEdgeAsk() {
 }
 
 /** Two-way message flow between any two sessions (graph edge click). */
-export function usePeerFlow(a: string | null, b: string | null) {
-  return useQuery({
-    queryKey: ["peer-flow", a, b],
-    queryFn: () => api.getPeerFlow(a!, b!),
-    enabled: !!a && !!b,
-    refetchInterval: 5000,
-  });
-}
-
-/** Send a question to a session as the web console. */
-export function useWebAsk() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: api.webAsk,
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["peer-messages"] });
-      qc.invalidateQueries({ queryKey: ["graph"] });
-    },
-  });
-}
-
 export function useAgents() {
   return useQuery({
     queryKey: ["agents"],

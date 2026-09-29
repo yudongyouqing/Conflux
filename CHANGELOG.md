@@ -12,6 +12,13 @@
 - 增加 `conflux` CLI 与 MCP 命名，同时保留 `muiltchat` 兼容入口。
 - 增加旧数据目录迁移、状态 marker、SQLite 锁/损坏诊断和仓库敏感信息扫描。
 - 增加跨平台 CI、Windows 未签名 NSIS 安装包和未打包目录构建流程。
+- 增加会话优先级 P0/P1/P2：低优先级向高优先级发起提问会被拒绝，支持人工豁免。
+- 增加 `search_sessions` 能力检索（MCP 工具 + Web 提问入口），按会话自述能力找到目标。
+- 增加主题系统：设计令牌 CSS 变量化、深浅色并入色板、设置页自定义主题导入。
+- 增加设置页数据管理：会话/消息/上下文分类清除，清除前自动全量备份（滚动保留 5 份），配套 `data counts` / `data clear` CLI。
+- `hooks install` 自动补录安装时已在运行的 Claude Code 会话（`hooks backfill` 可单独触发）。
+- 节点命名与终端标签对齐：取项目目录名（同目录自动加序号），`/rename` 后同步为自定义名。
+- 增加 `conflux channel show / watch` 命令查看与监听对话通道历史。
 
 ### 改进
 
@@ -36,6 +43,13 @@
 - The `conflux` CLI and MCP name while retaining the `muiltchat` compatibility entry point.
 - Legacy data-directory migration, migration markers, actionable SQLite diagnostics, and repository secret scanning.
 - Cross-platform CI plus unsigned Windows NSIS and unpacked directory build workflows.
+- Session priority tiers P0/P1/P2: lower-priority sessions asking higher ones are rejected, with manual override.
+- `search_sessions` capability search (MCP tool + web ask entry) to find peers by what they do.
+- Theming: design tokens as CSS variables, light/dark folded into the palette, custom theme import in settings.
+- Settings-page data management: category-scoped clear of sessions/messages/context with automatic full backup (latest 5 kept), plus `data counts` / `data clear` CLI.
+- `hooks install` backfills Claude Code sessions already running at install time (`hooks backfill` runs it standalone).
+- Node naming aligned with terminal tabs: project directory name (with collision suffix), `/rename` synced as the custom name.
+- `conflux channel show / watch` commands to inspect and watch conversation channel history.
 
 ### Changed
 

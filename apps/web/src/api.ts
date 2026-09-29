@@ -82,8 +82,6 @@ export const api = {
   getSessions: (status = "all") =>
     get<{ sessions: SessionSummary[] }>(`/sessions?status=${encodeURIComponent(status)}`),
 
-  searchSessions: (q: string) =>
-    get<{ sessions: SessionSummary[] }>(`/sessions/search?q=${encodeURIComponent(q)}`),
 
   getPeerMessages: (peer: string) =>
     get<{ messages: Message[] }>(`/web/peer-messages?peer=${encodeURIComponent(peer)}`),
@@ -96,11 +94,6 @@ export const api = {
 
   edgeAsk: (edgeId: number, question: string) =>
     post<{ message: Message }>(`/edges/${edgeId}/ask`, { question }),
-
-  getPeerFlow: (a: string, b: string) =>
-    get<{ messages: Message[] }>(
-      `/messages/peers?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`,
-    ),
 
   getRuntimes: () =>
     get<{

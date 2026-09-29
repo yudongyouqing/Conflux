@@ -81,7 +81,7 @@ function StepBack({ label, onBack }: { label: string; onBack: () => void }) {
     <div className="px-5 pt-3">
       <button
         onClick={onBack}
-        className="text-[11px] text-ink-faint hover:text-ink inline-flex items-center gap-1"
+        className="text-2xs text-ink-faint hover:text-ink inline-flex items-center gap-1"
       >
         ← 重新选择类型（当前：{label}）
       </button>
@@ -202,7 +202,7 @@ function AgentCreateForm({ onClose }: { onClose: () => void }) {
       <div className="flex items-center justify-end gap-2 pt-1">
         <button
           onClick={onClose}
-          className="px-3 py-1.5 rounded-lg text-xs text-ink-muted hover:text-ink hover:bg-paper"
+          className="px-3 py-1.5 rounded-lg text-xs text-ink-muted hover:text-ink hover:bg-tile-hover"
         >
           取消
         </button>
@@ -241,7 +241,7 @@ const inputCls =
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="block text-[11px] text-ink-muted mb-1">{label}</span>
+      <span className="block text-2xs text-ink-muted mb-1">{label}</span>
       {children}
     </label>
   );
@@ -262,7 +262,7 @@ function RuntimeCard({
     <button
       type="button"
       onClick={onClick}
-      className={`flex flex-col items-center gap-1 py-2 rounded-lg border text-[11px] font-medium transition-colors ${
+      className={`flex flex-col items-center gap-1 py-2 rounded-lg border text-2xs font-medium transition-colors ${
         active
           ? "border-accent bg-accent-soft text-accent-deep ring-1 ring-accent/40"
           : "border-line text-ink-muted hover:border-line-strong"
@@ -381,7 +381,7 @@ function RuntimeCreateForm({ onClose }: { onClose: () => void }) {
             {canBrowse && (
               <button
                 onClick={pickDir}
-                className="flex items-center gap-1 px-2.5 rounded-lg border border-line text-xs text-ink-muted hover:bg-paper flex-shrink-0"
+                className="flex items-center gap-1 px-2.5 rounded-lg border border-line text-xs text-ink-muted hover:bg-tile-hover flex-shrink-0"
                 title="浏览目录（桌面端）"
               >
                 <Compass size={12} /> 浏览
@@ -390,7 +390,7 @@ function RuntimeCreateForm({ onClose }: { onClose: () => void }) {
           </div>
           {knownDirs.length > 0 && (
             <div className="mt-1.5 space-y-1">
-              <div className="text-[10px] text-ink-faint flex items-center gap-1 px-0.5">
+              <div className="text-2xs text-ink-faint flex items-center gap-1 px-0.5">
                 <Search size={9} /> 近期项目
               </div>
               <div className="flex flex-wrap gap-1">
@@ -399,7 +399,7 @@ function RuntimeCreateForm({ onClose }: { onClose: () => void }) {
                     key={dir}
                     onClick={() => set("workdir", dir)}
                     title={dir}
-                    className="max-w-full flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md bg-paper border border-line text-ink-muted hover:border-accent/60 hover:text-accent"
+                    className="max-w-full flex items-center gap-1 text-2xs px-1.5 py-0.5 rounded-md bg-paper border border-line text-ink-muted hover:border-accent/60 hover:text-accent"
                   >
                     <FolderOpen size={9} className="flex-shrink-0" />
                     <span className="truncate">{dir}</span>
@@ -412,7 +412,7 @@ function RuntimeCreateForm({ onClose }: { onClose: () => void }) {
 
         <button
           onClick={() => setAdvanced((v) => !v)}
-          className="flex items-center gap-1 text-[11px] text-ink-muted hover:text-ink"
+          className="flex items-center gap-1 text-2xs text-ink-muted hover:text-ink"
         >
           <ChevronDown
             size={12}
@@ -466,7 +466,7 @@ function RuntimeCreateForm({ onClose }: { onClose: () => void }) {
                 onChange={(e) => set("extra_env", e.target.value)}
                 placeholder='{"HTTP_PROXY":"http://127.0.0.1:7890"}'
                 rows={2}
-                className={`${inputCls} font-mono text-[11px]`}
+                className={`${inputCls} font-mono text-2xs`}
               />
             </Field>
             <Field label="系统指令(可选,--append-system-prompt)">
@@ -478,7 +478,7 @@ function RuntimeCreateForm({ onClose }: { onClose: () => void }) {
                 className={inputCls}
               />
             </Field>
-            <div className="text-[10px] text-ink-faint px-1">
+            <div className="text-2xs text-ink-faint px-1">
               定时到点后 headless 唤醒(无窗口):查收件箱、处理待办、简报后退出。
             </div>
           </div>
@@ -488,7 +488,7 @@ function RuntimeCreateForm({ onClose }: { onClose: () => void }) {
       <div className="flex justify-end gap-2 px-5 py-3 border-t border-line sticky bottom-0 bg-surface rounded-b-2xl">
         <button
           onClick={onClose}
-          className="px-3 py-1.5 rounded-lg text-xs text-ink-muted hover:bg-paper"
+          className="px-3 py-1.5 rounded-lg text-xs text-ink-muted hover:bg-tile-hover"
         >
           取消
         </button>

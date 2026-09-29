@@ -30,14 +30,14 @@ export function MarkdownText({ children, tone = "light", className }: MarkdownTe
       // the content in hljs token spans; keep those classes (token colors) but
       // let the surrounding pre own the background
       return (
-        <code className={`hljs bg-transparent font-mono text-[12px] block overflow-x-auto ${className ?? ""}`}>
+        <code className={`hljs bg-transparent font-mono text-xs block overflow-x-auto ${className ?? ""}`}>
           {children}
         </code>
       );
     }
     return (
       <code
-        className={`font-mono text-[12px] px-1 py-px rounded ${
+        className={`font-mono text-xs px-1 py-px rounded ${
           onBlue ? "bg-surface/25 text-white" : "bg-paper text-pink-600"
         }`}
       >
@@ -120,7 +120,7 @@ export function MarkdownText({ children, tone = "light", className }: MarkdownTe
             const body =
               isValidElement(children) && children.type === Code
                 ? cloneElement(children, {
-                    className: `hljs bg-transparent font-mono text-[12px] block overflow-x-auto ${
+                    className: `hljs bg-transparent font-mono text-xs block overflow-x-auto ${
                       langClass ?? ""
                     }`,
                   })
@@ -128,14 +128,14 @@ export function MarkdownText({ children, tone = "light", className }: MarkdownTe
             return (
               <div className="relative my-2">
                 <span
-                  className={`absolute top-1.5 right-2 text-[10px] font-mono uppercase tracking-wide select-none pointer-events-none ${
+                  className={`absolute top-1.5 right-2 text-2xs font-mono uppercase tracking-wide select-none pointer-events-none ${
                     onBlue ? "text-blue-300/60" : "text-ink-muted"
                   }`}
                 >
                   {lang}
                 </span>
                 <pre
-                  className={`p-2.5 rounded-lg overflow-x-auto text-[12px] leading-snug ${
+                  className={`p-2.5 rounded-lg overflow-x-auto text-xs leading-snug ${
                     onBlue ? "bg-black/20 border border-accent/30" : "bg-gray-900 text-gray-100"
                   }`}
                 >
@@ -146,7 +146,7 @@ export function MarkdownText({ children, tone = "light", className }: MarkdownTe
           },
           table: ({ children }) => (
             <div className="my-2 overflow-x-auto">
-              <table className={`text-[12px] border-collapse ${onBlue ? "" : "text-ink"}`}>
+              <table className={`text-xs border-collapse ${onBlue ? "" : "text-ink"}`}>
                 {children}
               </table>
             </div>

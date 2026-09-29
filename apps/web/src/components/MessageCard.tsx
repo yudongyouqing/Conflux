@@ -46,14 +46,14 @@ export function MessageCard({
         <span className="text-ink font-medium">{toName ?? msg.to_session.slice(0, 8)}</span>
         {deadLetter && (
           <span
-            className="ml-auto px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-red-50 text-red-600 border border-red-200"
+            className="ml-auto px-1.5 py-0.5 rounded-md text-2xs font-medium bg-red-50 text-red-600 border border-red-200"
             title="目标会话离线:消息未送达,直到该对话被 resume"
           >
             目标离线
           </span>
         )}
         <span
-          className={`${deadLetter ? "" : "ml-auto"} px-1.5 py-0.5 rounded-md text-[10px] font-medium ${
+          className={`${deadLetter ? "" : "ml-auto"} px-1.5 py-0.5 rounded-md text-2xs font-medium ${
             STATUS_COLORS[msg.status] ?? "bg-paper text-ink-muted border border-line"
           }`}
         >
