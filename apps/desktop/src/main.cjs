@@ -21,6 +21,7 @@ const { resolveRuntimePaths } = require("./runtime-paths.cjs");
 const { configureElectronRuntime } = require("./runtime-config.cjs");
 const { createTray } = require("./tray.cjs");
 const { startMessageNotifications } = require("./desktop-notify.cjs");
+const ptyManager = require("./pty-manager.cjs");
 const { externalLinkDecision } = require("./security.cjs");
 const { createRendererWatchdog } = require("./renderer-watchdog.cjs");
 const { createServiceHealthMonitor, probeHttp } = require("./service-health.cjs");
@@ -333,6 +334,36 @@ if (!hasSingleInstanceLock) {
   ipcMain.on("conflux:show-window", focusMainWindow);
   // Dark palette → native chrome (macOS menu bar / context menus / dialogs)
   // follows the app theme instead of the OS appearance (#95)
+  // PTY management (#130): spawn/inject/buffer for runtime agents
+  ipcMain.handle("pty:spawn", (_event, { agentId, command, args, opts }) => {
+    try {
+      const entry = ptyManager.spawnAgent(agentId, command, args, opts);
+      // forward output to any subscribed renderers
+      ptyManager.subscribe(agentId, (chunk) => {
+        if (chunk !== null) {
+          try { mainWindow?.webContents.send(`pty:output:${agentId}`, chunk); }
+          catch { /* window closed */ }
+        }
+      });
+      return { ok: true, pid: entry.pid };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+  ipcMain.handle("pty:inject", (_event, { agentId, text }) => {
+    return { ok: ptyManager.inject(agentId, text) };
+  });
+  ipcMain.handle("pty:buffer", (_event, { agentId }) => {
+    return { buffer: ptyManager.getBuffer(agentId) };
+  });
+  ipcMain.handle("pty:alive", (_event, { agentId }) => {
+    return ptyManager.isAlive(agentId);
+  });
+  ipcMain.handle("pty:kill", (_event, { agentId }) => {
+    ptyManager.kill(agentId);
+    return { ok: true };
+  });
+
   ipcMain.on("conflux:native-theme", (_event, mode) => {
     nativeTheme.themeSource = mode === "dark" ? "dark" : "light";
   });
