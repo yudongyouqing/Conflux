@@ -81,7 +81,7 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
           .join(" | ") || undefined
       }
       className={`group relative w-[176px] rounded-xl bg-surface border border-slate-200/70 overflow-hidden transition-all duration-200 ease-out cursor-grab active:cursor-grabbing ${
-        d.status !== "active" ? "opacity-50 saturate-[0.3] border-transparent " : ""}${
+        d.status !== "active" ? "opacity-50 saturate-50 border-0 shadow-none " : ""}${
         dragging
           ? "shadow-[0_12px_28px_rgba(16,24,40,0.18)] scale-[1.02] ring-2 ring-accent/30 border-slate-300"
           : selected
