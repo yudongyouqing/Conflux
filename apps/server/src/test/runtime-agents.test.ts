@@ -220,8 +220,8 @@ test("wakeSessionForMail: guards, dedup and command shape", () => {
   if (idle.woke) {
     // claude has NO thread lock, so idle wake resumes the real conversation
     // (full context, reply in actual history) whenever a transcript exists
-    assert.ok(idle.command.includes("--resume wake-alive"), "resumes the real conversation");
-    assert.ok(idle.command.trimEnd().endsWith("-p"), "headless prompt via stdin");
+    assert.ok(idle.command?.includes("--resume wake-alive"), "resumes the real conversation");
+    assert.ok(idle.command?.trimEnd().endsWith("-p"), "headless prompt via stdin");
   }
 
   // offline claude session → dry-run returns the full wake command
@@ -241,8 +241,8 @@ test("wakeSessionForMail: guards, dedup and command shape", () => {
   const w = wakeSessionForMail(db, "wake-dead", { dryRun: true, claudeHome: FAKE_HOME });
   assert.equal(w.woke, true);
   if (w.woke) {
-    assert.ok(w.command.includes("--resume wake-dead"), "resumes the conversation");
-    assert.ok(w.command.trimEnd().endsWith("-p"), "headless prompt via stdin");
+    assert.ok(w.command?.includes("--resume wake-dead"), "resumes the conversation");
+    assert.ok(w.command?.trimEnd().endsWith("-p"), "headless prompt via stdin");
   }
 
   // global opt-out
@@ -276,8 +276,8 @@ test("wakeSessionForMail: codex wakes headlessly via exec resume", () => {
   const w = wakeSessionForMail(db, "wake-codex", { dryRun: true });
   assert.equal(w.woke, true);
   if (w.woke) {
-    assert.ok(w.command.includes("exec resume 01c0d3x-uuid"), "resumes the codex conversation");
-    assert.ok(!w.command.includes("--resume "), "not the claude resume flag");
+    assert.ok(w.command?.includes("exec resume 01c0d3x-uuid"), "resumes the codex conversation");
+    assert.ok(!w.command?.includes("--resume "), "not the claude resume flag");
   }
 });
 
