@@ -81,6 +81,7 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
           .join(" | ") || undefined
       }
       className={`group relative w-[176px] rounded-xl bg-surface border border-slate-200/70 overflow-hidden transition-all duration-200 ease-out cursor-grab active:cursor-grabbing ${
+        d.status !== "active" ? "opacity-50 saturate-[0.3] border-transparent " : ""}${
         dragging
           ? "shadow-[0_12px_28px_rgba(16,24,40,0.18)] scale-[1.02] ring-2 ring-accent/30 border-slate-300"
           : selected
@@ -88,8 +89,8 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
             : "shadow-[0_1px_2px_rgba(16,24,40,0.05),0_4px_12px_rgba(16,24,40,0.06)] hover:shadow-[0_8px_24px_rgba(16,24,40,0.12)] hover:border-slate-300 hover:-translate-y-0.5"
       } ${d.highlighted ? "ring-2 ring-amber-400/80" : ""}`}
     >
-      {/* signature top accent strip */}
-      <div className={`h-[2.5px] ${skin.accent}`} />
+      {/* signature accent: left vertical strip (#node-ui) */}
+      <div className={`absolute left-0 top-0 bottom-0 w-[3px] ${skin.accent} rounded-l-xl`} />
 
       <Handle
         type="target"
