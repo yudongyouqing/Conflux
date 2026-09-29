@@ -80,13 +80,13 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
           .filter(Boolean)
           .join(" | ") || undefined
       }
-      className={`group relative w-[176px] rounded-xl bg-surface border border-slate-200/70 overflow-hidden transition-all duration-200 ease-out cursor-grab active:cursor-grabbing ${
+      className={`group relative w-[176px] rounded-xl bg-surface overflow-hidden transition-all duration-200 ease-out cursor-grab active:cursor-grabbing ${
         d.status !== "active" ? "opacity-50 saturate-50 border-0 shadow-none " : ""}${
         dragging
-          ? "shadow-[0_12px_28px_rgba(16,24,40,0.18)] scale-[1.02] ring-2 ring-accent/30 border-slate-300"
+          ? "shadow-[0_12px_28px_rgba(16,24,40,0.18)] scale-[1.02] ring-2 ring-accent/30 ring-2 ring-accent/20"
           : selected
             ? "shadow-[0_4px_16px_rgba(37,99,235,0.16)] ring-2 ring-accent"
-            : "shadow-[0_1px_2px_rgba(16,24,40,0.05),0_4px_12px_rgba(16,24,40,0.06)] hover:shadow-[0_8px_24px_rgba(16,24,40,0.12)] hover:border-slate-300 hover:-translate-y-0.5"
+            : "shadow-[0_1px_2px_rgba(16,24,40,0.05),0_4px_12px_rgba(16,24,40,0.06)] hover:shadow-[0_8px_24px_rgba(16,24,40,0.12)] hover:-translate-y-0.5"
       } ${d.highlighted ? "ring-2 ring-amber-400/80" : ""}`}
     >
       {/* signature accent: left vertical strip (#node-ui) */}
