@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 
 import type { DB } from "./db.js";
@@ -282,7 +282,7 @@ export function startRuntimeAgent(
 
   if (platform === "darwin") {
     try {
-      const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
+      
       const sessionName = `conflux/agent-${id}`;
       execFileSync(
         "tmux",
