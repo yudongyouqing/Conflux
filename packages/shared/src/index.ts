@@ -166,6 +166,8 @@ export interface GraphNode {
   busy?: boolean;
   /** Agent Card: capability self-description (register_session skills). */
   skills?: string[];
+  /** Owning chat room (#137); null = free-floating */
+  chat_room_id?: number | null;
   /** Ask priority (metadata.priority; P1 default). */
   priority?: SessionPriority;
 }

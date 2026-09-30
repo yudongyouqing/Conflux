@@ -20,6 +20,7 @@ import { GroupFrame, type GroupFrameData } from "./GroupFrame";
 import { CurvedPairEdge } from "./CurvedPairEdge";
 import { ChatRoomWizard } from "./ChatRoomWizard";
 import {
+  applyChatRoomGroups,
   applyEdgeOffsets,
   buildActiveView,
   buildAllView,
@@ -54,12 +55,18 @@ export function GraphTab({
   selectedEdge,
 }: GraphTabProps) {
   const { data, isLoading, error, refetch } = useGraph();
+  useEffect(() => {
+    import("../api").then(({ api }) =>
+      api.chatRooms.list().then((r) => setChatRooms(r.rooms)).catch(() => {}),
+    );
+  }, []);
   const [viewMode, setViewMode] = useState<ViewMode>("active");
   // ACCORDION: at most one frame open at a time. The overview stays
   // constant-density (every directory is one compact tile) no matter how
   // many sessions exist; clicking a tile drills into that directory.
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [chatRooms, setChatRooms] = useState<import("@conflux/shared").ChatRoom[]>([]);
 
   // Interactive state — required for node dragging in React Flow v12.
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
@@ -127,12 +134,13 @@ export function GraphTab({
   // data (name/status/counts) refreshes.
   useEffect(() => {
     if (!data) return;
-    const built =
-      viewMode === "dirs"
+    let built = viewMode === "dirs"
         ? buildDirsView({ data, onSelectEdge, expandedKey })
         : viewMode === "all"
           ? buildAllView({ data, onSelectEdge })
           : buildActiveView({ data, onSelectEdge });
+    const roomGrouped = applyChatRoomGroups(built.nodes as Node[], chatRooms);
+    built = { ...built, nodes: roomGrouped };
     const offset = applyEdgeOffsets(built.edges, manualOffsets.current, handleOffsetChange);
     const styled = styleEdges(offset, selectedEdge, selectedSessionId);
     const endpoints = selectedEdgeEndpoints(selectedEdge);
@@ -145,7 +153,7 @@ export function GraphTab({
     );
     setEdges(styled);
   }, [
-    data,
+    data, chatRooms,
     selectedSessionId,
     selectedEdge,
     viewMode,
