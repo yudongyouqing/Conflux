@@ -8,6 +8,7 @@ import {
   Settings,
   ChevronDown,
   ChevronRight,
+  Users,
 } from "lucide-react";
 import { useDaemonHealth } from "../hooks";
 import type { GraphNode } from "@conflux/shared";
@@ -17,6 +18,7 @@ export type TabId = "graph" | "messages" | "agents" | "runtimes" | "settings";
 interface SidebarProps {
   activeTab: TabId;
   onTabChange: (tab: TabId) => void;
+  onOpenChatRoom?: () => void;
   /** live graph nodes — the session list body (#107) */
   sessions: GraphNode[];
   selectedSessionId: string | null;
@@ -48,6 +50,7 @@ function statusDot(node: GraphNode): string {
 export function Sidebar({
   activeTab,
   onTabChange,
+  onOpenChatRoom,
   sessions,
   selectedSessionId,
   onSelectSession,
@@ -128,6 +131,17 @@ export function Sidebar({
           })}
         </div>
       </div>
+
+      {/* Chat room trigger (#137): moved here from graph canvas — organizational, not a view mode */}
+      {onOpenChatRoom && (
+        <button
+          onClick={onOpenChatRoom}
+          className="mx-2 mb-1 flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-ink-muted hover:bg-tile-hover hover:text-ink transition-colors flex-shrink-0"
+        >
+          <Users size={14} className="text-accent" />
+          聊天室
+        </button>
+      )}
 
       {/* Session list: the sidebar's main body (#107) */}
       <div className="px-3 pb-1 pt-2 text-2xs font-medium text-ink-faint flex-shrink-0">

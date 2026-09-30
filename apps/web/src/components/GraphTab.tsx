@@ -1,4 +1,3 @@
-import { Users } from "lucide-react";
 import { useEffect, useCallback, useRef, useState } from "react";
 import {
   ReactFlow,
@@ -66,6 +65,11 @@ export function GraphTab({
   // many sessions exist; clicking a tile drills into that directory.
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
+  useEffect(() => {
+    const handler = () => setWizardOpen(true);
+    window.addEventListener('conflux:open-chat-room', handler);
+    return () => window.removeEventListener('conflux:open-chat-room', handler);
+  }, []);
   const [chatRooms, setChatRooms] = useState<import("@conflux/shared").ChatRoom[]>([]);
 
   // Interactive state — required for node dragging in React Flow v12.
@@ -261,17 +265,6 @@ export function GraphTab({
       <Controls
         className="!bg-surface !border !border-line !rounded-lg !shadow-[0_2px_10px_rgba(16,24,40,0.1)] !overflow-hidden [&_button]:!bg-surface [&_button]:!border-line [&_button]:!text-ink-muted [&_button:hover]:!bg-paper [&_button:hover]:!text-ink"
       />
-      {/* Chat Room trigger (#137) */}
-      <button
-        onClick={() => setWizardOpen(true)}
-        title="创建聊天室"
-        className="absolute left-3 top-3 z-10 flex items-center gap-1.5 px-3 py-2 rounded-lg bg-surface border border-line text-xs text-ink hover:bg-tile-hover shadow-[0_2px_8px_rgba(16,24,40,0.08)]"
-        style={{ position: "absolute", top: 12, left: 12 }}
-      >
-        <Users size={13} className="text-accent" />
-        聊天室
-      </button>
-
       {wizardOpen && (
         <ChatRoomWizard
           sessions={data?.nodes ?? []}
