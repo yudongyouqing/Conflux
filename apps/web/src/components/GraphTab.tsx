@@ -1,3 +1,4 @@
+import { Users } from "lucide-react";
 import { useEffect, useCallback, useRef, useState } from "react";
 import {
   ReactFlow,
@@ -17,6 +18,7 @@ import { useGraph } from "../hooks";
 import { SessionNode } from "./SessionNode";
 import { GroupFrame, type GroupFrameData } from "./GroupFrame";
 import { CurvedPairEdge } from "./CurvedPairEdge";
+import { ChatRoomWizard } from "./ChatRoomWizard";
 import {
   applyEdgeOffsets,
   buildActiveView,
@@ -51,12 +53,13 @@ export function GraphTab({
   onSelectEdge,
   selectedEdge,
 }: GraphTabProps) {
-  const { data, isLoading, error } = useGraph();
+  const { data, isLoading, error, refetch } = useGraph();
   const [viewMode, setViewMode] = useState<ViewMode>("active");
   // ACCORDION: at most one frame open at a time. The overview stays
   // constant-density (every directory is one compact tile) no matter how
   // many sessions exist; clicking a tile drills into that directory.
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   // Interactive state — required for node dragging in React Flow v12.
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
@@ -250,6 +253,25 @@ export function GraphTab({
       <Controls
         className="!bg-surface !border !border-line !rounded-lg !shadow-[0_2px_10px_rgba(16,24,40,0.1)] !overflow-hidden [&_button]:!bg-surface [&_button]:!border-line [&_button]:!text-ink-muted [&_button:hover]:!bg-paper [&_button:hover]:!text-ink"
       />
+      {/* Chat Room trigger (#137) */}
+      <button
+        onClick={() => setWizardOpen(true)}
+        title="创建聊天室"
+        className="absolute left-3 top-3 z-10 flex items-center gap-1.5 px-3 py-2 rounded-lg bg-surface border border-line text-xs text-ink hover:bg-tile-hover shadow-[0_2px_8px_rgba(16,24,40,0.08)]"
+        style={{ position: "absolute", top: 12, left: 12 }}
+      >
+        <Users size={13} className="text-accent" />
+        聊天室
+      </button>
+
+      {wizardOpen && (
+        <ChatRoomWizard
+          sessions={data?.nodes ?? []}
+          onClose={() => setWizardOpen(false)}
+          onCreated={() => refetch()}
+        />
+      )}
+
       <MiniMap
         pannable
         zoomable
