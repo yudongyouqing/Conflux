@@ -17,8 +17,7 @@ interface RoomsTabProps {
 export function RoomsTab({ sessions }: RoomsTabProps) {
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
   const [wizardOpen, setWizardOpen] = useState(false);
-  const [expandedRoom, setExpandedRoom] = useState<number | null>(null);
-  const [addingTo, setAddingTo] = useState<number | null>(null);
+    const [addingTo, setAddingTo] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
@@ -84,8 +83,7 @@ export function RoomsTab({ sessions }: RoomsTabProps) {
           <div className="space-y-3">
             {rooms.map((room) => {
               const members = room.members ?? [];
-              const isExpanded = expandedRoom === room.id;
-              return (
+                            return (
                 <div key={room.id} className="bg-surface rounded-xl p-4 shadow-sm">
                   {/* room header */}
                   <div className="flex items-center gap-3">
@@ -163,13 +161,10 @@ export function RoomsTab({ sessions }: RoomsTabProps) {
                   )}
 
                   {/* room conversations (expandable) */}
-                  <button
-                    onClick={() => setExpandedRoom(isExpanded ? null : room.id)}
-                    className="mt-3 flex items-center gap-1.5 text-2xs text-ink-faint hover:text-ink"
-                  >
+                  <div className="mt-3 flex items-center gap-1.5 text-2xs text-accent">
                     <MessageSquare size={11} />
-                    {isExpanded ? "收起对话" : "查看对话"}
-                  </button>
+                    点击房间进入对话
+                  </div>
                 </div>
               );
             })}
