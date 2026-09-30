@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { createChatRoom, deleteChatRoom, getChatRoom, listChatRooms, roomMembers } from "../../core/chat-rooms.js";
+import { createChatRoom, deleteChatRoom, getChatRoom, listChatRooms, roomMembers, joinRoom, leaveRoom } from "../../core/chat-rooms.js";
 import { logAudit } from "../../core/audit.js";
 import type { ServerContext } from "../context.js";
 
@@ -48,4 +48,27 @@ export function registerChatRoomRoutes(app: FastifyInstance, ctx: ServerContext)
     if (!ok) return reply.status(404).send({ error: "not found" });
     return reply.send({ ok: true });
   });
+
+  app.post<{ Params: { id: string }; Body: { session_id: string } }>(
+    "/chat-rooms/:id/join",
+    {},
+    async (req, reply) => {
+      try {
+        joinRoom(db, Number(req.params.id), req.body.session_id);
+        return reply.send({ ok: true });
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
+  app.post<{ Body: { session_id: string } }>(
+    "/chat-rooms/leave",
+    {},
+    async (req, reply) => {
+      leaveRoom(db, req.body.session_id);
+      return reply.send({ ok: true });
+    },
+  );
+
 }

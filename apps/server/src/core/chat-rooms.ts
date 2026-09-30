@@ -53,7 +53,7 @@ export function createChatRoom(
   input: { name: string; description?: string; members: string[] },
 ): ChatRoom {
   if (!input.name.trim()) throw new Error("room name required");
-  if (input.members.length < 2) throw new Error("at least 2 members required");
+  // free-join: rooms can start empty; members added later
   const now = nowIso();
   // store members as the legacy topology column (array of {from,to} pairs for
   // schema compat — every member pairs with the first for storage)
@@ -101,4 +101,17 @@ export function roomMembers(db: DB, roomId: number): string[] {
     .prepare('SELECT id FROM sessions WHERE chat_room_id = ?')
     .all(roomId) as { id: string }[];
   return rows.map((r) => r.id);
+}
+
+
+/** Add a session to a room (mutual exclusivity: removes from any previous room). */
+export function joinRoom(db: DB, roomId: number, sessionId: string): void {
+  const room = getChatRoom(db, roomId);
+  if (!room) throw new Error("room not found");
+  db.prepare(`UPDATE sessions SET chat_room_id = ? WHERE id = ?`).run(roomId, sessionId);
+}
+
+/** Remove a session from its room. */
+export function leaveRoom(db: DB, sessionId: string): void {
+  db.prepare(`UPDATE sessions SET chat_room_id = NULL WHERE id = ?`).run(sessionId);
 }

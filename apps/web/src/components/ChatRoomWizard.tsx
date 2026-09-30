@@ -30,7 +30,7 @@ export function ChatRoomWizard({ sessions, onClose, onCreated }: ChatRoomWizardP
 
   const create = async () => {
     if (!name.trim()) return setError("请填写聊天室名称");
-    if (members.length < 2) return setError("至少选择 2 个成员");
+    
     setPending(true);
     setError(null);
     try {
@@ -96,10 +96,10 @@ export function ChatRoomWizard({ sessions, onClose, onCreated }: ChatRoomWizardP
 
         <button
           onClick={create}
-          disabled={pending || !name.trim() || members.length < 2}
+          disabled={pending || !name.trim()}
           className="w-full py-2 rounded-lg bg-accent text-white text-xs font-medium hover:bg-accent-deep disabled:opacity-50"
         >
-          {pending ? "创建中…" : `创建聊天室（${members.length} 人）`}
+          {pending ? "创建中…" : members.length > 0 ? `创建聊天室（${members.length} 人）` : "创建空聊天室"}
         </button>
       </div>
     </div>

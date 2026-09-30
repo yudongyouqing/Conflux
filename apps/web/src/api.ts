@@ -252,5 +252,9 @@ export const api = {
       members: string[];
     }) => post<{ room: import("@conflux/shared").ChatRoom }>("/chat-rooms", body),
     delete: (id: number) => del<{ ok: boolean }>(`/chat-rooms/${id}`),
+    join: (roomId: number, sessionId: string) =>
+      post<{ ok: boolean }>(`/chat-rooms/${roomId}/join`, { session_id: sessionId }),
+    leave: (sessionId: string) =>
+      post<{ ok: boolean }>('/chat-rooms/leave', { session_id: sessionId }),
   },
 };
