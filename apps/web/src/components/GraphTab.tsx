@@ -17,9 +17,7 @@ import { useGraph } from "../hooks";
 import { SessionNode } from "./SessionNode";
 import { GroupFrame, type GroupFrameData } from "./GroupFrame";
 import { CurvedPairEdge } from "./CurvedPairEdge";
-import { ChatRoomWizard } from "./ChatRoomWizard";
 import {
-  applyChatRoomGroups,
   applyEdgeOffsets,
   buildActiveView,
   buildAllView,
@@ -53,24 +51,12 @@ export function GraphTab({
   onSelectEdge,
   selectedEdge,
 }: GraphTabProps) {
-  const { data, isLoading, error, refetch } = useGraph();
-  useEffect(() => {
-    import("../api").then(({ api }) =>
-      api.chatRooms.list().then((r) => setChatRooms(r.rooms)).catch(() => {}),
-    );
-  }, []);
+  const { data, isLoading, error } = useGraph();
   const [viewMode, setViewMode] = useState<ViewMode>("active");
   // ACCORDION: at most one frame open at a time. The overview stays
   // constant-density (every directory is one compact tile) no matter how
   // many sessions exist; clicking a tile drills into that directory.
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
-  const [wizardOpen, setWizardOpen] = useState(false);
-  useEffect(() => {
-    const handler = () => setWizardOpen(true);
-    window.addEventListener('conflux:open-chat-room', handler);
-    return () => window.removeEventListener('conflux:open-chat-room', handler);
-  }, []);
-  const [chatRooms, setChatRooms] = useState<import("@conflux/shared").ChatRoom[]>([]);
 
   // Interactive state — required for node dragging in React Flow v12.
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
@@ -138,13 +124,11 @@ export function GraphTab({
   // data (name/status/counts) refreshes.
   useEffect(() => {
     if (!data) return;
-    let built = viewMode === "dirs"
+    const built = viewMode === "dirs"
         ? buildDirsView({ data, onSelectEdge, expandedKey })
         : viewMode === "all"
           ? buildAllView({ data, onSelectEdge })
           : buildActiveView({ data, onSelectEdge });
-    const roomGrouped = applyChatRoomGroups(built.nodes as Node[], chatRooms);
-    built = { ...built, nodes: roomGrouped };
     const offset = applyEdgeOffsets(built.edges, manualOffsets.current, handleOffsetChange);
     const styled = styleEdges(offset, selectedEdge, selectedSessionId);
     const endpoints = selectedEdgeEndpoints(selectedEdge);
@@ -157,7 +141,7 @@ export function GraphTab({
     );
     setEdges(styled);
   }, [
-    data, chatRooms,
+    data,
     selectedSessionId,
     selectedEdge,
     viewMode,
@@ -265,13 +249,6 @@ export function GraphTab({
       <Controls
         className="!bg-surface !border !border-line !rounded-lg !shadow-[0_2px_10px_rgba(16,24,40,0.1)] !overflow-hidden [&_button]:!bg-surface [&_button]:!border-line [&_button]:!text-ink-muted [&_button:hover]:!bg-paper [&_button:hover]:!text-ink"
       />
-      {wizardOpen && (
-        <ChatRoomWizard
-          sessions={data?.nodes ?? []}
-          onClose={() => setWizardOpen(false)}
-          onCreated={() => refetch()}
-        />
-      )}
 
       <MiniMap
         pannable

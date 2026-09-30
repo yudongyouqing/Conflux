@@ -3,6 +3,7 @@ import { Sidebar, type TabId } from "./components/Sidebar";
 import { GraphTab } from "./components/GraphTab";
 import { MessageTab } from "./components/MessageTab";
 import { AgentTab } from "./components/AgentTab";
+import { RoomsTab } from "./components/RoomsTab";
 import { DetailPanel } from "./components/DetailPanel";
 import { useGraph } from "./hooks";
 import { X } from "lucide-react";
@@ -153,11 +154,6 @@ export default function App() {
       <Sidebar
         activeTab={tab}
         onTabChange={switchTab}
-        onOpenChatRoom={() => {
-          switchTab('graph');
-          // small delay to let graph mount, then trigger via DOM event
-          setTimeout(() => window.dispatchEvent(new CustomEvent('conflux:open-chat-room')), 100);
-        }}
         sessions={graph.data?.nodes ?? []}
         selectedSessionId={selectedSession?.id ?? null}
         onSelectSession={handleSidebarSelect}
@@ -181,6 +177,7 @@ export default function App() {
             />,
           )}
           {surface("agents", <AgentTab />)}
+          {surface("rooms", <RoomsTab sessions={graph.data?.nodes ?? []} />)}
           {surface(
             "runtimes",
             visited.has("runtimes") ? (
