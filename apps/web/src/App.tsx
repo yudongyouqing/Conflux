@@ -153,6 +153,11 @@ export default function App() {
       <Sidebar
         activeTab={tab}
         onTabChange={switchTab}
+        onOpenChatRoom={() => {
+          switchTab('graph');
+          // small delay to let graph mount, then trigger via DOM event
+          setTimeout(() => window.dispatchEvent(new CustomEvent('conflux:open-chat-room')), 100);
+        }}
         sessions={graph.data?.nodes ?? []}
         selectedSessionId={selectedSession?.id ?? null}
         onSelectSession={handleSidebarSelect}
