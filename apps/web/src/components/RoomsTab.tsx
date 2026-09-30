@@ -3,6 +3,7 @@ import { Users, Plus, X, Trash2, MessageSquare } from "lucide-react";
 import type { ChatRoom, GraphNode } from "@conflux/shared";
 import { api } from "../api";
 import { ChatRoomWizard } from "./ChatRoomWizard";
+import { RoomChat } from "./RoomChat";
 import { StatusDot } from "./StatusDot";
 
 interface RoomsTabProps {
@@ -19,6 +20,7 @@ export function RoomsTab({ sessions }: RoomsTabProps) {
   const [wizardOpen, setWizardOpen] = useState(false);
     const [addingTo, setAddingTo] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [chatRoomId, setChatRoomId] = useState<number | null>(null);
 
   const refresh = useCallback(() => {
     api.chatRooms.list().then((r) => setRooms(r.rooms)).catch((e) => setError(e.message));
@@ -47,6 +49,23 @@ export function RoomsTab({ sessions }: RoomsTabProps) {
     await api.chatRooms.delete(roomId);
     refresh();
   };
+
+  // chat mode: a room is selected, show conversation interface
+  if (chatRoomId !== null) {
+    const room = rooms.find((r) => r.id === chatRoomId);
+    if (room) {
+      const memberSessions = (room.members ?? [])
+        .map((id) => sessions.find((s) => s.id === id))
+        .filter((s): s is GraphNode => !!s);
+      return (
+        <RoomChat
+          roomName={room.name}
+          members={memberSessions}
+          onBack={() => setChatRoomId(null)}
+        />
+      );
+    }
+  }
 
   return (
     <div className="h-full overflow-y-auto p-6">
@@ -84,7 +103,11 @@ export function RoomsTab({ sessions }: RoomsTabProps) {
             {rooms.map((room) => {
               const members = room.members ?? [];
                             return (
-                <div key={room.id} className="bg-surface rounded-xl p-4 shadow-sm">
+                <div
+                  key={room.id}
+                  onClick={() => setChatRoomId(room.id)}
+                  className="bg-surface rounded-xl p-4 shadow-sm cursor-pointer hover:shadow-[0_4px_16px_rgba(37,99,235,0.12)] transition-shadow"
+                >
                   {/* room header */}
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-accent-soft flex items-center justify-center flex-shrink-0">
@@ -98,7 +121,7 @@ export function RoomsTab({ sessions }: RoomsTabProps) {
                       </div>
                     </div>
                     <button
-                      onClick={() => remove(room.id)}
+                      onClick={(e) => { e.stopPropagation(); remove(room.id); }}
                       className="p-1.5 rounded-lg text-ink-faint hover:text-red-500 hover:bg-tile-hover"
                       title="删除房间"
                     >
@@ -121,7 +144,7 @@ export function RoomsTab({ sessions }: RoomsTabProps) {
                           />
                           <span>{nameOf(mid)}</span>
                           <button
-                            onClick={() => leave(mid)}
+                            onClick={(e) => { e.stopPropagation(); leave(mid); }}
                             className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-ink-faint hover:text-red-500 transition-opacity"
                             title="移出"
                           >
@@ -133,7 +156,7 @@ export function RoomsTab({ sessions }: RoomsTabProps) {
 
                     {/* add member button */}
                     <button
-                      onClick={() => setAddingTo(addingTo === room.id ? null : room.id)}
+                      onClick={(e) => { e.stopPropagation(); setAddingTo(addingTo === room.id ? null : room.id); }}
                       className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-dashed border-line text-xs text-accent hover:bg-accent-soft"
                     >
                       <Plus size={11} /> 拉人
@@ -146,7 +169,7 @@ export function RoomsTab({ sessions }: RoomsTabProps) {
                       {unroomed.map((s) => (
                         <button
                           key={s.id}
-                          onClick={() => join(room.id, s.id)}
+                          onClick={(e) => { e.stopPropagation(); join(room.id, s.id); }}
                           className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs text-ink-muted hover:bg-tile-hover"
                         >
                           <StatusDot status={s.status} busy={s.busy} />
