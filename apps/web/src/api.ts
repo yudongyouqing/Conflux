@@ -249,7 +249,7 @@ export const api = {
     create: (body: {
       name: string;
       description?: string;
-      topology: import("@conflux/shared").TopologyStep[];
+      members: string[];
     }) => post<{ room: import("@conflux/shared").ChatRoom }>("/chat-rooms", body),
     delete: (id: number) => del<{ ok: boolean }>(`/chat-rooms/${id}`),
   },

@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { X, Plus, Trash2, ArrowRight, Users } from "lucide-react";
-import type { GraphNode, TopologyStep } from "@conflux/shared";
+import { X, Plus, Users } from "lucide-react";
+import type { GraphNode } from "@conflux/shared";
 
 interface ChatRoomWizardProps {
   sessions: GraphNode[];
@@ -15,38 +15,27 @@ interface ChatRoomWizardProps {
  */
 export function ChatRoomWizard({ sessions, onClose, onCreated }: ChatRoomWizardProps) {
   const [name, setName] = useState("");
-  const [steps, setSteps] = useState<TopologyStep[]>([]);
+  const [members, setMembers] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const [fromSel, setFromSel] = useState("");
-  const [toSel, setToSel] = useState("");
 
   const selectable = sessions.filter((s) => s.type === "session" && s.id !== "web-console");
-  const nameOf = (id: string) => selectable.find((s) => s.id === id)?.name ?? id.slice(0, 8);
 
-  const addStep = () => {
-    if (!fromSel || !toSel || fromSel === toSel) {
-      setError("请选择两个不同的会话");
-      return;
-    }
+  const toggleMember = (id: string) => {
     setError(null);
-    setSteps((prev) => [...prev, { from: fromSel, to: toSel, order: prev.length + 1 }]);
-    setFromSel("");
-    setToSel("");
-  };
-
-  const removeStep = (order: number) => {
-    setSteps((prev) => prev.filter((s) => s.order !== order).map((s, i) => ({ ...s, order: i + 1 })));
+    setMembers((prev) =>
+      prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id],
+    );
   };
 
   const create = async () => {
     if (!name.trim()) return setError("请填写聊天室名称");
-    if (steps.length === 0) return setError("至少需要一步流程");
+    if (members.length < 2) return setError("至少选择 2 个成员");
     setPending(true);
     setError(null);
     try {
       const { api } = await import("../api");
-      await api.chatRooms.create({ name: name.trim(), topology: steps });
+      await api.chatRooms.create({ name: name.trim(), members });
       onCreated();
       onClose();
     } catch (e) {
@@ -56,8 +45,6 @@ export function ChatRoomWizard({ sessions, onClose, onCreated }: ChatRoomWizardP
     }
   };
 
-  const selectCls =
-    "flex-1 px-2.5 py-1.5 rounded-lg border border-line text-xs text-ink bg-surface focus:border-accent outline-none";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
@@ -80,48 +67,28 @@ export function ChatRoomWizard({ sessions, onClose, onCreated }: ChatRoomWizardP
           className="w-full px-3 py-2 rounded-lg border border-line text-xs text-ink bg-surface placeholder-ink-faint focus:border-accent outline-none"
         />
 
-        {/* topology steps */}
+        {/* member selection */}
         <div className="space-y-2">
-          <div className="text-2xs font-medium text-ink-muted">流程步骤（谁 → 谁，按顺序）</div>
-
-          {steps.map((step) => (
-            <div key={step.order} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-tile text-xs">
-              <span className="text-ink-faint w-4">{step.order}</span>
-              <span className="text-ink font-medium">{nameOf(step.from)}</span>
-              <ArrowRight size={11} className="text-ink-faint" />
-              <span className="text-ink font-medium">{nameOf(step.to)}</span>
-              <button
-                onClick={() => removeStep(step.order)}
-                className="ml-auto p-0.5 rounded text-ink-faint hover:text-red-500"
-              >
-                <Trash2 size={11} />
-              </button>
-            </div>
-          ))}
-
-          {/* add step row */}
-          <div className="flex items-center gap-1.5">
-            <select value={fromSel} onChange={(e) => setFromSel(e.target.value)} className={selectCls}>
-              <option value="">发起方…</option>
-              {selectable.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-            <ArrowRight size={12} className="text-ink-faint flex-shrink-0" />
-            <select value={toSel} onChange={(e) => setToSel(e.target.value)} className={selectCls}>
-              <option value="">接收方…</option>
-              {selectable.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-            <button
-              onClick={addStep}
-              disabled={!fromSel || !toSel}
-              className="p-1.5 rounded-lg text-accent hover:bg-accent-soft disabled:opacity-40 flex-shrink-0"
-              title="添加步骤"
-            >
-              <Plus size={14} />
-            </button>
+          <div className="text-2xs font-medium text-ink-muted">选择成员（{members.length} 人）</div>
+          <div className="grid grid-cols-2 gap-1.5 max-h-48 overflow-y-auto">
+            {selectable.map((s2) => {
+              const selected = members.includes(s2.id);
+              return (
+                <button
+                  key={s2.id}
+                  onClick={() => toggleMember(s2.id)}
+                  className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border text-xs transition-colors ${
+                    selected
+                      ? "border-accent bg-accent-soft text-accent"
+                      : "border-line text-ink-muted hover:bg-tile-hover"
+                  }`}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${s2.status === "active" ? "bg-emerald-500" : "bg-ink-faint/50"}`} />
+                  <span className="truncate">{s2.name}</span>
+                  {selected && <Plus size={11} className="ml-auto rotate-45" />}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -129,10 +96,10 @@ export function ChatRoomWizard({ sessions, onClose, onCreated }: ChatRoomWizardP
 
         <button
           onClick={create}
-          disabled={pending || !name.trim() || steps.length === 0}
+          disabled={pending || !name.trim() || members.length < 2}
           className="w-full py-2 rounded-lg bg-accent text-white text-xs font-medium hover:bg-accent-deep disabled:opacity-50"
         >
-          {pending ? "创建中…" : `创建聊天室（${steps.length} 步）`}
+          {pending ? "创建中…" : `创建聊天室（${members.length} 人）`}
         </button>
       </div>
     </div>

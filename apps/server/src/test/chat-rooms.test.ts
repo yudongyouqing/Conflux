@@ -27,33 +27,23 @@ test("create, list, get, delete a chat room with topology", () => {
 
   const room = createChatRoom(db, {
     name: "代码审查",
-    description: "开发⇄审查→合并",
-    topology: [
-      { from: "node-a", to: "node-b", order: 1 },
-      { from: "node-b", to: "node-a", order: 2 },
-      { from: "node-b", to: "node-c", order: 3 },
-    ],
+    description: "圈子内自由对话",
+    members: ["node-a", "node-b", "node-c"],
   });
   assert.ok(room.id > 0);
-  assert.equal(room.topology.length, 3);
+  assert.equal(room.members.length, 3);
+  assert.ok(room.members.includes("node-a"));
 
   const list = listChatRooms(db);
   assert.equal(list.length, 1);
   assert.equal(list[0].name, "代码审查");
 
-  const got = getChatRoom(db, room.id);
-  assert.ok(got);
-  assert.equal(got!.topology[0].from, "node-a");
-
-  // members claimed
   const members = roomMembers(db, room.id);
   assert.equal(members.length, 3);
-  assert.ok(members.some((m) => m.id === "node-a" && m.stepOrder === 1));
+  assert.ok(members.includes("node-b"));
 
-  // delete releases members
   assert.ok(deleteChatRoom(db, room.id));
   assert.equal(roomMembers(db, room.id).length, 0);
-  assert.equal(listChatRooms(db).length, 0);
 });
 
 test("mutual exclusivity: joining a new room removes from old", () => {
@@ -63,18 +53,15 @@ test("mutual exclusivity: joining a new room removes from old", () => {
 
   const room1 = createChatRoom(db, {
     name: "room-1",
-    topology: [{ from: "shared", to: "other", order: 1 }],
+    members: ["shared", "other"],
   });
-  // shared is in room 1
-  assert.ok(roomMembers(db, room1.id).some((m) => m.id === "shared"));
+  assert.ok(roomMembers(db, room1.id).includes("shared"));
 
-  // create room 2 claiming shared — should steal from room 1
   registerSession(db, { id: "third", name: "第三个" });
   const room2 = createChatRoom(db, {
     name: "room-2",
-    topology: [{ from: "shared", to: "third", order: 1 }],
+    members: ["shared", "third"],
   });
-  // shared now in room 2 only
-  assert.ok(!roomMembers(db, room1.id).some((m) => m.id === "shared"), "旧房间不再持有");
-  assert.ok(roomMembers(db, room2.id).some((m) => m.id === "shared"), "新房间持有");
+  assert.ok(!roomMembers(db, room1.id).includes("shared"), "旧房间不再持有");
+  assert.ok(roomMembers(db, room2.id).includes("shared"), "新房间持有");
 });

@@ -20,7 +20,7 @@ export function registerChatRoomRoutes(app: FastifyInstance, ctx: ServerContext)
     return reply.send({ room, members: roomMembers(db, room.id) });
   });
 
-  app.post<{ Body: { name: string; description?: string; topology: unknown } }>(
+  app.post<{ Body: { name: string; description?: string; members: string[] } }>(
     "/chat-rooms",
     {},
     async (req, reply) => {
@@ -28,7 +28,7 @@ export function registerChatRoomRoutes(app: FastifyInstance, ctx: ServerContext)
         const room = createChatRoom(db, {
           name: req.body.name,
           description: req.body.description,
-          topology: req.body.topology as never,
+          members: req.body.members as string[],
         });
         logAudit(db, {
           interface: "http",
