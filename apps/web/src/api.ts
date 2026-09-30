@@ -242,4 +242,15 @@ export const api = {
       }
     }
   },
+
+  // ---- Chat Rooms (#137) ----
+  chatRooms: {
+    list: () => get<{ rooms: import("@conflux/shared").ChatRoom[] }>("/chat-rooms"),
+    create: (body: {
+      name: string;
+      description?: string;
+      topology: import("@conflux/shared").TopologyStep[];
+    }) => post<{ room: import("@conflux/shared").ChatRoom }>("/chat-rooms", body),
+    delete: (id: number) => del<{ ok: boolean }>(`/chat-rooms/${id}`),
+  },
 };

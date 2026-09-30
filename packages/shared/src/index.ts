@@ -267,3 +267,20 @@ export const PLACEHOLDER_DESCRIPTIONS = [
   AUTO_REGISTERED_DESCRIPTION,
   WEB_CONSOLE_DESCRIPTION,
 ] as const;
+
+// ---- Chat Rooms (#137): structured collaboration workflows ----
+
+export interface TopologyStep {
+  from: string;
+  to: string;
+  order: number;
+}
+
+export interface ChatRoom {
+  id: number;
+  name: string;
+  description: string | null;
+  topology: TopologyStep[];
+  created_at: string;
+  updated_at: string;
+}
