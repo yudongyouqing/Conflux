@@ -11,6 +11,7 @@ import {
   Users,
 } from "lucide-react";
 import { useDaemonHealth } from "../hooks";
+import { ChatRoomList } from "./ChatRoomList";
 import type { GraphNode } from "@conflux/shared";
 
 export type TabId = "graph" | "messages" | "agents" | "runtimes" | "settings";
@@ -142,6 +143,9 @@ export function Sidebar({
           聊天室
         </button>
       )}
+
+      {/* Chat room management (#137) */}
+      <ChatRoomList sessions={listable} onRoomChange={() => onTabChange("graph")} />
 
       {/* Session list: the sidebar's main body (#107) */}
       <div className="px-3 pb-1 pt-2 text-2xs font-medium text-ink-faint flex-shrink-0">
