@@ -282,7 +282,7 @@ export interface ChatRoom {
   id: number;
   name: string;
   description: string | null;
-  topology: TopologyStep[];
+  members: string[];
   created_at: string;
   updated_at: string;
 }
