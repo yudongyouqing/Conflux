@@ -207,11 +207,13 @@ export default function App() {
               title="拖动调宽 · 双击复位"
               className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-accent/30 active:bg-accent/50 z-10"
             />
+            {/* top drag strip — the whole window should be grabbable here */}
+            <div className="absolute left-0 right-0 top-0 h-10 app-drag z-[5]" />
             <button
               onClick={closeDrawer}
               title="关闭"
               aria-label="关闭详情面板"
-              className="absolute right-2.5 top-2.5 z-10 p-1 rounded-md text-ink-faint hover:bg-paper hover:text-ink"
+              className="absolute right-3 top-3 z-10 p-1.5 rounded-lg text-ink-faint hover:bg-tile-hover hover:text-ink app-no-drag"
             >
               <X size={14} />
             </button>

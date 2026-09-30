@@ -92,16 +92,16 @@ export function Sidebar({
         isDarwin ? "glass-sidebar" : "bg-paper"
       } w-60 border-r border-line flex flex-col flex-shrink-0 min-h-0`}
     >
-      {/* Brand — darwin 上是窗口拖拽区并给红绿灯让位（#111） */}
+      {/* Brand — darwin: 红绿灯占顶部空间，logo 放在它们下方 */}
       <div
-        className={`flex items-center gap-2.5 h-12 border-b border-line flex-shrink-0 ${
-          isDarwin ? "app-drag pl-[84px] pr-4" : "px-4"
-        }`}
+        className={`app-drag flex-shrink-0 ${isDarwin ? "pt-[38px]" : ""}`}
       >
+        <div className="flex items-center gap-2.5 h-10 border-b border-line px-4 app-no-drag">
         <div className="w-[26px] h-[26px] rounded-lg bg-accent flex items-center justify-center app-no-drag">
           <Boxes size={14} className="text-white" />
         </div>
         <span className="font-semibold text-sm text-ink tracking-tight">Conflux</span>
+        </div>
       </div>
 
       {/* Work views: compact switcher — navigation gets out of the way */}
