@@ -21,6 +21,7 @@ export function RoomsTab({ sessions }: RoomsTabProps) {
     const [addingTo, setAddingTo] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [chatRoomId, setChatRoomId] = useState<number | null>(null);
+  const [chatPeer, setChatPeer] = useState<GraphNode | null>(null);
 
   const refresh = useCallback(() => {
     api.chatRooms.list().then((r) => setRooms(r.rooms)).catch((e) => setError(e.message));
@@ -50,7 +51,19 @@ export function RoomsTab({ sessions }: RoomsTabProps) {
     refresh();
   };
 
-  // chat mode: a room is selected, show conversation interface
+  // direct chat: a peer is picked, show conversation (skip room selection)
+  if (chatPeer) {
+    const room = rooms.find((r) => (r.members ?? []).includes(chatPeer.id));
+    return (
+      <RoomChat
+        roomName={room?.name ?? "对话"}
+        members={[chatPeer]}
+        onBack={() => setChatPeer(null)}
+      />
+    );
+  }
+
+  // legacy: room-level chat (unused but kept for potential group view)
   if (chatRoomId !== null) {
     const room = rooms.find((r) => r.id === chatRoomId);
     if (room) {
@@ -136,7 +149,8 @@ export function RoomsTab({ sessions }: RoomsTabProps) {
                       return (
                         <div
                           key={mid}
-                          className="group flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-tile text-xs text-ink"
+                          onClick={(e) => { e.stopPropagation(); if (session) setChatPeer(session); }}
+                          className="group flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-tile hover:bg-accent-soft hover:text-accent text-xs text-ink cursor-pointer transition-colors"
                         >
                           <StatusDot
                             status={session?.status ?? "stale"}
