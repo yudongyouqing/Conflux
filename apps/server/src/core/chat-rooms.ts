@@ -31,21 +31,20 @@ interface ChatRoomRow {
   updated_at: string;
 }
 
-function toRoom(row: ChatRoomRow): ChatRoom {
-  // legacy topology JSON → member list (unique session ids)
-  let members: string[] = [];
-  try {
-    const parsed = JSON.parse(row.topology);
-    if (Array.isArray(parsed)) {
-      const ids = new Set<string>();
-      for (const step of parsed as { from?: string; to?: string }[]) {
-        if (typeof step.from === "string") ids.add(step.from);
-        if (typeof step.to === "string") ids.add(step.to);
-      }
-      members = [...ids];
-    }
-  } catch { /* empty topology */ }
-  return { id: row.id, name: row.name, description: row.description, members, created_at: row.created_at, updated_at: row.updated_at };
+function toRoom(db: DB, row: ChatRoomRow): ChatRoom {
+  // members from the sessions table (authoritative — join/leave updates it),
+  // NOT from the stale topology JSON snapshot
+  const members = db
+    .prepare(`SELECT id FROM sessions WHERE chat_room_id = ?`)
+    .all(row.id) as { id: string }[];
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    members: members.map((m) => m.id),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
 }
 
 export function createChatRoom(
@@ -75,17 +74,17 @@ export function createChatRoom(
   for (const sid of input.members) {
     db.prepare(`UPDATE sessions SET chat_room_id = ? WHERE id = ?`).run(row.id, sid);
   }
-  return toRoom(row);
+  return toRoom(db, row);
 }
 
 export function listChatRooms(db: DB): ChatRoom[] {
   const rows = db.prepare(`SELECT * FROM chat_rooms ORDER BY updated_at DESC`).all() as ChatRoomRow[];
-  return rows.map(toRoom);
+  return rows.map((r) => toRoom(db, r));
 }
 
 export function getChatRoom(db: DB, id: number): ChatRoom | null {
   const row = db.prepare(`SELECT * FROM chat_rooms WHERE id = ?`).get(id) as ChatRoomRow | undefined;
-  return row ? toRoom(row) : null;
+  return row ? toRoom(db, row) : null;
 }
 
 export function deleteChatRoom(db: DB, id: number): boolean {
