@@ -95,7 +95,7 @@ function safePublicMessage(value: string, fallback: string): string {
   return message;
 }
 
-const SCHEMA_VERSION = 11; // v11: chat_rooms（结构化协作流程）
+const SCHEMA_VERSION = 12; // v12: room_tasks + messages.room_id（Agent 编排引擎）
 
 // Keep checkpoint timers tied to their database handles. A process can open
 // more than one temporary database during tests and interface operations.
@@ -172,6 +172,21 @@ CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
 
 -- Graph edges: directed, formed dynamically from communication history.
 -- Each ask_session / reply_ask upserts a row (weight + 1).
+-- Agent orchestration tasks (#152): each row is one agent execution
+-- within a room. The room tracks expected vs received; when all done,
+-- the initiator is summoned to read results.
+CREATE TABLE IF NOT EXISTS room_tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  room_id INTEGER NOT NULL,
+  initiator_session_id TEXT NOT NULL,
+  executor_session_id TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  result TEXT,
+  created_at TEXT NOT NULL,
+  completed_at TEXT
+);
+
 -- Structured collaboration rooms (#137): fixed topology workflows.
 -- topology JSON: [{from:"<sessionId>", to:"<sessionId>", order:1}, ...]
 CREATE TABLE IF NOT EXISTS chat_rooms (
@@ -340,6 +355,8 @@ function migrate(db: DB): void {
     ensureColumn("messages", "reply_seen_at", "reply_seen_at TEXT");
     // v11: chat rooms — a session belongs to at most one room (#137)
     ensureColumn("sessions", "chat_room_id", "chat_room_id INTEGER");
+    // v12: room shared thread + orchestration (#152)
+    ensureColumn("messages", "room_id", "room_id INTEGER");
     db.exec(`
       INSERT OR IGNORE INTO edges (from_session, to_session, weight, last_interact_at)
         SELECT from_session, to_session, COUNT(*), MAX(COALESCE(replied_at, created_at))
