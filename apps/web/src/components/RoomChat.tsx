@@ -48,9 +48,56 @@ export function RoomChat({ roomId, roomName, members, onBack }: RoomChatProps) {
   const [prompt, setPrompt] = useState("");
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
   const pollRef = useRef<ReturnType<typeof setInterval>>();
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const nameOf = (id: string) => members.find((m) => m.id === id)?.name ?? id.slice(0, 8);
+
+  // @mention autocomplete: filter members by current query after '@'
+  const mentionMatches = mentionQuery !== null
+    ? members.filter((m) =>
+        m.name.toLowerCase().includes(mentionQuery.toLowerCase()) ||
+        m.id.toLowerCase().includes(mentionQuery.toLowerCase()),
+      )
+    : [];
+
+  const handleInputChange = (value: string) => {
+    setPrompt(value);
+    // detect @mention trigger: last '@' with no space after it
+    const atIdx = value.lastIndexOf("@");
+    if (atIdx >= 0 && !value.slice(atIdx + 1).includes(" ")) {
+      setMentionQuery(value.slice(atIdx + 1));
+      setMentionIndex(0);
+    } else {
+      setMentionQuery(null);
+    }
+  };
+
+  const pickMention = (member: GraphNode) => {
+    const atIdx = prompt.lastIndexOf("@");
+    if (atIdx >= 0) {
+      const before = prompt.slice(0, atIdx);
+      setPrompt(`${before}@${member.name} `);
+      setSelectedExecutor(member.id);
+    }
+    setMentionQuery(null);
+    inputRef.current?.focus();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // mention picker navigation
+    if (mentionQuery !== null && mentionMatches.length > 0) {
+      if (e.key === "ArrowDown") { e.preventDefault(); setMentionIndex((i) => Math.min(i + 1, mentionMatches.length - 1)); return; }
+      if (e.key === "ArrowUp") { e.preventDefault(); setMentionIndex((i) => Math.max(i - 1, 0)); return; }
+      if (e.key === "Tab" || (e.key === "Enter" && mentionMatches.length === 1)) {
+        e.preventDefault(); pickMention(mentionMatches[mentionIndex]); return;
+      }
+      if (e.key === "Escape") { setMentionQuery(null); return; }
+    }
+    if (e.key === "Enter" && !e.shiftKey) summon();
+  };
 
   const fetchTasks = useCallback(async () => {
     try {
@@ -134,29 +181,49 @@ export function RoomChat({ roomId, roomName, members, onBack }: RoomChatProps) {
         )}
       </div>
 
-      {/* summon input */}
-      <div className="border-t border-line px-4 py-3 space-y-2 flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <select
-            value={selectedExecutor}
-            onChange={(e) => setSelectedExecutor(e.target.value)}
-            className="px-2.5 py-1.5 rounded-lg border border-line text-xs text-ink bg-surface focus:border-accent outline-none"
-          >
-            <option value="">选择执行者…</option>
-            {members.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name} {m.status === "active" ? "●" : "○"}
-              </option>
+      {/* summon input with @mention */}
+      <div className="border-t border-line px-4 py-3 space-y-2 flex-shrink-0 relative">
+        {/* @mention autocomplete popup */}
+        {mentionQuery !== null && mentionMatches.length > 0 && (
+          <div className="absolute bottom-full left-4 right-4 mb-1 rounded-xl bg-surface border border-line shadow-raised overflow-hidden z-10 max-h-40 overflow-y-auto">
+            {mentionMatches.map((m, i) => (
+              <button
+                key={m.id}
+                onClick={() => pickMention(m)}
+                onMouseEnter={() => setMentionIndex(i)}
+                className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors ${
+                  i === mentionIndex ? "bg-accent-soft text-accent" : "text-ink hover:bg-tile-hover"
+                }`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${m.status === "active" ? "bg-emerald-500" : "bg-ink-faint/50"}`} />
+                <span className="font-medium">{m.name}</span>
+                <span className="text-ink-faint text-2xs ml-auto">{m.id.slice(0, 8)}</span>
+              </button>
             ))}
-          </select>
-          <span className="text-2xs text-ink-faint">真实进程执行</span>
-        </div>
+          </div>
+        )}
+
+        {/* executor indicator */}
+        {selectedExecutor && (
+          <div className="flex items-center gap-1.5 text-2xs text-accent">
+            <span>→ {nameOf(selectedExecutor)}</span>
+            <button
+              onClick={() => setSelectedExecutor("")}
+              className="text-ink-faint hover:text-ink"
+              title="清除目标"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
         <div className="flex items-center gap-2">
           <input
+            ref={inputRef}
             value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && summon()}
-            placeholder={`输入要注入到 Agent 的 prompt…`}
+            onChange={(e) => handleInputChange(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={`@某Agent 下发任务，或不 @ 广播…`}
             className="flex-1 px-3.5 py-2.5 rounded-xl border border-line text-xs text-ink bg-surface placeholder-ink-faint focus:border-accent outline-none"
           />
           <button
