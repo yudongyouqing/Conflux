@@ -266,10 +266,10 @@ export const api = {
         }>;
         status: Array<{ executor_session_id: string; status: string; n: number }>;
       }>(`/chat-rooms/${roomId}/orchestrate`),
-    summon: (roomId: number, executorSessionId: string, prompt: string) =>
+    summon: (roomId: number, executorSessionId: string, prompt: string, senderIdentity?: string) =>
       post<{ task_id: number; injected: boolean; method: string }>(
         `/chat-rooms/${roomId}/summon`,
-        { executor_session_id: executorSessionId, prompt },
+        { executor_session_id: executorSessionId, prompt, sender_session_id: senderIdentity ?? "web-console" },
       ),
   },
 };
