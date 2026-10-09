@@ -31,6 +31,7 @@ import { logAudit } from "../core/audit.js";
 import { getRuntimePid, findSessionByRuntimePid, deleteUnreferencedSession } from "../core/live.js";
 import { askAndMaybeWake } from "../core/ask.js";
 import { askAndReplySync } from "../core/ask-sync.js";
+import { summonAgent, writeResult, readRoom, roomStatus } from "../core/room-orchestrator.js";
 import { refreshCodexSessionTitles } from "../core/codex-titles.js";
 import { logger } from "../log.js";
 
@@ -569,6 +570,80 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
             }
           : { error: r.error },
       );
+    },
+  );
+
+  // 8c. Room orchestration tools (#152) — agents coordinate through rooms
+  server.registerTool(
+    "room_write",
+    {
+      description:
+        "Write your result to a chat room's shared database and mark your task done. When all expected tasks are complete, the initiator is automatically summoned to read results.",
+      inputSchema: {
+        task_id: z.number().int().describe("The task ID you were summoned for"),
+        result: z.string().min(1).max(50_000).describe("Your result/findings"),
+      },
+    },
+    async ({ task_id, result }) => {
+      const r = await withAudit("room_write", { task_id, resultLen: result.length }, () =>
+        writeResult(db, { task_id, executor_session_id: sessionId, result }),
+      );
+      return json(
+        r.ok
+          ? { task_id, status: "done", all_done: r.result.allDone, initiator_summoned: r.result.summonedInitiator }
+          : { error: r.error },
+      );
+    },
+  );
+
+  server.registerTool(
+    "room_summon",
+    {
+      description:
+        "Summon another agent to execute a task in a chat room. The agent's real process is started/injected with the prompt. Use for parallel fan-out, sequential chains, or cascading work.",
+      inputSchema: {
+        room_id: z.number().int().describe("Chat room ID"),
+        executor_session_id: z.string().min(1).describe("Session ID of the agent to summon"),
+        prompt: z.string().min(1).max(20_000).describe("The task prompt to inject"),
+      },
+    },
+    async ({ room_id, executor_session_id, prompt }) => {
+      const r = await withAudit("room_summon", { room_id, executor_session_id, promptLen: prompt.length }, () =>
+        summonAgent(db, { room_id, initiator_session_id: sessionId, executor_session_id, prompt }),
+      );
+      return json(
+        r.ok
+          ? { task_id: r.result.task.id, injected: r.result.injected, method: r.result.method }
+          : { error: r.error },
+      );
+    },
+  );
+
+  server.registerTool(
+    "room_read",
+    {
+      description: "Read all shared content in a chat room: tasks, results, and messages.",
+      inputSchema: {
+        room_id: z.number().int().describe("Chat room ID"),
+      },
+    },
+    async ({ room_id }) => {
+      const r = await withAudit("room_read", { room_id }, () => readRoom(db, room_id));
+      return json(r.ok ? r.result : { error: r.error });
+    },
+  );
+
+  server.registerTool(
+    "room_status",
+    {
+      description: "Check which agents have responded and which are still working in a room.",
+      inputSchema: {
+        room_id: z.number().int().describe("Chat room ID"),
+      },
+    },
+    async ({ room_id }) => {
+      const r = await withAudit("room_status", { room_id }, () => roomStatus(db, room_id));
+      return json(r.ok ? { status: r.result } : { error: r.error });
     },
   );
 

@@ -74,7 +74,7 @@ test("openDb backfills explicit identity fields from a v8 sessions table", () =>
     assert.equal(corrupt.identity_source, null);
     assert.equal(corrupt.runtime_pid, null);
     assert.equal(corrupt.metadata, "{not-json");
-    assert.equal(migrated.pragma("user_version", { simple: true }), 11); // v11: chat_rooms
+    assert.equal(migrated.pragma("user_version", { simple: true }), 12); // v12: room_tasks
   } finally {
     migrated.close();
     rmSync(dataDir, { recursive: true, force: true });

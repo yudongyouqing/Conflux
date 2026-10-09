@@ -206,6 +206,8 @@ export interface Message {
   replied_at: string | null;
   /** When the asker's CLI was last pushed this reply via hooks (#102). */
   reply_seen_at?: string | null;
+  /** Chat room shared thread (#152). */
+  room_id?: number | null;
 }
 
 export interface Conversation {

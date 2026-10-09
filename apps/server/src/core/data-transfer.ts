@@ -96,6 +96,7 @@ const messageSchema = z
     created_at: isoTimestamp,
     replied_at: isoTimestamp.nullable(),
     reply_seen_at: isoTimestamp.nullable().optional(),
+    room_id: z.number().int().nullable().optional(),
   })
   .strict();
 
