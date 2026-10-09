@@ -44,6 +44,7 @@ const STATUS_COLOR: Record<string, string> = {
  */
 export function RoomChat({ roomId, roomName, members, onBack }: RoomChatProps) {
   const [tasks, setTasks] = useState<RoomTask[]>([]);
+  const [senderIdentity, setSenderIdentity] = useState<string>("web-console");
   const [selectedExecutor, setSelectedExecutor] = useState<string>("");
   const [prompt, setPrompt] = useState("");
   const [sending, setSending] = useState(false);
@@ -119,7 +120,7 @@ export function RoomChat({ roomId, roomName, members, onBack }: RoomChatProps) {
     setSending(true);
     setPrompt("");
     try {
-      await api.chatRooms.summon(roomId, selectedExecutor, text);
+      await api.chatRooms.summon(roomId, selectedExecutor, text, senderIdentity);
       await fetchTasks();
     } catch { /* next poll will pick up */ }
     finally { setSending(false); }
@@ -181,7 +182,7 @@ export function RoomChat({ roomId, roomName, members, onBack }: RoomChatProps) {
         )}
       </div>
 
-      {/* summon input with @mention */}
+      {/* summon input with sender identity + @mention target */}
       <div className="border-t border-line px-4 py-3 space-y-2 flex-shrink-0 relative">
         {/* @mention autocomplete popup */}
         {mentionQuery !== null && mentionMatches.length > 0 && (
@@ -203,20 +204,38 @@ export function RoomChat({ roomId, roomName, members, onBack }: RoomChatProps) {
           </div>
         )}
 
-        {/* executor indicator */}
-        {selectedExecutor && (
-          <div className="flex items-center gap-1.5 text-2xs text-accent">
-            <span>→ {nameOf(selectedExecutor)}</span>
-            <button
-              onClick={() => setSelectedExecutor("")}
-              className="text-ink-faint hover:text-ink"
-              title="清除目标"
-            >
-              ×
-            </button>
-          </div>
-        )}
+        {/* row 1: sender identity (who am I) + executor target (who runs it) */}
+        <div className="flex items-center gap-2 text-2xs">
+          <span className="text-ink-faint">发起方</span>
+          <select
+            value={senderIdentity}
+            onChange={(e) => setSenderIdentity(e.target.value)}
+            className="px-2 py-1 rounded-lg border border-line text-2xs text-ink bg-surface focus:border-accent outline-none"
+          >
+            <option value="web-console">👤 Web 控制台</option>
+            {members.map((m) => (
+              <option key={m.id} value={m.id}>🤖 {m.name}</option>
+            ))}
+          </select>
+          {selectedExecutor && (
+            <>
+              <span className="text-ink-faint">→</span>
+              <span className="text-accent font-medium">{nameOf(selectedExecutor)}</span>
+              <button
+                onClick={() => setSelectedExecutor("")}
+                className="text-ink-faint hover:text-ink"
+                title="清除目标"
+              >
+                ×
+              </button>
+            </>
+          )}
+          {!selectedExecutor && (
+            <span className="text-ink-faint">@某人定向，不 @ 则广播</span>
+          )}
+        </div>
 
+        {/* row 2: prompt input */}
         <div className="flex items-center gap-2">
           <input
             ref={inputRef}

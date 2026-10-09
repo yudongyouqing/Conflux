@@ -86,12 +86,12 @@ export function registerChatRoomRoutes(app: FastifyInstance, ctx: ServerContext)
 
   // POST /chat-rooms/:id/summon — human initiates an agent task (#152)
   app.post<
-    { Params: { id: string }; Body: { executor_session_id: string; prompt: string } }
+    { Params: { id: string }; Body: { executor_session_id: string; prompt: string; sender_session_id?: string } }
   >("/chat-rooms/:id/summon", {}, async (req, reply) => {
     try {
       const result = summonAgent(db, {
         room_id: Number(req.params.id),
-        initiator_session_id: "web-console",
+        initiator_session_id: req.body.sender_session_id ?? "web-console",
         executor_session_id: req.body.executor_session_id,
         prompt: req.body.prompt,
       });
