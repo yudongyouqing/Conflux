@@ -3,6 +3,11 @@ import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 import { getSession } from "./sessions.js";
 import { logger } from "../log.js";
+import { launchWakeRun } from "./wake/launcher.js";
+import { planClaudeWake } from "./wake/claude.js";
+import { wakeCommand, AUTO_WAKE_PROMPT } from "./wake/commands.js";
+import { probeRuntimePids } from "./liveness.js";
+import { getTerminalSettings } from "./app-settings.js";
 
 /**
  * Room orchestration engine (#152): agents coordinate through a shared room
@@ -89,15 +94,21 @@ export function summonAgent(
 ): { task: RoomTask; injected: boolean; method: string } {
   const task = createTask(db, input);
 
-  // Try to inject into live process (tmux/PTY), else headless wake
+  // Try live injection first, fall back to headless wake
   const injected = injectIntoProcess(db, input.executor_session_id, input.prompt, task.id);
-  const method = injected ? "tmux" : "headless";
+  let method = injected ? "tmux" : "";
+
+  if (!injected) {
+    // Fallback: headless wake the agent to process the task
+    const woke = headlessWakeForTask(db, input.executor_session_id, input.prompt, task.id);
+    method = woke ? "headless" : "failed";
+  }
 
   logger.info(
     { roomId: input.room_id, taskId: task.id, executor: input.executor_session_id, method },
     "room: agent summoned",
   );
-  return { task, injected, method };
+  return { task, injected: method !== "failed", method };
 }
 
 /**
@@ -171,6 +182,50 @@ export function roomStatus(db: DB, roomId: number) {
 }
 
 // ---- internals ---------------------------------------------------------------
+
+/**
+ * Fallback: headless wake the executor to process a room task (#152).
+ * Uses the existing wake infrastructure (planClaudeWake → launchWakeRun)
+ * with a prompt that tells the agent to process and room_write the result.
+ */
+function headlessWakeForTask(
+  db: DB,
+  sessionId: string,
+  prompt: string,
+  taskId: number,
+): boolean {
+  const session = getSession(db, sessionId);
+  if (!session) return false;
+
+  const runtime = session.runtime ?? "claude";
+  if (runtime !== "claude") return false; // codex wake handled separately later
+
+  const settings = getTerminalSettings(db);
+  const exe = settings.claude_path || "claude";
+  const offline = session.status !== "active";
+  const plan = planClaudeWake({
+    sessionId,
+    exe,
+    offline,
+    projectDir: session.project_dir,
+  });
+  if ("refuse" in plan) return false;
+
+  const wrapped = `${prompt}\n(这是一个聊天室任务。处理完后用 Conflux 的 room_write 工具写入结果，task_id=${taskId})`;
+  const launch = launchWakeRun({
+    db,
+    sessionId,
+    projectDir: session.project_dir,
+    command: plan.command,
+    prompt: wrapped,
+    pinCodex: false,
+  });
+  if (!launch.ok) return false;
+
+  db.prepare(`UPDATE room_tasks SET status = 'running' WHERE id = ?`).run(taskId);
+  logger.info({ sessionId, taskId }, "room: headless wake launched");
+  return true;
+}
 
 /** Try to inject prompt into live process; returns true if injected. */
 function injectIntoProcess(

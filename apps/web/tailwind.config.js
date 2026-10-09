@@ -52,7 +52,7 @@ export default {
       },
       fontFamily: {
         sans: [
-          '"IBM Plex Sans"',
+          '"Inter"',
           '"PingFang SC"',
           '"Microsoft YaHei UI"',
           '"Microsoft YaHei"',
@@ -60,7 +60,7 @@ export default {
           "sans-serif",
         ],
         /** mono 只用于真的终端数据（id/路径/代码/会话名），不做装饰 */
-        mono: ['"IBM Plex Mono"', '"Cascadia Mono"', "Consolas", "monospace"],
+        mono: ['"JetBrains Mono"', '"IBM Plex Mono"', '"Cascadia Mono"', "Consolas", "monospace"],
       },
       /** 阴影只给浮起物：卡片静态无影或极浅，浮层/拖拽/选中才升级 */
       boxShadow: {

@@ -125,7 +125,11 @@ html[data-theme="dark"] {
   --tk-accent: 96 165 250;
   --tk-accent-deep: 59 130 246;
   --tk-accent-soft: 30 58 95;
+  /* 深色底下细字看不清——全局提升一档字重 */
+  font-weight: 450;
 }
+html[data-theme="dark"] .font-normal { font-weight: 500; }
+html[data-theme="dark"] .font-medium { font-weight: 600; }
 
 
 /* ---- Motion tokens（#111）: durations/easings live in tailwind config as
