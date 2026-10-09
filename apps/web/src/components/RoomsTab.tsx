@@ -51,11 +51,12 @@ export function RoomsTab({ sessions }: RoomsTabProps) {
     refresh();
   };
 
-  // direct chat: a peer is picked, show conversation (skip room selection)
+  // direct chat: a peer is picked → orchestration view for that agent's room
   if (chatPeer) {
     const room = rooms.find((r) => (r.members ?? []).includes(chatPeer.id));
     return (
       <RoomChat
+        roomId={room?.id ?? 0}
         roomName={room?.name ?? "对话"}
         members={[chatPeer]}
         onBack={() => setChatPeer(null)}
@@ -63,7 +64,7 @@ export function RoomsTab({ sessions }: RoomsTabProps) {
     );
   }
 
-  // legacy: room-level chat (unused but kept for potential group view)
+  // room-level orchestration: all members visible
   if (chatRoomId !== null) {
     const room = rooms.find((r) => r.id === chatRoomId);
     if (room) {
@@ -72,6 +73,7 @@ export function RoomsTab({ sessions }: RoomsTabProps) {
         .filter((s): s is GraphNode => !!s);
       return (
         <RoomChat
+          roomId={room.id}
           roomName={room.name}
           members={memberSessions}
           onBack={() => setChatRoomId(null)}

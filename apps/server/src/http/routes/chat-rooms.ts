@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { createChatRoom, deleteChatRoom, getChatRoom, listChatRooms, roomMembers, joinRoom, leaveRoom } from "../../core/chat-rooms.js";
+import { readRoom, roomStatus, summonAgent } from "../../core/room-orchestrator.js";
 import { logAudit } from "../../core/audit.js";
 import type { ServerContext } from "../context.js";
 
@@ -70,5 +71,40 @@ export function registerChatRoomRoutes(app: FastifyInstance, ctx: ServerContext)
       return reply.send({ ok: true });
     },
   );
+
+  // GET /chat-rooms/:id/orchestrate — tasks + status for the UI (#152)
+  app.get<{ Params: { id: string } }>("/chat-rooms/:id/orchestrate", {}, async (req, reply) => {
+    try {
+      const roomId = Number(req.params.id);
+      const data = readRoom(db, roomId);
+      const status = roomStatus(db, roomId);
+      return reply.send({ tasks: data.tasks, status });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // POST /chat-rooms/:id/summon — human initiates an agent task (#152)
+  app.post<
+    { Params: { id: string }; Body: { executor_session_id: string; prompt: string } }
+  >("/chat-rooms/:id/summon", {}, async (req, reply) => {
+    try {
+      const result = summonAgent(db, {
+        room_id: Number(req.params.id),
+        initiator_session_id: "web-console",
+        executor_session_id: req.body.executor_session_id,
+        prompt: req.body.prompt,
+      });
+      logAudit(db, {
+        interface: "http",
+        action: "room_summon",
+        args: { room_id: Number(req.params.id), executor: req.body.executor_session_id },
+        result: { task_id: result.task.id, method: result.method },
+      });
+      return reply.send(result);
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
 
 }

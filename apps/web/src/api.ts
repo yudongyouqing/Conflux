@@ -256,5 +256,20 @@ export const api = {
       post<{ ok: boolean }>(`/chat-rooms/${roomId}/join`, { session_id: sessionId }),
     leave: (sessionId: string) =>
       post<{ ok: boolean }>('/chat-rooms/leave', { session_id: sessionId }),
+    orchestrate: (roomId: number) =>
+      get<{
+        tasks: Array<{
+          id: number; room_id: number; initiator_session_id: string;
+          executor_session_id: string; prompt: string;
+          status: "pending" | "running" | "done" | "failed";
+          result: string | null; created_at: string; completed_at: string | null;
+        }>;
+        status: Array<{ executor_session_id: string; status: string; n: number }>;
+      }>(`/chat-rooms/${roomId}/orchestrate`),
+    summon: (roomId: number, executorSessionId: string, prompt: string) =>
+      post<{ task_id: number; injected: boolean; method: string }>(
+        `/chat-rooms/${roomId}/summon`,
+        { executor_session_id: executorSessionId, prompt },
+      ),
   },
 };
