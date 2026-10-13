@@ -8,6 +8,7 @@ import {
   Search,
   Compass,
   ChevronDown,
+  Zap,
 } from "lucide-react";
 import { useCreateAgent, useCreateRuntimeAgent, useRuntimes, useSessions } from "../hooks";
 import { ClaudeIcon, OpenAIIcon } from "./brand-icons";
@@ -287,7 +288,7 @@ function useKnownProjectDirs(): string[] {
     }
     return [...seen.entries()]
       .sort((a, b) => b[1].localeCompare(a[1]))
-      .slice(0, 8)
+      .slice(0, 6)
       .map(([dir]) => dir);
   }, [sessions.data]);
 }
@@ -297,6 +298,8 @@ function RuntimeCreateForm({ onClose }: { onClose: () => void }) {
   const runtimes = useRuntimes();
   const [form, setForm] = useState(EMPTY_RUNTIME_FORM);
   const [advanced, setAdvanced] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; error?: string; model?: string; response?: string } | null>(null);
   const knownDirs = useKnownProjectDirs();
   const canBrowse = typeof window.confluxDesktop?.pickDirectory === "function";
 
@@ -480,6 +483,44 @@ function RuntimeCreateForm({ onClose }: { onClose: () => void }) {
             </Field>
             <div className="text-2xs text-ink-faint px-1">
               定时到点后 headless 唤醒(无窗口):查收件箱、处理待办、简报后退出。
+            </div>
+            {/* connectivity test (#agent-improve): verify provider chain before save */}
+            <div className="pt-1">
+              <button
+                onClick={async () => {
+                  setTestResult(null);
+                  setTesting(true);
+                  try {
+                    const r = await fetch("/agents/test-provider", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        provider: form.runtime === "codex" ? "openai" : "anthropic",
+                        base_url: form.base_url || undefined,
+                        api_key: form.api_key || undefined,
+                        model: form.model || undefined,
+                      }),
+                    });
+                    setTestResult(await r.json());
+                  } catch (e) {
+                    setTestResult({ ok: false, error: e instanceof Error ? e.message : "network error" });
+                  } finally {
+                    setTesting(false);
+                  }
+                }}
+                disabled={testing || !form.api_key}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line text-xs text-ink hover:border-accent hover:text-accent disabled:opacity-40"
+              >
+                {testing ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
+                测试连通性
+              </button>
+              {testResult && (
+                <div className={`mt-1.5 text-2xs ${testResult.ok ? "text-emerald-600" : "text-red-600"}`}>
+                  {testResult.ok
+                    ? `✓ 连通 · ${testResult.model} · "${testResult.response}"`
+                    : `✗ ${testResult.error}`}
+                </div>
+              )}
             </div>
           </div>
         )}
