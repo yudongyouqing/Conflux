@@ -294,4 +294,35 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: ServerContext): v
       return sendError(reply, err);
     }
   });
+
+  // POST /agents/test-provider — connectivity check before creating an agent
+  // (#agent-improve). Sends a minimal generateText to verify base URL +
+  // key + model work together. Honest tiers: this validates the full chain,
+  // not just reachability.
+  app.post<{
+    Body: { provider?: string; base_url?: string; api_key?: string; model?: string };
+  }>("/agents/test-provider", {}, async (req, reply) => {
+    const { provider = "anthropic", base_url, api_key, model } = req.body;
+    try {
+      if (!api_key) return sendHttpError(reply, 400, "API key is required for a connectivity test");
+      const testModel = model || (provider === "openai" ? "gpt-4o-mini" : "claude-sonnet-4-20250514");
+      const { generateText } = await import("ai");
+      const entry = providerRegistry[provider];
+      if (!entry) return sendHttpError(reply, 400, `unknown provider: ${provider}`);
+      const langModel = await entry.loadModel(testModel);
+      const result = await generateText({
+        model: langModel,
+        prompt: "Reply with just: OK",
+        maxOutputTokens: 10,
+      });
+      return reply.send({
+        ok: true,
+        model: testModel,
+        response: result.text?.slice(0, 50) || "(empty)",
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return reply.send({ ok: false, error: msg });
+    }
+  });
 }
