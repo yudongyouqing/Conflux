@@ -582,12 +582,13 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
         "Write your result to a chat room's shared database and mark your task done. When all expected tasks are complete, the initiator is automatically summoned to read results.",
       inputSchema: {
         task_id: z.number().int().describe("The task ID you were summoned for"),
+        task_token: z.string().min(1).describe("One-shot task token from the summon prompt"),
         result: z.string().min(1).max(50_000).describe("Your result/findings"),
       },
     },
-    async ({ task_id, result }) => {
+    async ({ task_id, task_token, result }) => {
       const r = await withAudit("room_write", { task_id, resultLen: result.length }, () =>
-        writeResult(db, { task_id, executor_session_id: sessionId, result }),
+        writeResult(db, { task_id, task_token, result }),
       );
       return json(
         r.ok

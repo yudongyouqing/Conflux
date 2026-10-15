@@ -95,7 +95,7 @@ function safePublicMessage(value: string, fallback: string): string {
   return message;
 }
 
-const SCHEMA_VERSION = 12; // v12: room_tasks + messages.room_id（Agent 编排引擎）
+const SCHEMA_VERSION = 13; // v13: room_tasks.task_token（一次性任务令牌修复 split-brain）
 
 // Keep checkpoint timers tied to their database handles. A process can open
 // more than one temporary database during tests and interface operations.
@@ -180,6 +180,7 @@ CREATE TABLE IF NOT EXISTS room_tasks (
   room_id INTEGER NOT NULL,
   initiator_session_id TEXT NOT NULL,
   executor_session_id TEXT NOT NULL,
+  task_token TEXT NOT NULL,
   prompt TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
   result TEXT,
@@ -357,6 +358,13 @@ function migrate(db: DB): void {
     ensureColumn("sessions", "chat_room_id", "chat_room_id INTEGER");
     // v12: room shared thread + orchestration (#152)
     ensureColumn("messages", "room_id", "room_id INTEGER");
+    // v13: one-shot task token to fix split-brain (#151)
+    ensureColumn("room_tasks", "task_token", "task_token TEXT");
+    // backfill task_token for existing rows with random tokens
+    db.exec(`
+      UPDATE room_tasks SET task_token = lower(hex(randomblob(16)))
+      WHERE task_token IS NULL
+    `);
     db.exec(`
       INSERT OR IGNORE INTO edges (from_session, to_session, weight, last_interact_at)
         SELECT from_session, to_session, COUNT(*), MAX(COALESCE(replied_at, created_at))
