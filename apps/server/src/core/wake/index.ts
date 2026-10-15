@@ -1,7 +1,13 @@
 import { WEB_CONSOLE_ID } from "@conflux/shared";
 import type { DB } from "../db.js";
 import { logger } from "../../log.js";
-import { getAutoWake, getSetting, getTerminalSettings, setSetting } from "../app-settings.js";
+import {
+  getAutoWake,
+  getSetting,
+  getTerminalSettings,
+  setSetting,
+  getWakeMaxConcurrent,
+} from "../app-settings.js";
 import { getSession, mergeSessionMeta } from "../sessions.js";
 import { hasTranscript } from "../live.js";
 import { pushMailTyped } from "../mail-push.js";
@@ -34,6 +40,26 @@ const AUTO_WAKE_DEDUP_MS = 90_000;
 const TMUX_WAKE_POLL_MS = 400;
 const TMUX_WAKE_MAX_POLLS = 40; // ~16s — a TUI that hasn't painted by then is broken
 
+/** Global counter for active wake processes (spawned, not yet exited). */
+let activeWakeCount = 0;
+
+/** Increment active wake counter (called before spawn). */
+export function incrementWakeCount(): void {
+  activeWakeCount++;
+  logger.debug({ activeWakeCount }, "wake process started");
+}
+
+/** Decrement active wake counter (called on process exit). */
+export function decrementWakeCount(): void {
+  activeWakeCount = Math.max(0, activeWakeCount - 1);
+  logger.debug({ activeWakeCount }, "wake process ended");
+}
+
+/** Get current active wake count (for monitoring/UI). */
+export function getActiveWakeCount(): number {
+  return activeWakeCount;
+}
+
 export type WakeResult =
   | { woke: true; command?: string }
   | { woke: false; reason: string };
@@ -55,6 +81,15 @@ export function wakeSessionForMail(db: DB, sessionId: string, opts: WakeOptions 
   if (sessionId === WEB_CONSOLE_ID || sessionId.startsWith("agent-")) {
     return { woke: false, reason: "not a CLI conversation" };
   }
+
+  // Concurrent wake limit: fan-out broadcasts used to spawn every offline
+  // member at once and burn through tokens. The counter tracks spawned-but-
+  // not-yet-exited headless wakes; 0 disables the cap.
+  const maxConcurrent = getWakeMaxConcurrent(db);
+  if (maxConcurrent > 0 && activeWakeCount >= maxConcurrent) {
+    return { woke: false, reason: `wake queue full (${activeWakeCount}/${maxConcurrent})` };
+  }
+
   const session = getSession(db, sessionId);
   if (!session) return { woke: false, reason: "session not found" };
 

@@ -205,3 +205,32 @@ test("wake: TUI never becomes ready → mail stays pending for the hook fallback
   assert.deepEqual(rec.sends, [], "no typing into a TUI that never booted");
   assert.equal(getMessage(db, m.id)!.status, "pending", "hook path still owns delivery");
 });
+
+// ---- wake concurrency cap -------------------------------------------------------
+
+import { incrementWakeCount, decrementWakeCount } from "../core/wake/index.js";
+import { setWakeMaxConcurrent } from "../core/app-settings.js";
+
+test("wake concurrency cap: a full queue blocks, a free slot proceeds", () => {
+  const db = freshDb();
+  registerSession(db, { id: "s-1", name: "离线目标" });
+  // offline + no transcript → the wake ladder would REFUSE before any spawn,
+  // so the non-commercial arm proves the gate was passed without spawning
+  db.prepare(`UPDATE sessions SET status = 'stale' WHERE id = 's-1'`).run();
+  const emptyHome = mkdtempSync(join(tmpdir(), "wake-cap-home-"));
+  cleanups.push(() => rmSync(emptyHome, { recursive: true, force: true }));
+  setWakeMaxConcurrent(db, 1);
+  incrementWakeCount(); // queue now 1/1
+
+  // queue 1/1 → the wake ladder is blocked before anything else
+  const capped = wakeSessionForMail(db, "s-1", { io: fakeIO({ aliveNames: [], launches: [], sends: [], captures: 0 }), claudeHome: emptyHome });
+  assert.equal(capped.woke, false);
+  assert.match(capped.reason ?? "", /wake queue full/);
+
+  // slot frees up → the ladder proceeds (offline + no transcript refuses
+  // before any spawn, which proves the cap was passed); counter back to 0
+  decrementWakeCount();
+  const freed = wakeSessionForMail(db, "s-1", { io: fakeIO({ aliveNames: [], launches: [], sends: [], captures: 0 }), claudeHome: emptyHome });
+  assert.equal(freed.woke, false);
+  assert.ok(!/wake queue full/.test(freed.reason ?? ""), "freed slot must not report a full queue");
+});

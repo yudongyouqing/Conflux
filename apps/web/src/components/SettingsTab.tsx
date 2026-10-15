@@ -24,6 +24,9 @@ export function SettingsTab() {
   const [terminal, setTerminal] = useState<TerminalChoice>("wt");
   const [claudePath, setClaudePath] = useState("");
   const [codexPath, setCodexPath] = useState("");
+  const [autoWake, setAutoWake] = useState(true);
+  const [wakeMaxConcurrent, setWakeMaxConcurrent] = useState(3);
+  const [wakeActiveCount, setWakeActiveCount] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
   const [transferNotice, setTransferNotice] = useState<string | null>(null);
   const [transferPending, setTransferPending] = useState(false);
@@ -117,12 +120,31 @@ export function SettingsTab() {
     setTerminal(data.terminal.terminal);
     setClaudePath(data.terminal.claude_path);
     setCodexPath(data.terminal.codex_path);
+    setAutoWake(data.auto_wake ?? true);
+    setWakeMaxConcurrent(data.wake_max_concurrent ?? 3);
+    setWakeActiveCount(data.wake_active_count ?? 0);
   }, [data]);
+
+  // Refresh wake active count every 3s
+  useEffect(() => {
+    const timer = setInterval(() => {
+      api.getTerminalSettings().then((d) => {
+        setWakeActiveCount(d.wake_active_count ?? 0);
+      }).catch(() => {/* ignore */});
+    }, 3000);
+    return () => clearInterval(timer);
+  }, []);
 
   const submit = () => {
     setNotice(null);
     save.mutate(
-      { terminal, claude_path: claudePath, codex_path: codexPath },
+      {
+        terminal,
+        claude_path: claudePath,
+        codex_path: codexPath,
+        auto_wake: autoWake,
+        wake_max_concurrent: wakeMaxConcurrent,
+      },
       {
         onSuccess: () => setNotice("已保存"),
         onError: (e) => setNotice(`保存失败: ${(e as Error).message}`),
@@ -362,6 +384,61 @@ export function SettingsTab() {
               保存
             </button>
           </div>
+        </div>
+
+        {/* Wake concurrency control: caps simultaneous headless wakes */}
+        <div className="bg-surface border border-line rounded-xl p-4 space-y-4 shadow-sm">
+          <div>
+            <h3 className="text-ink font-medium text-sm">唤醒控制</h3>
+            <p className="text-2xs text-ink-faint mt-0.5">
+              自动唤醒会话响应消息，限制并发数量防止资源耗尽
+            </p>
+          </div>
+
+          <label className="flex items-center justify-between gap-3">
+            <div>
+              <span className="text-xs text-ink">自动唤醒</span>
+              <p className="text-2xs text-ink-faint mt-0.5">
+                关闭后消息将保持 pending 状态，需手动打开会话处理
+              </p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={autoWake}
+                onChange={(e) => setAutoWake(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-line peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-accent/30 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-line after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-accent"></div>
+            </label>
+          </label>
+
+          <label className="block">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs text-ink">最大并发唤醒数</span>
+              <span className="text-xs text-ink-muted tabular-nums">
+                {wakeMaxConcurrent === 0 ? "无限制" : wakeMaxConcurrent}
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="10"
+              step="1"
+              value={wakeMaxConcurrent}
+              onChange={(e) => setWakeMaxConcurrent(Number(e.target.value))}
+              disabled={!autoWake}
+              className="w-full h-2 bg-line rounded-lg appearance-none cursor-pointer accent-accent disabled:opacity-50 disabled:cursor-not-allowed"
+            />
+            <div className="flex items-center justify-between mt-1.5">
+              <span className="text-2xs text-ink-faint">
+                0 = 无限制 · 当前活跃：{wakeActiveCount}
+              </span>
+              <span className="text-2xs text-ink-faint">
+                推荐 3-5，避免资源耗尽
+              </span>
+            </div>
+          </label>
         </div>
 
         <div className="bg-surface border border-line rounded-xl p-4 space-y-3 shadow-sm">

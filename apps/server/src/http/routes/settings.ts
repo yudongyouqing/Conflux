@@ -5,7 +5,10 @@ import {
   getTerminalSettings,
   saveTerminalSettings,
   setAutoWake,
+  getWakeMaxConcurrent,
+  setWakeMaxConcurrent,
 } from "../../core/app-settings.js";
+import { getActiveWakeCount } from "../../core/wake/index.js";
 import { terminalOptions } from "../../core/terminal.js";
 import { logAudit } from "../../core/audit.js";
 import type { TerminalSettings } from "@conflux/shared";
@@ -30,13 +33,15 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: ServerContext)
         terminal: getTerminalSettings(db),
         options: terminalOptions(),
         auto_wake: getAutoWake(db),
+        wake_max_concurrent: getWakeMaxConcurrent(db),
+        wake_active_count: getActiveWakeCount(),
       });
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
-  app.put<{ Body: Partial<TerminalSettings> & { auto_wake?: boolean } }>(
+  app.put<{ Body: Partial<TerminalSettings> & { auto_wake?: boolean; wake_max_concurrent?: number } }>(
     "/settings/terminal",
     {
       schema: {
@@ -47,6 +52,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: ServerContext)
             claude_path: { type: "string", maxLength: 500 },
             codex_path: { type: "string", maxLength: 500 },
             auto_wake: { type: "boolean" },
+            wake_max_concurrent: { type: "number", minimum: 0, maximum: 20 },
           },
         },
       },
@@ -55,12 +61,19 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: ServerContext)
       try {
         const terminal = saveTerminalSettings(db, req.body);
         if (typeof req.body.auto_wake === "boolean") setAutoWake(db, req.body.auto_wake);
+        if (typeof req.body.wake_max_concurrent === "number") {
+          setWakeMaxConcurrent(db, req.body.wake_max_concurrent);
+        }
         logAudit(db, {
           interface: "http",
           action: "save_terminal_settings",
           args: { terminal: terminal.terminal },
         });
-        return reply.send({ terminal, auto_wake: getAutoWake(db) });
+        return reply.send({
+          terminal,
+          auto_wake: getAutoWake(db),
+          wake_max_concurrent: getWakeMaxConcurrent(db),
+        });
       } catch (err) {
         return sendError(reply, err);
       }
