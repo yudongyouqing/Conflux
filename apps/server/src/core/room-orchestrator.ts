@@ -9,7 +9,6 @@ import { badge, flattenOneLine } from "./inject-format.js";
 import { tmuxInject } from "./wake/tmux-inject.js";
 import { roomMembers, getChatRoom } from "./chat-rooms.js";
 import { askAndMaybeWake } from "./ask.js";
-import { isCommercial } from "./license.js";
 
 /**
  * Room orchestration engine (#152): agents coordinate through a shared room
@@ -30,6 +29,7 @@ export interface RoomTask {
   room_id: number;
   initiator_session_id: string;
   executor_session_id: string;
+  task_token: string;
   prompt: string;
   status: "pending" | "running" | "done" | "failed";
   result: string | null;
@@ -49,12 +49,16 @@ export function createTask(
   },
 ): RoomTask {
   const now = nowIso();
+  // Generate a one-shot task token (32-char hex) for split-brain-free validation
+  const task_token = Array.from(crypto.getRandomValues(new Uint8Array(16)))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
   const res = db
     .prepare(
-      `INSERT INTO room_tasks (room_id, initiator_session_id, executor_session_id, prompt, status, created_at)
-       VALUES (?, ?, ?, ?, 'pending', ?)`,
+      `INSERT INTO room_tasks (room_id, initiator_session_id, executor_session_id, task_token, prompt, status, created_at)
+       VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
     )
-    .run(input.room_id, input.initiator_session_id, input.executor_session_id, input.prompt, now);
+    .run(input.room_id, input.initiator_session_id, input.executor_session_id, task_token, input.prompt, now);
   return getTask(db, Number(res.lastInsertRowid))!;
 }
 
@@ -71,6 +75,7 @@ function toTask(r: Record<string, unknown>): RoomTask {
     room_id: r.room_id as number,
     initiator_session_id: r.initiator_session_id as string,
     executor_session_id: r.executor_session_id as string,
+    task_token: r.task_token as string,
     prompt: r.prompt as string,
     status: r.status as RoomTask["status"],
     result: (r.result as string) ?? null,
@@ -97,12 +102,12 @@ export function summonAgent(
   const task = createTask(db, input);
 
   // Try live injection first, fall back to headless wake
-  const injected = injectIntoProcess(db, input.executor_session_id, input.prompt, task.id);
+  const injected = injectIntoProcess(db, input.executor_session_id, input.prompt, task.id, task.task_token);
   let method = injected ? "tmux" : "";
 
   if (!injected) {
     // Fallback: headless wake the agent to process the task
-    const woke = headlessWakeForTask(db, input.executor_session_id, input.prompt, task.id);
+    const woke = headlessWakeForTask(db, input.executor_session_id, input.prompt, task.id, task.task_token);
     method = woke ? "headless" : "failed";
   }
 
@@ -116,15 +121,16 @@ export function summonAgent(
 /**
  * Write a result: mark task done, check if all expected tasks are complete,
  * if so summon the initiator back to read results.
+ * Now uses task_token for split-brain-free validation instead of executor_session_id.
  */
 export function writeResult(
   db: DB,
-  input: { task_id: number; executor_session_id: string; result: string },
+  input: { task_id: number; task_token: string; result: string },
 ): { task: RoomTask; allDone: boolean; summonedInitiator: boolean } {
   const task = getTask(db, input.task_id);
   if (!task) throw new Error(`task not found: ${input.task_id}`);
-  if (task.executor_session_id !== input.executor_session_id) {
-    throw new Error("not the executor of this task");
+  if (task.task_token !== input.task_token) {
+    throw new Error("invalid task token");
   }
 
   db.prepare(
@@ -204,9 +210,6 @@ export function broadcastToRoom(
   db: DB,
   input: { room_id: number; sender_session_id: string; prompt: string },
 ): BroadcastResult {
-  if (!isCommercial()) {
-    throw new Error("Room broadcast is a commercial feature. Set CONFLUX_COMMERCIAL=1 to enable.");
-  }
   const room = getChatRoom(db, input.room_id);
   if (!room) throw new Error(`room not found: ${input.room_id}`);
 
@@ -295,6 +298,7 @@ function headlessWakeForTask(
   sessionId: string,
   prompt: string,
   taskId: number,
+  taskToken: string,
 ): boolean {
   const session = getSession(db, sessionId);
   if (!session) return false;
@@ -313,7 +317,7 @@ function headlessWakeForTask(
   });
   if ("refuse" in plan) return false;
 
-  const wrapped = `${badge({ label: "聊天室任务", ref: `task #${taskId}` })} ${prompt}\n(这是一个聊天室任务。处理完后用 Conflux 的 room_write 工具写入结果，task_id=${taskId})`;
+  const wrapped = `${badge({ label: "聊天室任务", ref: `task #${taskId}` })} ${prompt}\n(这是一个聊天室任务。处理完后用 Conflux 的 room_write 工具写入结果，task_id=${taskId}，task_token="${taskToken}")`;
   const launch = launchWakeRun({
     db,
     sessionId,
@@ -335,6 +339,7 @@ function injectIntoProcess(
   sessionId: string,
   prompt: string,
   taskId: number,
+  taskToken: string,
 ): boolean {
   const session = getSession(db, sessionId);
   if (!session) return false;
@@ -347,7 +352,7 @@ function injectIntoProcess(
   if (Number.isFinite(agentId) && agentId > 0) {
     const wrapped = `${badge({ label: "聊天室任务", ref: `task #${taskId}` })} ${flattenOneLine(
       prompt,
-    )}（完成后用 Conflux 的 room_write 写入结果，task_id=${taskId}）`;
+    )}（完成后用 Conflux 的 room_write 写入结果，task_id=${taskId}，task_token="${taskToken}"）`;
     if (tmuxInject(String(agentId), wrapped)) {
       db.prepare(`UPDATE room_tasks SET status = 'running' WHERE id = ?`).run(taskId);
       return true;
