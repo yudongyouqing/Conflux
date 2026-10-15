@@ -80,3 +80,16 @@ export function withMcpConfig(command: string, mcpConfigPath?: string | null): s
   if (!mcpConfigPath) return command;
   return `${command} --mcp-config ${cmdQuote(mcpConfigPath)}`;
 }
+
+/**
+ * INTERACTIVE wake command for the tmux path (#162): resume the REAL
+ * conversation in a visible, attachable TUI instead of a headless zombie.
+ * No `-p` — the mail arrives as a typed prompt once the TUI has painted.
+ * The MCP pre-auth carries over because nobody may be watching when the
+ * woken session tries to reply_ask.
+ */
+export function tmuxWakeCommand(sessionId: string, executable: string): string {
+  return `${resumeCommand("claude", sessionId, executable)} --allowedTools ${cmdQuote(
+    HEADLESS_ALLOWED_TOOLS,
+  )}`;
+}

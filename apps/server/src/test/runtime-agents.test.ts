@@ -33,6 +33,23 @@ after(() => {
     // temp dir disposal is best-effort on Windows file locks
   }
 });
+
+// deterministic tmux IO: dry-run tests pin the branch instead of probing
+// whatever machine they happen to run on
+import type { TmuxIO } from "../core/mail-push.js";
+const noTmuxIO = (): TmuxIO => ({
+  available: () => false,
+  alive: () => false,
+  paneForPid: () => null,
+  send: () => false,
+  launch: () => false,
+  capture: () => "",
+});
+const withTmuxIO = (): TmuxIO => ({
+  ...noTmuxIO(),
+  available: () => true,
+});
+
 import { makeDb } from "./helpers.js";
 
 const { db, cleanup } = makeDb();
@@ -224,7 +241,10 @@ test("wakeSessionForMail: guards, dedup and command shape", () => {
     assert.ok(idle.command?.trimEnd().endsWith("-p"), "headless prompt via stdin");
   }
 
-  // offline claude session → dry-run returns the full wake command
+  // offline claude session → dry-run returns the full wake command.
+  // io injected: with tmux (#162) the offline wake is an INTERACTIVE tmux
+  // relaunch — the mail arrives as a typed prompt, not stdin; without tmux
+  // (Windows / bare CI) the headless stdin form is unchanged.
   registerSession(db, {
     id: "wake-dead",
     name: "dead",
@@ -233,12 +253,26 @@ test("wakeSessionForMail: guards, dedup and command shape", () => {
   });
   db.prepare(`UPDATE sessions SET status = 'stale' WHERE id = 'wake-dead'`).run();
   assert.deepEqual(
-    wakeSessionForMail(db, "wake-dead", { dryRun: true }),
+    wakeSessionForMail(db, "wake-dead", { dryRun: true, io: noTmuxIO() }),
     { woke: false, reason: "no transcript (zero-turn conversation)" },
     "no transcript → cannot resume",
   );
   makeTranscript("wake-dead", "C:/Project folder/项目/muiltchat");
-  const w = wakeSessionForMail(db, "wake-dead", { dryRun: true, claudeHome: FAKE_HOME });
+  const wTmux = wakeSessionForMail(db, "wake-dead", {
+    dryRun: true,
+    claudeHome: FAKE_HOME,
+    io: withTmuxIO(),
+  });
+  assert.equal(wTmux.woke, true);
+  if (wTmux.woke) {
+    assert.ok(wTmux.command?.includes("--resume wake-dead"), "resumes the conversation");
+    assert.ok(!wTmux.command?.includes("-p"), "interactive TUI, not headless -p");
+  }
+  const w = wakeSessionForMail(db, "wake-dead", {
+    dryRun: true,
+    claudeHome: FAKE_HOME,
+    io: noTmuxIO(),
+  });
   assert.equal(w.woke, true);
   if (w.woke) {
     assert.ok(w.command?.includes("--resume wake-dead"), "resumes the conversation");

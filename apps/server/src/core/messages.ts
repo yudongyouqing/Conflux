@@ -3,6 +3,7 @@ import { nowIso } from "./db.js";
 import { recordEdge, touchEdge } from "./graph.js";
 import { WEB_CONSOLE_ID, type Message, type MessageStatus } from "@conflux/shared";
 import { PRIORITY_RANK, sessionPriority } from "./sessions.js";
+import { badge, flattenOneLine, truncateForTyping } from "./inject-format.js";
 
 export type { Message, MessageStatus };
 
@@ -272,56 +273,55 @@ export function forwardInboxFromPid(db: DB, claudePid: number, successorId: stri
   return res.changes;
 }
 
-/**
- * Short stdout notice for hook events (UserPromptSubmit/SessionStart stdout
- * is injected into the conversation context). Returns null when there is
- * nothing unread — hooks must stay silent in the common case. Only
- * still-pending (never even seen) messages trigger a notice, so the nag
- * stops once the session actually runs check_inbox.
- */
-export function formatInboxNotice(db: DB, sessionId: string): string | null {
-  const notices: string[] = [];
+// ---- undelivered mail: one gather for two renderers (#162) --------------------
+//
+// The hook stdout notice (context injection — dim) and the typed prompt
+// (tmux send-keys — prompt-level visibility) render the SAME undelivered
+// mail, so gathering + delivery marking live here once.
 
-  // 1) replies to MY questions — pushed in FULL with clear marking, once
-  //    (#102: the asker's CLI must see the answer without check_replies)
+export interface MailItem {
+  id: number;
+  kind: "reply" | "question";
+  /** sender's display name (session name, falling back to id8) */
+  from: string;
+  /** flattened body, capped with a channel-show hint when truncated */
+  body: string;
+}
+
+const MAIL_BODY_LIMIT = 1200;
+
+/**
+ * Undelivered mail for a session, oldest first: replies to its questions
+ * (≤3) then questions addressed to it (≤2). Pure read — nothing is marked;
+ * call markMailDelivered only after the mail actually reached the session.
+ */
+export function gatherUnseenMail(db: DB, sessionId: string): MailItem[] {
+  const items: MailItem[] = [];
+
+  // replies to MY questions — the channel direction is fixed (from asked,
+  // to answered), so the REPLIER on a reply row is to_session. Joining
+  // from_session here used to badge the reply with the asker's own name.
   const replies = db
     .prepare(
-      `SELECT m.id, m.reply, m.question, s.name, substr(m.from_session, 1, 8) AS sid8
-       FROM messages m LEFT JOIN sessions s ON s.id = m.from_session
+      `SELECT m.id, m.reply, s.name, substr(m.to_session, 1, 8) AS sid8
+       FROM messages m LEFT JOIN sessions s ON s.id = m.to_session
        WHERE m.from_session = ? AND m.reply IS NOT NULL AND m.reply_seen_at IS NULL
        ORDER BY m.id ASC LIMIT 3`,
     )
-    .all(sessionId) as {
-    id: number;
-    reply: string;
-    question: string;
-    name: string | null;
-    sid8: string;
-  }[];
-  const REPLY_LIMIT = 1200;
+    .all(sessionId) as { id: number; reply: string; name: string | null; sid8: string }[];
   for (const r of replies) {
-    const from = r.name ?? r.sid8;
-    const full = r.reply.replace(/\s+/g, " ").trim();
-    const body =
-      full.length > REPLY_LIMIT
-        ? full.slice(0, REPLY_LIMIT) + `…(截断，channel show ${r.id} 看全文)`
-        : full;
-    notices.push(
-      `── Conflux · 回复 ← ${from} (msg #${r.id}) ──\n` +
-        `  ${body}\n` +
-        `── 追问 ask_session · 查通道 channel show ${r.id} ──`,
-    );
-  }
-  if (replies.length > 0) {
-    db.prepare(
-      `UPDATE messages SET reply_seen_at = ? WHERE id IN (${replies.map(() => "?").join(",")})`,
-    ).run(nowIso(), ...replies.map((r) => r.id));
+    items.push({
+      id: r.id,
+      kind: "reply",
+      from: r.name ?? r.sid8,
+      body: truncateForTyping(
+        flattenOneLine(r.reply),
+        MAIL_BODY_LIMIT,
+        `channel show ${r.id} 看全文`,
+      ),
+    });
   }
 
-  // 2) pending questions addressed to me — pushed in FULL (#102 target
-  //    side): the AI reads the question directly in its context and can
-  //    reply_ask without a check_inbox round trip. Marked seen so the full
-  //    text never repeats; the asker's "对方已看" receipt is honest too.
   const rows = db
     .prepare(
       `SELECT m.id, m.question, s.name, substr(m.from_session, 1, 8) AS sid8
@@ -330,28 +330,80 @@ export function formatInboxNotice(db: DB, sessionId: string): string | null {
        ORDER BY m.id ASC LIMIT 2`,
     )
     .all(sessionId) as { id: number; question: string; name: string | null; sid8: string }[];
-  const QUESTION_LIMIT = 1200;
   for (const q of rows) {
-    const from = q.name ?? q.sid8;
-    const full = q.question.replace(/\s+/g, " ").trim();
-    const body =
-      full.length > QUESTION_LIMIT
-        ? full.slice(0, QUESTION_LIMIT) + `…(截断，channel show ${q.id} 看全文)`
-        : full;
-    notices.push(
-      `── Conflux · 提问 → 你 (msg #${q.id}) 来自 ${from} ──\n` +
-        `  ${body}\n` +
-        `── 回复 reply_ask ──`,
-    );
-    db.prepare(`UPDATE messages SET status = 'seen' WHERE id = ?`).run(q.id);
+    items.push({
+      id: q.id,
+      kind: "question",
+      from: q.name ?? q.sid8,
+      body: truncateForTyping(
+        flattenOneLine(q.question),
+        MAIL_BODY_LIMIT,
+        `channel show ${q.id} 看全文`,
+      ),
+    });
   }
-  if (rows.length > 0) {
+  return items;
+}
+
+/**
+ * Record delivery of gathered mail: replies get their receipt timestamp,
+ * questions go seen (and, as before, one noticed question sweeps every
+ * still-pending question for the session — they'd be stale anyway).
+ */
+export function markMailDelivered(db: DB, sessionId: string, items: MailItem[]): void {
+  const replyIds = items.filter((i) => i.kind === "reply").map((i) => i.id);
+  if (replyIds.length > 0) {
+    db.prepare(
+      `UPDATE messages SET reply_seen_at = ? WHERE id IN (${replyIds.map(() => "?").join(",")})`,
+    ).run(nowIso(), ...replyIds);
+  }
+  if (items.some((i) => i.kind === "question")) {
+    for (const id of items.filter((i) => i.kind === "question").map((i) => i.id)) {
+      db.prepare(`UPDATE messages SET status = 'seen' WHERE id = ?`).run(id);
+    }
     db.prepare(
       `UPDATE messages SET status = 'seen' WHERE to_session = ? AND status = 'pending'`,
     ).run(sessionId);
   }
+}
 
-  return notices.length === 0 ? null : notices.join("\n\n");
+/**
+ * Render gathered mail as ONE typed prompt line (#162): badged with
+ * provenance, flattened (send-keys types literal characters — a newline
+ * submits early), so it lands in the TUI exactly like a user prompt.
+ */
+export function formatTypedMailPrompt(items: MailItem[]): string | null {
+  if (items.length === 0) return null;
+  return items
+    .map((item) =>
+      item.kind === "reply"
+        ? `${badge({ label: "回复", from: item.from, ref: `msg #${item.id}` })} ${item.body} —— 追问用 ask_session，全文 channel show ${item.id}`
+        : `${badge({ label: "提问", from: item.from, ref: `msg #${item.id}` })} ${item.body} —— 用 Conflux 的 reply_ask 回复 msg #${item.id}`,
+    )
+    .join(" ｜ ");
+}
+
+/**
+ * Short stdout notice for hook events (UserPromptSubmit/SessionStart stdout
+ * is injected into the conversation context). Returns null when there is
+ * nothing unread — hooks must stay silent in the common case. Only
+ * still-pending (never even seen) messages trigger a notice, so the nag
+ * stops once the session actually runs check_inbox.
+ */
+export function formatInboxNotice(db: DB, sessionId: string): string | null {
+  const items = gatherUnseenMail(db, sessionId);
+  if (items.length === 0) return null;
+  const notices = items.map((item) =>
+    item.kind === "reply"
+      ? `── Conflux · 回复 ← ${item.from} (msg #${item.id}) ──\n` +
+        `  ${item.body}\n` +
+        `── 追问 ask_session · 查通道 channel show ${item.id} ──`
+      : `── Conflux · 提问 → 你 (msg #${item.id}) 来自 ${item.from} ──\n` +
+        `  ${item.body}\n` +
+        `── 回复 reply_ask ──`,
+  );
+  markMailDelivered(db, sessionId, items);
+  return notices.join("\n\n");
 }
 
 /**
