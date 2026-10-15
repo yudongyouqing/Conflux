@@ -50,7 +50,7 @@ test("summon → write result → initiator notified when all done", () => {
   // Agent B writes result
   const r1 = writeResult(db, {
     task_id: t1.id,
-    executor_session_id: "agent-b",
+    task_token: t1.task_token,
     result: "B 的分析结果",
   });
   assert.equal(r1.task.status, "done");
@@ -59,7 +59,7 @@ test("summon → write result → initiator notified when all done", () => {
   // Agent C writes result → all done
   const r2 = writeResult(db, {
     task_id: t2.id,
-    executor_session_id: "agent-c",
+    task_token: t2.task_token,
     result: "C 的架构建议",
   });
   assert.equal(r2.task.status, "done");
@@ -101,7 +101,7 @@ test("cascade: executor can summon other agents mid-execution", () => {
   // D completes → B is notified (B's sub-task done)
   const rD = writeResult(db, {
     task_id: tD.id,
-    executor_session_id: "agent-d",
+    task_token: tD.task_token,
     result: "D 的数据",
   });
   assert.equal(rD.allDone, true, "B 的子任务全完成");
@@ -109,7 +109,7 @@ test("cascade: executor can summon other agents mid-execution", () => {
   // B completes with D's data → human's task done
   const rB = writeResult(db, {
     task_id: tB.id,
-    executor_session_id: "agent-b",
+    task_token: tB.task_token,
     result: "B 综合了 D 的数据",
   });
   assert.equal(rB.allDone, true);
@@ -125,8 +125,8 @@ test("executor mismatch is rejected", () => {
     prompt: "test",
   });
   assert.throws(
-    () => writeResult(db, { task_id: task.id, executor_session_id: "agent-c", result: "wrong" }),
-    /not the executor/,
+    () => writeResult(db, { task_id: task.id, task_token: "wrong-token", result: "wrong" }),
+    /invalid task token/,
   );
 });
 
