@@ -79,6 +79,8 @@ export const api = {
     return get<{ messages: Message[] }>(`/messages?${qs.toString()}`);
   },
 
+  checkInbox: () => get<{ messages: Message[] }>("/messages/inbox"),
+
   getSessions: (status = "all") =>
     get<{ sessions: SessionSummary[] }>(`/sessions?status=${encodeURIComponent(status)}`),
 
