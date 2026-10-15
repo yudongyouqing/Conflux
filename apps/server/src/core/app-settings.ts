@@ -83,3 +83,15 @@ export function getAutoWake(db: DB): boolean {
 export function setAutoWake(db: DB, enabled: boolean): void {
   setSetting(db, "auto_wake", enabled ? "true" : "false");
 }
+
+/** Max concurrent wake processes (0 = unlimited). */
+export function getWakeMaxConcurrent(db: DB): number {
+  const val = getSetting(db, "wake_max_concurrent");
+  if (!val) return 3; // default
+  const n = Number.parseInt(val, 10);
+  return Number.isNaN(n) || n < 0 ? 3 : n;
+}
+
+export function setWakeMaxConcurrent(db: DB, max: number): void {
+  setSetting(db, "wake_max_concurrent", String(Math.max(0, max)));
+}

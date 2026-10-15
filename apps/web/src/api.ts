@@ -122,10 +122,25 @@ export const api = {
     post<{ opener: string }>(`/sessions/${encodeURIComponent(sessionId)}/open-terminal`, {}),
 
   getTerminalSettings: () =>
-    get<{ terminal: TerminalSettings; options: TerminalOption[] }>("/settings/terminal"),
+    get<{
+      terminal: TerminalSettings;
+      options: TerminalOption[];
+      auto_wake: boolean;
+      wake_max_concurrent: number;
+      wake_active_count: number;
+    }>("/settings/terminal"),
 
-  saveTerminalSettings: (body: Partial<TerminalSettings>) =>
-    put<{ terminal: TerminalSettings }>("/settings/terminal", body),
+  saveTerminalSettings: (
+    body: Partial<TerminalSettings> & {
+      auto_wake?: boolean;
+      wake_max_concurrent?: number;
+    },
+  ) =>
+    put<{
+      terminal: TerminalSettings;
+      auto_wake: boolean;
+      wake_max_concurrent: number;
+    }>("/settings/terminal", body),
 
   webAsk: (body: { to_session: string; question: string; from_session?: string }) =>
     post<{ message: Message }>("/web/ask", body),
