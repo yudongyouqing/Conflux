@@ -9,6 +9,8 @@ import { probeRuntimePids } from "./liveness.js";
 import { getTerminalSettings } from "./app-settings.js";
 import { badge, flattenOneLine } from "./inject-format.js";
 import { tmuxInject } from "./wake/tmux-inject.js";
+import { roomMembers, getChatRoom } from "./chat-rooms.js";
+import { askAndMaybeWake } from "./ask.js";
 
 /**
  * Room orchestration engine (#152): agents coordinate through a shared room
@@ -180,6 +182,103 @@ export function roomStatus(db: DB, roomId: number) {
     )
     .all(roomId) as { executor_session_id: string; status: string; n: number }[];
   return rows;
+}
+
+// ---- broadcast self-select (#151) ----------------------------------------------
+
+export interface BroadcastResult {
+  room_id: number;
+  /** members actually addressed (sender excluded) */
+  members: string[];
+  /** created message ids, parallel to members */
+  message_ids: number[];
+}
+
+/**
+ * Broadcast a prompt to every room member except the sender: each member
+ * gets the question via askAndMaybeWake (#163 typed delivery — badge +
+ * full text into their terminal, or hook notice / wake as fallback) and
+ * self-selects whether to answer. Replies come back through reply_ask and
+ * stay visible in the room's shared thread (messages.room_id).
+ */
+export function broadcastToRoom(
+  db: DB,
+  input: { room_id: number; sender_session_id: string; prompt: string },
+): BroadcastResult {
+  const room = getChatRoom(db, input.room_id);
+  if (!room) throw new Error(`room not found: ${input.room_id}`);
+
+  const members = roomMembers(db, input.room_id).filter((m) => m !== input.sender_session_id);
+  // self-select clause: silence must be an explicitly allowed answer, or
+  // every member burns a turn replying "not me"
+  const question =
+    `${input.prompt}（聊天室「${room.name}」广播：适合你回答就用 Conflux 的 ` +
+    `reply_ask 回复本条消息，回复会进房间共享线程；不适合则保持沉默，不要做其他事）`;
+
+  const message_ids: number[] = [];
+  for (const member of members) {
+    try {
+      const { message } = askAndMaybeWake(db, {
+        from_session: input.sender_session_id,
+        to_session: member,
+        question,
+        room_id: input.room_id,
+      });
+      message_ids.push(message.id);
+    } catch (err) {
+      // one unreachable member must not block the rest (priority gate etc.)
+      logger.warn(
+        { room: input.room_id, member, err: err instanceof Error ? err.message : String(err) },
+        "broadcast: member skipped",
+      );
+    }
+  }
+  logger.info(
+    { room: input.room_id, sender: input.sender_session_id, addressed: members.length },
+    "room broadcast sent",
+  );
+  return { room_id: input.room_id, members, message_ids };
+}
+
+/**
+ * The room's shared thread: broadcast questions and their replies
+ * (messages.room_id), oldest first — the human-visible conversation.
+ */
+export function listRoomMessages(db: DB, roomId: number) {
+  const rows = db
+    .prepare(
+      `SELECT m.id, m.room_id, m.from_session, m.to_session, m.question, m.reply, m.status, m.created_at,
+              s1.name AS from_name, s2.name AS to_name
+       FROM messages m
+       LEFT JOIN sessions s1 ON s1.id = m.from_session
+       LEFT JOIN sessions s2 ON s2.id = m.to_session
+       WHERE m.room_id = ?
+       ORDER BY m.id ASC`,
+    )
+    .all(roomId) as Array<{
+    id: number;
+    room_id: number;
+    from_session: string;
+    to_session: string;
+    question: string;
+    reply: string | null;
+    status: string;
+    created_at: string;
+    from_name: string | null;
+    to_name: string | null;
+  }>;
+  return rows.map((r) => ({
+    id: r.id,
+    room_id: r.room_id,
+    from_session: r.from_session,
+    to_session: r.to_session,
+    from_name: r.from_name ?? r.from_session.slice(0, 8),
+    to_name: r.to_name ?? r.to_session.slice(0, 8),
+    question: r.question,
+    reply: r.reply,
+    status: r.status,
+    created_at: r.created_at,
+  }));
 }
 
 // ---- internals ---------------------------------------------------------------

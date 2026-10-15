@@ -44,6 +44,10 @@ const STATUS_COLOR: Record<string, string> = {
  */
 export function RoomChat({ roomId, roomName, members, onBack }: RoomChatProps) {
   const [tasks, setTasks] = useState<RoomTask[]>([]);
+  const [thread, setThread] = useState<Array<{
+    id: number; from_name: string; to_name: string; question: string;
+    reply: string | null; created_at: string;
+  }>>([]);
   const [senderIdentity, setSenderIdentity] = useState<string>("web-console");
   const [selectedExecutor, setSelectedExecutor] = useState<string>("");
   const [prompt, setPrompt] = useState("");
@@ -97,13 +101,17 @@ export function RoomChat({ roomId, roomName, members, onBack }: RoomChatProps) {
       }
       if (e.key === "Escape") { setMentionQuery(null); return; }
     }
-    if (e.key === "Enter" && !e.shiftKey) summon();
+    if (e.key === "Enter" && !e.shiftKey) send();
   };
 
   const fetchTasks = useCallback(async () => {
     try {
-      const r = await api.chatRooms.orchestrate(roomId);
+      const [r, t] = await Promise.all([
+        api.chatRooms.orchestrate(roomId),
+        api.chatRooms.messages(roomId),
+      ]);
       setTasks(r.tasks);
+      setThread(t.messages);
     } catch { /* server unreachable */ }
   }, [roomId]);
 
@@ -114,13 +122,18 @@ export function RoomChat({ roomId, roomName, members, onBack }: RoomChatProps) {
     return () => clearInterval(pollRef.current);
   }, [fetchTasks]);
 
-  const summon = async () => {
+  const send = async () => {
     const text = prompt.trim();
-    if (!text || !selectedExecutor || sending) return;
+    if (!text || sending) return;
     setSending(true);
     setPrompt("");
     try {
-      await api.chatRooms.summon(roomId, selectedExecutor, text, senderIdentity);
+      // @target = 定向任务（#152）；不 @ = 广播，全员自选回答（#151）
+      if (selectedExecutor) {
+        await api.chatRooms.summon(roomId, selectedExecutor, text, senderIdentity);
+      } else {
+        await api.chatRooms.broadcast(roomId, text, senderIdentity);
+      }
       await fetchTasks();
     } catch { /* next poll will pick up */ }
     finally { setSending(false); }
@@ -179,6 +192,28 @@ export function RoomChat({ roomId, roomName, members, onBack }: RoomChatProps) {
               </div>
             );
           })
+        )}
+
+        {/* broadcast shared thread (#151): questions + self-selected replies */}
+        {thread.length > 0 && (
+          <div className="pt-2">
+            <div className="text-2xs text-ink-faint mb-2">广播讨论</div>
+            <div className="space-y-3">
+              {thread.map((m) => (
+                <div key={m.id} className="rounded-xl bg-surface p-3 shadow-sm space-y-1.5">
+                  <div className="text-2xs text-ink-faint">
+                    {m.from_name} → {m.to_name} · #{m.id}
+                  </div>
+                  <div className="text-xs text-ink-muted">{m.question}</div>
+                  {m.reply && (
+                    <div className="text-xs text-ink bg-accent-soft rounded-lg px-3 py-2 border-l-2 border-accent">
+                      {m.reply}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
         )}
       </div>
 
@@ -246,12 +281,12 @@ export function RoomChat({ roomId, roomName, members, onBack }: RoomChatProps) {
             className="flex-1 px-3.5 py-2.5 rounded-xl border border-line text-xs text-ink bg-surface placeholder-ink-faint focus:border-accent outline-none"
           />
           <button
-            onClick={summon}
-            disabled={!prompt.trim() || !selectedExecutor || sending}
+            onClick={send}
+            disabled={!prompt.trim() || sending}
             className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-accent text-white text-xs font-medium hover:bg-accent-deep disabled:opacity-40"
           >
             {sending ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
-            召唤
+            {selectedExecutor ? "召唤" : "广播"}
           </button>
         </div>
       </div>

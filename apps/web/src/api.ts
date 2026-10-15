@@ -271,5 +271,18 @@ export const api = {
         `/chat-rooms/${roomId}/summon`,
         { executor_session_id: executorSessionId, prompt, sender_session_id: senderIdentity ?? "web-console" },
       ),
+    broadcast: (roomId: number, prompt: string, senderIdentity?: string) =>
+      post<{ room_id: number; members: string[]; message_ids: number[] }>(
+        `/chat-rooms/${roomId}/broadcast`,
+        { prompt, sender_session_id: senderIdentity ?? "web-console" },
+      ),
+    messages: (roomId: number) =>
+      get<{
+        messages: Array<{
+          id: number; room_id: number; from_session: string; to_session: string;
+          from_name: string; to_name: string; question: string;
+          reply: string | null; status: string; created_at: string;
+        }>;
+      }>(`/chat-rooms/${roomId}/messages`),
   },
 };

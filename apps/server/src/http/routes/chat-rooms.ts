@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { createChatRoom, deleteChatRoom, getChatRoom, listChatRooms, roomMembers, joinRoom, leaveRoom } from "../../core/chat-rooms.js";
-import { readRoom, roomStatus, summonAgent } from "../../core/room-orchestrator.js";
+import { readRoom, roomStatus, summonAgent, broadcastToRoom, listRoomMessages } from "../../core/room-orchestrator.js";
 import { logAudit } from "../../core/audit.js";
 import type { ServerContext } from "../context.js";
 
@@ -102,6 +102,37 @@ export function registerChatRoomRoutes(app: FastifyInstance, ctx: ServerContext)
         result: { task_id: result.task.id, method: result.method },
       });
       return reply.send(result);
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // POST /chat-rooms/:id/broadcast — one prompt, every member self-selects (#151)
+  app.post<
+    { Params: { id: string }; Body: { prompt: string; sender_session_id?: string } }
+  >("/chat-rooms/:id/broadcast", {}, async (req, reply) => {
+    try {
+      const result = broadcastToRoom(db, {
+        room_id: Number(req.params.id),
+        sender_session_id: req.body.sender_session_id ?? "web-console",
+        prompt: req.body.prompt,
+      });
+      logAudit(db, {
+        interface: "http",
+        action: "room_broadcast",
+        args: { room_id: Number(req.params.id), members: result.members.length },
+        result: { message_ids: result.message_ids },
+      });
+      return reply.send(result);
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // GET /chat-rooms/:id/messages — the room's shared thread (#151)
+  app.get<{ Params: { id: string } }>("/chat-rooms/:id/messages", {}, async (req, reply) => {
+    try {
+      return reply.send({ messages: listRoomMessages(db, Number(req.params.id)) });
     } catch (err) {
       return sendError(reply, err);
     }

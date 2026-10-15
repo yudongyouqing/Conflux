@@ -14,6 +14,8 @@ export interface AskOptions {
   from_session: string;
   to_session: string;
   question: string;
+  /** chat-room shared thread marker (#151): replies stay visible in the room */
+  room_id?: number | null;
 }
 
 export interface AskOutcome {
