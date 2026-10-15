@@ -8,6 +8,7 @@ import {
   type Message,
 } from "./messages.js";
 import { getSession, sessionBusy } from "./sessions.js";
+import { getAutoWake } from "./app-settings.js";
 import { realTmuxIO, tmuxSessionName, type TmuxIO } from "./wake/tmux-inject.js";
 
 export type { TmuxIO };
@@ -51,8 +52,15 @@ export function pushMailTyped(db: DB, sessionId: string, io: TmuxIO = realTmuxIO
     // unreadable metadata — treat as empty
   }
 
+  // stamped = a USER session woken into tmux by us: same busy caution as the
+  // pane path — mid-turn the TUI may sit on a permission dialog and typed
+  // text would answer it. Runtime agents (below) keep always-inject: their
+  // queue box is the lifeline rooms summon through.
   const stamped = typeof meta.tmux_session === "string" ? meta.tmux_session : null;
-  if (stamped && io.alive(stamped)) return deliver(db, sessionId, stamped, "stamped-tmux", io);
+  const busy = sessionBusy(session.metadata);
+  if (stamped && !busy && io.alive(stamped)) {
+    return deliver(db, sessionId, stamped, "stamped-tmux", io);
+  }
 
   const agentId = Number(meta.agent_id);
   if (Number.isFinite(agentId) && agentId > 0) {
@@ -64,7 +72,7 @@ export function pushMailTyped(db: DB, sessionId: string, io: TmuxIO = realTmuxIO
   // the user's own terminal — see the claude-only / idle-only caveats above
   const pid = [meta.claude_pid, meta.runtime_pid].map(Number).find((n) => Number.isFinite(n) && n > 0) ?? null;
   const isClaude = (session.runtime ?? "claude") === "claude";
-  if (pid !== null && isClaude && session.status === "active" && !sessionBusy(session.metadata)) {
+  if (pid !== null && isClaude && session.status === "active" && !busy) {
     const pane = io.paneForPid(pid);
     if (pane) return deliver(db, sessionId, pane, "pane", io);
   }
@@ -100,6 +108,9 @@ export function replyAskAndPush(
   io: TmuxIO = realTmuxIO,
 ): Message {
   const msg = replyAsk(db, id, replierSessionId, reply);
+  // auto_wake is the user's consent switch for Conflux steering sessions —
+  // typing into terminals without it hijacks turns the setting exists to stop
+  if (!getAutoWake(db)) return msg;
   try {
     pushMailTyped(db, msg.from_session, io);
   } catch (err) {

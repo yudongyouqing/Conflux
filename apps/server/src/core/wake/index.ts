@@ -6,6 +6,7 @@ import { getSession, mergeSessionMeta } from "../sessions.js";
 import { hasTranscript } from "../live.js";
 import { pushMailTyped } from "../mail-push.js";
 import { AUTO_WAKE_PROMPT, tmuxWakeCommand } from "./commands.js";
+import { ensureWakeMcpConfig } from "./launcher.js";
 import { planClaudeWake } from "./claude.js";
 import { planCodexWake } from "./codex.js";
 import { launchWakeRun } from "./launcher.js";
@@ -45,6 +46,8 @@ export interface WakeOptions {
   io?: TmuxIO;
   /** timer scheduler — injectable for tests (default setTimeout) */
   schedule?: (fn: () => void, ms: number) => void;
+  /** #105 mcp-config mount for the tmux relaunch (defaults to the real one) */
+  mcpConfigPath?: string | null;
 }
 
 export function wakeSessionForMail(db: DB, sessionId: string, opts: WakeOptions = {}): WakeResult {
@@ -55,27 +58,25 @@ export function wakeSessionForMail(db: DB, sessionId: string, opts: WakeOptions 
   const session = getSession(db, sessionId);
   if (!session) return { woke: false, reason: "session not found" };
 
-  // dedup: an in-flight wake (or a recent one) must not stack
+  const io = opts.io ?? realTmuxIO;
+  const schedule = opts.schedule ?? ((fn, ms) => setTimeout(fn, ms));
   const now = (opts.now ?? new Date()).getTime();
+
+  // #162 typed delivery FIRST — before the dedup window, because typing
+  // spawns nothing to stack (dedup exists to stop process pile-ups). Busy
+  // user sessions resolve no target inside pushMailTyped and fall through
+  // to the busy skip below; a successful typed delivery stamps no dedup
+  // entry, so the next mail types too.
+  if (!opts.dryRun && io.available()) {
+    const pushed = pushMailTyped(db, sessionId, io);
+    if (pushed.pushed) return { woke: true };
+    // no typed target / send failed — fall through to the wake ladder
+  }
+
+  // dedup: an in-flight wake (or a recent one) must not stack
   const last = getSetting(db, `auto-wake:${sessionId}`);
   if (last && now - Date.parse(last) < AUTO_WAKE_DEDUP_MS) {
     return { woke: false, reason: "wake already in flight" };
-  }
-
-  const io = opts.io ?? realTmuxIO;
-  const schedule = opts.schedule ?? ((fn, ms) => setTimeout(fn, ms));
-
-  // #162 typed delivery first: if the target's terminal is reachable, the
-  // undelivered mail goes in as a badged prompt — no wake needed at all.
-  // (Busy user sessions resolve no pane target inside pushMailTyped and
-  // fall through to the busy skip below.)
-  if (!opts.dryRun && io.available()) {
-    const pushed = pushMailTyped(db, sessionId, io);
-    if (pushed.pushed) {
-      setSetting(db, `auto-wake:${sessionId}`, new Date(now).toISOString());
-      return { woke: true };
-    }
-    // no typed target / send failed — fall through to the wake ladder
   }
 
   let runtime: "claude" | "codex" = "claude";
@@ -108,7 +109,7 @@ export function wakeSessionForMail(db: DB, sessionId: string, opts: WakeOptions 
     // user-session namespace: conflux/<sessionId> (tmuxSessionName is the
     // runtime-AGENT namer — conflux/agent-<registry id> — never reuse it here)
     const name = `conflux/${sessionId}`;
-    const command = tmuxWakeCommand(sessionId, exe);
+    const command = tmuxWakeCommand(sessionId, exe, opts.mcpConfigPath ?? ensureWakeMcpConfig());
     if (opts.dryRun) return { woke: true, command };
     if (io.launch({ name, command, cwd: session.project_dir })) {
       mergeSessionMeta(db, sessionId, { tmux_session: name });

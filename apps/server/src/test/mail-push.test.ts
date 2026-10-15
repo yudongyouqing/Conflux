@@ -12,6 +12,7 @@ import {
   formatTypedMailPrompt,
 } from "../core/messages.js";
 import { pushMailTyped, replyAskAndPush, type TmuxIO } from "../core/mail-push.js";
+import { setSetting } from "../core/app-settings.js";
 
 const cleanups: Array<() => void> = [];
 after(() => cleanups.forEach((c) => c()));
@@ -185,6 +186,28 @@ test("pushMailTyped: busy session never gets pane injection (user may be typing)
   assert.deepEqual(rec.sends, []);
 });
 
+test("pushMailTyped: busy STAMPED session skips typing — mid-turn TUI may sit on a permission dialog", () => {
+  const db = freshDb();
+  seedChannel(db);
+  askSession(db, { from_session: "asker", to_session: "target", question: "在吗" });
+  mergeSessionMeta(db, "target", { tmux_session: "conflux/target", busy: true });
+
+  const { io, rec } = fakeIO({ aliveNames: ["conflux/target"] });
+  assert.equal(pushMailTyped(db, "target", io).pushed, false);
+  assert.deepEqual(rec.sends, [], "busy user session: typed text could answer a y/n dialog");
+});
+
+test("pushMailTyped: busy runtime agent still gets typed mail (queue injection is its lifeline)", () => {
+  const db = freshDb();
+  seedChannel(db);
+  askSession(db, { from_session: "asker", to_session: "target", question: "在吗" });
+  mergeSessionMeta(db, "target", { agent_id: 5, busy: true });
+
+  const { io, rec } = fakeIO({ aliveNames: ["conflux/agent-5"] });
+  assert.equal(pushMailTyped(db, "target", io).pushed, true);
+  assert.equal(rec.sends.length, 1);
+});
+
 test("pushMailTyped: send failure leaves mail pending — hook fallback still surfaces it", () => {
   const db = freshDb();
   seedChannel(db);
@@ -231,4 +254,34 @@ test("replyAskAndPush: the asker's pane receives the badged reply", () => {
   assert.equal(rec.sends[0].target, "%4");
   assert.ok(rec.sends[0].text.includes("[Conflux·回复 ← 目标会话 · msg #1]"));
   assert.ok(rec.sends[0].text.includes("收到，处理中"));
+});
+
+test("replyAskAndPush: auto_wake off means NO typed steering — the setting is consent", () => {
+  const db = freshDb();
+  seedChannel(db);
+  const m = askSession(db, { from_session: "asker", to_session: "target", question: "在吗" });
+  mergeSessionMeta(db, "asker", { claude_pid: 777 });
+  setSetting(db, "auto_wake", "false");
+
+  const { io, rec } = fakeIO({ pane: "%4" });
+  const msg = replyAskAndPush(db, m.id, "target", "收到", io);
+  assert.equal(msg.status, "replied", "the reply itself still lands");
+  assert.deepEqual(rec.sends, [], "no typing into terminals when auto_wake is off");
+  assert.equal(gatherUnseenMail(db, "asker").length, 1, "hook notice still owns delivery");
+});
+
+test("markMailDelivered never regresses a question that got answered mid-delivery", () => {
+  const db = freshDb();
+  seedChannel(db);
+  const m = askSession(db, { from_session: "asker", to_session: "target", question: "在吗" });
+  // gathered while pending…
+  const items = gatherUnseenMail(db, "target");
+  // …then answered before the (tmux-spawning) delivery finished
+  replyAsk(db, m.id, "target", "好了");
+  markMailDelivered(db, "target", items);
+  assert.equal(
+    getMessage(db, m.id)!.status,
+    "replied",
+    "a replied question must not be stamped back to seen",
+  );
 });
