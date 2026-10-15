@@ -357,10 +357,10 @@ export function markMailDelivered(db: DB, sessionId: string, items: MailItem[]):
       `UPDATE messages SET reply_seen_at = ? WHERE id IN (${replyIds.map(() => "?").join(",")})`,
     ).run(nowIso(), ...replyIds);
   }
+  // questions: the pending-only sweep covers every gathered question AND
+  // cannot regress one that got answered mid-delivery (gather → tmux spawns
+  // → mark leaves a window where replyAsk may have already set 'replied')
   if (items.some((i) => i.kind === "question")) {
-    for (const id of items.filter((i) => i.kind === "question").map((i) => i.id)) {
-      db.prepare(`UPDATE messages SET status = 'seen' WHERE id = ?`).run(id);
-    }
     db.prepare(
       `UPDATE messages SET status = 'seen' WHERE to_session = ? AND status = 'pending'`,
     ).run(sessionId);

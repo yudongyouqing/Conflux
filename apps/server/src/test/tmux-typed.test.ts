@@ -137,6 +137,50 @@ test("wake: offline claude session is relaunched in tmux and fed after boot", ()
   assert.equal(getMessage(db, m.id)!.status, "seen");
 });
 
+test("wake: typed delivery runs BEFORE the dedup window — typing spawns nothing to stack", () => {
+  const db = freshDb();
+  registerSession(db, { id: "asker", name: "提问方" });
+  registerSession(db, { id: "t-2", name: "在线目标" });
+  mergeSessionMeta(db, "t-2", { tmux_session: "conflux/t-2" });
+
+  const rec: Rec = { aliveNames: ["conflux/t-2"], launches: [], sends: [], captures: 0 };
+  const io = fakeIO(rec);
+
+  askSession(db, { from_session: "asker", to_session: "t-2", question: "第一个问题" });
+  assert.equal(wakeSessionForMail(db, "t-2", { io }).woke, true);
+  // 5s later, still inside the 90s dedup window
+  askSession(db, { from_session: "asker", to_session: "t-2", question: "第二个问题" });
+  const second = wakeSessionForMail(db, "t-2", {
+    io,
+    now: new Date(Date.now() + 5000),
+  });
+  assert.equal(second.woke, true, "dedup guards process stacking, not typing");
+  assert.equal(rec.sends.length, 2, "the second question must ALSO be typed");
+  assert.ok(rec.sends[1].text.includes("第二个问题"));
+});
+
+test("wake: offline tmux relaunch carries the #105 mcp-config mount", () => {
+  const db = freshDb();
+  registerSession(db, { id: "asker", name: "提问方" });
+  registerSession(db, { id: "off-3", name: "离线目标" });
+  askSession(db, { from_session: "asker", to_session: "off-3", question: "在吗" });
+  db.prepare(`UPDATE sessions SET status = 'stale' WHERE id = 'off-3'`).run();
+
+  const rec: Rec = { aliveNames: [], launches: [], sends: [], captures: 0 };
+  const pending: Array<() => void> = [];
+  wakeSessionForMail(db, "off-3", {
+    io: fakeIO(rec),
+    claudeHome: fakeClaudeHome("off-3"),
+    mcpConfigPath: "/tmp/wake-mcp-test.json",
+    schedule: (fn) => pending.push(fn),
+  });
+  assert.equal(rec.launches.length, 1);
+  assert.ok(
+    rec.launches[0].command.includes("--mcp-config"),
+    "a project that never mounted Conflux must still get the tools (#105)",
+  );
+});
+
 test("wake: TUI never becomes ready → mail stays pending for the hook fallback", () => {
   const db = freshDb();
   registerSession(db, { id: "asker", name: "提问方" });
