@@ -24,7 +24,8 @@ import {
 import { getSetting } from "../core/app-settings.js";
 import { publishContext, updateContext, deleteContext, listMyContext } from "../core/context.js";
 import { queryContext } from "../core/search.js";
-import { checkInbox, replyAsk, checkReplies, recordExchange } from "../core/messages.js";
+import { checkInbox, checkReplies, recordExchange } from "../core/messages.js";
+import { replyAskAndPush } from "../core/mail-push.js";
 import { getGraph } from "../core/graph.js";
 import { mergeSessionMeta } from "../core/sessions.js";
 import { logAudit } from "../core/audit.js";
@@ -673,7 +674,7 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
     },
     async ({ message_id, reply }) => {
       const r = await withAudit("reply_ask", { message_id, replyLen: reply.length }, () =>
-        replyAsk(db, message_id, sessionId, reply),
+        replyAskAndPush(db, message_id, sessionId, reply),
       );
       return json(r.ok ? { message: r.result } : { error: r.error });
     },

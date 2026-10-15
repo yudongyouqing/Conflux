@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 import { getSession } from "./sessions.js";
@@ -8,6 +7,8 @@ import { planClaudeWake } from "./wake/claude.js";
 import { wakeCommand, AUTO_WAKE_PROMPT } from "./wake/commands.js";
 import { probeRuntimePids } from "./liveness.js";
 import { getTerminalSettings } from "./app-settings.js";
+import { badge, flattenOneLine } from "./inject-format.js";
+import { tmuxInject } from "./wake/tmux-inject.js";
 
 /**
  * Room orchestration engine (#152): agents coordinate through a shared room
@@ -211,7 +212,7 @@ function headlessWakeForTask(
   });
   if ("refuse" in plan) return false;
 
-  const wrapped = `${prompt}\n(这是一个聊天室任务。处理完后用 Conflux 的 room_write 工具写入结果，task_id=${taskId})`;
+  const wrapped = `${badge({ label: "聊天室任务", ref: `task #${taskId}` })} ${prompt}\n(这是一个聊天室任务。处理完后用 Conflux 的 room_write 工具写入结果，task_id=${taskId})`;
   const launch = launchWakeRun({
     db,
     sessionId,
@@ -239,18 +240,17 @@ function injectIntoProcess(
   let meta: Record<string, unknown> = {};
   try { meta = JSON.parse(session.metadata ?? "{}"); } catch { /* ignore */ }
 
-  // Try tmux (Conflux-launched agents)
+  // Try tmux (Conflux-launched agents) — badged so the injected task is
+  // distinguishable from human typing (#162)
   const agentId = Number(meta.agent_id);
   if (Number.isFinite(agentId) && agentId > 0) {
-    try {
-      const name = `conflux/agent-${agentId}`;
-      execFileSync("tmux", ["has-session", "-t", name], { timeout: 2000, stdio: "ignore" });
-      const wrapped = `${prompt}\n(完成后用 Conflux 的 room_write 写入结果，task_id=${taskId})`;
-      execFileSync("tmux", ["send-keys", "-t", name, "-l", wrapped], { timeout: 3000, stdio: "ignore" });
-      execFileSync("tmux", ["send-keys", "-t", name, "Enter"], { timeout: 3000, stdio: "ignore" });
+    const wrapped = `${badge({ label: "聊天室任务", ref: `task #${taskId}` })} ${flattenOneLine(
+      prompt,
+    )}（完成后用 Conflux 的 room_write 写入结果，task_id=${taskId}）`;
+    if (tmuxInject(String(agentId), wrapped)) {
       db.prepare(`UPDATE room_tasks SET status = 'running' WHERE id = ?`).run(taskId);
       return true;
-    } catch { /* tmux not available */ }
+    }
   }
   return false;
 }
@@ -274,13 +274,10 @@ function notifyInitiator(
   const agentId = Number(meta.agent_id);
   if (!Number.isFinite(agentId) || agentId <= 0) return false;
 
-  try {
-    const name = `conflux/agent-${agentId}`;
-    execFileSync("tmux", ["has-session", "-t", name], { timeout: 2000, stdio: "ignore" });
-    const prompt = `你在聊天室的全部任务已完成。用 room_read 读取结果并继续。`;
-    execFileSync("tmux", ["send-keys", "-t", name, "-l", prompt], { timeout: 3000, stdio: "ignore" });
-    execFileSync("tmux", ["send-keys", "-t", name, "Enter"], { timeout: 3000, stdio: "ignore" });
+  const prompt = `${badge({ label: "任务完成通知" })} 你在聊天室的全部任务已完成。用 room_read 读取结果并继续。`;
+  if (tmuxInject(String(agentId), prompt)) {
     logger.info({ roomId, initiatorSessionId }, "room: initiator summoned");
     return true;
-  } catch { return false; }
+  }
+  return false;
 }
