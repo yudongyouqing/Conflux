@@ -1,0 +1,208 @@
+import { test, after } from "node:test";
+import assert from "node:assert/strict";
+import { makeDb } from "./helpers.js";
+import type { DB } from "../core/db.js";
+import { registerSession } from "../core/sessions.js";
+import { createChatRoom } from "../core/chat-rooms.js";
+import {
+  summonAgent,
+  writeResult,
+  readRoom,
+  roomStatus,
+} from "../core/room-orchestrator.js";
+
+const cleanups: Array<() => void> = [];
+after(() => cleanups.forEach((c) => c()));
+function freshDb(): DB {
+  const { db, cleanup } = makeDb();
+  cleanups.push(cleanup);
+  return db;
+}
+
+function setup(db: DB) {
+  registerSession(db, { id: "web-console", name: "Web 控制台" });
+  registerSession(db, { id: "agent-b", name: "Agent B" });
+  registerSession(db, { id: "agent-c", name: "Agent C" });
+  return createChatRoom(db, { name: "测试房间", members: ["agent-b", "agent-c"] });
+}
+
+test("summon → write result → initiator notified when all done", () => {
+  const db = freshDb();
+  const room = setup(db);
+
+  // Human summons two agents in parallel
+  const { task: t1 } = summonAgent(db, {
+    room_id: room.id,
+    initiator_session_id: "web-console",
+    executor_session_id: "agent-b",
+    prompt: "分析代码",
+  });
+  const { task: t2 } = summonAgent(db, {
+    room_id: room.id,
+    initiator_session_id: "web-console",
+    executor_session_id: "agent-c",
+    prompt: "架构建议",
+  });
+
+  assert.equal(t1.status, "pending");
+  assert.equal(t2.status, "pending");
+
+  // Agent B writes result
+  const r1 = writeResult(db, {
+    task_id: t1.id,
+    task_token: t1.task_token,
+    result: "B 的分析结果",
+  });
+  assert.equal(r1.task.status, "done");
+  assert.equal(r1.allDone, false, "C 还没完成");
+
+  // Agent C writes result → all done
+  const r2 = writeResult(db, {
+    task_id: t2.id,
+    task_token: t2.task_token,
+    result: "C 的架构建议",
+  });
+  assert.equal(r2.task.status, "done");
+  assert.equal(r2.allDone, true, "全部完成");
+  assert.equal(r2.summonedInitiator, true, "人类发起者不需要注入");
+
+  // Room shared thread has both results
+  const roomData = readRoom(db, room.id);
+  assert.equal(roomData.tasks.length, 2);
+  assert.ok(roomData.tasks.some((t) => t.result?.includes("B 的分析结果")));
+  assert.ok(roomData.tasks.some((t) => t.result?.includes("C 的架构建议")));
+
+  // Status shows all done
+  const status = roomStatus(db, room.id);
+  assert.ok(status.some((s) => s.executor_session_id === "agent-b" && s.status === "done"));
+});
+
+test("cascade: executor can summon other agents mid-execution", () => {
+  const db = freshDb();
+  const room = setup(db);
+  registerSession(db, { id: "agent-d", name: "Agent D" });
+
+  // Human summons B
+  const { task: tB } = summonAgent(db, {
+    room_id: room.id,
+    initiator_session_id: "web-console",
+    executor_session_id: "agent-b",
+    prompt: "需要 D 的数据",
+  });
+
+  // B cascades: summons D (B is now the initiator for D's task)
+  const { task: tD } = summonAgent(db, {
+    room_id: room.id,
+    initiator_session_id: "agent-b",
+    executor_session_id: "agent-d",
+    prompt: "提供数据",
+  });
+
+  // D completes → B is notified (B's sub-task done)
+  const rD = writeResult(db, {
+    task_id: tD.id,
+    task_token: tD.task_token,
+    result: "D 的数据",
+  });
+  assert.equal(rD.allDone, true, "B 的子任务全完成");
+
+  // B completes with D's data → human's task done
+  const rB = writeResult(db, {
+    task_id: tB.id,
+    task_token: tB.task_token,
+    result: "B 综合了 D 的数据",
+  });
+  assert.equal(rB.allDone, true);
+});
+
+test("executor mismatch is rejected", () => {
+  const db = freshDb();
+  const room = setup(db);
+  const { task } = summonAgent(db, {
+    room_id: room.id,
+    initiator_session_id: "web-console",
+    executor_session_id: "agent-b",
+    prompt: "test",
+  });
+  assert.throws(
+    () => writeResult(db, { task_id: task.id, task_token: "wrong-token", result: "wrong" }),
+    /invalid task token/,
+  );
+});
+
+// ---- broadcast self-select (#151) ----------------------------------------------
+
+import { broadcastToRoom, listRoomMessages } from "../core/room-orchestrator.js";
+import { replyAsk, getMessage } from "../core/messages.js";
+
+test("broadcast addresses every member except the sender, with room_id + self-select clause", () => {
+  const db = freshDb();
+  const room = setup(db); // members: agent-b, agent-c
+
+  const res = broadcastToRoom(db, {
+    room_id: room.id,
+    sender_session_id: "web-console",
+    prompt: "谁来分析一下 CI 失败原因",
+  });
+
+  assert.deepEqual([...res.members].sort(), ["agent-b", "agent-c"]);
+  assert.equal(res.message_ids.length, 2);
+  for (const id of res.message_ids) {
+    const m = getMessage(db, id)!;
+    assert.equal(m.from_session, "web-console");
+    assert.ok(m.to_session === "agent-b" || m.to_session === "agent-c");
+    assert.ok(m.question.includes("CI 失败原因"), "原 prompt 保留");
+    assert.ok(m.question.includes("reply_ask"), "自选指令在正文里");
+    assert.ok(m.question.includes("保持沉默"), "不适答者明确被允许沉默");
+    assert.equal(m.status, "pending");
+  }
+});
+
+test("broadcast from a member session excludes itself", () => {
+  const db = freshDb();
+  const room = setup(db);
+
+  const res = broadcastToRoom(db, {
+    room_id: room.id,
+    sender_session_id: "agent-b",
+    prompt: "我需要数据支持",
+  });
+
+  assert.deepEqual(res.members, ["agent-c"], "发起者不广播给自己");
+});
+
+test("broadcast thread: replies land in the shared room thread with names", () => {
+  const db = freshDb();
+  const room = setup(db);
+
+  const res = broadcastToRoom(db, {
+    room_id: room.id,
+    sender_session_id: "web-console",
+    prompt: "谁能看看这个报错",
+  });
+  // one member answers
+  const target = getMessage(db, res.message_ids.find((id) => getMessage(db, id)!.to_session === "agent-b")!)!;
+  replyAsk(db, target.id, "agent-b", "是依赖版本不匹配，升级就好");
+
+  const thread = listRoomMessages(db, room.id);
+  assert.equal(thread.length, 2);
+  const answered = thread.find((t) => t.reply !== null)!;
+  assert.equal(answered.from_name, "Web 控制台");
+  assert.equal(answered.to_session, "agent-b");
+  assert.ok(answered.reply!.includes("依赖版本不匹配"));
+  assert.equal(answered.room_id, room.id);
+});
+
+test("broadcast to an empty room is a no-op, not an error", () => {
+  const db = freshDb();
+  registerSession(db, { id: "web-console", name: "Web 控制台" });
+  const room = createChatRoom(db, { name: "空房", members: [] });
+
+  const res = broadcastToRoom(db, {
+    room_id: room.id,
+    sender_session_id: "web-console",
+    prompt: "有人吗",
+  });
+  assert.deepEqual(res.members, []);
+  assert.deepEqual(res.message_ids, []);
+});

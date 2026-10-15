@@ -79,6 +79,8 @@ export const api = {
     return get<{ messages: Message[] }>(`/messages?${qs.toString()}`);
   },
 
+  checkInbox: () => get<{ messages: Message[] }>("/messages/inbox"),
+
   getSessions: (status = "all") =>
     get<{ sessions: SessionSummary[] }>(`/sessions?status=${encodeURIComponent(status)}`),
 
@@ -122,10 +124,25 @@ export const api = {
     post<{ opener: string }>(`/sessions/${encodeURIComponent(sessionId)}/open-terminal`, {}),
 
   getTerminalSettings: () =>
-    get<{ terminal: TerminalSettings; options: TerminalOption[] }>("/settings/terminal"),
+    get<{
+      terminal: TerminalSettings;
+      options: TerminalOption[];
+      auto_wake: boolean;
+      wake_max_concurrent: number;
+      wake_active_count: number;
+    }>("/settings/terminal"),
 
-  saveTerminalSettings: (body: Partial<TerminalSettings>) =>
-    put<{ terminal: TerminalSettings }>("/settings/terminal", body),
+  saveTerminalSettings: (
+    body: Partial<TerminalSettings> & {
+      auto_wake?: boolean;
+      wake_max_concurrent?: number;
+    },
+  ) =>
+    put<{
+      terminal: TerminalSettings;
+      auto_wake: boolean;
+      wake_max_concurrent: number;
+    }>("/settings/terminal", body),
 
   webAsk: (body: { to_session: string; question: string; from_session?: string }) =>
     post<{ message: Message }>("/web/ask", body),
@@ -241,5 +258,48 @@ export const api = {
         }
       }
     }
+  },
+
+  // ---- Chat Rooms (#137) ----
+  chatRooms: {
+    list: () => get<{ rooms: import("@conflux/shared").ChatRoom[] }>("/chat-rooms"),
+    create: (body: {
+      name: string;
+      description?: string;
+      members: string[];
+    }) => post<{ room: import("@conflux/shared").ChatRoom }>("/chat-rooms", body),
+    delete: (id: number) => del<{ ok: boolean }>(`/chat-rooms/${id}`),
+    join: (roomId: number, sessionId: string) =>
+      post<{ ok: boolean }>(`/chat-rooms/${roomId}/join`, { session_id: sessionId }),
+    leave: (sessionId: string) =>
+      post<{ ok: boolean }>('/chat-rooms/leave', { session_id: sessionId }),
+    orchestrate: (roomId: number) =>
+      get<{
+        tasks: Array<{
+          id: number; room_id: number; initiator_session_id: string;
+          executor_session_id: string; prompt: string;
+          status: "pending" | "running" | "done" | "failed";
+          result: string | null; created_at: string; completed_at: string | null;
+        }>;
+        status: Array<{ executor_session_id: string; status: string; n: number }>;
+      }>(`/chat-rooms/${roomId}/orchestrate`),
+    summon: (roomId: number, executorSessionId: string, prompt: string, senderIdentity?: string) =>
+      post<{ task_id: number; injected: boolean; method: string }>(
+        `/chat-rooms/${roomId}/summon`,
+        { executor_session_id: executorSessionId, prompt, sender_session_id: senderIdentity ?? "web-console" },
+      ),
+    broadcast: (roomId: number, prompt: string, senderIdentity?: string) =>
+      post<{ room_id: number; members: string[]; message_ids: number[] }>(
+        `/chat-rooms/${roomId}/broadcast`,
+        { prompt, sender_session_id: senderIdentity ?? "web-console" },
+      ),
+    messages: (roomId: number) =>
+      get<{
+        messages: Array<{
+          id: number; room_id: number; from_session: string; to_session: string;
+          from_name: string; to_name: string; question: string;
+          reply: string | null; status: string; created_at: string;
+        }>;
+      }>(`/chat-rooms/${roomId}/messages`),
   },
 };

@@ -166,6 +166,8 @@ export interface GraphNode {
   busy?: boolean;
   /** Agent Card: capability self-description (register_session skills). */
   skills?: string[];
+  /** Owning chat room (#137); null = free-floating */
+  chat_room_id?: number | null;
   /** Ask priority (metadata.priority; P1 default). */
   priority?: SessionPriority;
 }
@@ -204,6 +206,8 @@ export interface Message {
   replied_at: string | null;
   /** When the asker's CLI was last pushed this reply via hooks (#102). */
   reply_seen_at?: string | null;
+  /** Chat room shared thread (#152). */
+  room_id?: number | null;
 }
 
 export interface Conversation {
@@ -267,3 +271,20 @@ export const PLACEHOLDER_DESCRIPTIONS = [
   AUTO_REGISTERED_DESCRIPTION,
   WEB_CONSOLE_DESCRIPTION,
 ] as const;
+
+// ---- Chat Rooms (#137): structured collaboration workflows ----
+
+export interface TopologyStep {
+  from: string;
+  to: string;
+  order: number;
+}
+
+export interface ChatRoom {
+  id: number;
+  name: string;
+  description: string | null;
+  members: string[];
+  created_at: string;
+  updated_at: string;
+}

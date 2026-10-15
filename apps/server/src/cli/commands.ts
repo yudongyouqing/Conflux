@@ -17,13 +17,13 @@ import { queryContext } from "../core/search.js";
 import {
   askSession,
   checkInbox,
-  replyAsk,
   checkReplies,
   listMessages,
   formatInboxNotice,
   getEdge,
   listEdgeMessages,
 } from "../core/messages.js";
+import { replyAskAndPush } from "../core/mail-push.js";
 import {
   parseEdgeId,
   parseWatchInterval,
@@ -720,7 +720,7 @@ export function buildCli(argv?: string | readonly string[]): Command {
         () => {
           const db = openDbFrom(o);
           const sid = resolveCliSessionId(db);
-          const m = replyAsk(db, id, sid, reply);
+          const m = replyAskAndPush(db, id, sid, reply);
           logAudit(db, {
             caller_session: sid,
             interface: "cli",

@@ -1,0 +1,37 @@
+# Dependabot 自动依赖更新（#160）
+# 注意：仓库默认分支是 main，但 main-merge-gate 只放行来自 dev 的 PR，
+# 所以这里必须显式 target-branch: dev，否则机器人开的 PR 会永远卡在必需检查上。
+version: 2
+updates:
+  # npm 依赖：monorepo workspaces 由根目录统一解析
+  - package-ecosystem: npm
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+    # minor/patch 合并成一个 PR——三平台矩阵 CI 每跑一轮成本不低，
+    # 拆成一依赖一 PR 会被淹没；major（可能有 breaking change）仍单独开
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    commit-message:
+      prefix: chore
+      prefix-development: chore
+    open-pull-requests-limit: 10
+
+  # GitHub Actions 版本（checkout / setup-node / upload-artifact 等）
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: weekly
+    groups:
+      actions-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    commit-message:
+      prefix: chore
+    open-pull-requests-limit: 5

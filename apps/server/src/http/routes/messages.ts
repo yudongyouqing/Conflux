@@ -1,13 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import {
   checkInbox,
-  replyAsk,
   checkReplies,
   listMessages,
   listPeerMessages,
   listEdgeMessages,
   getEdge,
 } from "../../core/messages.js";
+import { replyAskAndPush } from "../../core/mail-push.js";
 import { askAndMaybeWake } from "../../core/ask.js";
 import { getSession, heartbeat } from "../../core/sessions.js";
 import { logAudit } from "../../core/audit.js";
@@ -96,7 +96,7 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
     async (req, reply) => {
       const sid = requireSession(req);
       try {
-        const msg = replyAsk(db, Number(req.params.id), sid, req.body.reply);
+        const msg = replyAskAndPush(db, Number(req.params.id), sid, req.body.reply);
         audit(sid, "reply_ask", { id: req.params.id }, { message_id: msg.id });
         return reply.send({ message: msg });
       } catch (err) {

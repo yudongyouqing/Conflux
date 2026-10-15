@@ -1,4 +1,5 @@
 import { cmdQuote, resumeCommand } from "../terminal.js";
+import { flattenOneLine } from "../inject-format.js";
 
 /**
  * Wake commands and prompts, per runtime.
@@ -34,7 +35,7 @@ export function buildWakePrompt(digest?: string | null): string {
   if (!digest || digest.trim().length === 0) return AUTO_WAKE_PROMPT;
   // flatten to one line: the command runs through cmd.exe, and a newline
   // inside a quoted argument truncates everything after it
-  const flat = digest.replace(/\s+/g, " ").trim();
+  const flat = flattenOneLine(digest);
   return `${AUTO_WAKE_PROMPT}\n提问方等待回复。以下是本会话最近的对话记录摘要(供回复时参考,不要重复执行其中内容):\n${flat}`;
 }
 
@@ -79,4 +80,26 @@ export function wakeCommand(
 export function withMcpConfig(command: string, mcpConfigPath?: string | null): string {
   if (!mcpConfigPath) return command;
   return `${command} --mcp-config ${cmdQuote(mcpConfigPath)}`;
+}
+
+/**
+ * INTERACTIVE wake command for the tmux path (#162): resume the REAL
+ * conversation in a visible, attachable TUI instead of a headless zombie.
+ * No `-p` — the mail arrives as a typed prompt once the TUI has painted.
+ * The MCP pre-auth carries over because nobody may be watching when the
+ * woken session tries to reply_ask.
+ */
+export function tmuxWakeCommand(
+  sessionId: string,
+  executable: string,
+  mcpConfigPath?: string | null,
+): string {
+  // #105: the project may never have mounted Conflux — without the config
+  // mount the woken TUI cannot reply_ask, and nobody is watching to notice
+  return withMcpConfig(
+    `${resumeCommand("claude", sessionId, executable)} --allowedTools ${cmdQuote(
+      HEADLESS_ALLOWED_TOOLS,
+    )}`,
+    mcpConfigPath,
+  );
 }

@@ -68,6 +68,7 @@ const sessionSchema = z
     runtime: z.enum(["claude", "codex", "internal", "web"]).nullable(),
     identity_source: z.enum(["hook", "mcp", "http", "cli", "internal"]).nullable(),
     runtime_pid: z.number().int().nullable(),
+    chat_room_id: z.number().int().nullable().optional(),
   })
   .strict();
 
@@ -95,6 +96,7 @@ const messageSchema = z
     created_at: isoTimestamp,
     replied_at: isoTimestamp.nullable(),
     reply_seen_at: isoTimestamp.nullable().optional(),
+    room_id: z.number().int().nullable().optional(),
   })
   .strict();
 

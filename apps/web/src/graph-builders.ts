@@ -3,6 +3,7 @@ import type { GraphEdge, GraphNode } from "@conflux/shared";
 import { layoutGraph } from "./layout";
 import type { SessionNodeData } from "./components/SessionNode";
 import type { GroupFrameData } from "./components/GroupFrame";
+import type { ChatRoom } from "@conflux/shared";
 
 /** Runtime dot color for cluster frames — keyed by runtime id, one line per
  * runtime; unknown runtimes render web-blue. Keep in sync with
@@ -388,4 +389,69 @@ export function mergeNodePositions(
     position: prevPos.get(n.id) ?? n.position,
     selected: n.id === selectedSessionId,
   }));
+}
+
+
+// ---- Chat Room view (#137): room frames + member nodes ----------------------
+
+const chatRoomGroupId = (roomId: number) => `__chatroom:${roomId}`;
+
+export interface ChatRoomViewInput extends ViewBuilderInput {
+  rooms: ChatRoom[];
+}
+
+export function applyChatRoomGroups(
+  nodes: Node[],
+  rooms: ChatRoom[],
+): Node[] {
+  if (rooms.length === 0) return nodes;
+  const roomById = new Map(rooms.map((r) => [r.id, r]));
+
+  // tag session nodes with their room's parentId
+  const tagged = nodes.map((n) => {
+    const roomId = Number((n.data as Record<string, unknown>).chat_room_id);
+    if (roomId && roomById.has(roomId)) {
+      return { ...n, parentId: chatRoomGroupId(roomId), extent: "parent" as const };
+    }
+    return n;
+  });
+
+  // create group frame nodes for each room
+  const frames: Node[] = rooms.map((room, i) => {
+    const members = tagged.filter((n) => n.parentId === chatRoomGroupId(room.id));
+    const cols = Math.min(members.length, 3);
+    const rows = Math.ceil(members.length / cols) || 1;
+    return {
+      id: chatRoomGroupId(room.id),
+      type: "groupFrame",
+      position: { x: 1200 + (i % 3) * 500, y: Math.floor(i / 3) * 400 },
+      data: {
+        key: chatRoomGroupId(room.id),
+        variant: "dir",
+        label: `💬 ${room.name}`,
+        count: members.length,
+        activeCount: members.filter((m) => (m.data as SessionNodeData).status === "active").length,
+        expanded: true,
+        width: cols * 200 + 40,
+        height: rows * 120 + 60,
+      } satisfies GroupFrameData,
+      style: { width: cols * 200 + 40, height: rows * 120 + 60 },
+    };
+  });
+
+  // position members inside their frame (grid layout)
+  const positioned = tagged.map((n) => {
+    if (!n.parentId) return n;
+    const siblings = tagged.filter((t) => t.parentId === n.parentId);
+    const idx = siblings.indexOf(n);
+    const cols = Math.min(siblings.length, 3);
+    const col = idx % cols;
+    const row = Math.floor(idx / cols);
+    return {
+      ...n,
+      position: { x: 20 + col * 200, y: 40 + row * 120 },
+    };
+  });
+
+  return [...positioned.filter((n) => !n.parentId), ...frames, ...positioned.filter((n) => !!n.parentId)];
 }

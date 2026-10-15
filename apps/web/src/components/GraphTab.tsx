@@ -124,8 +124,7 @@ export function GraphTab({
   // data (name/status/counts) refreshes.
   useEffect(() => {
     if (!data) return;
-    const built =
-      viewMode === "dirs"
+    const built = viewMode === "dirs"
         ? buildDirsView({ data, onSelectEdge, expandedKey })
         : viewMode === "all"
           ? buildAllView({ data, onSelectEdge })
@@ -250,6 +249,7 @@ export function GraphTab({
       <Controls
         className="!bg-surface !border !border-line !rounded-lg !shadow-[0_2px_10px_rgba(16,24,40,0.1)] !overflow-hidden [&_button]:!bg-surface [&_button]:!border-line [&_button]:!text-ink-muted [&_button:hover]:!bg-paper [&_button:hover]:!text-ink"
       />
+
       <MiniMap
         pannable
         zoomable

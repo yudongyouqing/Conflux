@@ -4,7 +4,8 @@ import type { DB } from "./db.js";
 import type { Agent } from "@conflux/shared";
 import { registerSession, listSessions } from "./sessions.js";
 import { queryContext } from "./search.js";
-import { askSession, checkInbox, replyAsk } from "./messages.js";
+import { askSession, checkInbox } from "./messages.js";
+import { replyAskAndPush } from "./mail-push.js";
 import { publishContext } from "./context.js";
 import { recordEdge } from "./graph.js";
 import { resolveModel } from "./providers.js";
@@ -180,7 +181,7 @@ async function defineTools(db: DB, sessionId: string): Promise<ToolSet> {
       }),
       execute: async ({ message_id, reply }) =>
         safe(() => {
-          const msg = replyAsk(db, message_id, sessionId, reply);
+          const msg = replyAskAndPush(db, message_id, sessionId, reply);
           return { message_id: msg.id, status: "replied" };
         }),
     }),

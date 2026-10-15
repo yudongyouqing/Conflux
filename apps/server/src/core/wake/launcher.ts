@@ -109,6 +109,14 @@ export function launchWakeRun(req: LaunchRequest): LaunchResult {
     windowsVerbatimArguments: process.platform === "win32",
     windowsHide: true,
   });
+
+  // Track active wake count for concurrent limit
+  // Dynamic import to avoid circular dependency (index.ts imports launcher.ts)
+  import("./index.js").then(({ incrementWakeCount, decrementWakeCount }) => {
+    incrementWakeCount();
+    child.on("exit", () => decrementWakeCount());
+  });
+
   if (captureStdout && req.dataDir) {
     pipeWakeLog(child, req.dataDir, req.sessionId);
   }

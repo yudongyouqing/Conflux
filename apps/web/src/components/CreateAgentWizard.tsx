@@ -8,6 +8,7 @@ import {
   Search,
   Compass,
   ChevronDown,
+  Zap,
 } from "lucide-react";
 import { useCreateAgent, useCreateRuntimeAgent, useRuntimes, useSessions } from "../hooks";
 import { ClaudeIcon, OpenAIIcon } from "./brand-icons";
@@ -287,7 +288,7 @@ function useKnownProjectDirs(): string[] {
     }
     return [...seen.entries()]
       .sort((a, b) => b[1].localeCompare(a[1]))
-      .slice(0, 8)
+      .slice(0, 6)
       .map(([dir]) => dir);
   }, [sessions.data]);
 }
@@ -297,6 +298,8 @@ function RuntimeCreateForm({ onClose }: { onClose: () => void }) {
   const runtimes = useRuntimes();
   const [form, setForm] = useState(EMPTY_RUNTIME_FORM);
   const [advanced, setAdvanced] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; error?: string; model?: string; response?: string } | null>(null);
   const knownDirs = useKnownProjectDirs();
   const canBrowse = typeof window.confluxDesktop?.pickDirectory === "function";
 
@@ -460,15 +463,15 @@ function RuntimeCreateForm({ onClose }: { onClose: () => void }) {
                 />
               </Field>
             </div>
-            <Field label="额外环境变量(JSON,可选)">
-              <textarea
-                value={form.extra_env}
-                onChange={(e) => set("extra_env", e.target.value)}
-                placeholder='{"HTTP_PROXY":"http://127.0.0.1:7890"}'
-                rows={2}
-                className={`${inputCls} font-mono text-2xs`}
-              />
-            </Field>
+            {/* Live env preview: auto-derived from fields above, editable for custom vars */}
+            <EnvPreview
+              runtime={form.runtime}
+              model={form.model}
+              baseUrl={form.base_url}
+              apiKey={form.api_key}
+              extraEnv={form.extra_env}
+              onExtraEnvChange={(v) => set("extra_env", v)}
+            />
             <Field label="系统指令(可选,--append-system-prompt)">
               <textarea
                 value={form.instructions}
@@ -480,6 +483,44 @@ function RuntimeCreateForm({ onClose }: { onClose: () => void }) {
             </Field>
             <div className="text-2xs text-ink-faint px-1">
               定时到点后 headless 唤醒(无窗口):查收件箱、处理待办、简报后退出。
+            </div>
+            {/* connectivity test (#agent-improve): verify provider chain before save */}
+            <div className="pt-1">
+              <button
+                onClick={async () => {
+                  setTestResult(null);
+                  setTesting(true);
+                  try {
+                    const r = await fetch("/agents/test-provider", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        provider: form.runtime === "codex" ? "openai" : "anthropic",
+                        base_url: form.base_url || undefined,
+                        api_key: form.api_key || undefined,
+                        model: form.model || undefined,
+                      }),
+                    });
+                    setTestResult(await r.json());
+                  } catch (e) {
+                    setTestResult({ ok: false, error: e instanceof Error ? e.message : "network error" });
+                  } finally {
+                    setTesting(false);
+                  }
+                }}
+                disabled={testing || !form.api_key}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line text-xs text-ink hover:border-accent hover:text-accent disabled:opacity-40"
+              >
+                {testing ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
+                测试连通性
+              </button>
+              {testResult && (
+                <div className={`mt-1.5 text-2xs ${testResult.ok ? "text-emerald-600" : "text-red-600"}`}>
+                  {testResult.ok
+                    ? `✓ 连通 · ${testResult.model} · "${testResult.response}"`
+                    : `✗ ${testResult.error}`}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -505,5 +546,85 @@ function RuntimeCreateForm({ onClose }: { onClose: () => void }) {
         <div className="text-xs text-red-600 px-5 pb-3">{(create.error as Error)?.message}</div>
       )}
     </>
+  );
+}
+
+// ---- Live env preview (#agent-improve): auto-derives env vars from the
+// individual fields above, shows them in cc-switch format, and lets the
+// user add custom vars that get merged on top. -------------------------------
+
+function buildEnvBlock(
+  runtime: string,
+  model: string,
+  baseUrl: string,
+  apiKey: string,
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  const isClaude = runtime !== "codex";
+  if (isClaude) {
+    if (baseUrl) env.ANTHROPIC_BASE_URL = baseUrl;
+    if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
+    if (model) {
+      env.ANTHROPIC_MODEL = model;
+      env.ANTHROPIC_DEFAULT_HAIKU_MODEL = model;
+      env.ANTHROPIC_DEFAULT_SONNET_MODEL = model;
+      env.ANTHROPIC_DEFAULT_OPUS_MODEL = model;
+    }
+  } else {
+    if (baseUrl) env.OPENAI_BASE_URL = baseUrl;
+    if (apiKey) env.OPENAI_API_KEY = apiKey;
+    if (model) env.OPENAI_MODEL = model;
+  }
+  return env;
+}
+
+function EnvPreview({
+  runtime,
+  model,
+  baseUrl,
+  apiKey,
+  extraEnv,
+  onExtraEnvChange,
+}: {
+  runtime: string;
+  model: string;
+  baseUrl: string;
+  apiKey: string;
+  extraEnv: string;
+  onExtraEnvChange: (v: string) => void;
+}) {
+  const autoEnv = buildEnvBlock(runtime, model, baseUrl, apiKey);
+  const autoLines = Object.entries(autoEnv).map(([k, v]) => `${k}=${v}`);
+  const autoText = autoLines.length > 0 ? autoLines.join("\n") : "(填写上方字段后自动生成)";
+
+  // mask API key in preview
+  const displayText = apiKey
+    ? autoText.replace(
+        new RegExp(`=(${apiKey.slice(0, 8)}.*?)(?:\\n|$)`),
+        `=$1...(${apiKey.length} chars)`,
+      )
+    : autoText;
+
+  return (
+    <div className="space-y-1.5">
+      <div className="text-2xs font-medium text-ink-muted">
+        启动环境变量（自动生成 + 可追加）
+      </div>
+      {/* auto-derived block (read-only preview) */}
+      <pre className="px-3 py-2 rounded-lg bg-tile text-2xs text-ink-muted font-mono whitespace-pre-wrap break-all leading-relaxed">
+        {displayText}
+      </pre>
+      {/* custom additions (editable) */}
+      <textarea
+        value={extraEnv}
+        onChange={(e) => onExtraEnvChange(e.target.value)}
+        placeholder='追加自定义变量(JSON): {"HTTP_PROXY":"http://...","ANTHROPIC_AUTH_TOKEN":"sk-..."}'
+        rows={2}
+        className={`${inputCls} font-mono text-2xs`}
+      />
+      <div className="text-2xs text-ink-faint px-1">
+        上面是字段自动生成的（只读）；下面可粘贴 cc-switch 的 env 块或添加自定义变量，启动时合并生效。
+      </div>
+    </div>
   );
 }

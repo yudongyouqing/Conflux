@@ -95,7 +95,7 @@ function safePublicMessage(value: string, fallback: string): string {
   return message;
 }
 
-const SCHEMA_VERSION = 10; // v10: messages.reply_seen_at（回复推送一次性标记）
+const SCHEMA_VERSION = 13; // v13: room_tasks.task_token（一次性任务令牌修复 split-brain）
 
 // Keep checkpoint timers tied to their database handles. A process can open
 // more than one temporary database during tests and interface operations.
@@ -172,6 +172,33 @@ CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
 
 -- Graph edges: directed, formed dynamically from communication history.
 -- Each ask_session / reply_ask upserts a row (weight + 1).
+-- Agent orchestration tasks (#152): each row is one agent execution
+-- within a room. The room tracks expected vs received; when all done,
+-- the initiator is summoned to read results.
+CREATE TABLE IF NOT EXISTS room_tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  room_id INTEGER NOT NULL,
+  initiator_session_id TEXT NOT NULL,
+  executor_session_id TEXT NOT NULL,
+  task_token TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  result TEXT,
+  created_at TEXT NOT NULL,
+  completed_at TEXT
+);
+
+-- Structured collaboration rooms (#137): fixed topology workflows.
+-- topology JSON: [{from:"<sessionId>", to:"<sessionId>", order:1}, ...]
+CREATE TABLE IF NOT EXISTS chat_rooms (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  description TEXT,
+  topology TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS edges (
   from_session TEXT NOT NULL,
   to_session   TEXT NOT NULL,
@@ -327,6 +354,17 @@ function migrate(db: DB): void {
     // v10: asker-side reply push (#102) — a reply surfaced to the asker's
     // CLI via the hook channel is marked seen so it never repeats
     ensureColumn("messages", "reply_seen_at", "reply_seen_at TEXT");
+    // v11: chat rooms — a session belongs to at most one room (#137)
+    ensureColumn("sessions", "chat_room_id", "chat_room_id INTEGER");
+    // v12: room shared thread + orchestration (#152)
+    ensureColumn("messages", "room_id", "room_id INTEGER");
+    // v13: one-shot task token to fix split-brain (#151)
+    ensureColumn("room_tasks", "task_token", "task_token TEXT");
+    // backfill task_token for existing rows with random tokens
+    db.exec(`
+      UPDATE room_tasks SET task_token = lower(hex(randomblob(16)))
+      WHERE task_token IS NULL
+    `);
     db.exec(`
       INSERT OR IGNORE INTO edges (from_session, to_session, weight, last_interact_at)
         SELECT from_session, to_session, COUNT(*), MAX(COALESCE(replied_at, created_at))

@@ -21,11 +21,18 @@ export function useSessions(status: "active" | "all" = "active") {
 export function useMessages(filters?: { status?: string; limit?: number }) {
   return useQuery({
     queryKey: ["messages", filters],
-    queryFn: () =>
-      api.getMessages({
+    queryFn: async () => {
+      // Auto-mark pending messages addressed to web-console as seen
+      try {
+        await api.checkInbox();
+      } catch {
+        // web-console might not be registered yet; ignore and proceed
+      }
+      return api.getMessages({
         status: (filters?.status as never) ?? "all",
         limit: filters?.limit ?? 100,
-      }),
+      });
+    },
     refetchInterval: 3000,
   });
 }

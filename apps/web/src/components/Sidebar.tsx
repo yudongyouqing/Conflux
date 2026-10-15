@@ -8,11 +8,12 @@ import {
   Settings,
   ChevronDown,
   ChevronRight,
+  Users,
 } from "lucide-react";
 import { useDaemonHealth } from "../hooks";
 import type { GraphNode } from "@conflux/shared";
 
-export type TabId = "graph" | "messages" | "agents" | "runtimes" | "settings";
+export type TabId = "graph" | "messages" | "agents" | "rooms" | "runtimes" | "settings";
 
 interface SidebarProps {
   activeTab: TabId;
@@ -84,6 +85,7 @@ export function Sidebar({
     { id: "graph" as const, icon: Network, label: "图谱" },
     { id: "messages" as const, icon: MessageSquare, label: "消息流" },
     { id: "agents" as const, icon: Bot, label: "Agents" },
+    { id: "rooms" as const, icon: Users, label: "聊天室" },
   ];
 
   return (
@@ -92,21 +94,21 @@ export function Sidebar({
         isDarwin ? "glass-sidebar" : "bg-paper"
       } w-60 border-r border-line flex flex-col flex-shrink-0 min-h-0`}
     >
-      {/* Brand — darwin 上是窗口拖拽区并给红绿灯让位（#111） */}
+      {/* Brand — darwin: 红绿灯占顶部空间，logo 放在它们下方 */}
       <div
-        className={`flex items-center gap-2.5 h-12 border-b border-line flex-shrink-0 ${
-          isDarwin ? "app-drag pl-[84px] pr-4" : "px-4"
-        }`}
+        className={`app-drag flex-shrink-0 ${isDarwin ? "pt-[38px]" : ""}`}
       >
+        <div className="flex items-center gap-2.5 h-10 border-b border-line px-4 app-no-drag">
         <div className="w-[26px] h-[26px] rounded-lg bg-accent flex items-center justify-center app-no-drag">
           <Boxes size={14} className="text-white" />
         </div>
         <span className="font-semibold text-sm text-ink tracking-tight">Conflux</span>
+        </div>
       </div>
 
       {/* Work views: compact switcher — navigation gets out of the way */}
       <div className="p-2 flex-shrink-0">
-        <div className="grid grid-cols-3 gap-1">
+        <div className="grid grid-cols-4 gap-1">
           {workViews.map((item) => {
             const Icon = item.icon;
             const active = activeTab === item.id;
@@ -129,6 +131,9 @@ export function Sidebar({
         </div>
       </div>
 
+      {/* Chat room trigger (#137): moved here from graph canvas — organizational, not a view mode */}
+      
+      
       {/* Session list: the sidebar's main body (#107) */}
       <div className="px-3 pb-1 pt-2 text-2xs font-medium text-ink-faint flex-shrink-0">
         会话 · {listable.length}
