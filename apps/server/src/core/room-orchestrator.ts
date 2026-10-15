@@ -9,7 +9,6 @@ import { badge, flattenOneLine } from "./inject-format.js";
 import { tmuxInject } from "./wake/tmux-inject.js";
 import { roomMembers, getChatRoom } from "./chat-rooms.js";
 import { askAndMaybeWake } from "./ask.js";
-import { isCommercial } from "./license.js";
 
 /**
  * Room orchestration engine (#152): agents coordinate through a shared room
@@ -204,9 +203,6 @@ export function broadcastToRoom(
   db: DB,
   input: { room_id: number; sender_session_id: string; prompt: string },
 ): BroadcastResult {
-  if (!isCommercial()) {
-    throw new Error("Room broadcast is a commercial feature. Set CONFLUX_COMMERCIAL=1 to enable.");
-  }
   const room = getChatRoom(db, input.room_id);
   if (!room) throw new Error(`room not found: ${input.room_id}`);
 
