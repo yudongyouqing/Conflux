@@ -9,7 +9,6 @@ import {
   writeResult,
   readRoom,
   roomStatus,
-  createTask,
 } from "../core/room-orchestrator.js";
 
 const cleanups: Array<() => void> = [];
@@ -129,4 +128,125 @@ test("executor mismatch is rejected", () => {
     () => writeResult(db, { task_id: task.id, executor_session_id: "agent-c", result: "wrong" }),
     /not the executor/,
   );
+});
+
+// ---- broadcast self-select (#151) ----------------------------------------------
+
+import { broadcastToRoom, listRoomMessages } from "../core/room-orchestrator.js";
+import { replyAsk, getMessage } from "../core/messages.js";
+
+test("broadcast addresses every member except the sender, with room_id + self-select clause", () => {
+  const prev = process.env.CONFLUX_COMMERCIAL;
+  process.env.CONFLUX_COMMERCIAL = "1";
+  try {
+    const db = freshDb();
+    const room = setup(db); // members: agent-b, agent-c
+
+    const res = broadcastToRoom(db, {
+      room_id: room.id,
+      sender_session_id: "web-console",
+      prompt: "谁来分析一下 CI 失败原因",
+    });
+
+    assert.deepEqual([...res.members].sort(), ["agent-b", "agent-c"]);
+    assert.equal(res.message_ids.length, 2);
+    for (const id of res.message_ids) {
+      const m = getMessage(db, id)!;
+      assert.equal(m.from_session, "web-console");
+      assert.ok(m.to_session === "agent-b" || m.to_session === "agent-c");
+      assert.ok(m.question.includes("CI 失败原因"), "原 prompt 保留");
+      assert.ok(m.question.includes("reply_ask"), "自选指令在正文里");
+      assert.ok(m.question.includes("保持沉默"), "不适答者明确被允许沉默");
+      assert.equal(m.status, "pending");
+    }
+  } finally {
+    process.env.CONFLUX_COMMERCIAL = prev;
+  }
+});
+
+test("broadcast from a member session excludes itself", () => {
+  const prev = process.env.CONFLUX_COMMERCIAL;
+  process.env.CONFLUX_COMMERCIAL = "1";
+  try {
+    const db = freshDb();
+    const room = setup(db);
+
+    const res = broadcastToRoom(db, {
+      room_id: room.id,
+      sender_session_id: "agent-b",
+      prompt: "我需要数据支持",
+    });
+
+    assert.deepEqual(res.members, ["agent-c"], "发起者不广播给自己");
+  } finally {
+    process.env.CONFLUX_COMMERCIAL = prev;
+  }
+});
+
+test("broadcast thread: replies land in the shared room thread with names", () => {
+  const prev = process.env.CONFLUX_COMMERCIAL;
+  process.env.CONFLUX_COMMERCIAL = "1";
+  try {
+    const db = freshDb();
+    const room = setup(db);
+
+    const res = broadcastToRoom(db, {
+      room_id: room.id,
+      sender_session_id: "web-console",
+      prompt: "谁能看看这个报错",
+    });
+    // one member answers
+    const target = getMessage(db, res.message_ids.find((id) => getMessage(db, id)!.to_session === "agent-b")!)!;
+    replyAsk(db, target.id, "agent-b", "是依赖版本不匹配，升级就好");
+
+    const thread = listRoomMessages(db, room.id);
+    assert.equal(thread.length, 2);
+    const answered = thread.find((t) => t.reply !== null)!;
+    assert.equal(answered.from_name, "Web 控制台");
+    assert.equal(answered.to_session, "agent-b");
+    assert.ok(answered.reply!.includes("依赖版本不匹配"));
+    assert.equal(answered.room_id, room.id);
+  } finally {
+    process.env.CONFLUX_COMMERCIAL = prev;
+  }
+});
+
+test("broadcast to an empty room is a no-op, not an error", () => {
+  const prev = process.env.CONFLUX_COMMERCIAL;
+  process.env.CONFLUX_COMMERCIAL = "1";
+  try {
+    const db = freshDb();
+    registerSession(db, { id: "web-console", name: "Web 控制台" });
+    const room = createChatRoom(db, { name: "空房", members: [] });
+
+    const res = broadcastToRoom(db, {
+      room_id: room.id,
+      sender_session_id: "web-console",
+      prompt: "有人吗",
+    });
+    assert.deepEqual(res.members, []);
+    assert.deepEqual(res.message_ids, []);
+  } finally {
+    process.env.CONFLUX_COMMERCIAL = prev;
+  }
+});
+
+test("broadcast without commercial license throws error", () => {
+  const prev = process.env.CONFLUX_COMMERCIAL;
+  delete process.env.CONFLUX_COMMERCIAL;
+  try {
+    const db = freshDb();
+    const room = setup(db);
+
+    assert.throws(
+      () => broadcastToRoom(db, {
+        room_id: room.id,
+        sender_session_id: "web-console",
+        prompt: "测试",
+      }),
+      { message: "Room broadcast is a commercial feature. Set CONFLUX_COMMERCIAL=1 to enable." },
+    );
+  } finally {
+    process.env.CONFLUX_COMMERCIAL = prev;
+  }
 });

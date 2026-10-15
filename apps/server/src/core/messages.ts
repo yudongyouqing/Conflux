@@ -36,7 +36,7 @@ function toMsg(row: MessageRow): Message {
 
 export function askSession(
   db: DB,
-  input: { from_session: string; to_session: string; question: string },
+  input: { from_session: string; to_session: string; question: string; room_id?: number | null },
 ): Message {
   if (input.from_session === input.to_session) {
     throw new Error("cannot ask yourself");
@@ -65,10 +65,17 @@ export function askSession(
   const edgeId = recordEdge(db, input.from_session, input.to_session);
   const res = db
     .prepare(
-      `INSERT INTO messages (from_session, to_session, question, status, created_at, edge_id)
-       VALUES (?, ?, ?, 'pending', ?, ?)`,
+      `INSERT INTO messages (from_session, to_session, question, status, created_at, edge_id, room_id)
+       VALUES (?, ?, ?, 'pending', ?, ?, ?)`,
     )
-    .run(input.from_session, input.to_session, input.question, now, edgeId);
+    .run(
+      input.from_session,
+      input.to_session,
+      input.question,
+      now,
+      edgeId,
+      input.room_id ?? null,
+    );
   return getMessage(db, Number(res.lastInsertRowid))!;
 }
 
