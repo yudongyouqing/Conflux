@@ -38,7 +38,7 @@
     "@fastify/cors": "^11.3.1",
     "@fastify/static": "^10.1.6",
     "@fastify/swagger": "^9.9.2",
-    "@fastify/swagger-ui": "^5.0.0",
+    "@fastify/swagger-ui": "^6.1.2",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "@conflux/shared": "*",
     "ai": "^7.0.138",
@@ -51,7 +51,7 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",
-    "@types/node": "^20.0.0",
+    "@types/node": "^26.6.5",
     "@types/uuid": "^10.0.0",
     "tsx": "^4.23.15",
     "typescript": "^5.5.0"
