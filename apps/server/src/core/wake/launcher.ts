@@ -3,7 +3,7 @@ import { closeSync, existsSync, mkdirSync, openSync, writeFileSync, writeSync } 
 import { dirname, join } from "node:path";
 import { cleanTerminalEnv } from "../terminal.js";
 import { resolveConfig } from "../../config.js";
-import { withMcpConfig } from "./commands.js";
+import { withMcpConfig, projectHasConfluxMcp } from "./commands.js";
 import { setSetting } from "../app-settings.js";
 import { psMatchClauses } from "../runtime-identity.js";
 import { logger } from "../../log.js";
@@ -93,9 +93,16 @@ export function launchWakeRun(req: LaunchRequest): LaunchResult {
   const env = cleanTerminalEnv();
   env.MUILTCHAT_ASSUME_SESSION = req.sessionId;
   // claude wakes (pinCodex === false) get an explicit MCP mount so the
-  // headless run can always reach check_inbox/reply_ask (#105)
+  // headless run can always reach check_inbox/reply_ask — but only
+  // when the project doesn't already mount Conflux itself: an extra mount
+  // changes the tools array and invalidates the whole cached prefix
   const command =
-    req.pinCodex ? req.command : withMcpConfig(req.command, ensureWakeMcpConfig());
+    req.pinCodex
+      ? req.command
+      : withMcpConfig(
+          req.command,
+          projectHasConfluxMcp(req.projectDir) ? null : ensureWakeMcpConfig(),
+        );
   const shell = wakeShell();
   // stdout piped for wake-log capture (#102 streaming); falls back to
   // "ignore" when the data dir is unknown (shouldn't happen — resolveConfig

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { cmdQuote, resumeCommand } from "../terminal.js";
 import { flattenOneLine } from "../inject-format.js";
 
@@ -17,6 +19,12 @@ export const AUTO_WAKE_PROMPT =
  * The prefix follows the MCP server KEY in the host's config, which users
  * control: `conflux` is the new recommended key, `muiltchat` the legacy one.
  * Authorize both so a wake works under either naming.
+ *
+ * Key pinning: `conflux` is the ONLY key our own wake config writes
+ * (see ensureWakeMcpConfig) — the dual pattern above is legacy-compat for
+ * user configs, not an endorsement of mixed keys. A resumed session whose
+ * MCP mount changed keys sees different tool names, which invalidates the
+ * whole cached prefix (tools render ahead of system and messages).
  */
 export const HEADLESS_ALLOWED_TOOLS = "mcp__conflux__*,mcp__muiltchat__*";
 
@@ -80,6 +88,29 @@ export function wakeCommand(
 export function withMcpConfig(command: string, mcpConfigPath?: string | null): string {
   if (!mcpConfigPath) return command;
   return `${command} --mcp-config ${cmdQuote(mcpConfigPath)}`;
+}
+
+/**
+ * Cache-prefix protection: does the target project already mount
+ * Conflux in its own .mcp.json? Resuming with an EXTRA --mcp-config adds
+ * tool definitions to the request's tools array, which renders ahead of
+ * system and messages — a tool-set delta invalidates the ENTIRE cached
+ * prefix and the whole history re-reads at full input price. When the
+ * project already mounts Conflux (either key), resume without the extra
+ * mount so the tool set — and therefore the prefix — stays identical.
+ */
+export function projectHasConfluxMcp(projectDir: string | null | undefined): boolean {
+  if (!projectDir) return false;
+  try {
+    const raw = readFileSync(join(projectDir, ".mcp.json"), "utf8");
+    const parsed = JSON.parse(raw) as { mcpServers?: Record<string, unknown> };
+    const servers = parsed?.mcpServers;
+    if (!servers || typeof servers !== "object") return false;
+    return "conflux" in servers || "muiltchat" in servers;
+  } catch {
+    // missing file or malformed JSON — treat as not mounted
+    return false;
+  }
 }
 
 /**
