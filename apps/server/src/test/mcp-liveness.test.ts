@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { makeDb } from "./helpers.js";
 import { registerSession } from "../core/sessions.js";
 
@@ -90,6 +91,20 @@ class FakeTransport implements StdioCloseableTransport {
   emitClose(): void {
     this.onclose?.();
   }
+}
+
+/**
+ * A PID that is guaranteed dead: spawn a real child, wait for it to exit,
+ * then use the corpse. Hardcoded "unlikely" PIDs occasionally collide with
+ * real processes on CI runners — markMcpDisconnected keeps the session
+ * active whenever the runtime PID is alive, which flaked this suite on
+ * windows-latest twice.
+ */
+async function deadPid(): Promise<number> {
+  const child = spawn(process.execPath, ["-e", "process.exit(0)"], { stdio: "ignore" });
+  const pid = child.pid!;
+  await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  return pid;
 }
 
 async function loadApi(): Promise<Api> {
@@ -187,7 +202,7 @@ test("new MCP connection replaces an old generation without old close killing it
   registerSession(db, {
     id: "lease-generation-session",
     name: "lease-generation-session",
-    metadata: { runtime: "codex", runtime_pid: 7101 },
+    metadata: { runtime: "codex", runtime_pid: await deadPid() },
   });
   assert.equal(
     api.claimMcpConnection!(db, "lease-generation-session", "new-connection", new Date()),
@@ -259,7 +274,7 @@ test("silent MCP lease expires and records a disconnected state", async (t) => {
     name: "lease-expiry-session",
     metadata: {
       runtime: "codex",
-      runtime_pid: 7201,
+      runtime_pid: await deadPid(),
       ...api.createMcpLeaseMetadata!("expiry-connection", connectedAt),
     },
   });
