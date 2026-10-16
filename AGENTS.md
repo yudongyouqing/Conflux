@@ -18,7 +18,7 @@ This repository is an npm workspaces monorepo for Conflux (legacy alias `muiltch
 
 ## Coding Style & Naming Conventions
 
-Use TypeScript with two-space indentation, semicolons, and double quotes, matching Prettier and the existing source. Use `camelCase` for functions and variables, `PascalCase` for React components and types, and kebab-case for descriptive filenames where established. Prefer existing helpers and workspace packages over new abstractions. Keep MCP stdio protocol output off stdout; use the project logger for diagnostics.
+Use TypeScript with two-space indentation, semicolons, and double quotes, matching Prettier and the existing source. Use `camelCase` for functions and variables, `PascalCase` for React components and types, and kebab-case for descriptive filenames where established. Prefer existing helpers and workspace packages over new abstractions. Never reference GitHub issue or PR numbers in code comments — those live in commit messages and PR descriptions; a comment explains the *why* so it can be understood without leaving the editor. Keep MCP stdio protocol output off stdout; use the project logger for diagnostics.
 
 ## Testing Guidelines
 

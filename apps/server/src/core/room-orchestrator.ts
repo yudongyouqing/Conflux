@@ -3,6 +3,7 @@ import { nowIso } from "./db.js";
 import { getSession } from "./sessions.js";
 import { logger } from "../log.js";
 import { launchWakeRun } from "./wake/launcher.js";
+import { agentPromptSuffix } from "./wake/index.js";
 import { planClaudeWake } from "./wake/claude.js";
 import { getTerminalSettings } from "./app-settings.js";
 import { badge, flattenOneLine } from "./inject-format.js";
@@ -318,11 +319,15 @@ function headlessWakeForTask(
   if ("refuse" in plan) return false;
 
   const wrapped = `${badge({ label: "聊天室任务", ref: `task #${taskId}` })} ${prompt}\n(这是一个聊天室任务。处理完后用 Conflux 的 room_write 工具写入结果，task_id=${taskId}，task_token="${taskToken}")`;
+  // Agent sessions must resume with their --append-system-prompt or
+  // the system block changes and the whole cached prefix is lost
+  let meta: Record<string, unknown> | null = null;
+  try { meta = session.metadata ? (JSON.parse(session.metadata) as Record<string, unknown>) : null; } catch { /* ignore */ }
   const launch = launchWakeRun({
     db,
     sessionId,
     projectDir: session.project_dir,
-    command: plan.command,
+    command: plan.command + agentPromptSuffix(db, meta),
     prompt: wrapped,
     pinCodex: false,
   });

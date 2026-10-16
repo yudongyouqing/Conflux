@@ -44,6 +44,7 @@ npm run format             # prettier
 ## 关键约定
 
 - **MCP stdout 只输出 JSON-RPC**，日志一律 stderr（`src/log.ts` 的 pino sink）。
+- **注释不写 GitHub 编号**：issue/PR 号只出现在 commit message 和 PR 描述里；代码注释解释"为什么"，让读者不跳转工单也能看懂。
 - Claude hooks 跑的是 `apps/server/dist/` 编译产物——改 hook 相关逻辑后必须 `npm run build` 才生效。
 - 平台陷阱：仓库源码行尾 LF（`.gitattributes` 归一），但工作副本常为 CRLF；写脚本改文件时锚点匹配要容忍 `\r`。
 - Codex 硬约束：TUI 打开时线程写锁生效，任何进程无法 resume 该会话（"already has an active writer"）；且 codex 给 MCP 子进程净化环境——身份冒用走 pid 钉扎（`wake/launcher.ts`），不走 env。
