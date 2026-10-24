@@ -10,7 +10,7 @@
   <p><b>本地优先 · 会话图谱 · 异步消息 · MCP/HTTP/CLI 同核 · macOS/Windows/Linux</b></p>
   <p><a href="#界面预览">界面预览</a> · <a href="#不是一个聊天壳是一张会话图">为什么</a> · <a href="#-快速开始">快速开始</a> · <a href="#-架构">架构</a> · <a href="#-接入-claude-code">接入 Claude Code</a> · <a href="#-数据与配置">数据与配置</a> · <a href="#-路线图">路线图</a></p>
   <p>
-    <img src="https://img.shields.io/badge/Electron-37-47848F?logo=electron&logoColor=white" alt="Electron">
+    <img src="https://img.shields.io/badge/Electron-45-47848F?logo=electron&logoColor=white" alt="Electron">
     <img src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white" alt="React">
     <img src="https://img.shields.io/badge/Node.js-%3E%3D22-339933?logo=nodedotjs&logoColor=white" alt="Node.js">
     <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>

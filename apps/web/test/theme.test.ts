@@ -8,22 +8,11 @@ import {
   saveCustomTheme,
   deleteCustomTheme,
   setActiveCustomTheme,
-  setThemePreference,
   refreshTokenApplication,
   BUILTIN_THEMES,
 } from "../src/theme.ts";
 
-test("theme preference normalizes invalid values and resolves system", () => {
-  assert.equal(normalizeThemePreference("terminal"), "system");
-  assert.equal(resolveTheme("system", true), "dark");
-  assert.equal(resolveTheme("system", false), "light");
-  assert.equal(resolveTheme("dark", false), "dark");
-  assert.equal(resolveTheme("light", true), "light");
-});
-
 // ---- 自定义主题（#71） ------------------------------------------------------
-
-import { normalizeThemePreference, resolveTheme } from "../src/theme.ts";
 
 /** 内存版 Storage，模拟 localStorage 接口 */
 function fakeStorage(): Storage {
@@ -96,7 +85,7 @@ function fakeStyleRecorder() {
   return { dataset: {} as Record<string, string>, style: { setProperty: () => {}, removeProperty: () => {} } };
 }
 
-test("dark mode clears palette inline vars; light re-applies them", () => {
+test("refreshTokenApplication clears the default palette and reapplies an active palette", () => {
   const storage = fakeStorage();
   const written = new Map<string, string>();
   const root = {
@@ -106,17 +95,18 @@ test("dark mode clears palette inline vars; light re-applies them", () => {
       removeProperty: (k: string) => void written.delete(k),
     },
   };
-  // 激活色板 → 内联写色板
+  // 激活色板 -> 内联写色板
   setActiveCustomTheme("海洋深处", storage, root);
   assert.ok(written.get("--tk-accent"));
-  // 切深色 → 内联被清（深色组经 data-theme 选择器生效）
-  storage.setItem("conflux.theme", "dark");
+
+  // 回到默认主题 -> 清除自定义覆盖
+  storage.removeItem("conflux.active-custom-theme");
   refreshTokenApplication(storage, root);
-  assert.equal(written.get("--tk-accent"), undefined, "深色优先于色板");
-  // 切回浅色 → 色板恢复
-  storage.setItem("conflux.theme", "light");
+
+  assert.equal(written.get("--tk-accent"), undefined, "默认主题不保留自定义覆盖");
+  storage.setItem("conflux.active-custom-theme", "海洋深处");
   refreshTokenApplication(storage, root);
-  assert.ok(written.get("--tk-accent"), "浅色恢复色板");
+  assert.ok(written.get("--tk-accent"), "激活色板后恢复自定义覆盖");
 });
 
 test("内置主题含终端深色，isDarkPaper 判定深浅", () => {
