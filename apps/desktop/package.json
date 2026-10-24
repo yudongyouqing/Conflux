@@ -6,12 +6,14 @@
   "scripts": {
     "dev": "electron .",
     "build": "electron-builder --config electron-builder.yml --dir",
-    "package": "electron-builder --config electron-builder.yml"
+    "package": "electron-builder --config electron-builder.yml",
+    "rebuild": "electron-rebuild -f -w node-pty"
   },
   "devDependencies": {
     "@electron/asar": "^4.3.1",
     "electron": "45.0.0",
     "electron-builder": "^26.0.12",
+    "@electron/rebuild": "^4.2.0",
     "yaml": "^2.9.1"
   },
   "dependencies": {
