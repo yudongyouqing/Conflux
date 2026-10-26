@@ -83,11 +83,11 @@ npm run dev:desktop
 
 开发环境端点：
 
-| 端点         | 地址                          |
-| ------------ | ----------------------------- |
-| 工作空间     | <http://127.0.0.1:5173>       |
-| API 服务器   | <http://127.0.0.1:9527>       |
-| OpenAPI 文档 | <http://127.0.0.1:9527/docs>  |
+| 端点         | 地址                         |
+| ------------ | ---------------------------- |
+| 工作空间     | <http://127.0.0.1:5173>      |
+| API 服务器   | <http://127.0.0.1:9527>      |
+| OpenAPI 文档 | <http://127.0.0.1:9527/docs> |
 
 > ⚠️ 不要同时运行 `npm run dev:all` 和 `npm run dev:desktop`——两者使用相同端口与 SQLite 数据目录。只想用浏览器开发时，跑 `npm run dev:web-stack`。
 
@@ -98,6 +98,8 @@ npm start   # → http://127.0.0.1:9527
 ```
 
 遇到启动、端口、数据库、MCP 或迁移问题，请查看[故障排查指南](docs/TROUBLESHOOTING.md)。
+
+性能基线与本地指标见[性能文档](docs/PERFORMANCE.md)。
 
 ## 🧭 架构
 
@@ -303,14 +305,14 @@ node --test apps/desktop/test/dev-services.test.cjs apps/desktop/test/runtime-co
 
 ## 📚 文档
 
-| 文档                                   | 内容                       |
-| -------------------------------------- | -------------------------- |
-| [新机环境搭建](docs/SETUP.md)           | 从零配置开发环境清单（双语） |
-| [迁移指南](docs/MIGRATION.md)           | 新旧命名/目录兼容与迁移步骤 |
-| [故障排查](docs/TROUBLESHOOTING.md)     | 端口、数据库、MCP、数据恢复 |
-| [贡献指南](CONTRIBUTING.md)             | 开发规范与 PR 流程          |
-| [更新日志](CHANGELOG.md)                | 版本历史                    |
-| [English README](docs/README.en.md)     | English documentation       |
+| 文档                                | 内容                         |
+| ----------------------------------- | ---------------------------- |
+| [新机环境搭建](docs/SETUP.md)       | 从零配置开发环境清单（双语） |
+| [迁移指南](docs/MIGRATION.md)       | 新旧命名/目录兼容与迁移步骤  |
+| [故障排查](docs/TROUBLESHOOTING.md) | 端口、数据库、MCP、数据恢复  |
+| [贡献指南](CONTRIBUTING.md)         | 开发规范与 PR 流程           |
+| [更新日志](CHANGELOG.md)            | 版本历史                     |
+| [English README](docs/README.en.md) | English documentation        |
 
 ---
 

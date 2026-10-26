@@ -83,11 +83,11 @@ npm run dev:desktop
 
 Development endpoints:
 
-| Endpoint         | URL                           |
-| ---------------- | ----------------------------- |
-| Workspace        | <http://127.0.0.1:5173>       |
-| API server       | <http://127.0.0.1:9527>       |
-| OpenAPI docs     | <http://127.0.0.1:9527/docs>  |
+| Endpoint     | URL                          |
+| ------------ | ---------------------------- |
+| Workspace    | <http://127.0.0.1:5173>      |
+| API server   | <http://127.0.0.1:9527>      |
+| OpenAPI docs | <http://127.0.0.1:9527/docs> |
 
 > ⚠️ Do not run `npm run dev:all` and `npm run dev:desktop` at the same time — both use the same ports and SQLite data directory. For a browser-only dev stack run `npm run dev:web-stack`.
 
@@ -98,6 +98,8 @@ npm start   # → http://127.0.0.1:9527
 ```
 
 For startup, port, database, MCP, or migration issues, see the [troubleshooting guide](TROUBLESHOOTING.md).
+
+See the [performance baseline](PERFORMANCE.md) for local request and graph-build measurements.
 
 ## 🧭 Architecture
 
@@ -150,11 +152,11 @@ Session status dots: 🟢 online · 🟠 replying (busy) · ⚪ offline. Busy is
 
 Asking a question of an offline or idle session triggers a headless wake so the peer can process its inbox (optional):
 
-| Target state | Behavior                                                                                     |
-| ------------ | --------------------------------------------------------------------------------------------- |
-| Busy         | Left alone; the inbox is surfaced naturally after the current turn                            |
+| Target state | Behavior                                                                                                                                                       |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Busy         | Left alone; the inbox is surfaced naturally after the current turn                                                                                             |
 | Idle         | A fresh headless run answers as that session; Claude prefers resuming the real conversation, Codex falls back to digest injection due to its thread write lock |
-| Offline      | Headless resume of the real conversation — full context, reply written into real history (visible in the CLI) |
+| Offline      | Headless resume of the real conversation — full context, reply written into real history (visible in the CLI)                                                  |
 
 Master switch: `auto_wake` (settings page / `PUT /settings/terminal`); 90-second per-session dedup. Wake replies arrive via `reply_ask` and stay visible in the thread.
 
@@ -303,14 +305,14 @@ Issues, ideas, and pull requests are welcome. Read the [contribution guide](../C
 
 ## 📚 Documentation
 
-| Doc                                          | Contents                                            |
-| -------------------------------------------- | --------------------------------------------------- |
-| [Machine setup](SETUP.md)                     | From-scratch dev environment checklist (bilingual) |
-| [Migration guide](MIGRATION.md)              | Legacy naming/directory compatibility and migration |
-| [Troubleshooting](TROUBLESHOOTING.md)        | Ports, database, MCP, data recovery                 |
-| [Contributing](../CONTRIBUTING.md)           | Development standards and PR process                |
-| [Changelog](../CHANGELOG.md)                 | Release history                                     |
-| [简体中文](../README.md)                     | Chinese documentation                               |
+| Doc                                   | Contents                                            |
+| ------------------------------------- | --------------------------------------------------- |
+| [Machine setup](SETUP.md)             | From-scratch dev environment checklist (bilingual)  |
+| [Migration guide](MIGRATION.md)       | Legacy naming/directory compatibility and migration |
+| [Troubleshooting](TROUBLESHOOTING.md) | Ports, database, MCP, data recovery                 |
+| [Contributing](../CONTRIBUTING.md)    | Development standards and PR process                |
+| [Changelog](../CHANGELOG.md)          | Release history                                     |
+| [简体中文](../README.md)              | Chinese documentation                               |
 
 ---
 

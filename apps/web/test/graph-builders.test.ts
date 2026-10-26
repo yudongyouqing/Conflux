@@ -10,10 +10,19 @@ import {
   previewOf,
   selectedEdgeEndpoints,
   styleEdges,
+  graphBuildMetrics,
 } from "../src/graph-builders.ts";
 import type { Edge, Node } from "@xyflow/react";
 
 const noop = () => {};
+
+test("graphBuildMetrics reports graph size and rounded build time", () => {
+  assert.deepEqual(graphBuildMetrics(12, 7, 10, 11.234), {
+    nodes: 12,
+    edges: 7,
+    durationMs: 1.23,
+  });
+});
 
 const node = (over: Partial<GraphNode>): GraphNode => ({
   id: "n",
