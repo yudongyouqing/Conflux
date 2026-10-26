@@ -20,6 +20,35 @@ function withHttpEnv(env: Record<string, string | undefined>, run: () => void): 
   }
 }
 
+test("legacy HTTP variables warn once each while new variables keep priority", () => {
+  const originalEmitWarning = process.emitWarning;
+  const warnings: string[] = [];
+  process.emitWarning = ((warning: unknown) => {
+    warnings.push(String(warning));
+  }) as typeof process.emitWarning;
+  try {
+    withHttpEnv(
+      {
+        MUILTCHAT_HOST: "127.0.0.3",
+        MUILTCHAT_PORT: "9529",
+        CONFLUX_HOST: "127.0.0.2",
+        CONFLUX_PORT: "9528",
+      },
+      () => {
+        assert.equal(resolveHttpHost(), "127.0.0.2");
+        assert.equal(resolveHttpPort(), 9528);
+        resolveHttpHost();
+        resolveHttpPort();
+      },
+    );
+  } finally {
+    process.emitWarning = originalEmitWarning;
+  }
+  assert.equal(warnings.filter((warning) => warning.includes("MUILTCHAT_HOST")).length, 1);
+  assert.equal(warnings.filter((warning) => warning.includes("MUILTCHAT_PORT")).length, 1);
+  assert.ok(warnings.every((warning) => warning.includes("0.2.0")));
+});
+
 test("CONFLUX_HOST/CONFLUX_PORT are honoured", () => {
   withHttpEnv({ CONFLUX_HOST: "127.0.0.2", CONFLUX_PORT: "9528" }, () => {
     assert.equal(resolveHttpHost(), "127.0.0.2");
@@ -36,7 +65,12 @@ test("legacy MUILTCHAT_HOST/MUILTCHAT_PORT still apply", () => {
 
 test("CONFLUX_* takes precedence over MUILTCHAT_* when both are set", () => {
   withHttpEnv(
-    { CONFLUX_HOST: "127.0.0.2", MUILTCHAT_HOST: "127.0.0.3", CONFLUX_PORT: "9528", MUILTCHAT_PORT: "9529" },
+    {
+      CONFLUX_HOST: "127.0.0.2",
+      MUILTCHAT_HOST: "127.0.0.3",
+      CONFLUX_PORT: "9528",
+      MUILTCHAT_PORT: "9529",
+    },
     () => {
       assert.equal(resolveHttpHost(), "127.0.0.2");
       assert.equal(resolveHttpPort(), 9528);

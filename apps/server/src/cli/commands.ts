@@ -6,7 +6,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 
 import { resolveConfig, type Scope, DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT } from "../config.js";
 import { openDb, type DB } from "../core/db.js";
-import { migrateDataDir, readMigrationStatus } from "../core/config-migration.js";
+import { migrateDataDir, readMigrationStatus, warnLegacyConfig } from "../core/config-migration.js";
 import { handleHookEvent, readJsonFile } from "../core/live.js";
 import { clearData, getClearableCounts } from "../core/data-clear.js";
 import { runBackfill } from "../core/hooks-backfill.js";
@@ -1009,7 +1009,10 @@ function cliDisplayName(argv?: string | readonly string[]): "conflux" | "muiltch
       .replace(/\.(?:cmd|exe|js|ts)$/i, "")
       .toLowerCase();
     if (name === "conflux") return "conflux";
-    if (name === "muiltchat") return "muiltchat";
+    if (name === "muiltchat") {
+      warnLegacyConfig("muiltchat CLI", "the conflux CLI");
+      return "muiltchat";
+    }
   }
   return "muiltchat";
 }
