@@ -67,7 +67,7 @@ test("creates IPv4 service specs rooted at the repository", () => {
 test("runs the npm CLI directly on Windows when npm provides its CLI path", () => {
   const specs = createDevServiceSpecs("C:\\repo", {
     platform: "win32",
-    execPath: "C:\\node\\node.exe",
+    nodeExecPath: "C:\\node\\node.exe",
     npmExecPath: "C:\\node\\node_modules\\npm\\bin\\npm-cli.js",
   });
 

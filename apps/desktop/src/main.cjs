@@ -193,7 +193,7 @@ function startServiceHealthMonitors(specs) {
 
 async function startDevServices(signal) {
   const specs = createDevServiceSpecs(repoRoot, {
-    execPath: process.execPath,
+    nodeExecPath: process.env.npm_node_execpath,
     npmExecPath: process.env.npm_execpath,
   });
   await assertDevServicePorts(specs);

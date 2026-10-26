@@ -8,11 +8,11 @@ const DEV_SERVICE_STARTUP_TIMEOUT_MS = 120_000;
 
 function createNpmInvocation({
   platform = process.platform,
-  execPath = process.execPath,
+  nodeExecPath = process.env.npm_node_execpath,
   npmExecPath = process.env.npm_execpath,
 } = {}) {
-  if (platform === "win32" && npmExecPath) {
-    return { command: execPath, args: [npmExecPath], shell: false };
+  if (platform === "win32" && nodeExecPath && npmExecPath) {
+    return { command: nodeExecPath, args: [npmExecPath], shell: false };
   }
   return {
     command: platform === "win32" ? "npm.cmd" : "npm",
