@@ -50,6 +50,23 @@ function withEnv<T>(values: Record<string, string | undefined>, fn: () => T): T 
   }
 }
 
+test("legacy muiltchat CLI emits a one-time deprecation warning", () => {
+  const originalEmitWarning = process.emitWarning;
+  const warnings: string[] = [];
+  process.emitWarning = ((warning: unknown) => {
+    warnings.push(String(warning));
+  }) as typeof process.emitWarning;
+  try {
+    buildCli("muiltchat");
+    buildCli("muiltchat");
+  } finally {
+    process.emitWarning = originalEmitWarning;
+  }
+  assert.equal(warnings.filter((warning) => warning.includes("muiltchat CLI")).length, 1);
+  assert.match(warnings[0] ?? "", /0\.2\.0/u);
+  assert.match(warnings[0] ?? "", /conflux CLI/u);
+});
+
 function seedLegacyDir(root: string): string {
   const source = join(root, "legacy", ".muiltchat");
   mkdirSync(source, { recursive: true });

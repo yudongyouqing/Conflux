@@ -1,7 +1,7 @@
 import { homedir } from "os";
 import { join, resolve } from "path";
 import { existsSync, mkdirSync } from "fs";
-import { resolveDataHome } from "./core/config-migration.js";
+import { resolveDataHome, warnLegacyConfig } from "./core/config-migration.js";
 
 export type Scope = "project" | "global";
 
@@ -65,13 +65,16 @@ export const DEFAULT_HTTP_PORT = 9527;
 
 export function resolveHttpHost(override?: string): string {
   // CONFLUX_* is the new name; MUILTCHAT_* stays as the legacy fallback.
-  const envHost = (process.env.CONFLUX_HOST ?? process.env.MUILTCHAT_HOST)?.trim();
+  const legacyHost = process.env.MUILTCHAT_HOST?.trim();
+  if (legacyHost) warnLegacyConfig("MUILTCHAT_HOST");
+  const envHost = (process.env.CONFLUX_HOST ?? legacyHost)?.trim();
   return envHost || override || DEFAULT_HTTP_HOST;
 }
 
 export function resolveHttpPort(override?: number): number {
   const confluxPort = process.env.CONFLUX_PORT?.trim();
   const legacyPort = process.env.MUILTCHAT_PORT?.trim();
+  if (legacyPort) warnLegacyConfig("MUILTCHAT_PORT");
   const envPort = confluxPort || legacyPort;
   if (!envPort) return override ?? DEFAULT_HTTP_PORT;
 
