@@ -25,6 +25,7 @@ import {
   mergeNodePositions,
   selectedEdgeEndpoints,
   styleEdges,
+  graphBuildMetrics,
 } from "../graph-builders";
 
 const nodeTypes = { session: SessionNode, cluster: GroupFrame };
@@ -69,7 +70,9 @@ export function GraphTab({
   const manualOffsets = useRef<Record<string, number>>(
     (() => {
       try {
-        return JSON.parse(localStorage.getItem(OFFSETS_KEY) ?? localStorage.getItem(LEGACY_OFFSETS_KEY) ?? "{}");
+        return JSON.parse(
+          localStorage.getItem(OFFSETS_KEY) ?? localStorage.getItem(LEGACY_OFFSETS_KEY) ?? "{}",
+        );
       } catch {
         return {};
       }
@@ -124,7 +127,9 @@ export function GraphTab({
   // data (name/status/counts) refreshes.
   useEffect(() => {
     if (!data) return;
-    const built = viewMode === "dirs"
+    const startedAt = performance.now();
+    const built =
+      viewMode === "dirs"
         ? buildDirsView({ data, onSelectEdge, expandedKey })
         : viewMode === "all"
           ? buildAllView({ data, onSelectEdge })
@@ -140,6 +145,10 @@ export function GraphTab({
       })),
     );
     setEdges(styled);
+    console.debug(
+      "[conflux:perf] graph build",
+      graphBuildMetrics(built.nodes.length, built.edges.length, startedAt, performance.now()),
+    );
   }, [
     data,
     selectedSessionId,
@@ -246,9 +255,7 @@ export function GraphTab({
         </Panel>
       )}
       <Background color="rgb(var(--tk-line))" gap={22} size={1.2} />
-      <Controls
-        className="!bg-surface !border !border-line !rounded-lg !shadow-[0_2px_10px_rgba(16,24,40,0.1)] !overflow-hidden [&_button]:!bg-surface [&_button]:!border-line [&_button]:!text-ink-muted [&_button:hover]:!bg-paper [&_button:hover]:!text-ink"
-      />
+      <Controls className="!bg-surface !border !border-line !rounded-lg !shadow-[0_2px_10px_rgba(16,24,40,0.1)] !overflow-hidden [&_button]:!bg-surface [&_button]:!border-line [&_button]:!text-ink-muted [&_button:hover]:!bg-paper [&_button:hover]:!text-ink" />
 
       <MiniMap
         pannable

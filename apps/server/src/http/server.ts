@@ -1,4 +1,4 @@
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import cors from "@fastify/cors";
@@ -46,6 +46,10 @@ export interface HttpServerOptions {
 }
 
 export type RuntimePidProbe = () => Promise<RuntimePidSnapshot | null>;
+
+export function requestDurationMs(start: number, end: number): number {
+  return Math.max(0, Math.round((end - start) * 100) / 100);
+}
 
 export async function reconcileRuntimeState(
   db: DB,
@@ -132,6 +136,23 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   const app = Fastify({
     logger: false, // we use our own pino sink writing to stderr
   });
+  const requestStarts = new WeakMap<FastifyRequest, number>();
+  app.addHook("onRequest", async (request) => {
+    requestStarts.set(request, performance.now());
+  });
+  app.addHook("onResponse", async (request, reply) => {
+    const started = requestStarts.get(request);
+    if (started === undefined) return;
+    logger.info(
+      {
+        method: request.method,
+        url: request.url,
+        statusCode: reply.statusCode,
+        durationMs: requestDurationMs(started, performance.now()),
+      },
+      "http request completed",
+    );
+  });
 
   const closeResources = () => {
     clearInterval(consoleBeat);
@@ -190,7 +211,6 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   registerSystemRoutes(app, ctx);
 
   registerWakeStreamRoutes(app, ctx);
-
 
   registerChatRoomRoutes(app, ctx);
 
