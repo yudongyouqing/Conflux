@@ -6,17 +6,29 @@ const API_HEALTH_URL = "http://127.0.0.1:9527/healthz";
 const WEB_URL = "http://127.0.0.1:5173/";
 const DEV_SERVICE_STARTUP_TIMEOUT_MS = 120_000;
 
-function npmCommand() {
-  return process.platform === "win32" ? "npm.cmd" : "npm";
+function createNpmInvocation({
+  platform = process.platform,
+  execPath = process.execPath,
+  npmExecPath = process.env.npm_execpath,
+} = {}) {
+  if (platform === "win32" && npmExecPath) {
+    return { command: execPath, args: [npmExecPath], shell: false };
+  }
+  return {
+    command: platform === "win32" ? "npm.cmd" : "npm",
+    args: [],
+    shell: platform === "win32",
+  };
 }
 
-function createDevServiceSpecs(repoRoot) {
-  const command = npmCommand();
+function createDevServiceSpecs(repoRoot, options = {}) {
+  const invocation = createNpmInvocation(options);
   return [
     {
       name: "server",
-      command,
-      args: ["run", "serve", "-w", "apps/server"],
+      command: invocation.command,
+      args: [...invocation.args, "run", "serve", "-w", "apps/server"],
+      shell: invocation.shell,
       cwd: repoRoot,
       host: "127.0.0.1",
       port: 9527,
@@ -25,8 +37,9 @@ function createDevServiceSpecs(repoRoot) {
     },
     {
       name: "web",
-      command,
+      command: invocation.command,
       args: [
+        ...invocation.args,
         "run",
         "dev",
         "-w",
@@ -36,6 +49,7 @@ function createDevServiceSpecs(repoRoot) {
         "127.0.0.1",
         "--strictPort",
       ],
+      shell: invocation.shell,
       cwd: repoRoot,
       host: "127.0.0.1",
       port: 5173,
@@ -54,13 +68,17 @@ async function assertDevServicePorts(
   }
 }
 
-function createDevServiceSpawnOptions(cwd, env = process.env) {
+function createDevServiceSpawnOptions(
+  cwd,
+  env = process.env,
+  shell = process.platform === "win32"
+) {
   return {
     cwd,
     env,
     stdio: ["ignore", "pipe", "pipe"],
-    // Electron is a GUI process on Windows; npm.cmd must run through cmd.exe.
-    shell: process.platform === "win32",
+    // npm.cmd fallback needs cmd.exe; direct npm CLI launches do not.
+    shell,
     windowsHide: true,
   };
 }
@@ -212,27 +230,33 @@ function waitForService(
 }
 
 function stopChild(child, { platform = process.platform, spawnFn = spawn } = {}) {
-  if (
-    !child ||
-    stoppingChildren.has(child) ||
-    child.killed ||
-    (child.exitCode !== null && child.exitCode !== undefined)
-  ) {
-    return;
-  }
-
-  stoppingChildren.add(child);
+  if (!child) return Promise.resolve();
+  if (stoppingChildren.has(child)) return stoppingChildren.get(child);
 
   if (platform === "win32" && child.pid) {
-    const killer = spawnFn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
-      windowsHide: true,
-      stdio: "ignore",
+    const stopping = new Promise((resolve) => {
+      const killer = spawnFn(
+        "taskkill",
+        ["/pid", String(child.pid), "/T", "/F"],
+        { windowsHide: true, stdio: "ignore" }
+      );
+      if (!killer?.once) {
+        resolve();
+        return;
+      }
+      killer.once("error", resolve);
+      killer.once("exit", resolve);
     });
-    killer?.once?.("error", () => {});
-    return;
+    stoppingChildren.set(child, stopping);
+    return stopping;
   }
 
-  child.kill("SIGTERM");
+  if (!child.killed && (child.exitCode === null || child.exitCode === undefined)) {
+    child.kill("SIGTERM");
+  }
+  const stopping = Promise.resolve();
+  stoppingChildren.set(child, stopping);
+  return stopping;
 }
 
 function createServiceRuntimeGuard({
@@ -290,7 +314,7 @@ function createServiceRuntimeGuard({
   };
 }
 
-const stoppingChildren = new WeakSet();
+const stoppingChildren = new WeakMap();
 
 module.exports = {
   API_HEALTH_URL,
