@@ -20,6 +20,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run check:secrets
       # server tests now make runtime (non type-only) imports from
       # @conflux/shared, so the dist output must exist before they run.
       - run: npm run build -w packages/shared

@@ -13,21 +13,28 @@ test("CI runs server tests, builds, desktop tests, and secret scan", () => {
   const ci = read(".github/workflows/ci.yml");
   assert.match(ci, /npm test -w apps\/server/);
   assert.match(ci, /npm run build/);
-  assert.match(ci, /test:desktop/);
+  assert.match(ci, /desktop-tests:/);
+  assert.match(ci, /node --test apps\/desktop\/test\//);
   assert.match(ci, /check:secrets/);
   assert.match(ci, /ubuntu-latest/);
   assert.match(ci, /windows-latest/);
   assert.match(ci, /macos-latest/);
 });
 
-test("release workflow builds Windows artifacts from a version tag", () => {
+test("release workflow builds and publishes all desktop platforms from a version tag", () => {
   const release = read(".github/workflows/release.yml");
   assert.match(release, /tags:\s*[\r\n]+\s+- ['"]?v\*/);
   assert.match(release, /windows-latest/);
+  assert.match(release, /macos-latest/);
+  assert.match(release, /ubuntu-latest/);
   assert.match(release, /electron-builder/);
   assert.match(release, /upload-artifact/);
-  assert.match(release, /--win nsis/);
-  assert.match(release, /--win dir/);
+  assert.match(release, /--\$\{\{ matrix\.flag \}\} \$\{\{ matrix\.target \}\}/);
+  assert.match(release, /--publish never/);
+  assert.match(release, /gh release create/);
+  assert.match(release, /GH_TOKEN/);
+  assert.match(release, /WINDOWS_CSC_LINK/);
+  assert.match(release, /APPLE_ID/);
 });
 
 test("root scripts expose reproducible CI and directory packaging commands", () => {

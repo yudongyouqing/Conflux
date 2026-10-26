@@ -251,7 +251,7 @@ npx tsx apps/server/src/index.ts data clear --sessions --messages --context
 
 ## 📦 发布与安装包
 
-GitHub Actions 在 `v*` 标签上构建 Windows 发布，包含**未签名**的 NSIS 安装包与 `win-unpacked` 目录包——安装包不代表代码已签名，请验证来源后使用。
+GitHub Actions 在 `v*` 标签上构建 Windows NSIS、macOS DMG 和 Linux AppImage，并通过 GitHub Releases 提供 `electron-updater` 更新。未配置签名 Secrets 时仍可生成未签名产物；正式发布请配置 `WINDOWS_CSC_LINK` / `WINDOWS_CSC_KEY_PASSWORD`，macOS 还需 `APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID`。
 
 ```bash
 npm run package:desktop:dir   # 当前平台目录包
@@ -269,7 +269,7 @@ npm run package:desktop       # Windows NSIS 安装包
 - ✅ 内部标识更名 Conflux，兼容层保留（CLI 双入口、env 双变量）
 - ✅ 主题系统（设计令牌 + 自定义主题导入）、数据管理（分类清除 + 自动备份）
 - ✅ 会话优先级 P0/P1/P2、能力检索 `search_sessions`、channel watch CLI、hooks 存量会话补录
-- 🚧 自动更新与代码签名
+- ✅ GitHub Releases 自动更新链路；签名由发布环境 Secrets 按平台启用
 - 🚧 macOS / Linux 正式安装包发行
 
 ## ⌨️ 开发命令
