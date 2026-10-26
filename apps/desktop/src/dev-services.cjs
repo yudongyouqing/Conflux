@@ -4,6 +4,7 @@ const { assertPortAvailable } = require("./port-diagnostics.cjs");
 
 const API_HEALTH_URL = "http://127.0.0.1:9527/healthz";
 const WEB_URL = "http://127.0.0.1:5173/";
+const DEV_SERVICE_STARTUP_TIMEOUT_MS = 120_000;
 
 function npmCommand() {
   return process.platform === "win32" ? "npm.cmd" : "npm";
@@ -20,6 +21,7 @@ function createDevServiceSpecs(repoRoot) {
       host: "127.0.0.1",
       port: 9527,
       url: API_HEALTH_URL,
+      startupTimeoutMs: DEV_SERVICE_STARTUP_TIMEOUT_MS,
     },
     {
       name: "web",
@@ -38,6 +40,7 @@ function createDevServiceSpecs(repoRoot) {
       host: "127.0.0.1",
       port: 5173,
       url: WEB_URL,
+      startupTimeoutMs: DEV_SERVICE_STARTUP_TIMEOUT_MS,
     },
   ];
 }

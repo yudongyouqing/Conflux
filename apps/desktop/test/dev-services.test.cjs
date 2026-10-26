@@ -67,10 +67,25 @@ test("creates IPv4 service specs rooted at the repository", () => {
 test("declares the host and port for every development service", () => {
   const specs = createDevServiceSpecs("C:\\repo");
   assert.deepEqual(
-    specs.map(({ name, host, port }) => ({ name, host, port })),
+    specs.map(({ name, host, port, startupTimeoutMs }) => ({
+      name,
+      host,
+      port,
+      startupTimeoutMs,
+    })),
     [
-      { name: "server", host: "127.0.0.1", port: 9527 },
-      { name: "web", host: "127.0.0.1", port: 5173 },
+      {
+        name: "server",
+        host: "127.0.0.1",
+        port: 9527,
+        startupTimeoutMs: 120_000,
+      },
+      {
+        name: "web",
+        host: "127.0.0.1",
+        port: 5173,
+        startupTimeoutMs: 120_000,
+      },
     ]
   );
 });

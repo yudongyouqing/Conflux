@@ -317,7 +317,10 @@ async function start(signal) {
         const { specs, processes } = await startDevServices(signal);
         await Promise.all(
           specs.map((spec, index) =>
-            waitForService(spec, processes[index], { signal })
+            waitForService(spec, processes[index], {
+              timeoutMs: spec.startupTimeoutMs,
+              signal,
+            })
           )
         );
         return { webUrl: WEB_URL, specs, processes };
