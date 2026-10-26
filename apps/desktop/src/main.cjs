@@ -25,6 +25,7 @@ const ptyManager = require("./pty-manager.cjs");
 const { externalLinkDecision } = require("./security.cjs");
 const { createRendererWatchdog } = require("./renderer-watchdog.cjs");
 const { createServiceHealthMonitor, probeHttp } = require("./service-health.cjs");
+const { configureAutoUpdater } = require("./auto-update.cjs");
 
 const repoRoot = path.resolve(__dirname, "../../..");
 const PRODUCTION_URL = `http://${PRODUCTION_HOST}:${PRODUCTION_PORT}/`;
@@ -47,6 +48,16 @@ const startupController = new AbortController();
 
 function log(message) {
   process.stderr.write(`[desktop] ${message}\n`);
+}
+
+function startAutoUpdater() {
+  if (!app.isPackaged || process.env.CONFLUX_DISABLE_AUTO_UPDATE === "1") return;
+  try {
+    const { autoUpdater } = require("electron-updater");
+    configureAutoUpdater({ app, autoUpdater, log });
+  } catch (error) {
+    log(`auto-update unavailable: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 log(`boot cwd=${process.cwd()} repoRoot=${repoRoot}`);
@@ -428,6 +439,7 @@ if (!hasSingleInstanceLock) {
         }
       },
     });
+    startAutoUpdater();
     return start(startupController.signal);
   }).catch((error) => {
     if (isQuitting || startupController.signal.aborted) return;

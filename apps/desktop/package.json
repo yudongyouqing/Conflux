@@ -17,6 +17,7 @@
     "yaml": "^2.9.1"
   },
   "dependencies": {
+    "electron-updater": "^6.6.2",
     "node-pty": "^1.1.0"
   }
 }

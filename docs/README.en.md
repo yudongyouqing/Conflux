@@ -251,7 +251,7 @@ npx tsx apps/server/src/index.ts data clear --sessions --messages --context
 
 ## 📦 Releases and Installers
 
-GitHub Actions builds Windows releases from `v*` tags, producing an **unsigned** NSIS installer and a `win-unpacked` directory artifact — unsigned artifacts are not code-signed; verify the source before running them.
+GitHub Actions builds Windows NSIS, macOS DMG, and Linux AppImage releases from `v*` tags and publishes them to GitHub Releases for `electron-updater`. Without signing Secrets the workflow still produces unsigned artifacts; production signing uses `WINDOWS_CSC_LINK` / `WINDOWS_CSC_KEY_PASSWORD`, plus `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` for macOS.
 
 ```bash
 npm run package:desktop:dir   # unpacked directory for the current platform
@@ -269,7 +269,7 @@ Artifacts are written to `release/` (ignored by Git). Native `better-sqlite3` pa
 - ✅ Internal rename to Conflux with the compatibility layer retained (dual CLI entries, dual env vars)
 - ✅ Theming (design tokens + custom palette import), data management (scoped clear + auto backup)
 - ✅ Session priority P0/P1/P2, capability search `search_sessions`, channel watch CLI, hooks backfill for running sessions
-- 🚧 Automatic updates and code signing
+- ✅ GitHub Releases automatic updates; platform signing is enabled through release Secrets
 - 🚧 Official installer distribution for macOS and Linux
 
 ## ⌨️ Development Commands
