@@ -134,6 +134,32 @@ async function run() {
       .locator(".react-flow__node")
       .filter({ hasText: agentName })
       .waitFor({ timeout: 10_000 });
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("button", { name: "打开导航" }).click();
+    assert.equal(
+      await page.locator(".mobile-sidebar").evaluate((el) => el.classList.contains("is-open")),
+      true,
+      "mobile navigation should open",
+    );
+    await page.getByRole("button", { name: "消息流", exact: true }).click();
+    await page.getByTitle("返回消息流").click();
+    const search = page.getByPlaceholder("搜索消息内容...");
+    await search.waitFor();
+
+    const mobileLayout = await page.evaluate(() => ({
+      navOpen: document.querySelector(".mobile-sidebar")?.classList.contains("is-open"),
+      pageWidth: document.documentElement.scrollWidth,
+      viewportWidth: window.innerWidth,
+    }));
+    const searchBounds = await search.boundingBox();
+    assert.equal(mobileLayout.navOpen, false, "navigation should close after selecting a view");
+    assert.ok(
+      mobileLayout.pageWidth <= mobileLayout.viewportWidth,
+      `page overflows horizontally: ${mobileLayout.pageWidth}px > ${mobileLayout.viewportWidth}px`,
+    );
+    assert.ok(searchBounds, "message search should be visible");
+    assert.ok(searchBounds.x >= 0 && searchBounds.x + searchBounds.width <= 390, "message search should fit the mobile viewport");
   } catch (error) {
     await page.screenshot({ path: join(ARTIFACTS, "web-smoke-failure.png"), fullPage: true });
     await context.tracing.stop({ path: join(ARTIFACTS, "web-smoke-failure.zip") });
