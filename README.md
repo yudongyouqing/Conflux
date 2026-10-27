@@ -260,7 +260,7 @@ npm run package:desktop:dir   # 当前平台目录包
 npm run package:desktop       # Windows NSIS 安装包
 ```
 
-产物输出到 `release/`（不入 Git）。Windows 上 native `better-sqlite3` 可能需要 Visual Studio C++ Build Tools；本机没有该工具链时请使用仓库的 Windows CI。
+产物输出到 `release/`（不入 Git）。Windows 本地打包还要求仓库路径不含空格，否则 `@electron/rebuild` 无法生成 `better_sqlite3.node`；建议使用 `C:\src\Conflux` 这类路径，并准备 Visual Studio C++ Build Tools。本机路径或工具链不满足时，请使用仓库的 Windows CI。
 
 ## 🗺 路线图
 
@@ -272,7 +272,7 @@ npm run package:desktop       # Windows NSIS 安装包
 - ✅ 主题系统（设计令牌 + 自定义主题导入）、数据管理（分类清除 + 自动备份）
 - ✅ 会话优先级 P0/P1/P2、能力检索 `search_sessions`、channel watch CLI、hooks 存量会话补录
 - ✅ GitHub Releases 自动更新链路；签名由发布环境 Secrets 按平台启用
-- 🚧 macOS / Linux 正式安装包发行
+- 🚧 首个正式版本 tag 的跨平台安装包、签名与自动更新验证
 
 ## ⌨️ 开发命令
 

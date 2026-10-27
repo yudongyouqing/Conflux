@@ -260,7 +260,7 @@ npm run package:desktop:dir   # unpacked directory for the current platform
 npm run package:desktop       # Windows NSIS installer
 ```
 
-Artifacts are written to `release/` (ignored by Git). Native `better-sqlite3` packaging on Windows may require Visual Studio C++ Build Tools; use the repository Windows CI when the local toolchain is unavailable.
+Artifacts are written to `release/` (ignored by Git). Windows local packaging also requires a checkout path without spaces; `@electron/rebuild` cannot produce `better_sqlite3.node` from a path such as `C:\Project folder\Conflux`. Use a path such as `C:\src\Conflux` and install Visual Studio C++ Build Tools, or use the repository Windows CI when the local path or toolchain is unsuitable.
 
 ## 🗺 Roadmap
 
@@ -272,7 +272,7 @@ Artifacts are written to `release/` (ignored by Git). Native `better-sqlite3` pa
 - ✅ Theming (design tokens + custom palette import), data management (scoped clear + auto backup)
 - ✅ Session priority P0/P1/P2, capability search `search_sessions`, channel watch CLI, hooks backfill for running sessions
 - ✅ GitHub Releases automatic updates; platform signing is enabled through release Secrets
-- 🚧 Official installer distribution for macOS and Linux
+- 🚧 First tagged release validation for cross-platform installers, signing, and auto-update
 
 ## ⌨️ Development Commands
 

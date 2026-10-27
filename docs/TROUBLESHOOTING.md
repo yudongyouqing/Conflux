@@ -111,6 +111,12 @@ Conflux 中 MCP 会话显示为“在线”，表示对应的 MCP stdio 连接�
 
 手动验证功能分支前，先关闭主工作树遗留的旧 server 和 MCP 宿主/连接，再启动当前工作树。否则 `dist/` 文件或 SQLite 数据库可能来自错误工作树，导致验证结果反映了错误的代码或数据。
 
+### Windows 桌面包缺少 better-sqlite3 native 模块
+
+如果 `npm run package:desktop:dir` 输出 `Attempting to build a module with a space in the path`，请将仓库放到不含空格的路径（例如 `C:\src\Conflux`），并确认已安装 Visual Studio C++ Build Tools。node-gyp 在带空格的 Windows 工作路径下无法可靠构建 native 模块。
+
+打包完成后运行 `npm run verify:desktop-package` 检查目录包中的 SQLite native 模块及服务资源。本机路径或工具链不满足时，使用 GitHub Actions Windows runner 验证；其工作路径不含空格。
+
 ### Provider 或 API key 未配置
 
 内部智能体需要在启动服务前设置对应环境变量：
@@ -187,6 +193,12 @@ Note: Codex CLI 0.147–0.154 has an MCP tool-catalog regression (upstream [#375
 When Conflux shows an MCP session as `online`, the MCP stdio connection is still renewing its lease. This does not mean that the terminal window is visible or focused, and it does not mean that the Codex or Claude CLI process still exists. Conversely, an existing Codex or Claude CLI process alone does not prove that the current session is still connected. If the UI still shows `online` briefly after the terminal window closes, wait for the next service `liveness` scan. A normal `stdin` disconnect still reclaims the session immediately; forced termination of the host or CLI process, or a power loss, cannot send a normal disconnect, so the session is reclaimed within the lease TTL.
 
 Before manually verifying a feature branch, stop the old server and MCP host/connection from the main worktree, then start the current worktree. Otherwise the `dist/` files or SQLite database may come from the wrong worktree, so the verification may reflect the wrong code or data.
+
+### Windows package is missing the better-sqlite3 native module
+
+If `npm run package:desktop:dir` reports `Attempting to build a module with a space in the path`, move the checkout to a path without spaces (for example, `C:\src\Conflux`) and install Visual Studio C++ Build Tools. node-gyp cannot reliably build native modules from a Windows working path containing spaces.
+
+After packaging, run `npm run verify:desktop-package` to check the SQLite native module and server resources in the unpacked app. Use the GitHub Actions Windows runner when the local path or toolchain is unsuitable; its workspace path contains no spaces.
 
 ### Provider keys and migration
 
