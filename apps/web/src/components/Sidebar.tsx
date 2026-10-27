@@ -22,6 +22,8 @@ interface SidebarProps {
   sessions: GraphNode[];
   selectedSessionId: string | null;
   onSelectSession: (id: string) => void;
+  mobileOpen?: boolean;
+  onCloseMobile?: () => void;
 }
 
 /** Calendar-day bucket for the heartbeat timestamp. */
@@ -52,6 +54,8 @@ export function Sidebar({
   sessions,
   selectedSessionId,
   onSelectSession,
+  mobileOpen = false,
+  onCloseMobile,
 }: SidebarProps) {
   const health = useDaemonHealth();
   // Electron preload 注入的平台标识；纯浏览器为 undefined（无玻璃/拖拽）
@@ -89,8 +93,15 @@ export function Sidebar({
   ];
 
   return (
+    <>
+    <button
+      type="button"
+      aria-label="关闭导航"
+      className={`mobile-sidebar-backdrop ${mobileOpen ? "is-open" : ""}`}
+      onClick={onCloseMobile}
+    />
     <aside
-      className={`${
+      className={`mobile-sidebar ${mobileOpen ? "is-open" : ""} ${
         isDarwin ? "glass-sidebar" : "bg-paper"
       } w-60 border-r border-line flex flex-col flex-shrink-0 min-h-0`}
     >
@@ -236,5 +247,6 @@ export function Sidebar({
         })}
       </div>
     </aside>
+    </>
   );
 }

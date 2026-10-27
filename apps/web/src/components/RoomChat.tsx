@@ -142,7 +142,7 @@ export function RoomChat({ roomId, roomName, members, onBack }: RoomChatProps) {
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* header */}
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-line flex-shrink-0">
+      <div className="room-chat-header flex items-center gap-2 px-4 py-3 border-b border-line flex-shrink-0">
         <button onClick={onBack} className="p-1.5 rounded-lg text-ink-faint hover:bg-tile-hover hover:text-ink">
           <ArrowLeft size={16} />
         </button>
@@ -160,8 +160,16 @@ export function RoomChat({ roomId, roomName, members, onBack }: RoomChatProps) {
             <Loader2 size={16} className="text-ink-faint animate-spin" />
           </div>
         ) : tasks.length === 0 ? (
-          <div className="text-center py-12 text-ink-faint text-xs">
-            还没有任务——选择一个 Agent，输入 prompt 开始编排
+          <div className="room-empty-state text-center py-12 text-ink-faint text-xs">
+            <div>还没有任务</div>
+            <div className="mt-1">在下方选择 Agent 并输入任务，或直接广播给全员</div>
+            <button
+              type="button"
+              onClick={() => inputRef.current?.focus()}
+              className="mt-4 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-accent-soft text-accent font-medium hover:bg-accent-soft"
+            >
+              <Play size={12} /> 开始下发任务
+            </button>
           </div>
         ) : (
           tasks.map((task) => {
@@ -218,7 +226,7 @@ export function RoomChat({ roomId, roomName, members, onBack }: RoomChatProps) {
       </div>
 
       {/* summon input with sender identity + @mention target */}
-      <div className="border-t border-line px-4 py-3 space-y-2 flex-shrink-0 relative">
+      <div className="border-t border-line px-4 py-3 space-y-2 flex-shrink-0 relative room-composer">
         {/* @mention autocomplete popup */}
         {mentionQuery !== null && mentionMatches.length > 0 && (
           <div className="absolute bottom-full left-4 right-4 mb-1 rounded-xl bg-surface border border-line shadow-raised overflow-hidden z-10 max-h-40 overflow-y-auto">
@@ -240,7 +248,7 @@ export function RoomChat({ roomId, roomName, members, onBack }: RoomChatProps) {
         )}
 
         {/* row 1: sender identity (who am I) + executor target (who runs it) */}
-        <div className="flex items-center gap-2 text-2xs">
+        <div className="room-composer-meta flex items-center gap-2 text-2xs">
           <span className="text-ink-faint">发起方</span>
           <select
             value={senderIdentity}
@@ -271,7 +279,7 @@ export function RoomChat({ roomId, roomName, members, onBack }: RoomChatProps) {
         </div>
 
         {/* row 2: prompt input */}
-        <div className="flex items-center gap-2">
+        <div className="room-composer-row flex items-center gap-2">
           <input
             ref={inputRef}
             value={prompt}
