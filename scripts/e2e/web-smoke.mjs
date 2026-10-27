@@ -7,6 +7,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { chromium } from "playwright";
 
 const ROOT = resolve(fileURLToPath(new URL("../..", import.meta.url)));
+const VITE_BIN = resolve(ROOT, "node_modules/vite/bin/vite.js");
 const SERVER_PORT = 19527;
 const WEB_PORT = 5199;
 const ARTIFACTS = join(ROOT, "test-results", "e2e");
@@ -14,12 +15,12 @@ const home = mkdtempSync(join(tmpdir(), "conflux-e2e-"));
 const server = spawn(process.execPath, ["--import", "tsx", "apps/server/src/index.ts", "serve"], {
   cwd: ROOT,
   env: { ...process.env, CONFLUX_HOME: home, CONFLUX_PORT: String(SERVER_PORT) },
-  stdio: "ignore",
+  stdio: ["ignore", "ignore", "pipe"],
 });
 const web = spawn(
   process.execPath,
   [
-    "node_modules/vite/bin/vite.js",
+    VITE_BIN,
     "--port",
     String(WEB_PORT),
     "--strictPort",
@@ -29,9 +30,19 @@ const web = spawn(
   {
     cwd: join(ROOT, "apps/web"),
     env: { ...process.env, VITE_API_TARGET: `http://127.0.0.1:${SERVER_PORT}` },
-    stdio: "ignore",
+    stdio: ["ignore", "ignore", "pipe"],
   },
 );
+
+function childFailure(child, name) {
+  return new Promise((_, reject) => {
+    const onExit = (code, signal) => {
+      reject(new Error(`${name} exited before readiness (code=${code ?? "null"}, signal=${signal ?? "none"})`));
+    };
+    child.once("exit", onExit);
+    child.once("error", (error) => reject(new Error(`${name} failed to start: ${error.message}`)));
+  });
+}
 
 function stop(child) {
   if (!child.pid || child.exitCode !== null) return;
@@ -56,6 +67,10 @@ async function waitFor(url, timeoutMs = 30_000) {
   throw new Error(`Timed out waiting for ${url}`);
 }
 
+function waitForChildOrUrl(child, name, url) {
+  return Promise.race([waitFor(url), childFailure(child, name)]);
+}
+
 async function seed() {
   const result = spawnSync(
     process.execPath,
@@ -72,8 +87,8 @@ async function run() {
   mkdirSync(ARTIFACTS, { recursive: true });
   await seed();
   await Promise.all([
-    waitFor(`http://127.0.0.1:${SERVER_PORT}/healthz`),
-    waitFor(`http://127.0.0.1:${WEB_PORT}/`),
+    waitForChildOrUrl(server, "server", `http://127.0.0.1:${SERVER_PORT}/healthz`),
+    waitForChildOrUrl(web, "web", `http://127.0.0.1:${WEB_PORT}/`),
   ]);
 
   const browser = await chromium.launch({ headless: true });
@@ -82,7 +97,7 @@ async function run() {
   const page = await context.newPage();
 
   try {
-    await page.goto(`http://127.0.0.1:${WEB_PORT}`, { waitUntil: "networkidle" });
+    await page.goto(`http://127.0.0.1:${WEB_PORT}`, { waitUntil: "domcontentloaded" });
     await page.getByText("Conflux", { exact: true }).first().waitFor();
     await page.locator(".react-flow__node").first().waitFor();
 
