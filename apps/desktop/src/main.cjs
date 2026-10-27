@@ -192,7 +192,10 @@ function startServiceHealthMonitors(specs) {
 }
 
 async function startDevServices(signal) {
-  const specs = createDevServiceSpecs(repoRoot);
+  const specs = createDevServiceSpecs(repoRoot, {
+    nodeExecPath: process.env.npm_node_execpath,
+    npmExecPath: process.env.npm_execpath,
+  });
   await assertDevServicePorts(specs);
   throwIfStartupAborted(signal);
   const processes = [];
@@ -203,7 +206,7 @@ async function startDevServices(signal) {
     const child = spawn(
       spec.command,
       spec.args,
-      createDevServiceSpawnOptions(spec.cwd, process.env)
+      createDevServiceSpawnOptions(spec.cwd, process.env, spec.shell)
     );
     processes.push(recordChild(spec, child));
   }
@@ -317,7 +320,10 @@ async function start(signal) {
         const { specs, processes } = await startDevServices(signal);
         await Promise.all(
           specs.map((spec, index) =>
-            waitForService(spec, processes[index], { signal })
+            waitForService(spec, processes[index], {
+              timeoutMs: spec.startupTimeoutMs,
+              signal,
+            })
           )
         );
         return { webUrl: WEB_URL, specs, processes };
@@ -331,9 +337,12 @@ async function start(signal) {
 }
 
 function stopDevServices() {
-  if (servicesStopped) return;
+  if (servicesStopped) return servicesStopped;
   servicesStopped = true;
-  for (const service of children) stopChild(service.child);
+  servicesStopped = Promise.all(
+    children.map((service) => stopChild(service.child))
+  );
+  return servicesStopped;
 }
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -449,16 +458,17 @@ if (!hasSingleInstanceLock) {
     app.quit();
   });
 
-  app.on("before-quit", () => {
+  app.on("before-quit", (event) => {
     if (isQuitting) return;
+    event.preventDefault();
     isQuitting = true;
     startupController.abort();
     servicesReady = false;
     rendererWatchdog?.stop();
     stopServiceHealthMonitors();
-    stopDevServices();
     tray?.destroy();
     tray = undefined;
+    stopDevServices().finally(() => app.quit());
   });
 
   // Closing the last window hides it; the tray remains the explicit exit path.

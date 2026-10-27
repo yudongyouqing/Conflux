@@ -64,13 +64,46 @@ test("creates IPv4 service specs rooted at the repository", () => {
   );
 });
 
+test("runs the npm CLI directly on Windows when npm provides its CLI path", () => {
+  const specs = createDevServiceSpecs("C:\\repo", {
+    platform: "win32",
+    nodeExecPath: "C:\\node\\node.exe",
+    npmExecPath: "C:\\node\\node_modules\\npm\\bin\\npm-cli.js",
+  });
+
+  assert.equal(specs[0].command, "C:\\node\\node.exe");
+  assert.deepEqual(specs[0].args, [
+    "C:\\node\\node_modules\\npm\\bin\\npm-cli.js",
+    "run",
+    "serve",
+    "-w",
+    "apps/server",
+  ]);
+  assert.equal(specs[0].shell, false);
+});
+
 test("declares the host and port for every development service", () => {
   const specs = createDevServiceSpecs("C:\\repo");
   assert.deepEqual(
-    specs.map(({ name, host, port }) => ({ name, host, port })),
+    specs.map(({ name, host, port, startupTimeoutMs }) => ({
+      name,
+      host,
+      port,
+      startupTimeoutMs,
+    })),
     [
-      { name: "server", host: "127.0.0.1", port: 9527 },
-      { name: "web", host: "127.0.0.1", port: 5173 },
+      {
+        name: "server",
+        host: "127.0.0.1",
+        port: 9527,
+        startupTimeoutMs: 120_000,
+      },
+      {
+        name: "web",
+        host: "127.0.0.1",
+        port: 5173,
+        startupTimeoutMs: 120_000,
+      },
     ]
   );
 });
@@ -100,13 +133,20 @@ test("stops port preflight at the first conflict", async () => {
   assert.deepEqual(checked, [{ port: 9527, host: "127.0.0.1" }]);
 });
 
-test("stopChild uses taskkill once on Windows", () => {
+test("stopChild uses taskkill once on Windows", async () => {
   const calls = [];
   const child = { pid: 2468, killed: false, exitCode: null, kill() {} };
-  const spawnFn = (...args) => calls.push(args);
+  const spawnFn = (...args) => {
+    calls.push(args);
+    const killer = new EventEmitter();
+    process.nextTick(() => killer.emit("exit", 0));
+    return killer;
+  };
 
-  stopChild(child, { platform: "win32", spawnFn });
-  stopChild(child, { platform: "win32", spawnFn });
+  await Promise.all([
+    stopChild(child, { platform: "win32", spawnFn }),
+    stopChild(child, { platform: "win32", spawnFn }),
+  ]);
 
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0], [
@@ -114,6 +154,30 @@ test("stopChild uses taskkill once on Windows", () => {
     ["/pid", "2468", "/T", "/F"],
     { windowsHide: true, stdio: "ignore" },
   ]);
+});
+
+test("stopChild waits for Windows process-tree cleanup even after the shell exits", async () => {
+  const calls = [];
+  const child = { pid: 1357, killed: true, exitCode: 0, kill() {} };
+  let finishTaskkill;
+  const spawnFn = (...args) => {
+    calls.push(args);
+    const killer = new EventEmitter();
+    finishTaskkill = () => killer.emit("exit", 0);
+    return killer;
+  };
+
+  let settled = false;
+  const stopping = stopChild(child, { platform: "win32", spawnFn }).then(() => {
+    settled = true;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(settled, false);
+  assert.equal(calls.length, 1);
+  finishTaskkill();
+  await stopping;
+  assert.equal(settled, true);
 });
 
 test("stopChild sends SIGTERM once on non-Windows", () => {
