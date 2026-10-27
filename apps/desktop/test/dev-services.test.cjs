@@ -26,7 +26,10 @@ test("uses pipe-safe stdio for Electron child processes", () => {
 });
 
 test("creates IPv4 service specs rooted at the repository", () => {
-  const specs = createDevServiceSpecs("C:\\repo");
+  const specs = createDevServiceSpecs("C:\\repo", {
+    nodeExecPath: "",
+    npmExecPath: "",
+  });
 
   assert.deepEqual(
     specs.map(({ name, command, args, cwd, url }) => ({
