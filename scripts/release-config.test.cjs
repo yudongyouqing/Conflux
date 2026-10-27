@@ -28,6 +28,11 @@ test("release workflow builds and publishes all desktop platforms from a version
   assert.match(release, /macos-latest/);
   assert.match(release, /ubuntu-latest/);
   assert.match(release, /electron-builder/);
+  assert.ok(
+    release.indexOf("npm run build -w packages/shared") <
+      release.indexOf("npm test -w apps/server"),
+    "release workflow must build shared before server tests"
+  );
   assert.match(release, /upload-artifact/);
   assert.match(release, /--\$\{\{ matrix\.flag \}\} \$\{\{ matrix\.target \}\}/);
   assert.match(release, /--publish never/);
