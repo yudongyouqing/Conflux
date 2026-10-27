@@ -6,7 +6,7 @@ import { AgentTab } from "./components/AgentTab";
 import { RoomsTab } from "./components/RoomsTab";
 import { DetailPanel } from "./components/DetailPanel";
 import { useGraph } from "./hooks";
-import { X } from "lucide-react";
+import { Menu, X } from "lucide-react";
 import type { Message, GraphNode } from "@conflux/shared";
 
 // Low-frequency destinations load on first visit, then stay mounted
@@ -30,11 +30,13 @@ function initialDrawerWidth(): number {
 
 export default function App() {
   const [tab, setTab] = useState<TabId>("graph");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // views mount on first visit and never unmount — viewport zoom, scroll
   // positions and query caches survive tab switches (#107)
   const [visited, setVisited] = useState<ReadonlySet<TabId>>(new Set(["graph"]));
   const switchTab = useCallback((next: TabId) => {
     setTab(next);
+    setMobileNavOpen(false);
     setVisited((prev) => (prev.has(next) ? prev : new Set(prev).add(next)));
   }, []);
 
@@ -157,9 +159,34 @@ export default function App() {
         sessions={graph.data?.nodes ?? []}
         selectedSessionId={selectedSession?.id ?? null}
         onSelectSession={handleSidebarSelect}
+        mobileOpen={mobileNavOpen}
+        onCloseMobile={() => setMobileNavOpen(false)}
       />
       <div className="flex flex-1 overflow-hidden min-w-0">
-        <main className="relative flex-1 overflow-hidden">
+        <main className="relative flex-1 overflow-hidden mobile-main">
+          <div className="mobile-topbar">
+            <button
+              type="button"
+              className="mobile-menu-button"
+              aria-label="打开导航"
+              onClick={() => setMobileNavOpen(true)}
+            >
+              <Menu size={18} />
+            </button>
+            <span>
+              {tab === "graph"
+                ? "图谱"
+                : tab === "messages"
+                  ? "消息流"
+                  : tab === "agents"
+                    ? "Agents"
+                    : tab === "rooms"
+                      ? "聊天室"
+                      : tab === "runtimes"
+                        ? "运行时"
+                        : "设置"}
+            </span>
+          </div>
           {surface(
             "graph",
             <GraphTab
