@@ -234,3 +234,72 @@ test("wake concurrency cap: a full queue blocks, a free slot proceeds", () => {
   assert.equal(freed.woke, false);
   assert.ok(!/wake queue full/.test(freed.reason ?? ""), "freed slot must not report a full queue");
 });
+
+// ---- cache-prefix protection ----------------------------------------------------
+
+import { projectHasConfluxMcp } from "../core/wake/commands.js";
+import { createRuntimeAgent } from "../core/runtime-agents.js";
+
+function tempProjectDir(mcpJson?: string): string {
+  const dir = mkdtempSync(join(tmpdir(), "wake-prefix-proj-"));
+  cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+  if (mcpJson !== undefined) writeFileSync(join(dir, ".mcp.json"), mcpJson);
+  return dir;
+}
+
+test("projectHasConfluxMcp: detects a Conflux mount under either key", () => {
+  assert.equal(projectHasConfluxMcp(tempProjectDir(`{"mcpServers":{"conflux":{"command":"npx"}}}`)), true);
+  assert.equal(projectHasConfluxMcp(tempProjectDir(`{"mcpServers":{"muiltchat":{"command":"npx"}}}`)), true, "legacy key counts too");
+  assert.equal(projectHasConfluxMcp(tempProjectDir(`{"mcpServers":{"other":{"command":"npx"}}}`)), false);
+  assert.equal(projectHasConfluxMcp(tempProjectDir()), false, "no .mcp.json at all");
+  assert.equal(projectHasConfluxMcp(tempProjectDir(`{not-json`)), false, "malformed JSON → not mounted");
+  assert.equal(projectHasConfluxMcp(null), false, "no project dir");
+});
+
+test("wake: project that mounts Conflux itself resumes WITHOUT the extra --mcp-config", () => {
+  const db = freshDb();
+  const projDir = tempProjectDir(`{"mcpServers":{"conflux":{"command":"conflux","args":["mcp"]}}}`);
+  registerSession(db, { id: "asker", name: "提问方" });
+  registerSession(db, { id: "off-mounted", name: "已挂载项目", project_dir: projDir });
+  db.prepare(`UPDATE sessions SET status = 'stale' WHERE id = 'off-mounted'`).run();
+
+  const rec: Rec = { aliveNames: [], launches: [], sends: [], captures: 0 };
+  const res = wakeSessionForMail(db, "off-mounted", {
+    io: fakeIO(rec),
+    claudeHome: fakeClaudeHome("off-mounted"), // transcript found via the scan fallback
+  });
+
+  assert.equal(res.woke, true);
+  assert.equal(rec.launches.length, 1);
+  assert.ok(rec.launches[0].command.includes("--resume"), "still resumes the real conversation");
+  assert.ok(!rec.launches[0].command.includes("--mcp-config"), "no extra mount — tools array unchanged, prefix intact");
+});
+
+test("wake: runtime-agent session resumes with its --append-system-prompt", () => {
+  const db = freshDb();
+  const agent = createRuntimeAgent(db, {
+    name: "后台中继",
+    runtime: "claude",
+    instructions: "你是一个只做数据中继的后台 worker",
+  });
+  registerSession(db, { id: "asker", name: "提问方" });
+  registerSession(db, {
+    id: "off-agent",
+    name: "agent 会话",
+    project_dir: tempProjectDir(), // no Conflux mount → wake mount still applies
+    metadata: { agent_id: agent.id },
+  });
+  db.prepare(`UPDATE sessions SET status = 'stale' WHERE id = 'off-agent'`).run();
+
+  const rec: Rec = { aliveNames: [], launches: [], sends: [], captures: 0 };
+  const res = wakeSessionForMail(db, "off-agent", {
+    io: fakeIO(rec),
+    claudeHome: fakeClaudeHome("off-agent"),
+  });
+
+  assert.equal(res.woke, true);
+  assert.equal(rec.launches.length, 1);
+  assert.ok(rec.launches[0].command.includes("--mcp-config"), "unmounted project still gets the #105 mount");
+  assert.ok(rec.launches[0].command.includes("--append-system-prompt"), "agent instructions carried on resume");
+  assert.ok(rec.launches[0].command.includes("后台 worker"), "the agent's actual instructions are in the command");
+});

@@ -6,13 +6,29 @@ on:
       - "v*"
 
 permissions:
-  contents: read
+  contents: write
   actions: write
 
 jobs:
-  windows:
-    name: Build Windows release
-    runs-on: windows-latest
+  desktop:
+    name: Build ${{ matrix.platform }} release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: Windows
+            flag: win
+            target: nsis
+          - os: macos-latest
+            platform: macOS
+            flag: mac
+            target: dmg
+          - os: ubuntu-latest
+            platform: Linux
+            flag: linux
+            target: AppImage
 
     steps:
       - name: Check out tagged source
@@ -50,17 +66,38 @@ jobs:
       - name: Run desktop module tests
         run: npm run test:desktop
 
-      - name: Build unsigned NSIS installer
-        run: npx electron-builder --projectDir apps/desktop --config electron-builder.yml --win nsis --publish never
+      - name: Build ${{ matrix.platform }} release
+        env:
+          CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npx electron-builder --projectDir apps/desktop --config electron-builder.yml --${{ matrix.flag }} ${{ matrix.target }} --publish never
 
-      - name: Build unsigned unpacked directory
-        run: npx electron-builder --projectDir apps/desktop --config electron-builder.yml --win dir --publish never
-
-      - name: Upload Windows artifacts
+      - name: Upload ${{ matrix.platform }} artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: conflux-windows-${{ github.ref_name }}
+          name: conflux-${{ matrix.platform }}-${{ github.ref_name }}
           path: |
-            release/*.exe
-            release/win-unpacked/**
+            release/*
           if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: desktop
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download platform artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: conflux-*-${{ github.ref_name }}
+          path: release
+          merge-multiple: true
+
+      - name: Create GitHub Release and upload artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" release/* --generate-notes --verify-tag

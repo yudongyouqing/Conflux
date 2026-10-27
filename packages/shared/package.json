@@ -1,6 +1,6 @@
 {
   "name": "@conflux/shared",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Shared TypeScript types for Conflux (single source of truth)",
   "type": "commonjs",
   "main": "dist/index.js",
@@ -12,6 +12,6 @@
     "build": "tsc -p tsconfig.json"
   },
   "devDependencies": {
-    "typescript": "^5.5.0"
+    "typescript": "^7.0.2"
   }
 }

@@ -1,20 +1,23 @@
 {
   "name": "conflux-desktop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "main": "src/main.cjs",
   "scripts": {
     "dev": "electron .",
     "build": "electron-builder --config electron-builder.yml --dir",
-    "package": "electron-builder --config electron-builder.yml"
+    "package": "electron-builder --config electron-builder.yml",
+    "rebuild": "electron-rebuild -f -w node-pty"
   },
   "devDependencies": {
-    "@electron/asar": "^3.4.1",
-    "electron": "37.10.3",
+    "@electron/asar": "^4.3.1",
+    "electron": "45.0.0",
     "electron-builder": "^26.0.12",
+    "@electron/rebuild": "^4.2.0",
     "yaml": "^2.9.1"
   },
   "dependencies": {
+    "electron-updater": "^6.6.2",
     "node-pty": "^1.1.0"
   }
 }

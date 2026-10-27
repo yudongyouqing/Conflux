@@ -11,13 +11,15 @@ import {
 import { getSession, mergeSessionMeta } from "../sessions.js";
 import { hasTranscript } from "../live.js";
 import { pushMailTyped } from "../mail-push.js";
-import { AUTO_WAKE_PROMPT, tmuxWakeCommand } from "./commands.js";
+import { AUTO_WAKE_PROMPT, projectHasConfluxMcp, tmuxWakeCommand } from "./commands.js";
 import { ensureWakeMcpConfig } from "./launcher.js";
 import { planClaudeWake } from "./claude.js";
 import { planCodexWake } from "./codex.js";
 import { launchWakeRun } from "./launcher.js";
 import { realTmuxIO, type TmuxIO } from "./tmux-inject.js";
 import { resolveConfig } from "../../config.js";
+import { getRuntimeAgent } from "../runtime-agents.js";
+import { cmdQuote } from "../terminal.js";
 
 /**
  * Wake a session so it processes its inbox:
@@ -39,6 +41,21 @@ import { resolveConfig } from "../../config.js";
 const AUTO_WAKE_DEDUP_MS = 90_000;
 const TMUX_WAKE_POLL_MS = 400;
 const TMUX_WAKE_MAX_POLLS = 40; // ~16s — a TUI that hasn't painted by then is broken
+
+/**
+ * Cache-prefix protection: a session spawned from a runtime agent ran
+ * with that agent's --append-system-prompt; resuming it WITHOUT the append
+ * changes the request's system block and invalidates the whole cached
+ * prefix. Re-attach the agent's instructions to every resume of the real
+ * conversation so the prefix stays byte-identical to the original run.
+ */
+export function agentPromptSuffix(db: DB, meta: Record<string, unknown> | null): string {
+  const agentId = Number(meta?.agent_id);
+  if (!Number.isFinite(agentId) || agentId <= 0) return "";
+  const agent = getRuntimeAgent(db, agentId);
+  if (!agent?.instructions || !agent.instructions.trim()) return "";
+  return ` --append-system-prompt ${cmdQuote(agent.instructions)}`;
+}
 
 /** Global counter for active wake processes (spawned, not yet exited). */
 let activeWakeCount = 0;
@@ -144,7 +161,14 @@ export function wakeSessionForMail(db: DB, sessionId: string, opts: WakeOptions 
     // user-session namespace: conflux/<sessionId> (tmuxSessionName is the
     // runtime-AGENT namer — conflux/agent-<registry id> — never reuse it here)
     const name = `conflux/${sessionId}`;
-    const command = tmuxWakeCommand(sessionId, exe, opts.mcpConfigPath ?? ensureWakeMcpConfig());
+    // Mount the wake MCP config only when the project doesn't already
+    // carry Conflux itself — an extra mount changes the tools array and
+    // invalidates the whole cached prefix. Explicit test injection wins.
+    const mcpConfig =
+      opts.mcpConfigPath ??
+      (projectHasConfluxMcp(session.project_dir) ? null : ensureWakeMcpConfig());
+    const command =
+      tmuxWakeCommand(sessionId, exe, mcpConfig) + agentPromptSuffix(db, meta);
     if (opts.dryRun) return { woke: true, command };
     if (io.launch({ name, command, cwd: session.project_dir })) {
       mergeSessionMeta(db, sessionId, { tmux_session: name });
@@ -178,7 +202,7 @@ export function wakeSessionForMail(db: DB, sessionId: string, opts: WakeOptions 
     sessionId,
     dataDir: resolveConfig("global").dataDir,
     projectDir: session.project_dir,
-    command: plan.command,
+    command: plan.command + (runtime === "codex" ? "" : agentPromptSuffix(db, meta)),
     prompt: plan.prompt ?? AUTO_WAKE_PROMPT,
     pinCodex: runtime === "codex",
     dryRun: opts.dryRun,

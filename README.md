@@ -10,7 +10,7 @@
   <p><b>本地优先 · 会话图谱 · 异步消息 · MCP/HTTP/CLI 同核 · macOS/Windows/Linux</b></p>
   <p><a href="#界面预览">界面预览</a> · <a href="#不是一个聊天壳是一张会话图">为什么</a> · <a href="#-快速开始">快速开始</a> · <a href="#-架构">架构</a> · <a href="#-接入-claude-code">接入 Claude Code</a> · <a href="#-数据与配置">数据与配置</a> · <a href="#-路线图">路线图</a></p>
   <p>
-    <img src="https://img.shields.io/badge/Electron-37-47848F?logo=electron&logoColor=white" alt="Electron">
+    <img src="https://img.shields.io/badge/Electron-45-47848F?logo=electron&logoColor=white" alt="Electron">
     <img src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white" alt="React">
     <img src="https://img.shields.io/badge/Node.js-%3E%3D22-339933?logo=nodedotjs&logoColor=white" alt="Node.js">
     <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
@@ -83,11 +83,11 @@ npm run dev:desktop
 
 开发环境端点：
 
-| 端点         | 地址                          |
-| ------------ | ----------------------------- |
-| 工作空间     | <http://127.0.0.1:5173>       |
-| API 服务器   | <http://127.0.0.1:9527>       |
-| OpenAPI 文档 | <http://127.0.0.1:9527/docs>  |
+| 端点         | 地址                         |
+| ------------ | ---------------------------- |
+| 工作空间     | <http://127.0.0.1:5173>      |
+| API 服务器   | <http://127.0.0.1:9527>      |
+| OpenAPI 文档 | <http://127.0.0.1:9527/docs> |
 
 > ⚠️ 不要同时运行 `npm run dev:all` 和 `npm run dev:desktop`——两者使用相同端口与 SQLite 数据目录。只想用浏览器开发时，跑 `npm run dev:web-stack`。
 
@@ -98,6 +98,8 @@ npm start   # → http://127.0.0.1:9527
 ```
 
 遇到启动、端口、数据库、MCP 或迁移问题，请查看[故障排查指南](docs/TROUBLESHOOTING.md)。
+
+性能基线与本地指标见[性能文档](docs/PERFORMANCE.md)。
 
 ## 🧭 架构
 
@@ -245,19 +247,20 @@ npx tsx apps/server/src/index.ts data clear --sessions --messages --context
 - 精确查看生效路径：`npx tsx apps/server/src/index.ts --data-dir /path/to/data path`
 - Windows 数据目录为 `%USERPROFILE%\.muiltchat`；卸载 Conflux 不会删除用户数据。
 - 旧变量 `MUILTCHAT_HOME` / `MUILTCHAT_HOST` / `MUILTCHAT_PORT` 与新变量 `CONFLUX_HOME` / `CONFLUX_HOST` / `CONFLUX_PORT` 同时生效，新变量优先。
+- 兼容计划：0.1.x 仍支持旧变量和 `muiltchat` CLI，并在首次使用时输出弃用 warning；计划在 0.2.0 移除旧变量和旧 CLI 别名。请迁移到 `CONFLUX_*` 与 `conflux`，避免升级时中断。
 
 </details>
 
 ## 📦 发布与安装包
 
-GitHub Actions 在 `v*` 标签上构建 Windows 发布，包含**未签名**的 NSIS 安装包与 `win-unpacked` 目录包——安装包不代表代码已签名，请验证来源后使用。
+GitHub Actions 在 `v*` 标签上构建 Windows NSIS、macOS DMG 和 Linux AppImage，并通过 GitHub Releases 提供 `electron-updater` 更新。未配置签名 Secrets 时仍可生成未签名产物；正式发布请配置 `WINDOWS_CSC_LINK` / `WINDOWS_CSC_KEY_PASSWORD`，macOS 还需 `APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID`。
 
 ```bash
 npm run package:desktop:dir   # 当前平台目录包
 npm run package:desktop       # Windows NSIS 安装包
 ```
 
-产物输出到 `release/`（不入 Git）。Windows 上 native `better-sqlite3` 可能需要 Visual Studio C++ Build Tools；本机没有该工具链时请使用仓库的 Windows CI。
+产物输出到 `release/`（不入 Git）。Windows 本地打包还要求仓库路径不含空格，否则 `@electron/rebuild` 无法生成 `better_sqlite3.node`；建议使用 `C:\src\Conflux` 这类路径，并准备 Visual Studio C++ Build Tools。本机路径或工具链不满足时，请使用仓库的 Windows CI。
 
 ## 🗺 路线图
 
@@ -268,8 +271,8 @@ npm run package:desktop       # Windows NSIS 安装包
 - ✅ 内部标识更名 Conflux，兼容层保留（CLI 双入口、env 双变量）
 - ✅ 主题系统（设计令牌 + 自定义主题导入）、数据管理（分类清除 + 自动备份）
 - ✅ 会话优先级 P0/P1/P2、能力检索 `search_sessions`、channel watch CLI、hooks 存量会话补录
-- 🚧 自动更新与代码签名
-- 🚧 macOS / Linux 正式安装包发行
+- ✅ GitHub Releases 自动更新链路；签名由发布环境 Secrets 按平台启用
+- 🚧 首个正式版本 tag 的跨平台安装包、签名与自动更新验证
 
 ## ⌨️ 开发命令
 
@@ -302,14 +305,14 @@ node --test apps/desktop/test/dev-services.test.cjs apps/desktop/test/runtime-co
 
 ## 📚 文档
 
-| 文档                                   | 内容                       |
-| -------------------------------------- | -------------------------- |
-| [新机环境搭建](docs/SETUP.md)           | 从零配置开发环境清单（双语） |
-| [迁移指南](docs/MIGRATION.md)           | 新旧命名/目录兼容与迁移步骤 |
-| [故障排查](docs/TROUBLESHOOTING.md)     | 端口、数据库、MCP、数据恢复 |
-| [贡献指南](CONTRIBUTING.md)             | 开发规范与 PR 流程          |
-| [更新日志](CHANGELOG.md)                | 版本历史                    |
-| [English README](docs/README.en.md)     | English documentation       |
+| 文档                                | 内容                         |
+| ----------------------------------- | ---------------------------- |
+| [新机环境搭建](docs/SETUP.md)       | 从零配置开发环境清单（双语） |
+| [迁移指南](docs/MIGRATION.md)       | 新旧命名/目录兼容与迁移步骤  |
+| [故障排查](docs/TROUBLESHOOTING.md) | 端口、数据库、MCP、数据恢复  |
+| [贡献指南](CONTRIBUTING.md)         | 开发规范与 PR 流程           |
+| [更新日志](CHANGELOG.md)            | 版本历史                     |
+| [English README](docs/README.en.md) | English documentation        |
 
 ---
 

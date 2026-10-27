@@ -27,7 +27,14 @@ test("production build config includes app, server, web, and native module resou
   );
   assert.equal(config.nsis.deleteAppDataOnUninstall, false);
   assert.deepEqual(config.mac.target, ["dir"]);
+  assert.equal(config.mac.hardenedRuntime, true);
   assert.deepEqual(config.linux.target, ["dir"]);
+  assert.deepEqual(config.publish, {
+    provider: "github",
+    owner: "yudongyouqing",
+    repo: "Conflux",
+    releaseType: "release",
+  });
 });
 
 test("declares the server workspace as a root production dependency", () => {

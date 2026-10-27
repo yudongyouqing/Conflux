@@ -20,6 +20,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run check:secrets
       # server tests now make runtime (non type-only) imports from
       # @conflux/shared, so the dist output must exist before they run.
       - run: npm run build -w packages/shared
@@ -39,6 +40,29 @@ jobs:
           cache: npm
       - run: npm ci
       - run: node --test apps/desktop/test/dev-services.test.cjs apps/desktop/test/runtime-config.test.cjs apps/desktop/test/security.test.cjs
+
+  web-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test -w apps/web
+
+  e2e-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e:web
 
   build:
     runs-on: ubuntu-latest

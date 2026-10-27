@@ -22,6 +22,12 @@ asarUnpack:
   - "**/better-sqlite3/**"
 npmRebuild: true
 
+publish:
+  provider: github
+  owner: yudongyouqing
+  repo: Conflux
+  releaseType: release
+
 win:
   target:
     - target: nsis
@@ -36,6 +42,8 @@ nsis:
 mac:
   target:
     - dir
+  hardenedRuntime: true
+  gatekeeperAssess: false
 
 linux:
   target:

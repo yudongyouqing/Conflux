@@ -110,6 +110,25 @@ export interface ViewBuilderInput {
   onSelectEdge: EdgeSelectHandler;
 }
 
+export interface GraphBuildMetrics {
+  nodes: number;
+  edges: number;
+  durationMs: number;
+}
+
+export function graphBuildMetrics(
+  nodes: number,
+  edges: number,
+  startedAt: number,
+  finishedAt: number,
+): GraphBuildMetrics {
+  return {
+    nodes,
+    edges,
+    durationMs: Math.max(0, Math.round((finishedAt - startedAt) * 100) / 100),
+  };
+}
+
 /** active: live nodes only; edges never dangle onto offline/placeholder nodes. */
 export function buildActiveView({ data, onSelectEdge }: ViewBuilderInput) {
   const live = data.nodes.filter((n) => n.status === "active" || n.type === "agent");
@@ -391,7 +410,6 @@ export function mergeNodePositions(
   }));
 }
 
-
 // ---- Chat Room view (#137): room frames + member nodes ----------------------
 
 const chatRoomGroupId = (roomId: number) => `__chatroom:${roomId}`;
@@ -400,10 +418,7 @@ export interface ChatRoomViewInput extends ViewBuilderInput {
   rooms: ChatRoom[];
 }
 
-export function applyChatRoomGroups(
-  nodes: Node[],
-  rooms: ChatRoom[],
-): Node[] {
+export function applyChatRoomGroups(nodes: Node[], rooms: ChatRoom[]): Node[] {
   if (rooms.length === 0) return nodes;
   const roomById = new Map(rooms.map((r) => [r.id, r]));
 
@@ -453,5 +468,9 @@ export function applyChatRoomGroups(
     };
   });
 
-  return [...positioned.filter((n) => !n.parentId), ...frames, ...positioned.filter((n) => !!n.parentId)];
+  return [
+    ...positioned.filter((n) => !n.parentId),
+    ...frames,
+    ...positioned.filter((n) => !!n.parentId),
+  ];
 }

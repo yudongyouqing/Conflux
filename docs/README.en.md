@@ -28,7 +28,7 @@ AI coding assistants usually run as isolated processes, which makes simple quest
 
 **Conflux connects those sessions into a graph**: publish knowledge, ask across sessions, receive replies asynchronously, auto-wake offline peers — with no external database, message broker, or hosted control plane. Data stays in a local SQLite database by default.
 
-The public project name, CLI entry, and npm package names are all `Conflux` (`conflux` / `@conflux/shared`). The legacy `muiltchat` CLI entry, environment variables, and default data directory remain supported for compatibility.
+The public project name, CLI entry, and npm package names are all `Conflux` (`conflux` / `@conflux/shared`). The legacy `muiltchat` CLI entry, environment variables, and default data directory remain supported for compatibility. In the 0.1.x line, legacy names emit a one-time deprecation warning; the old CLI alias and `MUILTCHAT_*` settings are planned for removal in 0.2.0.
 
 ## Screenshots
 
@@ -83,11 +83,11 @@ npm run dev:desktop
 
 Development endpoints:
 
-| Endpoint         | URL                           |
-| ---------------- | ----------------------------- |
-| Workspace        | <http://127.0.0.1:5173>       |
-| API server       | <http://127.0.0.1:9527>       |
-| OpenAPI docs     | <http://127.0.0.1:9527/docs>  |
+| Endpoint     | URL                          |
+| ------------ | ---------------------------- |
+| Workspace    | <http://127.0.0.1:5173>      |
+| API server   | <http://127.0.0.1:9527>      |
+| OpenAPI docs | <http://127.0.0.1:9527/docs> |
 
 > ⚠️ Do not run `npm run dev:all` and `npm run dev:desktop` at the same time — both use the same ports and SQLite data directory. For a browser-only dev stack run `npm run dev:web-stack`.
 
@@ -98,6 +98,8 @@ npm start   # → http://127.0.0.1:9527
 ```
 
 For startup, port, database, MCP, or migration issues, see the [troubleshooting guide](TROUBLESHOOTING.md).
+
+See the [performance baseline](PERFORMANCE.md) for local request and graph-build measurements.
 
 ## 🧭 Architecture
 
@@ -150,11 +152,11 @@ Session status dots: 🟢 online · 🟠 replying (busy) · ⚪ offline. Busy is
 
 Asking a question of an offline or idle session triggers a headless wake so the peer can process its inbox (optional):
 
-| Target state | Behavior                                                                                     |
-| ------------ | --------------------------------------------------------------------------------------------- |
-| Busy         | Left alone; the inbox is surfaced naturally after the current turn                            |
+| Target state | Behavior                                                                                                                                                       |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Busy         | Left alone; the inbox is surfaced naturally after the current turn                                                                                             |
 | Idle         | A fresh headless run answers as that session; Claude prefers resuming the real conversation, Codex falls back to digest injection due to its thread write lock |
-| Offline      | Headless resume of the real conversation — full context, reply written into real history (visible in the CLI) |
+| Offline      | Headless resume of the real conversation — full context, reply written into real history (visible in the CLI)                                                  |
 
 Master switch: `auto_wake` (settings page / `PUT /settings/terminal`); 90-second per-session dedup. Wake replies arrive via `reply_ask` and stay visible in the thread.
 
@@ -251,14 +253,14 @@ npx tsx apps/server/src/index.ts data clear --sessions --messages --context
 
 ## 📦 Releases and Installers
 
-GitHub Actions builds Windows releases from `v*` tags, producing an **unsigned** NSIS installer and a `win-unpacked` directory artifact — unsigned artifacts are not code-signed; verify the source before running them.
+GitHub Actions builds Windows NSIS, macOS DMG, and Linux AppImage releases from `v*` tags and publishes them to GitHub Releases for `electron-updater`. Without signing Secrets the workflow still produces unsigned artifacts; production signing uses `WINDOWS_CSC_LINK` / `WINDOWS_CSC_KEY_PASSWORD`, plus `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` for macOS.
 
 ```bash
 npm run package:desktop:dir   # unpacked directory for the current platform
 npm run package:desktop       # Windows NSIS installer
 ```
 
-Artifacts are written to `release/` (ignored by Git). Native `better-sqlite3` packaging on Windows may require Visual Studio C++ Build Tools; use the repository Windows CI when the local toolchain is unavailable.
+Artifacts are written to `release/` (ignored by Git). Windows local packaging also requires a checkout path without spaces; `@electron/rebuild` cannot produce `better_sqlite3.node` from a path such as `C:\Project folder\Conflux`. Use a path such as `C:\src\Conflux` and install Visual Studio C++ Build Tools, or use the repository Windows CI when the local path or toolchain is unsuitable.
 
 ## 🗺 Roadmap
 
@@ -269,8 +271,8 @@ Artifacts are written to `release/` (ignored by Git). Native `better-sqlite3` pa
 - ✅ Internal rename to Conflux with the compatibility layer retained (dual CLI entries, dual env vars)
 - ✅ Theming (design tokens + custom palette import), data management (scoped clear + auto backup)
 - ✅ Session priority P0/P1/P2, capability search `search_sessions`, channel watch CLI, hooks backfill for running sessions
-- 🚧 Automatic updates and code signing
-- 🚧 Official installer distribution for macOS and Linux
+- ✅ GitHub Releases automatic updates; platform signing is enabled through release Secrets
+- 🚧 First tagged release validation for cross-platform installers, signing, and auto-update
 
 ## ⌨️ Development Commands
 
@@ -303,14 +305,14 @@ Issues, ideas, and pull requests are welcome. Read the [contribution guide](../C
 
 ## 📚 Documentation
 
-| Doc                                          | Contents                                            |
-| -------------------------------------------- | --------------------------------------------------- |
-| [Machine setup](SETUP.md)                     | From-scratch dev environment checklist (bilingual) |
-| [Migration guide](MIGRATION.md)              | Legacy naming/directory compatibility and migration |
-| [Troubleshooting](TROUBLESHOOTING.md)        | Ports, database, MCP, data recovery                 |
-| [Contributing](../CONTRIBUTING.md)           | Development standards and PR process                |
-| [Changelog](../CHANGELOG.md)                 | Release history                                     |
-| [简体中文](../README.md)                     | Chinese documentation                               |
+| Doc                                   | Contents                                            |
+| ------------------------------------- | --------------------------------------------------- |
+| [Machine setup](SETUP.md)             | From-scratch dev environment checklist (bilingual)  |
+| [Migration guide](MIGRATION.md)       | Legacy naming/directory compatibility and migration |
+| [Troubleshooting](TROUBLESHOOTING.md) | Ports, database, MCP, data recovery                 |
+| [Contributing](../CONTRIBUTING.md)    | Development standards and PR process                |
+| [Changelog](../CHANGELOG.md)          | Release history                                     |
+| [简体中文](../README.md)              | Chinese documentation                               |
 
 ---
 
