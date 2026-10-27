@@ -36,6 +36,7 @@ test("excerpt collapses whitespace and truncates at 80 chars", () => {
 test("runner: first poll is silent (watermark), new ids notify once", async () => {
   const seen = [];
   let call = 0;
+  let poll;
   const fetchFn = async () => {
     call += 1;
     if (call === 1)
@@ -47,10 +48,17 @@ test("runner: first poll is silent (watermark), new ids notify once", async () =
   const stop = startMessageNotifications({
     baseUrl: "http://x",
     fetchFn,
-    intervalMs: 5,
     onNotify: (n) => seen.push(n),
+    setIntervalFn: (callback) => {
+      poll = callback;
+      return 1;
+    },
+    clearIntervalFn: () => {},
   });
-  await new Promise((r) => setTimeout(r, 20));
+
+  await poll();
+  await poll();
+  await poll();
   stop();
   assert.deepEqual(
     seen.map((n) => n.id),
