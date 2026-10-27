@@ -188,3 +188,86 @@ html[data-theme="dark"] .font-medium { font-weight: 600; }
   content-visibility: hidden;
   pointer-events: none;
 }
+
+.mobile-topbar,
+.mobile-sidebar-backdrop {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .mobile-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 50;
+    width: min(82vw, 300px);
+    transform: translateX(-105%);
+    transition: transform 180ms ease;
+    box-shadow: 12px 0 30px rgb(24 34 52 / 0.14);
+  }
+
+  .mobile-sidebar.is-open {
+    transform: translateX(0);
+  }
+
+  .mobile-sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    border: 0;
+    background: rgb(24 34 52 / 0.28);
+  }
+
+  .mobile-sidebar-backdrop.is-open {
+    display: block;
+  }
+
+  .mobile-topbar {
+    position: absolute;
+    inset: 0 0 auto;
+    z-index: 20;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 12px;
+    border-bottom: 1px solid rgb(var(--tk-line));
+    background: rgb(var(--tk-surface) / 0.94);
+    color: rgb(var(--tk-ink));
+  }
+
+  .mobile-menu-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: 1px solid rgb(var(--tk-line));
+    border-radius: 8px;
+    color: rgb(var(--tk-ink-muted));
+  }
+
+  .mobile-main .tab-surface {
+    top: 48px;
+  }
+
+  .room-chat-header {
+    min-height: 52px;
+  }
+
+  .room-composer-meta {
+    flex-wrap: wrap;
+  }
+
+  .room-composer-meta select {
+    max-width: min(100%, 220px);
+  }
+
+  .room-composer-row input {
+    min-width: 0;
+  }
+
+  .room-composer-row button {
+    flex-shrink: 0;
+    padding-inline: 12px;
+  }
+}
