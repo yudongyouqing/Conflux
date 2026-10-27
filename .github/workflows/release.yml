@@ -69,13 +69,23 @@ jobs:
       - name: Run desktop module tests
         run: npm run test:desktop
 
-      - name: Build ${{ matrix.platform }} release
+      - name: Build Windows release
+        if: matrix.platform == 'Windows'
         env:
           CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+        run: npx electron-builder --projectDir apps/desktop --config electron-builder.yml --${{ matrix.flag }} ${{ matrix.target }} --publish never
+
+      - name: Build macOS release
+        if: matrix.platform == 'macOS'
+        env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npx electron-builder --projectDir apps/desktop --config electron-builder.yml --${{ matrix.flag }} ${{ matrix.target }} --publish never
+
+      - name: Build Linux release
+        if: matrix.platform == 'Linux'
         run: npx electron-builder --projectDir apps/desktop --config electron-builder.yml --${{ matrix.flag }} ${{ matrix.target }} --publish never
 
       - name: Upload ${{ matrix.platform }} artifacts

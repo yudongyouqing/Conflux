@@ -40,6 +40,14 @@ test("release workflow builds and publishes all desktop platforms from a version
   assert.match(release, /GH_TOKEN/);
   assert.match(release, /WINDOWS_CSC_LINK/);
   assert.match(release, /APPLE_ID/);
+  assert.match(release, /name: Build Windows release[\s\S]*?CSC_LINK:/);
+  assert.match(release, /name: Build macOS release[\s\S]*?APPLE_ID:/);
+  assert.match(release, /name: Build Linux release[\s\S]*?electron-builder/);
+  assert.doesNotMatch(
+    release,
+    /name: Build macOS release[\s\S]*?CSC_LINK:/,
+    "macOS release must not receive an empty Windows CSC_LINK"
+  );
 });
 
 test("root scripts expose reproducible CI and directory packaging commands", () => {
