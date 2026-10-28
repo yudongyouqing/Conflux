@@ -48,8 +48,8 @@ async function runCli(args: string[]): Promise<string> {
   const originalLog = console.log;
   console.log = (value?: unknown) => output.push(String(value));
   try {
-    const program = buildCli("muiltchat").exitOverride();
-    await program.parseAsync(["node", "muiltchat", ...args]);
+    const program = buildCli("conflux").exitOverride();
+    await program.parseAsync(["node", "conflux", ...args]);
     return output.join("\n");
   } finally {
     console.log = originalLog;
@@ -82,8 +82,8 @@ function watchUntilInitialOutput(dataDir: string, edgeId: number): Promise<{ cod
   });
 }
 
-test("both CLI aliases expose a channel command group", () => {
-  for (const cliName of ["conflux", "muiltchat"]) {
+test("Conflux CLI exposes a channel command group", () => {
+  for (const cliName of ["conflux"]) {
     const program = buildCli(cliName);
     const channel = program.commands.find((command) => command.name() === "channel");
     assert.ok(channel, `${cliName} should expose channel`);

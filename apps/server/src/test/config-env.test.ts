@@ -20,35 +20,6 @@ function withHttpEnv(env: Record<string, string | undefined>, run: () => void): 
   }
 }
 
-test("legacy HTTP variables warn once each while new variables keep priority", () => {
-  const originalEmitWarning = process.emitWarning;
-  const warnings: string[] = [];
-  process.emitWarning = ((warning: unknown) => {
-    warnings.push(String(warning));
-  }) as typeof process.emitWarning;
-  try {
-    withHttpEnv(
-      {
-        MUILTCHAT_HOST: "127.0.0.3",
-        MUILTCHAT_PORT: "9529",
-        CONFLUX_HOST: "127.0.0.2",
-        CONFLUX_PORT: "9528",
-      },
-      () => {
-        assert.equal(resolveHttpHost(), "127.0.0.2");
-        assert.equal(resolveHttpPort(), 9528);
-        resolveHttpHost();
-        resolveHttpPort();
-      },
-    );
-  } finally {
-    process.emitWarning = originalEmitWarning;
-  }
-  assert.equal(warnings.filter((warning) => warning.includes("MUILTCHAT_HOST")).length, 1);
-  assert.equal(warnings.filter((warning) => warning.includes("MUILTCHAT_PORT")).length, 1);
-  assert.ok(warnings.every((warning) => warning.includes("0.2.0")));
-});
-
 test("CONFLUX_HOST/CONFLUX_PORT are honoured", () => {
   withHttpEnv({ CONFLUX_HOST: "127.0.0.2", CONFLUX_PORT: "9528" }, () => {
     assert.equal(resolveHttpHost(), "127.0.0.2");
@@ -56,10 +27,10 @@ test("CONFLUX_HOST/CONFLUX_PORT are honoured", () => {
   });
 });
 
-test("legacy MUILTCHAT_HOST/MUILTCHAT_PORT still apply", () => {
+test("removed MUILTCHAT_HOST/MUILTCHAT_PORT are ignored", () => {
   withHttpEnv({ MUILTCHAT_HOST: "127.0.0.3", MUILTCHAT_PORT: "9529" }, () => {
-    assert.equal(resolveHttpHost(), "127.0.0.3");
-    assert.equal(resolveHttpPort(), 9529);
+    assert.equal(resolveHttpHost(), "127.0.0.1");
+    assert.equal(resolveHttpPort(), 9527);
   });
 });
 
@@ -84,9 +55,9 @@ test("invalid CONFLUX_PORT reports the new variable name", () => {
   });
 });
 
-test("invalid MUILTCHAT_PORT (legacy) still reports the legacy name", () => {
+test("removed MUILTCHAT_PORT cannot affect port resolution", () => {
   withHttpEnv({ MUILTCHAT_PORT: "nope" }, () => {
-    assert.throws(() => resolveHttpPort(), /invalid MUILTCHAT_PORT: nope/u);
+    assert.equal(resolveHttpPort(), 9527);
   });
 });
 

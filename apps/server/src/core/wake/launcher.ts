@@ -84,14 +84,14 @@ export function launchWakeRun(req: LaunchRequest): LaunchResult {
   if (req.dryRun) return { ok: true, command: req.command };
 
   // Identity, two channels (either suffices):
-  //  1. env MUILTCHAT_ASSUME_SESSION — claude passes a full env to MCP
+  //  1. env CONFLUX_ASSUME_SESSION — claude passes a full env to MCP
   //     children; codex SCRUBS it (verified empirically), so for codex:
   //  2. pid pin — the codex-spawned MCP adopts via its ancestor codex pid
   //     looking up `codex-current:<pid>`. Spawn first, pin immediately
   //     (the npm/tsx MCP chain takes seconds to boot — the pin always lands
   //     before the first tryAdopt), and the wake run acts as the target.
   const env = cleanTerminalEnv();
-  env.MUILTCHAT_ASSUME_SESSION = req.sessionId;
+  env.CONFLUX_ASSUME_SESSION = req.sessionId;
   // claude wakes (pinCodex === false) get an explicit MCP mount so the
   // headless run can always reach check_inbox/reply_ask — but only
   // when the project doesn't already mount Conflux itself: an extra mount

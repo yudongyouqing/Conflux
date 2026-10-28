@@ -1,5 +1,5 @@
 import { performance } from "node:perf_hooks";
-import type { GraphEdge, GraphNode } from "@muiltchat/shared";
+import type { GraphEdge, GraphNode } from "@conflux/shared";
 import { buildActiveView } from "../src/graph-builders.ts";
 
 for (const topology of ["chain", "tree", "disconnected"] as const) {

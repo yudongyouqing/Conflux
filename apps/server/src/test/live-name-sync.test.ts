@@ -19,7 +19,7 @@ function freshDb() {
 // Same env-pin pattern as live-title.test.ts: the ancestor walk reads this
 // before walking, making the claude pid deterministic in this file.
 const TEST_CLAUDE_PID = 424242;
-process.env.MUILTCHAT_CLAUDE_PID = String(TEST_CLAUDE_PID);
+process.env.CONFLUX_CLAUDE_PID = String(TEST_CLAUDE_PID);
 
 function fakeHome(): string {
   return mkdtempSync(join(tmpdir(), "muiltchat-name-sync-"));
