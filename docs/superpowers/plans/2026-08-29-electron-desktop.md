@@ -1,5 +1,7 @@
 # Electron 桌面开发壳实现计划
 
+> 历史实现计划：复选框记录原计划，不代表当前进度。当前状态和待办见 [项目待办](../../PROJECT-TODO.md)；未经核验的验收项不能视为已完成。
+
 > **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
 
 **目标：** 为 Windows 增加一个 Electron 开发客户端，自动启动现有 Vite 前端和 Fastify 后端，并在桌面窗口中完整加载现有 React 界面。
