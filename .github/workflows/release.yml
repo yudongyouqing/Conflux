@@ -79,10 +79,23 @@ jobs:
       - name: Build macOS release
         if: matrix.platform == 'macOS'
         env:
+          MAC_SIGN_CERT: ${{ secrets.MAC_CSC_LINK }}
+          MAC_SIGN_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npx electron-builder --projectDir apps/desktop --config electron-builder.yml --${{ matrix.flag }} ${{ matrix.target }} --publish never
+        run: |
+          if [[ -n "$MAC_SIGN_CERT" ]]; then
+            if [[ -z "$MAC_SIGN_PASSWORD" ]]; then
+              echo "MAC_CSC_KEY_PASSWORD is required when MAC_CSC_LINK is set" >&2
+              exit 1
+            fi
+            export CSC_LINK="$MAC_SIGN_CERT" CSC_KEY_PASSWORD="$MAC_SIGN_PASSWORD"
+          elif [[ -n "$MAC_SIGN_PASSWORD" ]]; then
+            echo "MAC_CSC_LINK is required when MAC_CSC_KEY_PASSWORD is set" >&2
+            exit 1
+          fi
+          npx electron-builder --projectDir apps/desktop --config electron-builder.yml --mac dmg zip --publish never
 
       - name: Build Linux release
         if: matrix.platform == 'Linux'
@@ -95,6 +108,7 @@ jobs:
           path: |
             release/*.exe
             release/*.dmg
+            release/*.zip
             release/*.AppImage
             release/*.blockmap
             release/latest*.yml
