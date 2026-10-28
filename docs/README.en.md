@@ -28,7 +28,7 @@ AI coding assistants usually run as isolated processes, which makes simple quest
 
 **Conflux connects those sessions into a graph**: publish knowledge, ask across sessions, receive replies asynchronously, auto-wake offline peers — with no external database, message broker, or hosted control plane. Data stays in a local SQLite database by default.
 
-The public project name, CLI entry, and npm package names are all `Conflux` (`conflux` / `@conflux/shared`). The legacy `muiltchat` CLI entry, environment variables, and default data directory remain supported for compatibility. In the 0.1.x line, legacy names emit a one-time deprecation warning; the old CLI alias and `MUILTCHAT_*` settings are planned for removal in 0.2.0.
+The public project name, CLI entry, and npm package names are all `Conflux` (`conflux` / `@conflux/shared`). The legacy `muiltchat` CLI entry, environment variables, and default data directory remain supported for compatibility. Legacy names remain supported in 0.2.0 and emit a one-time deprecation warning. No removal version has been set; migrate to the new names when convenient.
 
 ## Screenshots
 
@@ -273,6 +273,8 @@ Artifacts are written to `release/` (ignored by Git). Windows local packaging al
 - ✅ Session priority P0/P1/P2, capability search `search_sessions`, channel watch CLI, hooks backfill for running sessions
 - ✅ GitHub Releases automatic updates; platform signing is enabled through release Secrets
 - 🚧 First tagged release validation for cross-platform installers, signing, and auto-update
+
+See [project follow-ups](PROJECT-TODO.md) and the [performance baseline](PERFORMANCE.md).
 
 ## ⌨️ Development Commands
 

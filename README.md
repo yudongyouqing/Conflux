@@ -247,7 +247,7 @@ npx tsx apps/server/src/index.ts data clear --sessions --messages --context
 - 精确查看生效路径：`npx tsx apps/server/src/index.ts --data-dir /path/to/data path`
 - Windows 数据目录为 `%USERPROFILE%\.muiltchat`；卸载 Conflux 不会删除用户数据。
 - 旧变量 `MUILTCHAT_HOME` / `MUILTCHAT_HOST` / `MUILTCHAT_PORT` 与新变量 `CONFLUX_HOME` / `CONFLUX_HOST` / `CONFLUX_PORT` 同时生效，新变量优先。
-- 兼容计划：0.1.x 仍支持旧变量和 `muiltchat` CLI，并在首次使用时输出弃用 warning；计划在 0.2.0 移除旧变量和旧 CLI 别名。请迁移到 `CONFLUX_*` 与 `conflux`，避免升级时中断。
+- 兼容计划：0.2.0 仍支持旧变量和 `muiltchat` CLI，并在首次使用时输出弃用提示。移除版本尚未确定；建议迁移到 `CONFLUX_*` 与 `conflux`。
 
 </details>
 
@@ -273,6 +273,8 @@ npm run package:desktop       # Windows NSIS 安装包
 - ✅ 会话优先级 P0/P1/P2、能力检索 `search_sessions`、channel watch CLI、hooks 存量会话补录
 - ✅ GitHub Releases 自动更新链路；签名由发布环境 Secrets 按平台启用
 - 🚧 首个正式版本 tag 的跨平台安装包、签名与自动更新验证
+
+当前待办与历史计划状态见 [项目待办](docs/PROJECT-TODO.md)，性能测量方法见 [性能基线](docs/PERFORMANCE.md)。
 
 ## ⌨️ 开发命令
 

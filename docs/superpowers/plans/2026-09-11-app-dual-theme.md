@@ -1,5 +1,7 @@
 # Application Dual Theme Implementation Plan
 
+> 历史实现计划：复选框记录原计划，不代表当前进度。当前状态和待办见 [项目待办](../../PROJECT-TODO.md)；未经核验的验收项不能视为已完成。
+
 > **For the implementing agent:** Required sub-skill: use `superpowers-zh:executing-plans` to implement this plan task by task.
 
 **Goal:** Add persistent system/light/dark application themes so the complete web UI has a coherent workbench light mode and terminal-inspired dark mode.
