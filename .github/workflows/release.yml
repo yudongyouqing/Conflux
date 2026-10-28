@@ -93,7 +93,11 @@ jobs:
         with:
           name: conflux-${{ matrix.platform }}-${{ github.ref_name }}
           path: |
-            release/*
+            release/*.exe
+            release/*.dmg
+            release/*.AppImage
+            release/*.blockmap
+            release/latest*.yml
           if-no-files-found: error
 
   publish:
@@ -103,6 +107,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v7
+
       - name: Download platform artifacts
         uses: actions/download-artifact@v7
         with:
