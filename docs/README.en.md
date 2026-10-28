@@ -253,7 +253,7 @@ npx tsx apps/server/src/index.ts data clear --sessions --messages --context
 
 ## 📦 Releases and Installers
 
-GitHub Actions builds Windows NSIS, macOS DMG, and Linux AppImage releases from `v*` tags and publishes them to GitHub Releases for `electron-updater`. Without signing Secrets the workflow still produces unsigned artifacts; production signing uses `WINDOWS_CSC_LINK` / `WINDOWS_CSC_KEY_PASSWORD`, plus `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` for macOS.
+GitHub Actions builds Windows NSIS, macOS DMG / ZIP, and Linux AppImage releases from `v*` tags and publishes them to GitHub Releases for `electron-updater`. Without signing Secrets the workflow still produces unsigned artifacts. Windows signing uses `WINDOWS_CSC_LINK` / `WINDOWS_CSC_KEY_PASSWORD`; macOS signing uses `MAC_CSC_LINK` / `MAC_CSC_KEY_PASSWORD`, and notarization also requires `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID`. Store certificates securely in GitHub Actions Secrets, not in the repository; signing and updates still require testing on real devices.
 
 ```bash
 npm run package:desktop:dir   # unpacked directory for the current platform

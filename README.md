@@ -253,7 +253,7 @@ npx tsx apps/server/src/index.ts data clear --sessions --messages --context
 
 ## 📦 发布与安装包
 
-GitHub Actions 在 `v*` 标签上构建 Windows NSIS、macOS DMG 和 Linux AppImage，并通过 GitHub Releases 提供 `electron-updater` 更新。未配置签名 Secrets 时仍可生成未签名产物；正式发布请配置 `WINDOWS_CSC_LINK` / `WINDOWS_CSC_KEY_PASSWORD`，macOS 还需 `APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID`。
+GitHub Actions 在 `v*` 标签上构建 Windows NSIS、macOS DMG / ZIP 和 Linux AppImage，并通过 GitHub Releases 提供 `electron-updater` 更新。未配置签名 Secrets 时仍可生成未签名产物；Windows 签名需要 `WINDOWS_CSC_LINK` / `WINDOWS_CSC_KEY_PASSWORD`，macOS 签名需要 `MAC_CSC_LINK` / `MAC_CSC_KEY_PASSWORD`，公证还需 `APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID`。证书应安全存放在 GitHub Actions Secrets，不要提交到仓库；签名和更新仍需在真实设备上验收。
 
 ```bash
 npm run package:desktop:dir   # 当前平台目录包
