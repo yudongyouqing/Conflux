@@ -26,8 +26,8 @@ Run from the repository root after `npm ci` and `npm run build -w packages/share
 node --import tsx apps/web/test/graph-benchmark.ts
 ```
 
-The fixture is a single directed chain of active sessions with one fewer edge
-than nodes. It measures `buildActiveView`, including graph layout, in Node.js;
+The fixtures are active sessions arranged as a directed chain, a binary tree,
+or disconnected nodes. It measures `buildActiveView`, including graph layout, in Node.js;
 it does not measure React rendering, browser interaction, server latency, or
 memory. Each size has three warm-up runs followed by ten measured runs. The
 median is the average of the two middle samples; max is the largest sample.
@@ -41,7 +41,23 @@ Node.js v22.23.4, using the dev source at `4dfafa2`:
 | 100 | 99 | 28.22 | 40.25 |
 | 300 | 299 | 95.63 | 105.06 |
 
-These are observations from one run, not pass/fail limits. Machine load and
-graph topology affect results. Collect repeated runs on representative
-hardware and branching/dense graphs, plus browser rendering measurements,
-before choosing thresholds.
+On the same host on 2026-10-28, source `ce2658a`, an additional run compared
+three synthetic topologies (three warm-ups and ten samples each):
+
+| Topology | Nodes | Edges | Median (ms) | Max (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| Chain | 25 | 24 | 8.76 | 11.12 |
+| Chain | 100 | 99 | 33.79 | 39.06 |
+| Chain | 300 | 299 | 92.55 | 114.88 |
+| Binary tree | 25 | 24 | 8.97 | 12.80 |
+| Binary tree | 100 | 99 | 28.06 | 31.14 |
+| Binary tree | 300 | 299 | 86.67 | 102.94 |
+| Disconnected | 25 | 0 | 0.00 | 0.01 |
+| Disconnected | 100 | 0 | 0.01 | 0.02 |
+| Disconnected | 300 | 0 | 0.05 | 0.08 |
+
+Disconnected graphs use the grid fallback rather than Dagre, so their timings
+are not directly comparable to connected graphs. These observations are not
+pass/fail limits. Machine load and graph topology affect results. Collect
+repeated runs on representative hardware and dense graphs, plus browser
+rendering measurements, before choosing thresholds.
