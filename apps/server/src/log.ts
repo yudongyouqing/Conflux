@@ -6,14 +6,14 @@ import pino from "pino";
  * by default for consistency, but HTTP/CLI may swap in a different destination.
  */
 const dest =
-  process.env.MUILTCHAT_LOG_FILE && process.env.MUILTCHAT_LOG_FILE.length > 0
-    ? pino.destination(process.env.MUILTCHAT_LOG_FILE)
+  process.env.CONFLUX_LOG_FILE && process.env.CONFLUX_LOG_FILE.length > 0
+    ? pino.destination(process.env.CONFLUX_LOG_FILE)
     : pino.destination(2); // fd 2 = stderr
 
 export const logger = pino(
   {
     name: "conflux",
-    level: process.env.MUILTCHAT_LOG_LEVEL || "info",
+    level: process.env.CONFLUX_LOG_LEVEL || "info",
     base: undefined,
     timestamp: pino.stdTimeFunctions.isoTime,
   },

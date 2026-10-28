@@ -52,6 +52,24 @@ jobs:
       - run: npm ci
       - run: npm test -w apps/web
 
+  browser-performance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run perf:web
+      - uses: actions/upload-artifact@v7
+        with:
+          name: browser-performance
+          path: test-results/performance/browser.json
+          if-no-files-found: error
+
   e2e-web:
     runs-on: ubuntu-latest
     steps:

@@ -1,0 +1,517 @@
+{
+  "measuredAt": "2026-10-28T13:31:39.649Z",
+  "revision": "d32c9bb0baf3b2cb506499314f02cbc228ae294b",
+  "node": "v22.23.4",
+  "chromium": "156.0.8078.4",
+  "os": "win32 10.0.26300",
+  "cpu": "12th Gen Intel(R) Core(TM) i7-12650H",
+  "memoryBytes": 16898719744,
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "samples": 5,
+  "results": [
+    {
+      "topology": "chain",
+      "nodes": 25,
+      "edges": 24,
+      "runs": [
+        {
+          "renderedMs": 247.89999997615814,
+          "zoomMs": 26.599999994039536,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 237.90000000596046,
+          "zoomMs": 21.19999998807907,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 256.7000000178814,
+          "zoomMs": 24.100000023841858,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 251.59999999403954,
+          "zoomMs": 30.5,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 258.7000000178814,
+          "zoomMs": 21.399999976158142,
+          "longTasks": []
+        }
+      ],
+      "renderMs": {
+        "median": 251.59999999403954,
+        "max": 258.7000000178814
+      },
+      "zoomMs": {
+        "median": 24.100000023841858,
+        "max": 30.5
+      },
+      "longTaskMaxMs": 0
+    },
+    {
+      "topology": "chain",
+      "nodes": 100,
+      "edges": 99,
+      "runs": [
+        {
+          "renderedMs": 378,
+          "zoomMs": 24.30000001192093,
+          "longTasks": [
+            51
+          ]
+        },
+        {
+          "renderedMs": 382.69999998807907,
+          "zoomMs": 17.19999998807907,
+          "longTasks": [
+            56
+          ]
+        },
+        {
+          "renderedMs": 372.7999999821186,
+          "zoomMs": 28.700000017881393,
+          "longTasks": [
+            54
+          ]
+        },
+        {
+          "renderedMs": 362.90000000596046,
+          "zoomMs": 20.099999994039536,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 372.59999999403954,
+          "zoomMs": 19.400000005960464,
+          "longTasks": []
+        }
+      ],
+      "renderMs": {
+        "median": 372.7999999821186,
+        "max": 382.69999998807907
+      },
+      "zoomMs": {
+        "median": 20.099999994039536,
+        "max": 28.700000017881393
+      },
+      "longTaskMaxMs": 56
+    },
+    {
+      "topology": "chain",
+      "nodes": 300,
+      "edges": 299,
+      "runs": [
+        {
+          "renderedMs": 801.3000000119209,
+          "zoomMs": 75.10000002384186,
+          "longTasks": [
+            129,
+            114,
+            139,
+            90,
+            89,
+            75,
+            76,
+            73,
+            71,
+            66
+          ]
+        },
+        {
+          "renderedMs": 786.8000000119209,
+          "zoomMs": 75.69999998807907,
+          "longTasks": [
+            119,
+            120,
+            144,
+            81,
+            84,
+            74,
+            75,
+            72,
+            72,
+            69,
+            65
+          ]
+        },
+        {
+          "renderedMs": 839.0999999940395,
+          "zoomMs": 100.69999998807907,
+          "longTasks": [
+            128,
+            130,
+            136,
+            90,
+            93,
+            88,
+            79,
+            80,
+            75,
+            93
+          ]
+        },
+        {
+          "renderedMs": 935.9000000059605,
+          "zoomMs": 86.90000000596046,
+          "longTasks": [
+            151,
+            51,
+            132,
+            148,
+            97,
+            92,
+            71
+          ]
+        },
+        {
+          "renderedMs": 1034.800000011921,
+          "zoomMs": 88.5,
+          "longTasks": [
+            165,
+            69,
+            63,
+            160,
+            169,
+            129,
+            103,
+            81
+          ]
+        }
+      ],
+      "renderMs": {
+        "median": 839.0999999940395,
+        "max": 1034.800000011921
+      },
+      "zoomMs": {
+        "median": 86.90000000596046,
+        "max": 100.69999998807907
+      },
+      "longTaskMaxMs": 169
+    },
+    {
+      "topology": "tree",
+      "nodes": 25,
+      "edges": 24,
+      "runs": [
+        {
+          "renderedMs": 255.59999999403954,
+          "zoomMs": 15.300000011920929,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 257,
+          "zoomMs": 23.30000001192093,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 245.89999997615814,
+          "zoomMs": 32.400000005960464,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 257.09999999403954,
+          "zoomMs": 27.599999994039536,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 242.90000000596046,
+          "zoomMs": 31.200000017881393,
+          "longTasks": []
+        }
+      ],
+      "renderMs": {
+        "median": 255.59999999403954,
+        "max": 257.09999999403954
+      },
+      "zoomMs": {
+        "median": 27.599999994039536,
+        "max": 32.400000005960464
+      },
+      "longTaskMaxMs": 0
+    },
+    {
+      "topology": "tree",
+      "nodes": 100,
+      "edges": 99,
+      "runs": [
+        {
+          "renderedMs": 370.69999998807907,
+          "zoomMs": 19.700000017881393,
+          "longTasks": [
+            53
+          ]
+        },
+        {
+          "renderedMs": 364.40000000596046,
+          "zoomMs": 23.900000005960464,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 390.09999999403954,
+          "zoomMs": 25.30000001192093,
+          "longTasks": [
+            61
+          ]
+        },
+        {
+          "renderedMs": 360.10000002384186,
+          "zoomMs": 25,
+          "longTasks": [
+            57
+          ]
+        },
+        {
+          "renderedMs": 353.7000000178814,
+          "zoomMs": 23,
+          "longTasks": [
+            51
+          ]
+        }
+      ],
+      "renderMs": {
+        "median": 364.40000000596046,
+        "max": 390.09999999403954
+      },
+      "zoomMs": {
+        "median": 23.900000005960464,
+        "max": 25.30000001192093
+      },
+      "longTaskMaxMs": 61
+    },
+    {
+      "topology": "tree",
+      "nodes": 300,
+      "edges": 299,
+      "runs": [
+        {
+          "renderedMs": 807.3000000119209,
+          "zoomMs": 94.40000000596046,
+          "longTasks": [
+            136,
+            114,
+            139,
+            102,
+            94,
+            79,
+            70,
+            76,
+            78,
+            84
+          ]
+        },
+        {
+          "renderedMs": 826,
+          "zoomMs": 94.80000001192093,
+          "longTasks": [
+            143,
+            118,
+            143,
+            95,
+            88,
+            79,
+            75,
+            82,
+            81,
+            82
+          ]
+        },
+        {
+          "renderedMs": 807.0999999940395,
+          "zoomMs": 92.89999997615814,
+          "longTasks": [
+            139,
+            104,
+            146,
+            92,
+            92,
+            85,
+            80,
+            79,
+            78,
+            82
+          ]
+        },
+        {
+          "renderedMs": 842.2000000178814,
+          "zoomMs": 91.80000001192093,
+          "longTasks": [
+            137,
+            114,
+            145,
+            98,
+            98,
+            90,
+            90,
+            85,
+            85
+          ]
+        },
+        {
+          "renderedMs": 822.5,
+          "zoomMs": 105.40000000596046,
+          "longTasks": [
+            128,
+            117,
+            144,
+            97,
+            100,
+            99,
+            81,
+            87,
+            94
+          ]
+        }
+      ],
+      "renderMs": {
+        "median": 822.5,
+        "max": 842.2000000178814
+      },
+      "zoomMs": {
+        "median": 94.40000000596046,
+        "max": 105.40000000596046
+      },
+      "longTaskMaxMs": 146
+    },
+    {
+      "topology": "disconnected",
+      "nodes": 25,
+      "edges": 0,
+      "runs": [
+        {
+          "renderedMs": 211.59999999403954,
+          "zoomMs": 26.900000005960464,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 196.2999999821186,
+          "zoomMs": 26.5,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 213.09999999403954,
+          "zoomMs": 33.29999998211861,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 214,
+          "zoomMs": 29.19999998807907,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 189.59999999403954,
+          "zoomMs": 21.69999998807907,
+          "longTasks": []
+        }
+      ],
+      "renderMs": {
+        "median": 211.59999999403954,
+        "max": 214
+      },
+      "zoomMs": {
+        "median": 26.900000005960464,
+        "max": 33.29999998211861
+      },
+      "longTaskMaxMs": 0
+    },
+    {
+      "topology": "disconnected",
+      "nodes": 100,
+      "edges": 0,
+      "runs": [
+        {
+          "renderedMs": 227.10000002384186,
+          "zoomMs": 27.599999994039536,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 227.59999999403954,
+          "zoomMs": 28.599999994039536,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 288.30000001192093,
+          "zoomMs": 21,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 243.90000000596046,
+          "zoomMs": 31.69999998807907,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 250.39999997615814,
+          "zoomMs": 27.299999982118607,
+          "longTasks": []
+        }
+      ],
+      "renderMs": {
+        "median": 243.90000000596046,
+        "max": 288.30000001192093
+      },
+      "zoomMs": {
+        "median": 27.599999994039536,
+        "max": 31.69999998807907
+      },
+      "longTaskMaxMs": 0
+    },
+    {
+      "topology": "disconnected",
+      "nodes": 300,
+      "edges": 0,
+      "runs": [
+        {
+          "renderedMs": 332.7999999821186,
+          "zoomMs": 32.10000002384186,
+          "longTasks": [
+            105,
+            72
+          ]
+        },
+        {
+          "renderedMs": 480.59999999403954,
+          "zoomMs": 25.900000005960464,
+          "longTasks": [
+            51,
+            66,
+            76
+          ]
+        },
+        {
+          "renderedMs": 407.2000000178814,
+          "zoomMs": 27.900000005960464,
+          "longTasks": [
+            61
+          ]
+        },
+        {
+          "renderedMs": 447.59999999403954,
+          "zoomMs": 31.400000005960464,
+          "longTasks": [
+            68
+          ]
+        },
+        {
+          "renderedMs": 344.5,
+          "zoomMs": 26.900000005960464,
+          "longTasks": [
+            103,
+            68
+          ]
+        }
+      ],
+      "renderMs": {
+        "median": 407.2000000178814,
+        "max": 480.59999999403954
+      },
+      "zoomMs": {
+        "median": 27.900000005960464,
+        "max": 32.10000002384186
+      },
+      "longTaskMaxMs": 105
+    }
+  ]
+}

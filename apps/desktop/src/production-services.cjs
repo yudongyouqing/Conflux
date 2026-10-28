@@ -12,11 +12,11 @@ function createProductionServiceSpec(
   const childEnv = {
     ...env,
     ELECTRON_RUN_AS_NODE: "1",
-    MUILTCHAT_WEB_DIST: webDist,
-    MUILTCHAT_HOST: PRODUCTION_HOST,
-    MUILTCHAT_PORT: String(PRODUCTION_PORT),
+    CONFLUX_WEB_DIST: webDist,
+    CONFLUX_HOST: PRODUCTION_HOST,
+    CONFLUX_PORT: String(PRODUCTION_PORT),
   };
-  if (dataDir) childEnv.MUILTCHAT_HOME = dataDir;
+  if (dataDir) childEnv.CONFLUX_HOME = dataDir;
 
   return {
     name: "server",

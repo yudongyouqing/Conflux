@@ -1,5 +1,7 @@
 # CLI Channel Show and Watch Implementation Plan
 
+> 历史实现计划：复选框记录原计划，不代表当前进度。当前状态和待办见 [项目待办](../../PROJECT-TODO.md)；未经核验的验收项不能视为已完成。
+
 > **For AI agents:** Required sub-skill: use `superpowers:executing-plans` to implement this plan task by task. Track progress with the checkboxes below.
 
 **Goal:** Let the Conflux/muiltchat CLI display one persisted conversation edge and continuously print channel changes while runtimes continue working.

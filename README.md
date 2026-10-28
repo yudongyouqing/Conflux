@@ -28,7 +28,7 @@ AI 编程助手通常以彼此隔离的进程运行，于是这些简单的问�
 
 **Conflux 把这些会话连成一张图**：发布知识、跨会话提问、异步收回复、离线自动唤醒——不依赖任何外部数据库、消息代理或托管控制平面，数据默认就在本机 SQLite 里。
 
-公开项目名、CLI 入口和 npm package 名称均为 `Conflux`（`conflux` / `@conflux/shared`）。旧 CLI 入口 `muiltchat`、环境变量和默认数据目录继续保留兼容性。
+公开项目名、CLI 入口和 npm package 名称均为 `Conflux`（`conflux` / `@conflux/shared`）。下一版本移除旧 CLI 入口 `muiltchat` 和 `MUILTCHAT_*` 环境变量；默认数据目录仍保留，见 [迁移指南](docs/MIGRATION.md)。
 
 ## 界面预览
 
@@ -220,7 +220,7 @@ startup_timeout_sec = 60
 
 ## 💾 数据与配置
 
-默认数据目录 `~/.muiltchat`（兼容重命名前版本，**升级不会自动迁移**）。目录优先级：CLI `--data-dir` → `CONFLUX_HOME` → `MUILTCHAT_HOME` → 已有项目目录 → `~/.muiltchat`。数据库文件 `data.db`，启用 SQLite WAL 模式。不需要部署任何外部数据库服务。
+默认数据目录 `~/.muiltchat`（兼容重命名前版本，**升级不会自动迁移**）。目录优先级：CLI `--data-dir` → `CONFLUX_HOME` → 已有项目目录 → `~/.muiltchat`。数据库文件 `data.db`，启用 SQLite WAL 模式。不需要部署任何外部数据库服务。
 
 ```bash
 # 自定义数据目录
@@ -246,14 +246,14 @@ npx tsx apps/server/src/index.ts data clear --sessions --messages --context
 - CLI 支持 `--scope global` 与 `--scope project`（自动探测 `CLAUDE_PROJECT_DIR`）。
 - 精确查看生效路径：`npx tsx apps/server/src/index.ts --data-dir /path/to/data path`
 - Windows 数据目录为 `%USERPROFILE%\.muiltchat`；卸载 Conflux 不会删除用户数据。
-- 旧变量 `MUILTCHAT_HOME` / `MUILTCHAT_HOST` / `MUILTCHAT_PORT` 与新变量 `CONFLUX_HOME` / `CONFLUX_HOST` / `CONFLUX_PORT` 同时生效，新变量优先。
-- 兼容计划：0.1.x 仍支持旧变量和 `muiltchat` CLI，并在首次使用时输出弃用 warning；计划在 0.2.0 移除旧变量和旧 CLI 别名。请迁移到 `CONFLUX_*` 与 `conflux`，避免升级时中断。
+- 下一版本仅使用 `CONFLUX_HOME` / `CONFLUX_HOST` / `CONFLUX_PORT`，旧 `MUILTCHAT_*` 变量不再读取。
+- 升级前将 CLI 改为 `conflux`，并将所有 `MUILTCHAT_*` 配置改为同后缀的 `CONFLUX_*`。已发布的 v0.2.0 不受影响。
 
 </details>
 
 ## 📦 发布与安装包
 
-GitHub Actions 在 `v*` 标签上构建 Windows NSIS、macOS DMG 和 Linux AppImage，并通过 GitHub Releases 提供 `electron-updater` 更新。未配置签名 Secrets 时仍可生成未签名产物；正式发布请配置 `WINDOWS_CSC_LINK` / `WINDOWS_CSC_KEY_PASSWORD`，macOS 还需 `APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID`。
+GitHub Actions 在 `v*` 标签上构建 Windows NSIS、macOS DMG / ZIP 和 Linux AppImage，并通过 GitHub Releases 提供 `electron-updater` 更新。未配置签名 Secrets 时仍可生成未签名产物；Windows 签名需要 `WINDOWS_CSC_LINK` / `WINDOWS_CSC_KEY_PASSWORD`，macOS 签名需要 `MAC_CSC_LINK` / `MAC_CSC_KEY_PASSWORD`，公证还需 `APPLE_ID`、`APPLE_APP_SPECIFIC_PASSWORD`、`APPLE_TEAM_ID`。证书应安全存放在 GitHub Actions Secrets，不要提交到仓库；签名和更新仍需在真实设备上验收。
 
 ```bash
 npm run package:desktop:dir   # 当前平台目录包
@@ -268,11 +268,13 @@ npm run package:desktop       # Windows NSIS 安装包
 - ✅ React + Vite + React Flow 工作空间、Fastify API、MCP + Hooks
 - ✅ Claude Code / Codex 存活探测、恢复继承、异步协作消息、自动唤醒
 - ✅ 版本化数据导入导出、旧目录迁移、稳定错误码与敏感信息扫描
-- ✅ 内部标识更名 Conflux，兼容层保留（CLI 双入口、env 双变量）
+- ✅ 内部标识更名 Conflux，下一版本移除旧 CLI / env 名称；现有数据目录保留
 - ✅ 主题系统（设计令牌 + 自定义主题导入）、数据管理（分类清除 + 自动备份）
 - ✅ 会话优先级 P0/P1/P2、能力检索 `search_sessions`、channel watch CLI、hooks 存量会话补录
 - ✅ GitHub Releases 自动更新链路；签名由发布环境 Secrets 按平台启用
 - 🚧 首个正式版本 tag 的跨平台安装包、签名与自动更新验证
+
+当前待办与历史计划状态见 [项目待办](docs/PROJECT-TODO.md)，性能测量方法见 [性能基线](docs/PERFORMANCE.md)。
 
 ## ⌨️ 开发命令
 

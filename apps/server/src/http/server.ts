@@ -68,8 +68,8 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   const db: DB = openDb(config);
   const host = resolveHttpHost(opts.host);
   const port = resolveHttpPort(opts.port);
-  const webDist = process.env.MUILTCHAT_WEB_DIST
-    ? resolve(process.env.MUILTCHAT_WEB_DIST)
+  const webDist = process.env.CONFLUX_WEB_DIST
+    ? resolve(process.env.CONFLUX_WEB_DIST)
     : resolve(__dirname, "../../../web/dist");
 
   // ---- Web console identity ----

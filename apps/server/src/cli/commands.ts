@@ -1,12 +1,12 @@
 import { Command, Option } from "commander";
 import { v4 as uuidv4 } from "uuid";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 import { resolveConfig, type Scope, DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT } from "../config.js";
 import { openDb, type DB } from "../core/db.js";
-import { migrateDataDir, readMigrationStatus, warnLegacyConfig } from "../core/config-migration.js";
+import { migrateDataDir, readMigrationStatus } from "../core/config-migration.js";
 import { handleHookEvent, readJsonFile } from "../core/live.js";
 import { clearData, getClearableCounts } from "../core/data-clear.js";
 import { runBackfill } from "../core/hooks-backfill.js";
@@ -51,10 +51,10 @@ import {
  * Adding a new endpoint no longer requires touching two places: the core
  * function lives in the local() closure, and only --http mode needs the path.
  */
-export function buildCli(argv?: string | readonly string[]): Command {
+export function buildCli(_argv?: string | readonly string[]): Command {
   const program = new Command();
   program
-    .name(cliDisplayName(argv))
+    .name("conflux")
     .description("Cross-session context query and conversation system")
     .version("0.1.0")
     .option("--data-dir <path>", "override the Conflux data directory (also via CONFLUX_HOME)")
@@ -995,28 +995,6 @@ export function buildCli(argv?: string | readonly string[]): Command {
 
 // --- helpers --------------------------------------------------------
 
-function cliDisplayName(argv?: string | readonly string[]): "conflux" | "muiltchat" {
-  const candidates =
-    typeof argv === "string"
-      ? [argv]
-      : argv
-        ? [argv[0], argv[1]]
-        : [process.argv[0], process.argv[1]];
-
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-    const name = basename(candidate)
-      .replace(/\.(?:cmd|exe|js|ts)$/i, "")
-      .toLowerCase();
-    if (name === "conflux") return "conflux";
-    if (name === "muiltchat") {
-      warnLegacyConfig("muiltchat CLI", "the conflux CLI");
-      return "muiltchat";
-    }
-  }
-  return "muiltchat";
-}
-
 type HookEvent = "session-start" | "prompt" | "stop";
 const HOOK_EVENTS: HookEvent[] = ["session-start", "prompt", "stop"];
 
@@ -1146,7 +1124,7 @@ async function remote(
   body?: unknown,
 ): Promise<unknown> {
   const url = `${baseUrl.replace(/\/$/, "")}${path}`;
-  const sid = process.env.MUILTCHAT_SESSION_ID || uuidv4();
+  const sid = process.env.CONFLUX_SESSION_ID || uuidv4();
   const headers: Record<string, string> = {
     "X-Session-Id": sid,
     "Content-Type": "application/json",
@@ -1227,12 +1205,12 @@ function parseTags(raw: string | undefined): string[] | undefined {
 /**
  * Resolve the CLI session id.
  *
- * - If `MUILTCHAT_SESSION_ID` env var is set, use it.
+ * - If `CONFLUX_SESSION_ID` env var is set, use it.
  * - Otherwise generate a new UUID, auto-register it as a transient session
  *   named "cli", and print a hint to stderr (so stdout stays machine-readable).
  */
 function resolveCliSessionId(db: DB): string {
-  const env = process.env.MUILTCHAT_SESSION_ID;
+  const env = process.env.CONFLUX_SESSION_ID;
   if (env && env.trim().length > 0) return env;
 
   const sid = uuidv4();
@@ -1242,10 +1220,10 @@ function resolveCliSessionId(db: DB): string {
     description: "ad-hoc CLI invocation",
     project_dir: process.env.CLAUDE_PROJECT_DIR || process.cwd(),
   });
-  process.env.MUILTCHAT_SESSION_ID = sid;
+  process.env.CONFLUX_SESSION_ID = sid;
   process.stderr.write(
     `conflux: registered transient CLI session ${sid}\n` +
-      `set MUILTCHAT_SESSION_ID=${sid} to reuse it across commands\n`,
+      `set CONFLUX_SESSION_ID=${sid} to reuse it across commands\n`,
   );
   return sid;
 }

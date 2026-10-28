@@ -67,7 +67,7 @@ export interface McpServerOptions {
 }
 
 function detectMcpRuntime(): { runtime: RuntimeId; pid: number | null } {
-  const configured = process.env.MUILTCHAT_AGENT_RUNTIME;
+  const configured = process.env.CONFLUX_AGENT_RUNTIME;
   if (configured === "claude" || configured === "codex") {
     return { runtime: configured, pid: getRuntimePid(configured) };
   }
@@ -121,12 +121,12 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
   // its env (set by startRuntimeAgent) — stamp it into metadata.
   const dirName = projectDir.replace(/\\/g, "/").split("/").pop() || "session";
   const agentTag = (() => {
-    const aid = process.env.MUILTCHAT_AGENT_ID;
+    const aid = process.env.CONFLUX_AGENT_ID;
     if (!aid || Number.isNaN(Number(aid))) return {};
     return {
       agent_id: Number(aid),
-      ...(process.env.MUILTCHAT_AGENT_RUNTIME
-        ? { runtime: process.env.MUILTCHAT_AGENT_RUNTIME }
+      ...(process.env.CONFLUX_AGENT_RUNTIME
+        ? { runtime: process.env.CONFLUX_AGENT_RUNTIME }
         : {}),
     };
   })();
@@ -191,7 +191,7 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
     // conversation it is answering FOR (newer claude versions don't fire
     // registering hooks in -p mode, so pid/pin adoption may find nothing).
     if (identity.pid === null) identity = detectMcpRuntime();
-    const assume = process.env.MUILTCHAT_ASSUME_SESSION;
+    const assume = process.env.CONFLUX_ASSUME_SESSION;
     const pid = getRuntimePid(identity.runtime);
     const pinned = pid === null ? null : getSetting(db, `${identity.runtime}-current:${pid}`);
     if (pid !== null) {
