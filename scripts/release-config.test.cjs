@@ -34,6 +34,11 @@ test("release workflow builds and publishes all desktop platforms from a version
     "release workflow must build shared before server tests"
   );
   assert.match(release, /upload-artifact/);
+  assert.doesNotMatch(
+    release,
+    /path:\s*\|\s*release\/\*\s*(?:\r?\n|$)/,
+    "release artifacts must exclude unpacked directories"
+  );
   assert.match(release, /--\$\{\{ matrix\.flag \}\} \$\{\{ matrix\.target \}\}/);
   assert.match(release, /--publish never/);
   assert.match(release, /gh release create/);
