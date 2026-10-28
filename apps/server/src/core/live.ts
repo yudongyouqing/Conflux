@@ -70,8 +70,8 @@ const runtimePidStates: Record<RuntimeId, RuntimePidState> = {
 };
 
 const runtimePidEnv: Record<RuntimeId, string> = {
-  claude: "MUILTCHAT_CLAUDE_PID",
-  codex: "MUILTCHAT_CODEX_PID",
+  claude: "CONFLUX_CLAUDE_PID",
+  codex: "CONFLUX_CODEX_PID",
 };
 
 /**
@@ -408,12 +408,12 @@ export function handleHookEvent(
   // their env (set by startRuntimeAgent); stamp it into metadata so the graph
   // can link the node back to its preset.
   const agentTag = (() => {
-    const aid = process.env.MUILTCHAT_AGENT_ID;
+    const aid = process.env.CONFLUX_AGENT_ID;
     if (!aid || Number.isNaN(Number(aid))) return {};
     return {
       agent_id: Number(aid),
-      ...(process.env.MUILTCHAT_AGENT_RUNTIME
-        ? { runtime: process.env.MUILTCHAT_AGENT_RUNTIME }
+      ...(process.env.CONFLUX_AGENT_RUNTIME
+        ? { runtime: process.env.CONFLUX_AGENT_RUNTIME }
         : {}),
     };
   })();

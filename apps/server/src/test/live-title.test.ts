@@ -22,7 +22,7 @@ after(cleanup);
 // the ancestor walk and is cached module-globally, so setting it before any
 // test runs makes same-pid pruning deterministic in this file.
 const TEST_CLAUDE_PID = 424242;
-process.env.MUILTCHAT_CLAUDE_PID = String(TEST_CLAUDE_PID);
+process.env.CONFLUX_CLAUDE_PID = String(TEST_CLAUDE_PID);
 
 // fake ~/.claude with a transcript per test case
 function fakeHome(): string {
@@ -286,11 +286,11 @@ describe("deleteUnreferencedSession", () => {
 describe("Codex runtime identity", () => {
   it("reads the Codex PID override and adopts a matching runtime session", () => {
     const pid = 515151;
-    process.env.MUILTCHAT_CODEX_PID = String(pid);
+    process.env.CONFLUX_CODEX_PID = String(pid);
     try {
       assert.equal(getRuntimePid("codex"), pid);
     } finally {
-      delete process.env.MUILTCHAT_CODEX_PID;
+      delete process.env.CONFLUX_CODEX_PID;
     }
 
     registerSession(db, {

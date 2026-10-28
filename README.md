@@ -28,7 +28,7 @@ AI 编程助手通常以彼此隔离的进程运行，于是这些简单的问�
 
 **Conflux 把这些会话连成一张图**：发布知识、跨会话提问、异步收回复、离线自动唤醒——不依赖任何外部数据库、消息代理或托管控制平面，数据默认就在本机 SQLite 里。
 
-公开项目名、CLI 入口和 npm package 名称均为 `Conflux`（`conflux` / `@conflux/shared`）。旧 CLI 入口 `muiltchat`、环境变量和默认数据目录继续保留兼容性。
+公开项目名、CLI 入口和 npm package 名称均为 `Conflux`（`conflux` / `@conflux/shared`）。下一版本移除旧 CLI 入口 `muiltchat` 和 `MUILTCHAT_*` 环境变量；默认数据目录仍保留，见 [迁移指南](docs/MIGRATION.md)。
 
 ## 界面预览
 
@@ -220,7 +220,7 @@ startup_timeout_sec = 60
 
 ## 💾 数据与配置
 
-默认数据目录 `~/.muiltchat`（兼容重命名前版本，**升级不会自动迁移**）。目录优先级：CLI `--data-dir` → `CONFLUX_HOME` → `MUILTCHAT_HOME` → 已有项目目录 → `~/.muiltchat`。数据库文件 `data.db`，启用 SQLite WAL 模式。不需要部署任何外部数据库服务。
+默认数据目录 `~/.muiltchat`（兼容重命名前版本，**升级不会自动迁移**）。目录优先级：CLI `--data-dir` → `CONFLUX_HOME` → 已有项目目录 → `~/.muiltchat`。数据库文件 `data.db`，启用 SQLite WAL 模式。不需要部署任何外部数据库服务。
 
 ```bash
 # 自定义数据目录
@@ -246,8 +246,8 @@ npx tsx apps/server/src/index.ts data clear --sessions --messages --context
 - CLI 支持 `--scope global` 与 `--scope project`（自动探测 `CLAUDE_PROJECT_DIR`）。
 - 精确查看生效路径：`npx tsx apps/server/src/index.ts --data-dir /path/to/data path`
 - Windows 数据目录为 `%USERPROFILE%\.muiltchat`；卸载 Conflux 不会删除用户数据。
-- 旧变量 `MUILTCHAT_HOME` / `MUILTCHAT_HOST` / `MUILTCHAT_PORT` 与新变量 `CONFLUX_HOME` / `CONFLUX_HOST` / `CONFLUX_PORT` 同时生效，新变量优先。
-- 兼容计划：0.2.0 仍支持旧变量和 `muiltchat` CLI，并在首次使用时输出弃用提示。移除版本尚未确定；建议迁移到 `CONFLUX_*` 与 `conflux`。
+- 下一版本仅使用 `CONFLUX_HOME` / `CONFLUX_HOST` / `CONFLUX_PORT`，旧 `MUILTCHAT_*` 变量不再读取。
+- 升级前将 CLI 改为 `conflux`，并将所有 `MUILTCHAT_*` 配置改为同后缀的 `CONFLUX_*`。已发布的 v0.2.0 不受影响。
 
 </details>
 
@@ -268,7 +268,7 @@ npm run package:desktop       # Windows NSIS 安装包
 - ✅ React + Vite + React Flow 工作空间、Fastify API、MCP + Hooks
 - ✅ Claude Code / Codex 存活探测、恢复继承、异步协作消息、自动唤醒
 - ✅ 版本化数据导入导出、旧目录迁移、稳定错误码与敏感信息扫描
-- ✅ 内部标识更名 Conflux，兼容层保留（CLI 双入口、env 双变量）
+- ✅ 内部标识更名 Conflux，下一版本移除旧 CLI / env 名称；现有数据目录保留
 - ✅ 主题系统（设计令牌 + 自定义主题导入）、数据管理（分类清除 + 自动备份）
 - ✅ 会话优先级 P0/P1/P2、能力检索 `search_sessions`、channel watch CLI、hooks 存量会话补录
 - ✅ GitHub Releases 自动更新链路；签名由发布环境 Secrets 按平台启用

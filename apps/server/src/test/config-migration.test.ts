@@ -50,23 +50,6 @@ function withEnv<T>(values: Record<string, string | undefined>, fn: () => T): T 
   }
 }
 
-test("legacy muiltchat CLI emits a one-time deprecation warning", () => {
-  const originalEmitWarning = process.emitWarning;
-  const warnings: string[] = [];
-  process.emitWarning = ((warning: unknown) => {
-    warnings.push(String(warning));
-  }) as typeof process.emitWarning;
-  try {
-    buildCli("muiltchat");
-    buildCli("muiltchat");
-  } finally {
-    process.emitWarning = originalEmitWarning;
-  }
-  assert.equal(warnings.filter((warning) => warning.includes("muiltchat CLI")).length, 1);
-  assert.match(warnings[0] ?? "", /0\.2\.0/u);
-  assert.match(warnings[0] ?? "", /conflux CLI/u);
-});
-
 function seedLegacyDir(root: string): string {
   const source = join(root, "legacy", ".muiltchat");
   mkdirSync(source, { recursive: true });
@@ -82,7 +65,7 @@ function readMarker(destination: string): MigrationMarker {
   ) as MigrationMarker;
 }
 
-test("resolves explicit, Conflux, legacy, project, and global data homes in order", () => {
+test("resolves data homes without honoring the removed environment variable", () => {
   const root = makeTempDir("resolution");
   try {
     const explicit = join(root, "explicit");
@@ -103,7 +86,7 @@ test("resolves explicit, Conflux, legacy, project, and global data homes in orde
     assert.equal(resolveDataHome({ env, homeDir: home }), resolve(conflux));
     assert.equal(
       resolveDataHome({ env: { MUILTCHAT_HOME: legacy }, homeDir: home }),
-      resolve(legacy),
+      resolve(join(home, ".muiltchat")),
     );
     assert.equal(
       resolveDataHome({
@@ -287,7 +270,7 @@ test("package bins and MCP config expose Conflux while retaining one manual lega
     readFileSync(resolve(__dirname, "../../package.json"), "utf8"),
   ) as { bin: Record<string, string> };
   assert.equal(packageJson.bin.conflux, "dist/index.js");
-  assert.equal(packageJson.bin.muiltchat, "dist/index.js");
+  assert.equal(packageJson.bin.muiltchat, undefined);
 
   const mcpConfig = JSON.parse(
     readFileSync(resolve(__dirname, "../../../..", ".mcp.json"), "utf8"),
@@ -302,14 +285,14 @@ test("package bins and MCP config expose Conflux while retaining one manual lega
   assert.deepEqual(Object.keys(legacyOnlyConfig.mcpServers), ["muiltchat"]);
 });
 
-test("Conflux and muiltchat buildCli calls expose the same command tree", () => {
+test("CLI reports Conflux even when invoked through an obsolete wrapper", () => {
   const conflux = buildCli(["conflux", "path"]);
   const legacy = buildCli(["muiltchat", "path"]);
   const confluxCommands = conflux.commands.map((command) => command.name()).sort();
   const legacyCommands = legacy.commands.map((command) => command.name()).sort();
 
   assert.equal(conflux.name(), "conflux");
-  assert.equal(legacy.name(), "muiltchat");
+  assert.equal(legacy.name(), "conflux");
   assert.deepEqual(confluxCommands, legacyCommands);
   assert.ok(confluxCommands.includes("path"));
   assert.ok(confluxCommands.includes("migrate"));

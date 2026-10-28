@@ -14,7 +14,7 @@ import { chromium } from "playwright";
 import os from "node:os";
 import { join } from "node:path";
 
-const URL = process.env.MUILTCHAT_WEB_URL ?? "http://127.0.0.1:5173";
+const URL = process.env.CONFLUX_WEB_URL ?? "http://127.0.0.1:5173";
 const results = [];
 const check = (name, ok) => {
   results.push([name, ok]);

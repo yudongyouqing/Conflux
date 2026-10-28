@@ -36,10 +36,10 @@ test("uses Electron as Node and passes packaged server configuration", () => {
   ]);
   assert.equal(spec.url, "http://127.0.0.1:9527/healthz");
   assert.equal(spec.env.ELECTRON_RUN_AS_NODE, "1");
-  assert.equal(spec.env.MUILTCHAT_WEB_DIST, "C:\\app.asar\\apps\\web\\dist");
-  assert.equal(spec.env.MUILTCHAT_HOST, "127.0.0.1");
-  assert.equal(spec.env.MUILTCHAT_PORT, "9527");
-  assert.equal(spec.env.MUILTCHAT_HOME, "C:\\Users\\me\\.muiltchat");
+  assert.equal(spec.env.CONFLUX_WEB_DIST, "C:\\app.asar\\apps\\web\\dist");
+  assert.equal(spec.env.CONFLUX_HOST, "127.0.0.1");
+  assert.equal(spec.env.CONFLUX_PORT, "9527");
+  assert.equal(spec.env.CONFLUX_HOME, "C:\\Users\\me\\.muiltchat");
   assert.equal(spec.env.KEEP_ME, "yes");
   assert.equal(Object.hasOwn(spec, "cwd"), false);
 });
