@@ -16,21 +16,6 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 
 export const MIGRATION_MARKER_FILENAME = ".conflux-migration.json";
 export const MIGRATION_TEMP_PREFIX = ".conflux-migration-";
-export const LEGACY_CONFIG_REMOVAL_VERSION = "0.2.0";
-
-const warnedLegacyNames = new Set<string>();
-
-/** Emit one process-level warning for each legacy configuration name. */
-export function warnLegacyConfig(name: string, replacement?: string): void {
-  if (warnedLegacyNames.has(name)) return;
-  warnedLegacyNames.add(name);
-  const target = replacement ?? name.replace(/^MUILTCHAT_/, "CONFLUX_");
-  process.emitWarning(
-    `${name} is deprecated and will be removed in Conflux ${LEGACY_CONFIG_REMOVAL_VERSION}; use ${target} instead.`,
-    { code: "CONFLUX_LEGACY_CONFIG" },
-  );
-}
-
 // Keep migration bounded to files owned by the current SQLite store. Config
 // values live in the app_settings table, so there is no config sidecar to copy.
 export const MIGRATION_FILE_NAMES = ["data.db", "data.db-wal", "data.db-shm"] as const;
@@ -100,12 +85,6 @@ export function resolveDataHome(options: DataHomeOptions = {}): string {
 
   const confluxHome = nonEmpty(env.CONFLUX_HOME);
   if (confluxHome) return resolve(confluxHome);
-
-  const legacyHome = nonEmpty(env.MUILTCHAT_HOME);
-  if (legacyHome) {
-    warnLegacyConfig("MUILTCHAT_HOME");
-    return resolve(legacyHome);
-  }
 
   const projectDir = nonEmpty(options.projectDir) ?? nonEmpty(env.CLAUDE_PROJECT_DIR);
   if (projectDir) {

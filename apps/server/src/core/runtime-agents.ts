@@ -171,7 +171,7 @@ export function deleteRuntimeAgent(db: DB, id: number): boolean {
  * are only removed when the preset REPLACES them (its own api_key/base_url) —
  * otherwise the spawned CLI keeps whatever auth the user's environment
  * already carries (AgentRecall's claude-env substitutes per channel the same
- * way). MUILTCHAT_AGENT_ID lets the spawned agent's hooks / MCP tag its
+ * way). CONFLUX_AGENT_ID lets the spawned agent's hooks / MCP tag its
  * session row back to this definition.
  */
 export function buildRuntimeEnv(
@@ -203,8 +203,8 @@ export function buildRuntimeEnv(
     }
   }
 
-  env.MUILTCHAT_AGENT_ID = String(agent.id);
-  env.MUILTCHAT_AGENT_RUNTIME = agent.runtime;
+  env.CONFLUX_AGENT_ID = String(agent.id);
+  env.CONFLUX_AGENT_RUNTIME = agent.runtime;
   return env;
 }
 

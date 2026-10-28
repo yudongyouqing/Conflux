@@ -3,7 +3,7 @@ import { freshWakeCommand, wakeCommand } from "./commands.js";
 
 /**
  * Claude wake policy. Claude Code passes a full environment to its MCP
- * children, so the launcher's MUILTCHAT_ASSUME_SESSION is how a headless
+ * children, so the launcher's CONFLUX_ASSUME_SESSION is how a headless
  * run adopts the target identity — no pid pinning needed.
  */
 

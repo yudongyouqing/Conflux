@@ -1,7 +1,7 @@
 import { homedir } from "os";
 import { join, resolve } from "path";
 import { existsSync, mkdirSync } from "fs";
-import { resolveDataHome, warnLegacyConfig } from "./core/config-migration.js";
+import { resolveDataHome } from "./core/config-migration.js";
 
 export type Scope = "project" | "global";
 
@@ -20,9 +20,8 @@ export interface Config {
  * Precedence (highest first):
  *   1. Explicit `override` argument
  *   2. `CONFLUX_HOME` env var (when set & non-empty)
- *   3. `MUILTCHAT_HOME` env var (when set & non-empty)
- *   4. an existing project-scoped `.muiltchat` directory
- *   5. `~/.muiltchat` (global default)
+ *   3. an existing project-scoped `.muiltchat` directory
+ *   4. `~/.muiltchat` (global default)
  *
  * `scope` overrides detection: `--scope global` forces the home dir even when
  * `CLAUDE_PROJECT_DIR` is set.
@@ -64,24 +63,17 @@ export const DEFAULT_HTTP_HOST = "127.0.0.1";
 export const DEFAULT_HTTP_PORT = 9527;
 
 export function resolveHttpHost(override?: string): string {
-  // CONFLUX_* is the new name; MUILTCHAT_* stays as the legacy fallback.
-  const legacyHost = process.env.MUILTCHAT_HOST?.trim();
-  if (legacyHost) warnLegacyConfig("MUILTCHAT_HOST");
-  const envHost = (process.env.CONFLUX_HOST ?? legacyHost)?.trim();
+  const envHost = process.env.CONFLUX_HOST?.trim();
   return envHost || override || DEFAULT_HTTP_HOST;
 }
 
 export function resolveHttpPort(override?: number): number {
-  const confluxPort = process.env.CONFLUX_PORT?.trim();
-  const legacyPort = process.env.MUILTCHAT_PORT?.trim();
-  if (legacyPort) warnLegacyConfig("MUILTCHAT_PORT");
-  const envPort = confluxPort || legacyPort;
+  const envPort = process.env.CONFLUX_PORT?.trim();
   if (!envPort) return override ?? DEFAULT_HTTP_PORT;
 
   const port = Number(envPort);
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-    const name = confluxPort ? "CONFLUX_PORT" : "MUILTCHAT_PORT";
-    throw new Error(`invalid ${name}: ${envPort}`);
+    throw new Error(`invalid CONFLUX_PORT: ${envPort}`);
   }
   return port;
 }

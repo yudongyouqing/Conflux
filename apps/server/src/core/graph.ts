@@ -70,7 +70,7 @@ export function getGraph(
   })[];
 
   // Annotate sessions spawned from a runtime-agent preset (metadata carries
-  // {agent_id, runtime} — written by hooks/MCP from MUILTCHAT_AGENT_ID).
+  // {agent_id, runtime} — written by hooks/MCP from CONFLUX_AGENT_ID).
   // The preset name is a FALLBACK identity for sessions that never got a
   // name of their own (custom title or first prompt excerpt); it must not
   // mask a name the user gave the conversation in Claude Code.
