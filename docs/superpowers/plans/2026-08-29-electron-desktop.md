@@ -2,6 +2,8 @@
 
 > 历史实现计划：复选框记录原计划，不代表当前进度。当前状态和待办见 [项目待办](../../PROJECT-TODO.md)；未经核验的验收项不能视为已完成。
 
+> 2026-10-28 验收核查：模块已实现并有自动覆盖；关闭窗口退出的旧验收已被托盘隐藏行为替代，完整真机退出记录未确认。证据与后续项见 [验收核查表](../../PLAN-ACCEPTANCE.md)。
+
 > **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
 
 **目标：** 为 Windows 增加一个 Electron 开发客户端，自动启动现有 Vite 前端和 Fastify 后端，并在桌面窗口中完整加载现有 React 界面。
