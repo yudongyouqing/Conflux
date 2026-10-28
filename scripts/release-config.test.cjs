@@ -37,6 +37,11 @@ test("release workflow builds and publishes all desktop platforms from a version
   assert.match(release, /--\$\{\{ matrix\.flag \}\} \$\{\{ matrix\.target \}\}/);
   assert.match(release, /--publish never/);
   assert.match(release, /gh release create/);
+  assert.match(
+    release,
+    /publish:[\s\S]*?uses: actions\/checkout@v\d+[\s\S]*?gh release create/,
+    "publish job must provide repository context for gh"
+  );
   assert.match(release, /GH_TOKEN/);
   assert.match(release, /WINDOWS_CSC_LINK/);
   assert.match(release, /APPLE_ID/);
