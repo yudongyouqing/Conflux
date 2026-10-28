@@ -18,6 +18,7 @@
     "rebuild": "npm run rebuild -w apps/desktop",
     "test:desktop": "node --test apps/desktop/test/*.test.cjs",
     "test:e2e:web": "npm run build -w packages/shared && node scripts/e2e/web-smoke.mjs",
+    "perf:web": "npm run build && node scripts/e2e/browser-performance.mjs",
     "ci:test": "npm test -w apps/server && npm run test:desktop && node --test scripts/release-config.test.cjs && npm run check:tokens",
     "ci:build": "npm run build",
     "verify:desktop-package": "node apps/desktop/test/package-smoke.cjs",
