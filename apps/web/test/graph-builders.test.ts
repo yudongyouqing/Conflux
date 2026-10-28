@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { GraphEdge, GraphNode } from "@muiltchat/shared";
+import type { GraphEdge, GraphNode } from "@conflux/shared";
 import {
   ARCHIVE_KEY,
   applyEdgeOffsets,

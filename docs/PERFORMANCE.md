@@ -5,7 +5,7 @@ collecting telemetry or sending data off the machine.
 
 The server logs one `http request completed` record per request through Pino.
 Each record includes `method`, `url`, `statusCode`, and `durationMs`. The
-existing `MUILTCHAT_LOG_FILE` setting can redirect these records to a local
+existing `CONFLUX_LOG_FILE` setting can redirect these records to a local
 file for comparison between releases.
 
 The web graph view emits a browser debug record named `[conflux:perf] graph

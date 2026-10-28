@@ -28,7 +28,7 @@ AI coding assistants usually run as isolated processes, which makes simple quest
 
 **Conflux connects those sessions into a graph**: publish knowledge, ask across sessions, receive replies asynchronously, auto-wake offline peers — with no external database, message broker, or hosted control plane. Data stays in a local SQLite database by default.
 
-The public project name, CLI entry, and npm package names are all `Conflux` (`conflux` / `@conflux/shared`). The legacy `muiltchat` CLI entry, environment variables, and default data directory remain supported for compatibility. Legacy names remain supported in 0.2.0 and emit a one-time deprecation warning. No removal version has been set; migrate to the new names when convenient.
+The public project name, CLI entry, and npm package names are all `Conflux` (`conflux` / `@conflux/shared`). The next release removes the `muiltchat` CLI entry and `MUILTCHAT_*` environment variables. Existing data directories remain supported. See [migration guidance](MIGRATION.md).
 
 ## Screenshots
 
@@ -220,7 +220,7 @@ Every 30 seconds, alongside the MCP heartbeat and liveness probe, the server sca
 
 ## 💾 Data and Configuration
 
-The default data directory is `~/.muiltchat` (kept for pre-rename compatibility; **upgrades never migrate automatically**). Directory precedence: CLI `--data-dir` → `CONFLUX_HOME` → `MUILTCHAT_HOME` → existing project directory → `~/.muiltchat`. The database file is `data.db` with SQLite WAL mode enabled. No external database service is required.
+The default data directory is `~/.muiltchat` (kept for pre-rename compatibility; **upgrades never migrate automatically**). Directory precedence: CLI `--data-dir` → `CONFLUX_HOME` → existing project directory → `~/.muiltchat`. The database file is `data.db` with SQLite WAL mode enabled. No external database service is required.
 
 ```bash
 # Custom data directory
@@ -247,13 +247,13 @@ npx tsx apps/server/src/index.ts data clear --sessions --messages --context
 - The CLI supports `--scope global` and `--scope project` (auto-detected via `CLAUDE_PROJECT_DIR`).
 - Print the effective path: `npx tsx apps/server/src/index.ts --data-dir /path/to/data path`
 - On Windows the data directory is `%USERPROFILE%\.muiltchat`; uninstalling Conflux does not delete user data.
-- Legacy `MUILTCHAT_HOME` / `MUILTCHAT_HOST` / `MUILTCHAT_PORT` and new `CONFLUX_HOME` / `CONFLUX_HOST` / `CONFLUX_PORT` all work; the new variables take precedence.
+- The next release reads only `CONFLUX_*` variables. Rename every `MUILTCHAT_*` setting to its `CONFLUX_*` equivalent before upgrading; the already published v0.2.0 is unchanged.
 
 </details>
 
 ## 📦 Releases and Installers
 
-GitHub Actions builds Windows NSIS, macOS DMG, and Linux AppImage releases from `v*` tags and publishes them to GitHub Releases for `electron-updater`. Without signing Secrets the workflow still produces unsigned artifacts; production signing uses `WINDOWS_CSC_LINK` / `WINDOWS_CSC_KEY_PASSWORD`, plus `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` for macOS.
+GitHub Actions builds Windows NSIS, macOS DMG / ZIP, and Linux AppImage releases from `v*` tags and publishes them to GitHub Releases for `electron-updater`. Without signing Secrets the workflow still produces unsigned artifacts. Windows signing uses `WINDOWS_CSC_LINK` / `WINDOWS_CSC_KEY_PASSWORD`; macOS signing uses `MAC_CSC_LINK` / `MAC_CSC_KEY_PASSWORD`, and notarization also requires `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID`. Store certificates securely in GitHub Actions Secrets, not in the repository; signing and updates still require testing on real devices.
 
 ```bash
 npm run package:desktop:dir   # unpacked directory for the current platform
@@ -268,7 +268,7 @@ Artifacts are written to `release/` (ignored by Git). Windows local packaging al
 - ✅ React + Vite + React Flow workspace, Fastify API, MCP + hooks
 - ✅ Claude Code / Codex liveness, resume lineage, async collaboration messages, auto-wake
 - ✅ Versioned data transfer, legacy directory migration, stable error codes, secret scanning
-- ✅ Internal rename to Conflux with the compatibility layer retained (dual CLI entries, dual env vars)
+- ✅ Internal Conflux rename; next release removes legacy CLI/env names while retaining existing data directories
 - ✅ Theming (design tokens + custom palette import), data management (scoped clear + auto backup)
 - ✅ Session priority P0/P1/P2, capability search `search_sessions`, channel watch CLI, hooks backfill for running sessions
 - ✅ GitHub Releases automatic updates; platform signing is enabled through release Secrets

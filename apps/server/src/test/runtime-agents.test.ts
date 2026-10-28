@@ -91,7 +91,7 @@ test("buildRuntimeEnv tags the agent id for MCP-side session linking", () => {
     model: null,
     extra_env: null,
   });
-  assert.equal(env.MUILTCHAT_AGENT_ID, "7");
+  assert.equal(env.CONFLUX_AGENT_ID, "7");
   assert.equal(env.ANTHROPIC_AUTH_TOKEN, "sk-test");
   assert.equal(env.ANTHROPIC_API_KEY, undefined, "replaced, not inherited");
 });

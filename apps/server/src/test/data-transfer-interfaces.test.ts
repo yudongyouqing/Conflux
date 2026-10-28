@@ -43,20 +43,19 @@ function bundleWithSession(id: string): ConfluxDataBundle {
 
 function cleanEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
-  delete env.MUILTCHAT_HOME;
   delete env.CONFLUX_HOME;
-  delete env.MUILTCHAT_PORT;
-  delete env.MUILTCHAT_HOST;
+  delete env.CONFLUX_PORT;
+  delete env.CONFLUX_HOST;
   return env;
 }
 
 test("HTTP data routes import and export a validated bundle", async () => {
   const root = mkdtempSync(join(tmpdir(), "conflux-http-transfer-"));
   const bundle = bundleWithSession("http-interface-session");
-  const previousPort = process.env.MUILTCHAT_PORT;
-  const previousHost = process.env.MUILTCHAT_HOST;
-  delete process.env.MUILTCHAT_PORT;
-  delete process.env.MUILTCHAT_HOST;
+  const previousPort = process.env.CONFLUX_PORT;
+  const previousHost = process.env.CONFLUX_HOST;
+  delete process.env.CONFLUX_PORT;
+  delete process.env.CONFLUX_HOST;
 
   let app: Awaited<ReturnType<typeof startHttpServer>> | undefined;
   try {
@@ -99,10 +98,10 @@ test("HTTP data routes import and export a validated bundle", async () => {
     assert.equal(JSON.parse(notFound.body).code, "NOT_FOUND");
   } finally {
     if (app) await app.close();
-    if (previousPort === undefined) delete process.env.MUILTCHAT_PORT;
-    else process.env.MUILTCHAT_PORT = previousPort;
-    if (previousHost === undefined) delete process.env.MUILTCHAT_HOST;
-    else process.env.MUILTCHAT_HOST = previousHost;
+    if (previousPort === undefined) delete process.env.CONFLUX_PORT;
+    else process.env.CONFLUX_PORT = previousPort;
+    if (previousHost === undefined) delete process.env.CONFLUX_HOST;
+    else process.env.CONFLUX_HOST = previousHost;
     rmSync(root, { recursive: true, force: true });
   }
 });

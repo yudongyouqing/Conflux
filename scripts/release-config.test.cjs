@@ -53,11 +53,12 @@ test("release workflow builds and publishes all desktop platforms from a version
   assert.match(release, /name: Build Windows release[\s\S]*?CSC_LINK:/);
   assert.match(release, /name: Build macOS release[\s\S]*?APPLE_ID:/);
   assert.match(release, /name: Build Linux release[\s\S]*?electron-builder/);
-  assert.doesNotMatch(
-    release,
-    /name: Build macOS release[\s\S]*?CSC_LINK:/,
-    "macOS release must not receive an empty Windows CSC_LINK"
-  );
+  const macStep = release.split("- name: Build macOS release")[1].split("- name: Build Linux release")[0];
+  assert.match(macStep, /secrets\.MAC_CSC_LINK/);
+  assert.match(macStep, /secrets\.MAC_CSC_KEY_PASSWORD/);
+  assert.match(macStep, /if \[\[ -n "\$MAC_SIGN_CERT" \]\]/);
+  assert.match(macStep, /--mac dmg zip/);
+  assert.match(release, /release\/\*\.zip/);
 });
 
 test("root scripts expose reproducible CI and directory packaging commands", () => {
