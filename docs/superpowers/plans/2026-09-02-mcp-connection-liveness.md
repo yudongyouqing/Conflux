@@ -2,6 +2,8 @@
 
 > 历史实现计划：复选框记录原计划，不代表当前进度。当前状态和待办见 [项目待办](../../PROJECT-TODO.md)；未经核验的验收项不能视为已完成。
 
+> 2026-10-28 验收核查：有 2026-09-02 子进程协议手工记录；真实 Codex 宿主重载仍在记录中明确保留，不能解释为全场景完成。证据与后续项见 [验收核查表](../../PLAN-ACCEPTANCE.md)。
+
 > **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
 
 **目标：** 让 Conflux 以 MCP stdio 连接租约判断 Codex/Claude 会话在线状态，避免仅凭 CLI 进程存在产生误报。

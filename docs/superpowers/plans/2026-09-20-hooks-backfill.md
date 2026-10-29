@@ -2,6 +2,8 @@
 
 > 历史实现计划：复选框记录原计划，不代表当前进度。当前状态和待办见 [项目待办](../../PROJECT-TODO.md)；未经核验的验收项不能视为已完成。
 
+> 2026-10-28 验收核查：存在 macOS 配方级历史声明；CLI 集成后的重复补录/重装实机输出未确认。证据与后续项见 [验收核查表](../../PLAN-ACCEPTANCE.md)。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** `hooks install` 后反向扫描仍存活的 Claude Code 会话并补录进 Conflux 图谱，消除"装了 hooks 也检测不到存量会话"的假阴性。

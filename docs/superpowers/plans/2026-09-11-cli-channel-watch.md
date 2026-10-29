@@ -2,6 +2,8 @@
 
 > 历史实现计划：复选框记录原计划，不代表当前进度。当前状态和待办见 [项目待办](../../PROJECT-TODO.md)；未经核验的验收项不能视为已完成。
 
+> 2026-10-28 验收核查：功能及本地/HTTP/SIGINT 自动覆盖存在；本次回归发现一次初始快照超时，见验收报告。证据与后续项见 [验收核查表](../../PLAN-ACCEPTANCE.md)。
+
 > **For AI agents:** Required sub-skill: use `superpowers:executing-plans` to implement this plan task by task. Track progress with the checkboxes below.
 
 **Goal:** Let the Conflux/muiltchat CLI display one persisted conversation edge and continuously print channel changes while runtimes continue working.

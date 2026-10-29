@@ -2,6 +2,8 @@
 
 > 历史实现计划：复选框记录原计划，不代表当前进度。当前状态和待办见 [项目待办](../../PROJECT-TODO.md)；未经核验的验收项不能视为已完成。
 
+> 2026-10-28 验收核查：主要模块和身份字段已落地；单实例、托盘退出和安装实机验收尚缺完整记录。证据与后续项见 [验收核查表](../../PLAN-ACCEPTANCE.md)。
+
 > 面向 AI 代理的工作者：必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（- [ ]）语法跟踪进度。
 
 **目标：** 让 Conflux 通过一个 Electron 入口可靠启动开发或生产服务，并让 Codex、Claude、MCP 和 Hook 共享可解释、可恢复的会话身份与存活状态。
