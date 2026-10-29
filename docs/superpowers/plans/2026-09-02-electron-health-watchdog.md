@@ -2,6 +2,8 @@
 
 > 历史实现计划：复选框记录原计划，不代表当前进度。当前状态和待办见 [项目待办](../../PROJECT-TODO.md)；未经核验的验收项不能视为已完成。
 
+> 2026-10-28 验收核查：状态机与接线有自动覆盖；真实 Electron 卡死/崩溃和服务故障注入记录未确认。证据与后续项见 [验收核查表](../../PLAN-ACCEPTANCE.md)。
+
 > **面向 AI 代理的工作者：** 使用 `superpowers:executing-plans` 逐任务实现此计划。步骤使用复选框跟踪进度。
 
 **目标：** 为 Electron 增加独立的 Renderer/Main ping-pong watchdog 和本地服务健康监控，不改变 MCP 会话租约语义。

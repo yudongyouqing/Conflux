@@ -2,6 +2,8 @@
 
 > 历史实现计划：复选框记录原计划，不代表当前进度。当前状态和待办见 [项目待办](../../PROJECT-TODO.md)；未经核验的验收项不能视为已完成。
 
+> 2026-10-28 验收核查：原三段主题/system 跟随已被后续色板方案替代，旧验收不再适用。证据与后续项见 [验收核查表](../../PLAN-ACCEPTANCE.md)。
+
 > **For the implementing agent:** Required sub-skill: use `superpowers-zh:executing-plans` to implement this plan task by task.
 
 **Goal:** Add persistent system/light/dark application themes so the complete web UI has a coherent workbench light mode and terminal-inspired dark mode.

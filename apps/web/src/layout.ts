@@ -106,11 +106,34 @@ function wrapSnake(nodes: Node[], edges: Edge[]): Node[] {
   });
 }
 
+function isLongDirectedPath(nodes: Node[], edges: Edge[]): boolean {
+  // At eight nodes even the shorter straight layout exceeds the existing
+  // 6:1 snake threshold. Preserve that output without two discarded layouts.
+  if (nodes.length < 8 || edges.length !== nodes.length - 1) return false;
+  const ids = new Set(nodes.map((node) => node.id));
+  if (ids.size !== nodes.length) return false;
+  const next = new Map<string, string>();
+  const incoming = new Set<string>();
+  for (const edge of edges) {
+    if (!ids.has(edge.source) || !ids.has(edge.target) || next.has(edge.source) || incoming.has(edge.target)) return false;
+    next.set(edge.source, edge.target);
+    incoming.add(edge.target);
+  }
+  let current = nodes.find((node) => !incoming.has(node.id))?.id;
+  const seen = new Set<string>();
+  while (current !== undefined && !seen.has(current)) {
+    seen.add(current);
+    current = next.get(current);
+  }
+  return seen.size === nodes.length;
+}
+
 export function layoutGraph(
   nodes: Node[],
   edges: Edge[],
   direction: "LR" | "TB" = "LR",
 ): { nodes: Node[]; edges: Edge[] } {
+  if (isLongDirectedPath(nodes, edges)) return { nodes: wrapSnake(nodes, edges), edges };
   // No relations to draw: dagre would stack every node into one rank (a
   // single vertical column) — a "graph" that reads as a broken list. Fall
   // back to a tidy left-aligned grid instead.

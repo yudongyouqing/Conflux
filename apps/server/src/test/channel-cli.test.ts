@@ -63,20 +63,23 @@ function watchUntilInitialOutput(dataDir: string, edgeId: number): Promise<{ cod
     stdio: ["ignore", "pipe", "pipe"],
   });
   let stdout = "";
+  let stderr = "";
+  child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
 
   return new Promise((resolvePromise, reject) => {
     const timeout = setTimeout(() => {
       child.kill();
-      reject(new Error("channel watch did not print its initial snapshot"));
-    }, 3000);
+      reject(new Error(`channel watch startup timed out: ${stderr}`));
+    }, 15000);
     child.stdout.on("data", (chunk: Buffer) => {
       stdout += chunk.toString("utf8");
       if (!stdout.includes('"edge"')) return;
       child.kill("SIGINT");
     });
-    child.once("error", reject);
+    child.once("error", (error) => { clearTimeout(timeout); reject(error); });
     child.once("exit", (code, signal) => {
       clearTimeout(timeout);
+      if (!stdout.includes('"edge"')) { reject(new Error(`channel watch exited before snapshot (code=${code}): ${stderr}`)); return; }
       resolvePromise({ code, signal, stdout });
     });
   });
