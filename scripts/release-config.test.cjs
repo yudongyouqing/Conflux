@@ -14,7 +14,10 @@ test("CI runs server tests, builds, desktop tests, and secret scan", () => {
   assert.match(ci, /npm test -w apps\/server/);
   assert.match(ci, /npm run build/);
   assert.match(ci, /desktop-tests:/);
-  assert.match(ci, /node --test apps\/desktop\/test\//);
+  assert.match(ci, /npm run test:desktop/);
+  assert.match(ci, /npm run lint/);
+  assert.match(ci, /node --test scripts\/release-config\.test\.cjs/);
+  assert.match(ci, /npm run check:tokens/);
   assert.match(ci, /check:secrets/);
   assert.match(ci, /ubuntu-latest/);
   assert.match(ci, /windows-latest/);
