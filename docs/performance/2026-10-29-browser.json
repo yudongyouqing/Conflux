@@ -1,0 +1,529 @@
+{
+  "measuredAt": "2026-10-29T15:38:11.490Z",
+  "revision": "5f128fcd4a47939e59ba1228ec10f3f5db301928",
+  "node": "v22.23.4",
+  "chromium": "156.0.8078.4",
+  "os": "win32 10.0.26300",
+  "cpu": "12th Gen Intel(R) Core(TM) i7-12650H",
+  "memoryBytes": 16898719744,
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "samples": 5,
+  "results": [
+    {
+      "topology": "chain",
+      "nodes": 25,
+      "edges": 24,
+      "runs": [
+        {
+          "renderedMs": 195.60000000149012,
+          "zoomMs": 31.299999997019768,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 225.5,
+          "zoomMs": 16.5,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 290.8999999985099,
+          "zoomMs": 19,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 231,
+          "zoomMs": 19.5,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 240.69999999552965,
+          "zoomMs": 18.599999994039536,
+          "longTasks": []
+        }
+      ],
+      "renderMs": {
+        "median": 231,
+        "max": 290.8999999985099
+      },
+      "zoomMs": {
+        "median": 19,
+        "max": 31.299999997019768
+      },
+      "longTaskMaxMs": 0
+    },
+    {
+      "topology": "chain",
+      "nodes": 100,
+      "edges": 99,
+      "runs": [
+        {
+          "renderedMs": 329,
+          "zoomMs": 29.299999997019768,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 266.1000000014901,
+          "zoomMs": 21,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 267.29999999701977,
+          "zoomMs": 23.799999997019768,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 268.20000000298023,
+          "zoomMs": 20,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 262.70000000298023,
+          "zoomMs": 20.19999999552965,
+          "longTasks": []
+        }
+      ],
+      "renderMs": {
+        "median": 267.29999999701977,
+        "max": 329
+      },
+      "zoomMs": {
+        "median": 21,
+        "max": 29.299999997019768
+      },
+      "longTaskMaxMs": 0
+    },
+    {
+      "topology": "chain",
+      "nodes": 300,
+      "edges": 299,
+      "runs": [
+        {
+          "renderedMs": 486.3999999985099,
+          "zoomMs": 58.80000000447035,
+          "longTasks": [
+            52,
+            81,
+            66,
+            52,
+            77,
+            84,
+            77,
+            54,
+            56,
+            57,
+            57,
+            52
+          ]
+        },
+        {
+          "renderedMs": 487.70000000298023,
+          "zoomMs": 57.19999999552965,
+          "longTasks": [
+            76,
+            87,
+            66,
+            64,
+            104,
+            68,
+            72,
+            66,
+            65,
+            61,
+            53
+          ]
+        },
+        {
+          "renderedMs": 469.59999999403954,
+          "zoomMs": 56.5,
+          "longTasks": [
+            78,
+            85,
+            61,
+            50,
+            74,
+            60,
+            59,
+            60,
+            57,
+            52,
+            54,
+            57,
+            50
+          ]
+        },
+        {
+          "renderedMs": 521.3000000044703,
+          "zoomMs": 65.70000000298023,
+          "longTasks": [
+            82,
+            93,
+            81,
+            60,
+            65,
+            59,
+            60
+          ]
+        },
+        {
+          "renderedMs": 502.70000000298023,
+          "zoomMs": 56.30000000447035,
+          "longTasks": [
+            81,
+            90,
+            67,
+            53,
+            72,
+            64,
+            54,
+            67,
+            61,
+            53,
+            53,
+            53,
+            51
+          ]
+        }
+      ],
+      "renderMs": {
+        "median": 487.70000000298023,
+        "max": 521.3000000044703
+      },
+      "zoomMs": {
+        "median": 57.19999999552965,
+        "max": 65.70000000298023
+      },
+      "longTaskMaxMs": 104
+    },
+    {
+      "topology": "tree",
+      "nodes": 25,
+      "edges": 24,
+      "runs": [
+        {
+          "renderedMs": 222.39999999850988,
+          "zoomMs": 17.700000002980232,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 261.1000000014901,
+          "zoomMs": 30.5,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 236.29999999701977,
+          "zoomMs": 17.700000002980232,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 212.60000000149012,
+          "zoomMs": 18.399999998509884,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 265.20000000298023,
+          "zoomMs": 29.5,
+          "longTasks": []
+        }
+      ],
+      "renderMs": {
+        "median": 236.29999999701977,
+        "max": 265.20000000298023
+      },
+      "zoomMs": {
+        "median": 18.399999998509884,
+        "max": 30.5
+      },
+      "longTaskMaxMs": 0
+    },
+    {
+      "topology": "tree",
+      "nodes": 100,
+      "edges": 99,
+      "runs": [
+        {
+          "renderedMs": 332.29999999701977,
+          "zoomMs": 26.5,
+          "longTasks": [
+            50
+          ]
+        },
+        {
+          "renderedMs": 360.3999999985099,
+          "zoomMs": 26.099999994039536,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 324.5,
+          "zoomMs": 28.399999998509884,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 301.29999999701977,
+          "zoomMs": 27.100000001490116,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 322.30000000447035,
+          "zoomMs": 20.299999997019768,
+          "longTasks": []
+        }
+      ],
+      "renderMs": {
+        "median": 324.5,
+        "max": 360.3999999985099
+      },
+      "zoomMs": {
+        "median": 26.5,
+        "max": 28.399999998509884
+      },
+      "longTaskMaxMs": 50
+    },
+    {
+      "topology": "tree",
+      "nodes": 300,
+      "edges": 299,
+      "runs": [
+        {
+          "renderedMs": 612.3999999985099,
+          "zoomMs": 64.70000000298023,
+          "longTasks": [
+            96,
+            84,
+            103,
+            63,
+            65,
+            62,
+            55,
+            56,
+            55,
+            51,
+            56,
+            53,
+            57
+          ]
+        },
+        {
+          "renderedMs": 554.1000000014901,
+          "zoomMs": 55.899999998509884,
+          "longTasks": [
+            111,
+            83,
+            60,
+            53,
+            50,
+            54,
+            59,
+            57,
+            55,
+            51,
+            59,
+            52
+          ]
+        },
+        {
+          "renderedMs": 613.7000000029802,
+          "zoomMs": 72.40000000596046,
+          "longTasks": [
+            103,
+            80,
+            99,
+            72,
+            63,
+            54,
+            64,
+            53,
+            55,
+            51,
+            57,
+            55,
+            67
+          ]
+        },
+        {
+          "renderedMs": 636.2999999970198,
+          "zoomMs": 60.5,
+          "longTasks": [
+            109,
+            89,
+            98,
+            63,
+            64,
+            61,
+            61,
+            61,
+            61,
+            53,
+            57,
+            53,
+            55
+          ]
+        },
+        {
+          "renderedMs": 645.4000000059605,
+          "zoomMs": 77.79999999701977,
+          "longTasks": [
+            100,
+            89,
+            113,
+            73,
+            70,
+            58,
+            54,
+            56,
+            57,
+            59,
+            70,
+            61,
+            69
+          ]
+        }
+      ],
+      "renderMs": {
+        "median": 613.7000000029802,
+        "max": 645.4000000059605
+      },
+      "zoomMs": {
+        "median": 64.70000000298023,
+        "max": 77.79999999701977
+      },
+      "longTaskMaxMs": 113
+    },
+    {
+      "topology": "disconnected",
+      "nodes": 25,
+      "edges": 0,
+      "runs": [
+        {
+          "renderedMs": 194.79999999701977,
+          "zoomMs": 18.200000002980232,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 193.69999999552965,
+          "zoomMs": 36,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 179.89999999850988,
+          "zoomMs": 20.599999994039536,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 208.39999999850988,
+          "zoomMs": 33,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 191.20000000298023,
+          "zoomMs": 25,
+          "longTasks": []
+        }
+      ],
+      "renderMs": {
+        "median": 193.69999999552965,
+        "max": 208.39999999850988
+      },
+      "zoomMs": {
+        "median": 25,
+        "max": 36
+      },
+      "longTaskMaxMs": 0
+    },
+    {
+      "topology": "disconnected",
+      "nodes": 100,
+      "edges": 0,
+      "runs": [
+        {
+          "renderedMs": 213.80000000447035,
+          "zoomMs": 23.80000000447035,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 227.20000000298023,
+          "zoomMs": 21.299999997019768,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 231.10000000149012,
+          "zoomMs": 19.100000001490116,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 200.60000000149012,
+          "zoomMs": 26.399999998509884,
+          "longTasks": []
+        },
+        {
+          "renderedMs": 248.10000000149012,
+          "zoomMs": 23.69999999552965,
+          "longTasks": []
+        }
+      ],
+      "renderMs": {
+        "median": 227.20000000298023,
+        "max": 248.10000000149012
+      },
+      "zoomMs": {
+        "median": 23.69999999552965,
+        "max": 26.399999998509884
+      },
+      "longTaskMaxMs": 0
+    },
+    {
+      "topology": "disconnected",
+      "nodes": 300,
+      "edges": 0,
+      "runs": [
+        {
+          "renderedMs": 404.20000000298023,
+          "zoomMs": 37.599999994039536,
+          "longTasks": [
+            56,
+            63
+          ]
+        },
+        {
+          "renderedMs": 432.20000000298023,
+          "zoomMs": 31.200000002980232,
+          "longTasks": [
+            59
+          ]
+        },
+        {
+          "renderedMs": 406.20000000298023,
+          "zoomMs": 22.899999998509884,
+          "longTasks": [
+            51
+          ]
+        },
+        {
+          "renderedMs": 377.1000000014901,
+          "zoomMs": 27.200000002980232,
+          "longTasks": [
+            55
+          ]
+        },
+        {
+          "renderedMs": 275.20000000298023,
+          "zoomMs": 35.29999999701977,
+          "longTasks": [
+            78,
+            51
+          ]
+        }
+      ],
+      "renderMs": {
+        "median": 404.20000000298023,
+        "max": 432.20000000298023
+      },
+      "zoomMs": {
+        "median": 31.200000002980232,
+        "max": 37.599999994039536
+      },
+      "longTaskMaxMs": 78
+    }
+  ]
+}

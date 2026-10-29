@@ -15,13 +15,15 @@
 ## 待办
 
 - [ ] 在 Windows、macOS Apple Silicon、Linux 实机验证 v0.2.0 安装、启动和退出清理；记录环境及结果。
-- [ ] 配置 Windows 签名和 macOS 签名及公证，验证签名安装包及自动更新。当前 v0.2.0 安装包未签名。
-- [ ] 在用户确认的里程碑中将发布工作流修复从 dev 合入 main，并在下次发布验证完整自动化链路。[发布准备 issue](https://github.com/yudongyouqing/Conflux/issues/222) 保持开放，直到相关收尾确定。
+- [ ] 可选后续：配置 Windows 签名和 macOS 签名及公证。用户已选择继续使用未签名版本；此项不阻塞当前发布，自动更新仍需实机验收。
+- [x] 发布工作流修复及本批改动已通过 PR #240 合入 main。
+- [ ] 在下次发布验证完整自动化链路。[发布准备 issue](https://github.com/yudongyouqing/Conflux/issues/222) 保持开放，直到相关收尾确定。
 - [x] 下一版本移除旧 `muiltchat` CLI 和 `MUILTCHAT_*` 变量，更新内部调用及迁移通知；现有数据目录保留。
 - [ ] 在真实业务数据和多种设备上复测浏览器基准，并补充服务器/数据库性能数据，再决定回归阈值；见 [性能基线](PERFORMANCE.md)。
 - [x] 核查 12 份历史实现计划并记录证据、回退和替代情况，见 [历史计划验收核查](PLAN-ACCEPTANCE.md)。
 - [ ] 决定是否继续旧协作工作区设计（聚合快照、消息投递重试、runtime_instances）及是否重做 Workbench；不得继续笼统标为已交付。
 - [ ] 补充真实 MCP 宿主、桌面故障注入/托盘退出、backfill CLI 幂等和当前主题/高亮视觉验收记录，具体步骤见验收核查表。
-- [ ] 调查本次 Windows 并行回归中的 channel watch 启动超时，见 [#242](https://github.com/yudongyouqing/Conflux/issues/242)。
+- [x] 分离 channel watch 的启动与更新等待：启动允许 15 秒、消息更新仍限 3 秒，提前退出立即报告诊断；补充慢启动和失败回归，见 [#242](https://github.com/yudongyouqing/Conflux/issues/242)。
+- [x] 普通 CI 纳入完整桌面测试、lint、发布配置测试与设计令牌检查，见 [#244](https://github.com/yudongyouqing/Conflux/issues/244)。
 
 `2026-09-09-pr-body-example.md` 是 PR 正文示例，不是实施计划。

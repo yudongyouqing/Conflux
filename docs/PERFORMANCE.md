@@ -117,3 +117,44 @@ Five measured navigations per case after one discarded navigation. Raw data: [br
 | disconnected | 300 | 407.2 | 27.9 | 105.0 |
 
 The connected 300-node fixtures show main-thread tasks above 100 ms. Use this as an optimization target and remeasure on the same environment; these samples do not establish a cross-device capacity limit.
+
+## Long directed path optimization (2026-10-29)
+
+Source `5f128fc` recognizes connected directed paths with at least eight nodes
+and uses the existing snake layout immediately. Other graphs retain Dagre's
+two-direction layout. This avoids computing two layouts that the old algorithm
+discarded for long paths. Node positions and edge arrays were checked for exact
+equality with the previous implementation at 8, 25, 100 and 300 nodes.
+
+On this Windows host, alternating old (`8ec85cb`) and new implementations in one
+process, with three warm-ups and ten samples per size, gave these layout-only
+medians (this excludes React conversion and rendering):
+
+| Nodes | Before (ms) | After (ms) |
+| ---: | ---: | ---: |
+| 8 | 3.68 | 0.02 |
+| 25 | 11.22 | 0.06 |
+| 100 | 38.09 | 0.14 |
+| 300 | 107.04 | 0.37 |
+
+The production browser benchmark then recorded five measured navigations per
+case after a discarded warm-up. Raw data and environment metadata are in
+[the 2026-10-29 report](performance/2026-10-29-browser.json).
+
+| Topology | Nodes | Ready median (ms) | Zoom median (ms) | Long-task max (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| chain | 25 | 231.0 | 19.0 | 0.0 |
+| chain | 100 | 267.3 | 21.0 | 0.0 |
+| chain | 300 | 487.7 | 57.2 | 104.0 |
+| tree | 25 | 236.3 | 18.4 | 0.0 |
+| tree | 100 | 324.5 | 26.5 | 50.0 |
+| tree | 300 | 613.7 | 64.7 | 113.0 |
+| disconnected | 25 | 193.7 | 25.0 | 0.0 |
+| disconnected | 100 | 227.2 | 23.7 | 0.0 |
+| disconnected | 300 | 404.2 | 31.2 | 78.0 |
+
+The historical 300-node chain readiness median was 839.1 ms; this run measured
+487.7 ms. These browser runs occurred at different times, so environment noise
+can contribute to the difference. Zoom improvements are observations, not a
+claimed direct effect of layout changes. Trees were not optimized; React/DOM
+work still creates long tasks and remains a separate optimization target.
