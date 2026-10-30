@@ -101,7 +101,9 @@ npm start   # → http://127.0.0.1:9527
 
 性能基线与本地指标见[性能文档](docs/PERFORMANCE.md)。
 
-会话列表与引用：Codex 使用 `$conflux list`（或 `/skills` 选择 conflux），Claude Code 使用 `/conflux list`；先运行 `conflux commands install --client all` 安装客户端技能，并重连更新后的 MCP。完整说明见[会话目录](docs/SESSION-DIRECTORY.md)。
+会话列表与引用：Codex 桌面版在 `/` 中选择 conflux，也可使用 `$conflux list`（CLI/IDE 使用 `/skills`）；Claude Code 使用 `/conflux list`。先运行 `conflux commands install --client all` 安装客户端技能，并重连更新后的 MCP。找不到名称或终端标题变化时，助手会提供候选供确认；见[会话目录](docs/SESSION-DIRECTORY.md)。
+
+消息可查看独立的唤醒尝试并重试，运行时页面可管理由 Conflux 启动的实例；安全停止与原对话恢复的条件见[协作控制](docs/COLLABORATION-CONTROLS.md)。
 
 ## 🧭 架构
 
