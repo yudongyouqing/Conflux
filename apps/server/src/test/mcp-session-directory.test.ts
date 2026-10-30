@@ -33,7 +33,9 @@ test("MCP directory exposes prompts and mention resources with full, unambiguous
   });
   await client.connect(clientTransport);
   let changed = 0;
-  client.setNotificationHandler(ResourceListChangedNotificationSchema, () => { changed++; });
+  client.setNotificationHandler(ResourceListChangedNotificationSchema, () => {
+    changed++;
+  });
   assert.ok(client.getServerCapabilities()?.prompts);
   assert.ok(client.getServerCapabilities()?.resources);
   assert.ok((await client.listPrompts()).prompts.some((p) => p.name === "list"));
@@ -43,6 +45,24 @@ test("MCP directory exposes prompts and mention resources with full, unambiguous
     true,
   );
   const listed = await client.callTool({ name: "list_session_directory", arguments: {} });
+  const suggested = await client.callTool({
+    name: "find_session_candidates",
+    arguments: { query: "Same name" },
+  });
+  assert.equal(
+    (suggested.structuredContent as { requires_confirmation: boolean }).requires_confirmation,
+    true,
+  );
+  assert.equal((suggested.structuredContent as { candidates: unknown[] }).candidates.length, 2);
+  const resolved = await client.callTool({
+    name: "find_session_candidates",
+    arguments: { query: unusual },
+  });
+  assert.equal(
+    (resolved.structuredContent as { requires_confirmation: boolean }).requires_confirmation,
+    false,
+  );
+  assert.equal((db.prepare("SELECT count(*) AS n FROM messages").get() as { n: number }).n, 0);
   const sessions = (
     listed.structuredContent as {
       sessions: Array<{ id: string; current: boolean; status: string; resource_uri: string }>;
@@ -51,7 +71,10 @@ test("MCP directory exposes prompts and mention resources with full, unambiguous
   assert.deepEqual(new Set(sessions.map((s) => s.id)), new Set(["current-session", unusual]));
   assert.equal(sessions.find((s) => s.id === "current-session")?.current, true);
   assert.equal(sessions.find((s) => s.id === unusual)?.status, "ended");
-  const active = await client.callTool({ name: "list_session_directory", arguments: { status: "active" } });
+  const active = await client.callTool({
+    name: "list_session_directory",
+    arguments: { status: "active" },
+  });
   assert.equal((active.structuredContent as { sessions: unknown[] }).sessions.length, 1);
   const resources = (await client.listResources()).resources;
   assert.ok(resources.some((r) => r.uri === sessionResourceUri(unusual)));

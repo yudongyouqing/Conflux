@@ -5,6 +5,7 @@ import type { DB } from "../core/db.js";
 import { listSessions } from "../core/sessions.js";
 import { logAudit } from "../core/audit.js";
 import { logger } from "../log.js";
+import { findSessionCandidates } from "../core/session-candidates.js";
 
 type Status = "active" | "stale" | "ended" | "all";
 
@@ -62,6 +63,34 @@ export function registerSessionDirectory(
     beforeRead: () => void;
   },
 ): () => void {
+  server.registerTool(
+    "find_session_candidates",
+    {
+      description:
+        "Find likely Conflux peers when a name/title/ID is unclear or a terminal title changed. Read-only. Only exact full IDs resolve; otherwise ask the user to choose from candidates before any message or wake. Titles are not stable identity.",
+      inputSchema: {
+        query: z.string().min(1).max(500),
+        project_dir: z.string().max(2000).optional(),
+        runtime: z.enum(["claude", "codex"]).optional(),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ query, project_dir, runtime }) => {
+      opts.beforeRead();
+      const result = findSessionCandidates(opts.db, query, { project_dir, runtime });
+      logAudit(opts.db, {
+        caller_session: opts.currentSessionId(),
+        interface: "mcp",
+        action: "find_session_candidates",
+        args: { query_length: query.length },
+        result: { count: result.candidates.length, match: result.match },
+      });
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        structuredContent: result,
+      };
+    },
+  );
   const schema = {
     status: z
       .enum(["active", "stale", "ended", "all"])
