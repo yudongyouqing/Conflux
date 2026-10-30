@@ -70,6 +70,25 @@ jobs:
           path: test-results/performance/browser.json
           if-no-files-found: error
 
+  server-performance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:perf:server
+      - run: npm run perf:server
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: server-database-performance
+          path: test-results/performance/server-database.json
+          if-no-files-found: error
+
   e2e-web:
     runs-on: ubuntu-latest
     steps:
