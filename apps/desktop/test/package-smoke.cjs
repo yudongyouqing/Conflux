@@ -26,6 +26,7 @@ function assertPackageLayout(packageDir) {
   for (const entry of [
     "apps/desktop/src/main.cjs",
     "apps/server/dist/index.js",
+    "apps/server/skills/conflux/SKILL.md",
     "apps/web/dist/index.html",
     "node_modules/fastify",
     "node_modules/@modelcontextprotocol/sdk",

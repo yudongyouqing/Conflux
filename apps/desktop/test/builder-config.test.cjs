@@ -17,6 +17,7 @@ test("production build config includes app, server, web, and native module resou
   assert.deepEqual(config.files, [
     "apps/desktop/**/*",
     "apps/server/dist/**/*",
+    "apps/server/skills/**/*",
     "apps/web/dist/**/*",
   ]);
   assert.ok(config.asarUnpack.includes("**/better-sqlite3/**"));

@@ -35,6 +35,7 @@ import { askAndReplySync } from "../core/ask-sync.js";
 import { summonAgent, writeResult, readRoom, roomStatus } from "../core/room-orchestrator.js";
 import { refreshCodexSessionTitles } from "../core/codex-titles.js";
 import { logger } from "../log.js";
+import { registerSessionDirectory } from "./session-directory.js";
 
 const INSTRUCTIONS = `
 Conflux: cross-session context + async messaging for AI coding assistants.
@@ -47,6 +48,7 @@ You share a SQLite file with other sessions, so you can:
   - query_context: FTS-search what other sessions have published
   - ask_session / reply_ask / check_inbox / check_replies: async Q&A between sessions
   - get_graph: see the session topology (who's online, who talked to whom)
+  - list_session_directory: show full peer IDs and resource URIs for user selection
 
 For messaging Claude Code peers you may prefer your NATIVE SendMessage tool
 (lower latency). When you do, call log_exchange once afterwards so the
@@ -168,6 +170,7 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
   let beat: NodeJS.Timeout | undefined;
   let disposeStdio: (() => void) | undefined;
   let disconnected = false;
+  let refreshSessionResources: (() => void) | undefined;
 
   const disconnect = (reason: string): void => {
     if (disconnected) return;
@@ -244,6 +247,7 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
       touchLease();
       // Codex has no hooks: keep the display title in sync with its rollouts.
       if (identity.runtime === "codex") refreshCodexSessionTitles(db, { onlySessionId: sessionId });
+      refreshSessionResources?.();
     } catch {
       // transient sqlite lock contention — next tick retries
     }
@@ -293,6 +297,15 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
       return { ok: false, error: message };
     }
   }
+
+  refreshSessionResources = registerSessionDirectory(server, {
+    db,
+    currentSessionId: () => sessionId,
+    beforeRead: () => {
+      tryAdopt();
+      touchLease();
+    },
+  });
 
   // 1. register_session
   server.registerTool(

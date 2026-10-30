@@ -10,6 +10,7 @@ import { migrateDataDir, readMigrationStatus } from "../core/config-migration.js
 import { handleHookEvent, readJsonFile } from "../core/live.js";
 import { clearData, getClearableCounts } from "../core/data-clear.js";
 import { runBackfill } from "../core/hooks-backfill.js";
+import { installSessionCommands } from "./session-commands.js";
 import { logger } from "../log.js";
 import { registerSession, listSessions, endSession } from "../core/sessions.js";
 import { publishContext, updateContext, deleteContext, listMyContext } from "../core/context.js";
@@ -826,6 +827,31 @@ export function buildCli(_argv?: string | readonly string[]): Command {
         `/audit?${qs.toString()}`,
       );
       console.log(JSON.stringify(res, null, 2));
+    });
+
+  const commands = program
+    .command("commands")
+    .description("Conflux session-directory commands for Codex and Claude Code");
+  commands
+    .command("install")
+    .description("install the Conflux list skill for user-level access across projects")
+    .addOption(
+      new Option("--client <client>", "client to install for")
+        .choices(["all", "codex", "claude"])
+        .default("all"),
+    )
+    .option("--force", "back up and replace conflicting Conflux skill instructions")
+    .action(function (this: Command) {
+      const opts = this.opts();
+      const installed = installSessionCommands({ client: opts.client, force: opts.force });
+      for (const item of installed) {
+        console.log(
+          `${item.changed ? "installed" : "unchanged"} ${item.client}: ${item.path}${item.backup ? ` (backup: ${item.backup})` : ""}`,
+        );
+      }
+      console.log(
+        "Codex: /skills → conflux or $conflux list. Claude Code: /conflux list. Reconnect the Conflux MCP server to discover its directory prompt and resources.",
+      );
     });
 
   // hooks ------------------------------------------------------------
