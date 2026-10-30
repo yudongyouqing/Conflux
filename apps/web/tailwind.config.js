@@ -8,10 +8,9 @@ export default {
          *  令牌以 rgb 通道三元组存于 CSS 变量（:root），主题可运行时覆盖。 */
         ink: {
           DEFAULT: "rgb(var(--tk-ink) / <alpha-value>)",
-          // 次级/弱化文字 = 墨色 alpha 派生（#109）：任何色板自动获得正确层级，
-          // 压在 tile 色块上也不塌（PI-Desktop 论证过的对比度策略）
-          muted: "rgb(var(--tk-ink) / 0.72)",
-          faint: "rgb(var(--tk-ink) / 0.50)",
+          // Metadata remains legible over panels and active row fills.
+          muted: "rgb(var(--tk-ink) / 0.76)",
+          faint: "rgb(var(--tk-ink) / 0.66)",
         },
         /** 画布底 / 卡片面的层级对 */
         paper: "rgb(var(--tk-paper) / <alpha-value>)",
@@ -27,11 +26,32 @@ export default {
           hover: "rgb(var(--tk-ink) / 0.06)",
           active: "rgb(var(--tk-ink) / 0.09)",
         },
-        /** 唯一强调色：汇流蓝。状态色（live/busy/ended）不在此列，只表达生命状态 */
+        /** 唯一强调色：汇流蓝；状态色单独表达运行状态。 */
         accent: {
           DEFAULT: "rgb(var(--tk-accent) / <alpha-value>)",
           deep: "rgb(var(--tk-accent-deep) / <alpha-value>)",
           soft: "rgb(var(--tk-accent-soft) / <alpha-value>)",
+        },
+        "on-accent": "rgb(var(--tk-on-accent) / <alpha-value>)",
+        success: {
+          DEFAULT: "rgb(var(--tk-success) / <alpha-value>)",
+          soft: "rgb(var(--tk-success-soft) / <alpha-value>)",
+        },
+        warning: {
+          DEFAULT: "rgb(var(--tk-warning) / <alpha-value>)",
+          soft: "rgb(var(--tk-warning-soft) / <alpha-value>)",
+        },
+        danger: {
+          DEFAULT: "rgb(var(--tk-danger) / <alpha-value>)",
+          soft: "rgb(var(--tk-danger-soft) / <alpha-value>)",
+        },
+        info: {
+          DEFAULT: "rgb(var(--tk-info) / <alpha-value>)",
+          soft: "rgb(var(--tk-info-soft) / <alpha-value>)",
+        },
+        neutral: {
+          DEFAULT: "rgb(var(--tk-neutral) / <alpha-value>)",
+          soft: "rgb(var(--tk-neutral-soft) / <alpha-value>)",
         },
       },
       /** 动效节拍（#111）：transition-* 不写时长即走这组默认 */
@@ -44,7 +64,7 @@ export default {
         DEFAULT: "cubic-bezier(0.22, 1, 0.36, 1)",
         "in-expo": "cubic-bezier(0.64, 0, 0.78, 0)",
       },
-      /** 半步字阶（#109）：10.5 地板给 kbd/微标签，12 起 = 列表正文 */
+      /** 半步字阶：11px 微标签地板，12px 起用于列表正文。 */
       fontSize: {
         "2xs": ["11px", { lineHeight: "15px" }],
         "md-plus": ["13.5px", { lineHeight: "19px" }],
@@ -52,7 +72,7 @@ export default {
       },
       fontFamily: {
         sans: [
-          '"Inter"',
+          '"IBM Plex Sans"',
           '"PingFang SC"',
           '"Microsoft YaHei UI"',
           '"Microsoft YaHei"',
@@ -60,7 +80,7 @@ export default {
           "sans-serif",
         ],
         /** mono 只用于真的终端数据（id/路径/代码/会话名），不做装饰 */
-        mono: ['"JetBrains Mono"', '"IBM Plex Mono"', '"Cascadia Mono"', "Consolas", "monospace"],
+        mono: ['"IBM Plex Mono"', '"Cascadia Mono"', "Consolas", "monospace"],
       },
       /** 阴影只给浮起物：卡片静态无影或极浅，浮层/拖拽/选中才升级 */
       boxShadow: {

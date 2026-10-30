@@ -8,7 +8,7 @@ import { cloneElement, isValidElement, type ReactNode } from "react";
  * (bold, lists, code fences); rendering it raw as pre-wrap text wastes that.
  *
  * Two tones: "light" for neutral/incoming bubbles (gray text on white),
- * "blue" for the outgoing blue bubble (white text). Element styling is
+ * "blue" for the outgoing accent bubble (palette-aware text). Element styling is
  * hand-mapped Tailwind (no typography plugin) so it stays consistent with
  * the workspace's design language.
  */
@@ -38,7 +38,7 @@ export function MarkdownText({ children, tone = "light", className }: MarkdownTe
     return (
       <code
         className={`font-mono text-xs px-1 py-px rounded ${
-          onBlue ? "bg-surface/25 text-white" : "bg-paper text-pink-600"
+          onBlue ? "bg-transparent text-on-accent" : "bg-paper text-pink-600"
         }`}
       >
         {children}
@@ -55,23 +55,23 @@ export function MarkdownText({ children, tone = "light", className }: MarkdownTe
         components={{
           p: ({ children }) => <p className="my-1.5 first:mt-0 last:mb-0">{children}</p>,
           strong: ({ children }) => (
-            <strong className={onBlue ? "text-white font-semibold" : "text-ink font-semibold"}>
+            <strong className={onBlue ? "text-on-accent font-semibold" : "text-ink font-semibold"}>
               {children}
             </strong>
           ),
           em: ({ children }) => (
-            <em className={onBlue ? "opacity-90" : "text-ink-muted"}>{children}</em>
+            <em className={onBlue ? "text-on-accent" : "text-ink-muted"}>{children}</em>
           ),
           ul: ({ children }) => (
             <ul
-              className={`list-disc pl-5 my-1.5 space-y-0.5 ${onBlue ? "marker:text-white/70" : "marker:text-ink-faint"}`}
+              className={`list-disc pl-5 my-1.5 space-y-0.5 ${onBlue ? "marker:text-on-accent" : "marker:text-ink-faint"}`}
             >
               {children}
             </ul>
           ),
           ol: ({ children }) => (
             <ol
-              className={`list-decimal pl-5 my-1.5 space-y-0.5 ${onBlue ? "marker:text-white/70" : "marker:text-ink-faint"}`}
+              className={`list-decimal pl-5 my-1.5 space-y-0.5 ${onBlue ? "marker:text-on-accent" : "marker:text-ink-faint"}`}
             >
               {children}
             </ol>
@@ -84,7 +84,7 @@ export function MarkdownText({ children, tone = "light", className }: MarkdownTe
               rel="noreferrer"
               className={
                 onBlue
-                  ? "underline underline-offset-2"
+                  ? "text-on-accent underline underline-offset-2"
                   : "text-accent hover:underline underline-offset-2"
               }
             >

@@ -291,7 +291,7 @@ export function RoomChat({ roomId, roomName, members, onBack }: RoomChatProps) {
           <button
             onClick={send}
             disabled={!prompt.trim() || sending}
-            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-accent text-white text-xs font-medium hover:bg-accent-deep disabled:opacity-40"
+            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-accent text-on-accent text-xs font-medium hover:bg-accent-deep disabled:opacity-40"
           >
             {sending ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
             {selectedExecutor ? "召唤" : "广播"}

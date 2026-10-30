@@ -11,6 +11,7 @@ import {
   selectedEdgeEndpoints,
   styleEdges,
   graphBuildMetrics,
+  toSessionNode,
 } from "../src/graph-builders.ts";
 import type { Edge, Node } from "@xyflow/react";
 
@@ -39,6 +40,13 @@ const edge = (from: string, to: string, weight = 1): GraphEdge =>
 
 const frameNodes = (nodes: Node[]) => nodes.filter((n) => n.type === "cluster");
 const sessionNodes = (nodes: Node[]) => nodes.filter((n) => n.type === "session");
+
+test("session graph nodes retain busy state for the shared status indicator", () => {
+  const busy = toSessionNode(node({ id: "busy", busy: true }));
+  const idle = toSessionNode(node({ id: "idle", busy: false }));
+  assert.equal(busy.data.busy, true);
+  assert.equal(idle.data.busy, false);
+});
 
 test("previewOf truncates to 16 chars with ellipsis", () => {
   assert.equal(previewOf(null), "");
