@@ -30,7 +30,7 @@ conflux commands install --client all
 
 | 客户端 | 入口 |
 | --- | --- |
-| Codex | `/skills` 选择 `conflux`，或输入 `$conflux list` |
+| Codex | 桌面版输入 `/` 选择 `conflux`；也可输入 `$conflux list`，CLI/IDE 使用 `/skills` |
 | Claude Code（安装技能后） | `/conflux list` |
 | Claude Code（MCP 提示词） | `/conflux:list`；兼容形式 `/mcp__conflux__list` |
 
@@ -50,7 +50,12 @@ Claude Code 支持从 `@` 菜单选择 MCP 资源。若连接名是 `conflux`，
 
 ## 协议与验证
 
+终端标题（例如 Ghostty 自动改名）不是会话身份。目标名称、标题或缩写不明确时，助手可调用只读工具 `find_session_candidates`，传入描述及已知的 `project_dir`、`runtime` 提示。完整 ID 精确匹配才直接定位；其他情况返回最多三个候选及匹配原因、项目、运行时、状态、最近活跃时间。低相关结果只是近期备选，不表示找到了原会话。
+
+Conflux 技能要求助手主动打开宿主的选项问答，让用户选候选或补充线索；宿主无该能力时使用编号列表。用户选择前不发送或唤醒，选择后重新确认完整 ID 仍然存在。此交互由 Codex/Claude Code 的助手执行，MCP 服务不能强制宿主显示弹窗。
+
 - `list_session_directory`：默认 all 的只读 MCP 工具，返回 Markdown 目录及结构化 sessions。
+- `find_session_candidates`：只读候选查询；不会通过候选分数自动授权发消息，也不会操作 Ghostty 标题。
 - MCP prompt `list`：实时读取目录，生成列表提示词。
 - `conflux://sessions`：完整目录 JSON 资源。
 - `conflux://sessions/id-{sessionId}`：单个可见会话的身份 JSON，不包含消息正文或上下文内容。固定前缀避免 `.`、`..` 等 ID 被当作路径片段。

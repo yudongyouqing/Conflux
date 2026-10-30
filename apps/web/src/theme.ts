@@ -47,6 +47,29 @@ export function hexToChannels(hex: string): string | null {
   return `${(n >> 16) & 255} ${(n >> 8) & 255} ${n & 255}`;
 }
 
+function relativeLuminance(hex: string): number {
+  const channels = hexToChannels(hex)?.split(" ").map(Number) ?? [0, 0, 0];
+  const linear = channels.map((channel) => {
+    const value = channel / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  });
+  return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+}
+
+/** Use one legible foreground through both the normal and hover button states.
+ * Derived at application time so imported palettes keep their eight-key format. */
+function accentForeground(colors: ThemeColors): string {
+  const backgrounds = [colors.accent, colors.accentDeep].map(relativeLuminance);
+  const score = (foreground: string) => {
+    const luminance = relativeLuminance(foreground);
+    return Math.min(
+      ...backgrounds.map((background) =>
+        (Math.max(luminance, background) + 0.05) / (Math.min(luminance, background) + 0.05)),
+    );
+  };
+  return score("#ffffff") >= score("#0d121c") ? "255 255 255" : "13 18 28";
+}
+
 /** 全部 8 个必需键都是合法 hex 才通过；legacy 键忽略，多退少补不猜默认值 */
 export function normalizeThemeColors(value: unknown): ThemeColors | null {
   if (!value || typeof value !== "object") return null;
@@ -73,6 +96,8 @@ export function applyThemeColors(root: StyleTarget = document.documentElement, c
       else root.style.removeProperty(varName);
     }
   }
+  if (colors) root.style.setProperty("--tk-on-accent", accentForeground(colors));
+  else root.style.removeProperty("--tk-on-accent");
 }
 
 // 内置预设：浅色系转译自 theme-factory 主题规格（Ocean Depths / Forest Canopy / Desert Rose / Tech Innovation），
@@ -81,7 +106,7 @@ export const BUILTIN_THEMES: CustomTheme[] = [
   { name: "汇流蓝（默认）", colors: { ink: "#182234", paper: "#f6f7f9", surface: "#ffffff", line: "#e4e8ef", lineStrong: "#cbd3e0", accent: "#2563eb", accentDeep: "#1e4fc4", accentSoft: "#ebf1fe" } },
   { name: "海洋深处", colors: { ink: "#0f2440", paper: "#eef4f8", surface: "#ffffff", line: "#d8e3ec", lineStrong: "#b9cbdc", accent: "#0e7490", accentDeep: "#0b5a6e", accentSoft: "#e0f2f7" } },
   { name: "森林树冠", colors: { ink: "#1d2a20", paper: "#f1f6f1", surface: "#ffffff", line: "#dce7dc", lineStrong: "#b9cdb9", accent: "#2f6b4f", accentDeep: "#24523c", accentSoft: "#e3f0e6" } },
-  { name: "沙漠玫瑰", colors: { ink: "#33272b", paper: "#faf4f1", surface: "#ffffff", line: "#ecdfda", lineStrong: "#d6bfb8", accent: "#b76e79", accentDeep: "#96545f", accentSoft: "#f7e8e6" } },
+  { name: "沙漠玫瑰", colors: { ink: "#33272b", paper: "#faf4f1", surface: "#ffffff", line: "#ecdfda", lineStrong: "#d6bfb8", accent: "#9e4f63", accentDeep: "#843e51", accentSoft: "#f7e8e6" } },
   { name: "科技创新", colors: { ink: "#1e1e1e", paper: "#f5f7fa", surface: "#ffffff", line: "#e2e8f0", lineStrong: "#c4cfda", accent: "#0066ff", accentDeep: "#0052cc", accentSoft: "#e5eeff" } },
   { name: "终端深色", colors: { ink: "#e6eaf2", paper: "#0d121c", surface: "#172030", line: "#2c384a", lineStrong: "#3e4c62", accent: "#60a5fa", accentDeep: "#3b82f6", accentSoft: "#1e3a5f" } },
 ];

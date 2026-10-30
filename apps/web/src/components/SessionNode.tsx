@@ -3,10 +3,12 @@ import { FileText, Inbox, Bot, MessageSquare, Globe, Terminal } from "lucide-rea
 import type { ElementType } from "react";
 import { ClaudeIcon, OpenAIIcon } from "./brand-icons";
 import { PLACEHOLDER_DESCRIPTIONS, WEB_CONSOLE_ID } from "@conflux/shared";
+import { sessionStatusAppearance } from "./StatusDot";
 
 export interface SessionNodeData {
   name: string;
   status: string;
+  busy?: boolean;
   type: "session" | "agent";
   context_count: number;
   pending_inbox: number;
@@ -17,7 +19,7 @@ export interface SessionNodeData {
   runtime?: string | null;
   /** Agent Card skills (capability self-description). */
   skills?: string[];
-  /** Endpoint of the currently selected edge — amber ring emphasis. */
+  /** Endpoint of the currently selected edge. */
   highlighted?: boolean;
   [key: string]: unknown;
 }
@@ -53,12 +55,6 @@ function skinFor(d: SessionNodeData, isAgent: boolean, isWeb: boolean): NodeSkin
   return (d.runtime && RUNTIME_SKIN[d.runtime]) || DEFAULT_SKIN;
 }
 
-const STATUS_DOT: Record<string, string> = {
-  active: "bg-emerald-500",
-  stale: "bg-gray-300",
-  ended: "bg-red-500",
-};
-
 export type SessionNodeType = Node<SessionNodeData>;
 
 export function SessionNode({ id, data, selected, dragging }: NodeProps) {
@@ -69,6 +65,7 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
   const isWeb = id === WEB_CONSOLE_ID;
   const skin = skinFor(d, isAgent, isWeb);
   const Icon = skin.icon;
+  const status = sessionStatusAppearance(d.status, d.busy);
 
   return (
     <div
@@ -81,13 +78,13 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
           .join(" | ") || undefined
       }
       className={`group relative w-[176px] rounded-xl bg-surface overflow-hidden transition-all duration-200 ease-out cursor-grab active:cursor-grabbing ${
-        d.status !== "active" ? "opacity-50 saturate-50 border-0 shadow-none " : ""}${
+        d.status !== "active" ? "saturate-50 border-0 shadow-none " : ""}${
         dragging
           ? "shadow-[0_12px_28px_rgba(16,24,40,0.18)] scale-[1.02] ring-2 ring-accent/30 ring-2 ring-accent/20"
           : selected
             ? "shadow-[0_4px_16px_rgba(37,99,235,0.16)] ring-2 ring-accent"
             : "shadow-[0_1px_2px_rgba(16,24,40,0.05),0_4px_12px_rgba(16,24,40,0.06)] hover:shadow-[0_8px_24px_rgba(16,24,40,0.12)] hover:-translate-y-0.5"
-      } ${d.highlighted ? "ring-2 ring-amber-400/80" : ""}`}
+      } ${d.highlighted ? "ring-2 ring-info/80" : ""}`}
     >
       {/* signature accent: left vertical strip (#node-ui) */}
       <div className={`absolute left-0 top-0 bottom-0 w-[3px] ${skin.accent} rounded-l-xl`} />
@@ -95,7 +92,7 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
       <Handle
         type="target"
         position={Position.Left}
-        className="!w-1.5 !h-1.5 !bg-gray-300 !border-[1.5px] !border-white opacity-50 group-hover:!bg-gray-400 group-hover:opacity-100 !transition-all"
+        className="!w-1.5 !h-1.5 !bg-line-strong !border-[1.5px] !border-surface opacity-50 group-hover:!bg-neutral group-hover:opacity-100 !transition-all"
       />
 
       <div className="px-2.5 py-2">
@@ -104,7 +101,7 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
           <div
             className={`w-6 h-6 rounded-[7px] ${skin.block} flex items-center justify-center flex-shrink-0 shadow-sm`}
           >
-            <Icon size={12} className="text-white" />
+            <Icon size={12} className={isWeb && !isAgent ? "text-on-accent" : "text-white"} />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1">
@@ -115,14 +112,14 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
                 {d.name}
               </span>
               <span
-                className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                  STATUS_DOT[d.status] ?? "bg-gray-300"
-                } ${d.status === "active" ? "shadow-[0_0_0_2px_rgba(16,185,129,0.15)] animate-pulse" : ""}`}
-                title={`状态: ${d.status}`}
+                role="img"
+                aria-label={status.label}
+                className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${status.className}`}
+                title={status.label}
               />
             </div>
             {d.runtime && !isAgent && (
-              <div className="font-mono text-2xs text-slate-400 leading-3">{d.runtime}</div>
+              <div className="font-mono text-2xs text-ink-faint leading-3">{d.runtime}</div>
             )}
           </div>
         </div>
@@ -141,7 +138,7 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
         <div className="flex items-center gap-1.5 mt-2 text-2xs">
           {d.context_count > 0 && (
             <span
-              className="inline-flex items-center gap-1 rounded-md bg-slate-50 border border-slate-100 px-1.5 py-[1px] text-ink-muted"
+              className="inline-flex items-center gap-1 rounded-md bg-tile border border-line px-1.5 py-[1px] text-ink-muted"
               title="已发布上下文"
             >
               <FileText size={10} /> {d.context_count}
@@ -149,7 +146,7 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
           )}
           {d.pending_inbox > 0 && (
             <span
-              className="inline-flex items-center gap-1 rounded-md bg-amber-50 border border-amber-100 px-1.5 py-[1px] text-amber-600"
+              className="inline-flex items-center gap-1 rounded-md bg-warning-soft border border-warning/20 px-1.5 py-[1px] text-warning"
               title="待处理收件"
             >
               <Inbox size={10} /> {d.pending_inbox}
@@ -157,7 +154,7 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
           )}
           {isAgent && (d.conversation_count ?? 0) > 0 && (
             <span
-              className="inline-flex items-center gap-1 rounded-md bg-indigo-50 border border-indigo-100 px-1.5 py-[1px] text-indigo-500"
+              className="inline-flex items-center gap-1 rounded-md bg-info-soft border border-info/20 px-1.5 py-[1px] text-info"
               title="对话数"
             >
               <MessageSquare size={10} /> {d.conversation_count}
@@ -169,7 +166,7 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
       <Handle
         type="source"
         position={Position.Right}
-        className="!w-1.5 !h-1.5 !bg-gray-300 !border-[1.5px] !border-white opacity-50 group-hover:!bg-gray-400 group-hover:opacity-100 !transition-all"
+        className="!w-1.5 !h-1.5 !bg-line-strong !border-[1.5px] !border-surface opacity-50 group-hover:!bg-neutral group-hover:opacity-100 !transition-all"
       />
     </div>
   );

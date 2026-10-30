@@ -79,7 +79,7 @@ export function getActiveWakeCount(): number {
 
 export type WakeResult =
   | { woke: true; command?: string }
-  | { woke: false; reason: string };
+  | { woke: false; reason: string; disposition?: "queued" | "failed" };
 
 export interface WakeOptions {
   dryRun?: boolean;
@@ -96,7 +96,7 @@ export interface WakeOptions {
 export function wakeSessionForMail(db: DB, sessionId: string, opts: WakeOptions = {}): WakeResult {
   if (!getAutoWake(db)) return { woke: false, reason: "auto_wake disabled" };
   if (sessionId === WEB_CONSOLE_ID || sessionId.startsWith("agent-")) {
-    return { woke: false, reason: "not a CLI conversation" };
+    return { woke: false, reason: "not a CLI conversation", disposition: "failed" };
   }
 
   // Concurrent wake limit: fan-out broadcasts used to spawn every offline
@@ -108,7 +108,7 @@ export function wakeSessionForMail(db: DB, sessionId: string, opts: WakeOptions 
   }
 
   const session = getSession(db, sessionId);
-  if (!session) return { woke: false, reason: "session not found" };
+  if (!session) return { woke: false, reason: "session not found", disposition: "failed" };
 
   const io = opts.io ?? realTmuxIO;
   const schedule = opts.schedule ?? ((fn, ms) => setTimeout(fn, ms));
@@ -167,8 +167,7 @@ export function wakeSessionForMail(db: DB, sessionId: string, opts: WakeOptions 
     const mcpConfig =
       opts.mcpConfigPath ??
       (projectHasConfluxMcp(session.project_dir) ? null : ensureWakeMcpConfig());
-    const command =
-      tmuxWakeCommand(sessionId, exe, mcpConfig) + agentPromptSuffix(db, meta);
+    const command = tmuxWakeCommand(sessionId, exe, mcpConfig) + agentPromptSuffix(db, meta);
     if (opts.dryRun) return { woke: true, command };
     if (io.launch({ name, command, cwd: session.project_dir })) {
       mergeSessionMeta(db, sessionId, { tmux_session: name });
@@ -195,7 +194,7 @@ export function wakeSessionForMail(db: DB, sessionId: string, opts: WakeOptions 
           projectDir: session.project_dir,
           claudeHome: opts.claudeHome,
         });
-  if ("refuse" in plan) return { woke: false, reason: plan.refuse };
+  if ("refuse" in plan) return { woke: false, reason: plan.refuse, disposition: "failed" };
 
   const launch = launchWakeRun({
     db,
@@ -207,7 +206,7 @@ export function wakeSessionForMail(db: DB, sessionId: string, opts: WakeOptions 
     pinCodex: runtime === "codex",
     dryRun: opts.dryRun,
   });
-  if (!launch.ok) return { woke: false, reason: launch.error };
+  if (!launch.ok) return { woke: false, reason: launch.error, disposition: "failed" };
   if (!opts.dryRun) {
     setSetting(db, `auto-wake:${sessionId}`, new Date(now).toISOString());
   } else {

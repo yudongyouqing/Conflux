@@ -244,57 +244,67 @@ export function SettingsTab() {
     <div className="h-full overflow-y-auto p-6">
       <div className="max-w-xl mx-auto space-y-5">
         <div>
-        <div className="bg-surface border border-line rounded-xl p-4 space-y-3 shadow-sm">
+        <div className="bg-surface border border-line rounded-xl p-4 space-y-3">
           <h3 className="text-ink font-medium text-sm">主题</h3>
           <div>
-            <p className="text-2xs text-ink-faint mb-2">明暗随色板自动切换——选深色色板即全站深色</p>
-            <div className="grid grid-cols-2 gap-1.5">
+            <p className="text-2xs text-ink-muted mb-2">明暗随色板切换，状态颜色保持一致。</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
               {allThemes.map((t) => {
-                const active = activeCustom === t.name;
+                const active = (activeCustom ?? BUILTIN_THEMES[0].name) === t.name;
+                const custom = !BUILTIN_THEMES.some((b) => b.name === t.name);
                 return (
-                  <button
+                  <div
                     key={t.name}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => { setActiveCustomTheme(t.name); setActiveCustom(t.name); }}
-                    className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border text-xs transition-colors ${
-                      active ? "border-accent ring-1 ring-accent/30 text-ink" : "border-line text-ink-muted hover:border-line-strong"
-                    }`}
+                    className={`flex items-center rounded-lg border ${active ? "border-accent bg-accent-soft" : "border-line"}`}
                   >
-                    <span className="flex gap-0.5 flex-shrink-0">
-                      {[t.colors.accent, t.colors.paper, t.colors.line].map((c, i) => (
-                        <span key={i} className="w-2.5 h-2.5 rounded-full border border-line" style={{ background: c }} />
-                      ))}
-                    </span>
-                    <span className="truncate text-left flex-1">{t.name}</span>
-                    {!BUILTIN_THEMES.some((b) => b.name === t.name) && (
-                      <span
-                        role="button"
+                    <button
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => { setActiveCustomTheme(t.name); setActiveCustom(t.name); }}
+                      className={`flex min-w-0 flex-1 items-center gap-2 px-2 py-2 rounded-lg text-xs transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent ${
+                        active ? "text-ink" : "text-ink-muted hover:bg-tile-hover"
+                      }`}
+                    >
+                      <span aria-hidden="true" className="flex gap-0.5 flex-shrink-0">
+                        {[t.colors.accent, t.colors.paper, t.colors.line].map((c, i) => (
+                          <span key={i} className="w-2.5 h-2.5 rounded-full border border-line" style={{ background: c }} />
+                        ))}
+                      </span>
+                      <span className="truncate text-left flex-1">{t.name}</span>
+                      {active && <Check size={14} aria-hidden="true" className="text-accent shrink-0" />}
+                    </button>
+                    {custom && (
+                      <button
+                        type="button"
+                        aria-label={`删除主题 ${t.name}`}
                         title="删除此主题"
-                        onClick={(e) => {
-                          e.stopPropagation();
+                        onClick={() => {
                           deleteCustomTheme(t.name);
                           setCustomThemes(listCustomThemes());
                           if (activeCustom === t.name) { setActiveCustomTheme(null); setActiveCustom(null); }
                         }}
-                        className="text-ink-faint hover:text-red-500 px-0.5"
+                        className="text-ink-muted hover:text-danger hover:bg-danger-soft rounded-md p-2 mr-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
                       >
-                        ×
-                      </span>
+                        <Trash2 size={13} aria-hidden="true" />
+                      </button>
                     )}
-                  </button>
+                  </div>
                 );
               })}
             </div>
             <div className="mt-2.5">
+              <label htmlFor="theme-import" className="block text-xs text-ink-muted mb-1.5">导入自定义主题</label>
               <textarea
+                id="theme-import"
+                aria-invalid={!!importError}
+                aria-describedby={importError ? "theme-import-error" : "theme-import-help"}
                 value={importText}
                 onChange={(e) => setImportText(e.target.value)}
                 rows={3}
                 placeholder='导入主题 JSON：{"name":"我的主题","colors":{"ink":"#182234","paper":"#f6f7f9","line":"#e4e8ef","accent":"#2563eb",…}（8 键）}'
                 className="w-full bg-surface text-ink text-xs rounded-lg px-2.5 py-2 border border-line placeholder-ink-faint outline-none focus:border-accent resize-y font-mono"
               />
-              {importError && <div className="text-xs text-red-500 mt-1">{importError}</div>}
+              {importError && <div id="theme-import-error" role="alert" className="text-xs text-danger mt-1">{importError}</div>}
               <button
                 type="button"
                 onClick={applyImport}
@@ -303,7 +313,7 @@ export function SettingsTab() {
               >
                 导入主题
               </button>
-              <span className="text-2xs text-ink-faint ml-2">
+              <span id="theme-import-help" className="block text-2xs text-ink-faint mt-2">
                 需要 name + 8 个 #rrggbb 颜色（ink/paper/surface/line/lineStrong/accent/accentDeep/accentSoft；次级文字色由 ink 自动派生）
               </span>
             </div>
@@ -378,7 +388,7 @@ export function SettingsTab() {
             <button
               onClick={submit}
               disabled={save.isPending}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-accent text-white text-xs hover:bg-accent-deep disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-accent text-on-accent text-xs hover:bg-accent-deep disabled:opacity-50"
             >
               {save.isPending && <Loader2 size={12} className="animate-spin" />}
               保存

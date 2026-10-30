@@ -16,6 +16,7 @@ import {
 import { forwardInboxFromPid } from "./messages.js";
 import { setSetting } from "./app-settings.js";
 import { isRuntimeCommand } from "./liveness.js";
+import { bindRuntimeInstance } from "./runtime-instances.js";
 
 /**
  * Hook-driven liveness + identity for Claude Code sessions.
@@ -216,12 +217,11 @@ export function readRuntimeSessionName(
 
 /** basename(cwd) with a ·2/·3 suffix when another live node holds the name. */
 function dedupeNodeName(db: DB, base: string, excludeId: string): string {
-  const rows = db
-    .prepare(`SELECT id, name FROM sessions WHERE status = 'active'`)
-    .all() as { id: string; name: string }[];
-  const taken = new Set(
-    rows.filter((r) => r.id !== excludeId).map((r) => r.name),
-  );
+  const rows = db.prepare(`SELECT id, name FROM sessions WHERE status = 'active'`).all() as {
+    id: string;
+    name: string;
+  }[];
+  const taken = new Set(rows.filter((r) => r.id !== excludeId).map((r) => r.name));
   if (!taken.has(base)) return base;
   for (let n = 2; ; n++) {
     const candidate = `${base}·${n}`;
@@ -412,9 +412,13 @@ export function handleHookEvent(
     if (!aid || Number.isNaN(Number(aid))) return {};
     return {
       agent_id: Number(aid),
-      ...(process.env.CONFLUX_AGENT_RUNTIME
-        ? { runtime: process.env.CONFLUX_AGENT_RUNTIME }
+      ...(process.env.CONFLUX_RUNTIME_INSTANCE_ID
+        ? { runtime_instance_id: process.env.CONFLUX_RUNTIME_INSTANCE_ID }
         : {}),
+      ...(process.env.CONFLUX_TMUX_SESSION
+        ? { tmux_session: process.env.CONFLUX_TMUX_SESSION }
+        : {}),
+      ...(process.env.CONFLUX_AGENT_RUNTIME ? { runtime: process.env.CONFLUX_AGENT_RUNTIME } : {}),
     };
   })();
 
@@ -463,9 +467,7 @@ export function handleHookEvent(
         cwd: payload.cwd,
         userNamed: meta.user_named === true,
         fallback:
-          typeof meta.named === "boolean" && meta.named && existing
-            ? existing.name
-            : "claude",
+          typeof meta.named === "boolean" && meta.named && existing ? existing.name : "claude",
         existingName: existing?.name ?? null,
       }),
       description: meta.named && existing ? existing.description : HOOK_SESSION_DESCRIPTION,
@@ -480,6 +482,9 @@ export function handleHookEvent(
     });
     // a fresh start is by definition not mid-turn (clears a stuck busy)
     mergeSessionMeta(db, id, { busy: false });
+    if (process.env.CONFLUX_RUNTIME_INSTANCE_ID && claudePid !== null) {
+      bindRuntimeInstance(db, process.env.CONFLUX_RUNTIME_INSTANCE_ID, id, claudePid);
+    }
     if (runtime?.source === "user") mergeSessionMeta(db, id, { user_named: true });
     // This process previously ran another conversation id that was abandoned
     // by /resume or /clear before receiving any prompt — reap it now.

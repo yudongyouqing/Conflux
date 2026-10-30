@@ -95,7 +95,7 @@ function safePublicMessage(value: string, fallback: string): string {
   return message;
 }
 
-const SCHEMA_VERSION = 13; // v13: room_tasks.task_token（一次性任务令牌修复 split-brain）
+const SCHEMA_VERSION = 14; // Separate wake attempts and owned runtime executions.
 
 // Keep checkpoint timers tied to their database handles. A process can open
 // more than one temporary database during tests and interface operations.
@@ -169,6 +169,39 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS idx_messages_to ON messages(to_session, status);
 CREATE INDEX IF NOT EXISTS idx_messages_from ON messages(from_session, status);
 CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
+
+CREATE TABLE IF NOT EXISTS message_deliveries (
+  message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+  state TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_attempted_at TEXT NOT NULL,
+  reason TEXT,
+  claim_token TEXT,
+  claim_expires_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS runtime_instances (
+  id TEXT PRIMARY KEY,
+  preset_id INTEGER NOT NULL,
+  preset_name TEXT NOT NULL,
+  runtime TEXT NOT NULL,
+  workdir TEXT,
+  preset_snapshot TEXT NOT NULL,
+  session_id TEXT,
+  runtime_pid INTEGER,
+  process_token TEXT,
+  state TEXT NOT NULL DEFAULT 'starting',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  ended_at TEXT,
+  resumed_from TEXT,
+  error TEXT,
+  stop_requested_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_runtime_instances_preset ON runtime_instances(preset_id, state);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_instances_resume ON runtime_instances(resumed_from)
+  WHERE resumed_from IS NOT NULL AND
+    (state IN ('starting', 'running', 'stale') OR (state = 'failed' AND ended_at IS NULL));
 
 -- Graph edges: directed, formed dynamically from communication history.
 -- Each ask_session / reply_ask upserts a row (weight + 1).

@@ -22,8 +22,12 @@
 - [x] 补充服务器 HTTP 和 SQLite 基准、原始样本、CPU/内存及存储记录，并在 CI 保存报告；见 [性能基线](PERFORMANCE.md)。
 - [ ] 在真实业务数据和多种设备上复测浏览器及服务器/数据库基准，再决定回归阈值；跨进程写锁竞争和长时间内存增长尚未验证。
 - [x] 核查 12 份历史实现计划并记录证据、回退和替代情况，见 [历史计划验收核查](PLAN-ACCEPTANCE.md)。
-- [ ] 决定是否继续旧协作工作区设计（聚合快照、消息投递重试、runtime_instances）及是否重做 Workbench；不得继续笼统标为已交付。
-- [ ] 补充真实 MCP 宿主、桌面故障注入/托盘退出、backfill CLI 幂等和当前主题/高亮视觉验收记录，具体步骤见验收核查表。
+- [x] 明确旧方案去留：正式归档已回退的 Workbench 合并方案，保留独立会话/消息入口；旧协作工作区不再整套实施，聚合首页与快照暂缓。
+- [x] 按[协作控制新设计](superpowers/specs/2026-10-30-collaboration-controls-design.md)实现消息唤醒结果、手动重试及受管运行实例的停止/恢复；保持已读/回复状态独立，覆盖进程归属和并发恢复边界。验证范围见[本批记录](COLLABORATION-VALIDATION.md)，真实宿主流程另行验收。
+- [x] 完善浅色/深色色板和语义状态色，保留已有自定义主题；通过默认色板对比度、持久化与桌面/窄屏浏览器验证，截图见[协作控制](COLLABORATION-CONTROLS.md)。
+- [x] 增加 MCP 会话目录、资源引用和 Codex/Claude Code 的 Conflux 技能入口，见[会话目录](SESSION-DIRECTORY.md)。
+- [x] 补充目标会话不明确时的候选查找与技能选项确认规则；终端标题变化时依据完整 ID、项目、运行时和活跃时间定位，用户选择前不发送。SDK/stdio 通过；真实宿主问答展示保留在手工验收中。
+- [ ] 补充真实 MCP 宿主的候选问答和实例启动/停止/恢复、桌面故障注入/托盘退出、backfill CLI 幂等验收；主题/高亮已补隔离浏览器记录，原生外观联动仍需实测，具体步骤见验收核查表。
 - [x] 分离 channel watch 的启动与更新等待：启动允许 15 秒、消息更新仍限 3 秒，提前退出立即报告诊断；补充慢启动和失败回归，见 [#242](https://github.com/yudongyouqing/Conflux/issues/242)。
 - [x] 普通 CI 纳入完整桌面测试、lint、发布配置测试与设计令牌检查，见 [#244](https://github.com/yudongyouqing/Conflux/issues/244)。
 

@@ -4,6 +4,7 @@
   "version": "0.2.0",
   "type": "module",
   "scripts": {
+    "pretest": "npm run build -w @conflux/shared",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",

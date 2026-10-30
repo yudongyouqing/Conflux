@@ -216,7 +216,7 @@ function EdgeFlowView({
           <button
             onClick={send}
             disabled={!text.trim() || ask.isPending}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-accent text-white text-xs font-medium disabled:opacity-40 hover:bg-accent-deep transition-colors flex-shrink-0"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-accent text-on-accent text-xs font-medium disabled:opacity-40 hover:bg-accent-deep transition-colors flex-shrink-0"
           >
             {ask.isPending ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
             发送
@@ -242,7 +242,7 @@ function EdgeFlowView({
                 <div
                   className={`p-3 rounded-2xl border max-w-[95%] shadow-sm ${
                     outgoing
-                      ? "bg-accent border-accent text-white"
+                      ? "bg-accent border-accent text-on-accent"
                       : "bg-surface border-line text-ink"
                   }`}
                 >

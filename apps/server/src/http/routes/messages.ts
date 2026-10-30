@@ -8,7 +8,7 @@ import {
   getEdge,
 } from "../../core/messages.js";
 import { replyAskAndPush } from "../../core/mail-push.js";
-import { askAndMaybeWake } from "../../core/ask.js";
+import { askAndMaybeWake, retryMessageDelivery } from "../../core/ask.js";
 import { getSession, heartbeat } from "../../core/sessions.js";
 import { logAudit } from "../../core/audit.js";
 import { httpError, WEB_CONSOLE_ID, type ServerContext } from "../context.js";
@@ -30,6 +30,27 @@ interface MessagesQs {
 
 export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext): void {
   const { db, requireSession, audit, sendError, sendHttpError } = ctx;
+
+  app.post<{ Params: { id: string } }>("/messages/:id/retry", {}, async (req, reply) => {
+    let actor: string | undefined;
+    try {
+      actor = requireSession(req);
+      const result = retryMessageDelivery(db, Number(req.params.id), actor);
+      logAudit(db, {
+        caller_session: actor,
+        interface: "http",
+        action: "retry_message_delivery",
+        args: { id: result.message.id },
+        result: {
+          state: result.message.delivery?.state,
+          attempts: result.message.delivery?.attempts,
+        },
+      });
+      return reply.send(result);
+    } catch (error) {
+      return sendError(reply, error, actor, "retry_message_delivery", { id: req.params.id });
+    }
+  });
 
   // POST /messages/ask
   app.post<{ Body: AskBody }>(
@@ -153,19 +174,23 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
   // ---- edge channels (directed conversation channels) ----
 
   // GET /edges/:id/messages — the channel's exchange history
-  app.get<{ Params: { id: string }; Querystring: { all?: string } }>("/edges/:id/messages", {}, async (req, reply) => {
-    try {
-      const edgeId = Number(req.params.id);
-      const edge = getEdge(db, edgeId);
-      if (!edge) return sendHttpError(reply, 404, "edge not found");
-      return reply.send({
-        edge: { id: edge.id, from: edge.from_session, to: edge.to_session },
-        messages: listEdgeMessages(db, edgeId, req.query.all === "true" ? null : undefined),
-      });
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
+  app.get<{ Params: { id: string }; Querystring: { all?: string } }>(
+    "/edges/:id/messages",
+    {},
+    async (req, reply) => {
+      try {
+        const edgeId = Number(req.params.id);
+        const edge = getEdge(db, edgeId);
+        if (!edge) return sendHttpError(reply, 404, "edge not found");
+        return reply.send({
+          edge: { id: edge.id, from: edge.from_session, to: edge.to_session },
+          messages: listEdgeMessages(db, edgeId, req.query.all === "true" ? null : undefined),
+        });
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
 
   // POST /edges/:id/ask — speak ON the channel as its initiator (the
   // console for its own channels; on A's behalf for A→B channels)

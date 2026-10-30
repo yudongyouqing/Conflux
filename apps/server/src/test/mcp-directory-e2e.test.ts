@@ -58,6 +58,16 @@ test(
     ).sessions;
     assert.ok(sessions.some((s) => s.id === "peer-online" && s.status === "active"));
     assert.ok(sessions.some((s) => s.id === "peer-ended" && s.status === "ended"));
+    const candidates = await client.callTool({
+      name: "find_session_candidates",
+      arguments: { query: "Shared name" },
+    });
+    assert.notEqual(candidates.isError, true);
+    assert.equal(
+      (candidates.structuredContent as { requires_confirmation: boolean }).requires_confirmation,
+      true,
+    );
+    assert.equal((candidates.structuredContent as { candidates: unknown[] }).candidates.length, 3);
     const uri = sessions.find((s) => s.id === "peer-ended")!.resource_uri;
     assert.ok((await client.listResources()).resources.some((r) => r.uri === uri));
     const attached = (await client.readResource({ uri })).contents[0];

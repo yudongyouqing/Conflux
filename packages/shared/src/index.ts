@@ -30,6 +30,33 @@ export type IdentitySource = "hook" | "mcp" | "http" | "cli" | "internal";
  */
 export type MessageStatus = "pending" | "seen" | "replied" | "read";
 
+export interface MessageDelivery {
+  state: "queued" | "woken" | "failed";
+  attempts: number;
+  last_attempted_at: string;
+  reason: string | null;
+}
+
+export interface RuntimeInstance {
+  id: string;
+  preset_id: number;
+  preset_name: string;
+  runtime: RuntimeId;
+  workdir: string | null;
+  session_id: string | null;
+  runtime_pid: number | null;
+  state: "starting" | "running" | "ended" | "stale" | "failed";
+  created_at: string;
+  updated_at: string;
+  ended_at: string | null;
+  resumed_from: string | null;
+  can_stop: boolean;
+  can_resume: boolean;
+  limitation: string | null;
+  last_seen: string | null;
+  error: string | null;
+}
+
 export interface Session {
   id: string;
   name: string;
@@ -194,6 +221,8 @@ export interface Graph {
 }
 
 export interface Message {
+  /** Wake attempts are independent of the read/reply lifecycle. Absent for legacy imports. */
+  delivery?: MessageDelivery;
   id: number;
   /** The conversation channel (edge) this exchange belongs to. */
   edge_id?: number | null;

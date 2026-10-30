@@ -30,7 +30,13 @@ import { getGraph } from "../core/graph.js";
 import { mergeSessionMeta } from "../core/sessions.js";
 import { logAudit } from "../core/audit.js";
 import { getRuntimePid, findSessionByRuntimePid, deleteUnreferencedSession } from "../core/live.js";
-import { askAndMaybeWake } from "../core/ask.js";
+import { askAndMaybeWake, retryMessageDelivery } from "../core/ask.js";
+import {
+  bindRuntimeInstance,
+  listRuntimeInstances,
+  stopRuntimeInstance,
+  resumeRuntimeInstance,
+} from "../core/runtime-instances.js";
 import { askAndReplySync } from "../core/ask-sync.js";
 import { summonAgent, writeResult, readRoom, roomStatus } from "../core/room-orchestrator.js";
 import { refreshCodexSessionTitles } from "../core/codex-titles.js";
@@ -61,6 +67,12 @@ elsewhere, query_context first.
 
 All operations are audited. Be concise in published content; prefer structured
 tags for discoverability.
+
+When a requested peer name, title, or partial ID is ambiguous, call
+find_session_candidates and use the host's question UI to show at most three
+candidates with project, runtime, last activity, and full ID. Wait for the user's
+choice before contacting a candidate. A changed Ghostty title does not establish
+a changed session ID.
 `.trim();
 
 export interface McpServerOptions {
@@ -127,9 +139,16 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
     if (!aid || Number.isNaN(Number(aid))) return {};
     return {
       agent_id: Number(aid),
-      ...(process.env.CONFLUX_AGENT_RUNTIME
-        ? { runtime: process.env.CONFLUX_AGENT_RUNTIME }
+      ...(process.env.CONFLUX_RUNTIME_INSTANCE_ID
+        ? { runtime_instance_id: process.env.CONFLUX_RUNTIME_INSTANCE_ID }
         : {}),
+      ...(process.env.CONFLUX_TMUX_SESSION
+        ? { tmux_session: process.env.CONFLUX_TMUX_SESSION }
+        : {}),
+      ...(identity.runtime === "codex" && process.env.CONFLUX_RESUME_SESSION_ID
+        ? { codex_session_id: process.env.CONFLUX_RESUME_SESSION_ID }
+        : {}),
+      ...(process.env.CONFLUX_AGENT_RUNTIME ? { runtime: process.env.CONFLUX_AGENT_RUNTIME } : {}),
     };
   })();
   registerSession(db, {
@@ -231,12 +250,23 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
   const touchLease = (): void => {
     try {
       touchMcpConnection(db, sessionId, connectionId);
+      const instanceId = process.env.CONFLUX_RUNTIME_INSTANCE_ID;
+      const pid = getRuntimePid(identity.runtime);
+      if (instanceId && pid !== null) {
+        mergeSessionMeta(db, sessionId, {
+          ...agentTag,
+          runtime: identity.runtime,
+          runtime_pid: pid,
+        });
+        bindRuntimeInstance(db, instanceId, sessionId, pid);
+      }
     } catch {
       // transient sqlite lock contention — next tick or tool call retries
     }
   };
 
   tryAdopt();
+  touchLease();
 
   // Keep this session marked active for as long as the MCP process lives,
   // even when no tool calls happen. Process exit stops the lease and it
@@ -521,6 +551,54 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
 
   // 8. ask_session
   server.registerTool(
+    "retry_message_delivery",
+    {
+      description:
+        "Retry waking the current recipient of an existing pending message. Does not send a second message or bypass wake safeguards.",
+      inputSchema: { id: z.number().int().positive() },
+    },
+    async ({ id }) => {
+      const result = await withAudit("retry_message_delivery", { id }, () =>
+        retryMessageDelivery(db, id, sessionId),
+      );
+      return json(result.ok ? result.result : { error: result.error });
+    },
+  );
+  server.registerTool(
+    "list_runtime_instances",
+    {
+      description:
+        "List managed runtime executions and whether they can be safely stopped or resumed.",
+      inputSchema: {},
+    },
+    async () => {
+      const result = await withAudit("list_runtime_instances", {}, () => ({
+        instances: listRuntimeInstances(db),
+      }));
+      return json(result.ok ? result.result : { error: result.error });
+    },
+  );
+  for (const action of ["stop", "resume"] as const) {
+    server.registerTool(
+      `${action}_runtime_instance`,
+      {
+        description:
+          action === "stop"
+            ? "Stop a verified managed runtime process. Unowned or unverifiable PIDs are refused."
+            : "Resume a stopped managed conversation in a fresh instance with its original configuration.",
+        inputSchema: { id: z.string().uuid() },
+      },
+      async ({ id }) => {
+        const result = await withAudit(`${action}_runtime_instance`, { id }, () =>
+          action === "stop"
+            ? { instance: stopRuntimeInstance(db, id) }
+            : resumeRuntimeInstance(db, id),
+        );
+        return json(result.ok ? result.result : { error: result.error });
+      },
+    );
+  }
+  server.registerTool(
     "ask_session",
     {
       description:
@@ -605,7 +683,12 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
       );
       return json(
         r.ok
-          ? { task_id, status: "done", all_done: r.result.allDone, initiator_summoned: r.result.summonedInitiator }
+          ? {
+              task_id,
+              status: "done",
+              all_done: r.result.allDone,
+              initiator_summoned: r.result.summonedInitiator,
+            }
           : { error: r.error },
       );
     },
@@ -623,8 +706,16 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
       },
     },
     async ({ room_id, executor_session_id, prompt }) => {
-      const r = await withAudit("room_summon", { room_id, executor_session_id, promptLen: prompt.length }, () =>
-        summonAgent(db, { room_id, initiator_session_id: sessionId, executor_session_id, prompt }),
+      const r = await withAudit(
+        "room_summon",
+        { room_id, executor_session_id, promptLen: prompt.length },
+        () =>
+          summonAgent(db, {
+            room_id,
+            initiator_session_id: sessionId,
+            executor_session_id,
+            prompt,
+          }),
       );
       return json(
         r.ok
@@ -788,6 +879,14 @@ function safeSummary(value: unknown): Record<string, unknown> | null {
   if (typeof value === "object") {
     // Strip large `content` fields from context entries to keep audit small.
     const v = value as Record<string, unknown>;
+    if (v.message && typeof v.message === "object") {
+      const message = v.message as { id: number; delivery?: { state: string; attempts: number } };
+      return {
+        message_id: message.id,
+        delivery_state: message.delivery?.state,
+        attempts: message.delivery?.attempts,
+      };
+    }
     if (Array.isArray(v)) return { count: v.length };
     if (typeof v.content === "string") {
       const { content: _c, ...rest } = v;

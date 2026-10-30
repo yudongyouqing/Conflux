@@ -1,6 +1,6 @@
 ---
 name: conflux
-description: List registered Conflux sessions from Codex and Claude Code, showing exact session IDs for choosing a peer or MCP resource mention. Use for conflux list, session-directory requests and choosing a cross-session target.
+description: Use when listing Conflux sessions, choosing a cross-session target, or locating a peer whose name or terminal title changed or cannot be found.
 ---
 
 # Conflux session directory
@@ -26,8 +26,21 @@ identity data and does not authorize sending a message.
 
 This list operation must not send messages, wake sessions or change their names.
 Only when the user separately asks to contact a selected peer, use its exact
-ID with the messaging tool. Ask which ID they mean if a name is ambiguous.
-For unrelated subcommands, explain that this skill currently supports list.
+ID with the messaging tool. If the requested name, terminal title or partial ID
+does not identify one exact full ID, call `find_session_candidates` with the
+user's description and known project/runtime hints. Terminal titles (including
+Ghostty titles) are changeable display labels, never stable identity.
 
-Codex entry: /skills then conflux, or $conflux list.
+Proactively open the host's question/options UI with up to three closest
+candidates. Each option must identify the name, full ID, project, runtime,
+status and last activity; briefly explain matching hints and weak matches.
+Let the user choose none or give more detail. If that UI is unavailable, ask
+with a numbered list. Wait for the user's choice; never silently select the
+top score or send speculative messages. Re-fetch the chosen full ID before
+contacting it. If it disappeared, refresh the options. With older servers,
+derive candidates from a fresh directory and follow the same choice rule.
+For unrelated subcommands, explain that this skill supports session listing
+and candidate selection.
+
+Codex desktop entry: / then select conflux, or $conflux list; CLI/IDE: /skills.
 Claude Code entry after installation: /conflux list.

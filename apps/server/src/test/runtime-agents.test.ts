@@ -209,6 +209,7 @@ test("wakeSessionForMail: guards, dedup and command shape", () => {
   assert.deepEqual(wakeSessionForMail(db, "agent-1", { dryRun: true }), {
     woke: false,
     reason: "not a CLI conversation",
+    disposition: "failed",
   });
 
   // active + BUSY → the running turn will surface the mail itself
@@ -254,7 +255,7 @@ test("wakeSessionForMail: guards, dedup and command shape", () => {
   db.prepare(`UPDATE sessions SET status = 'stale' WHERE id = 'wake-dead'`).run();
   assert.deepEqual(
     wakeSessionForMail(db, "wake-dead", { dryRun: true, io: noTmuxIO() }),
-    { woke: false, reason: "no transcript (zero-turn conversation)" },
+    { woke: false, reason: "no transcript (zero-turn conversation)", disposition: "failed" },
     "no transcript → cannot resume",
   );
   makeTranscript("wake-dead", "C:/Project folder/项目/muiltchat");
@@ -297,6 +298,7 @@ test("wakeSessionForMail: codex wakes headlessly via exec resume", () => {
   assert.deepEqual(wakeSessionForMail(db, "wake-codex-unbound", { dryRun: true }), {
     woke: false,
     reason: "no codex_session_id (rollout binding missing)",
+    disposition: "failed",
   });
 
   // bound uuid → codex exec resume command (no transcript requirement)
