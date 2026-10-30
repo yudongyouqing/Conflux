@@ -158,3 +158,127 @@ The historical 300-node chain readiness median was 839.1 ms; this run measured
 can contribute to the difference. Zoom improvements are observations, not a
 claimed direct effect of layout changes. Trees were not optimized; React/DOM
 work still creates long tasks and remains a separate optimization target.
+
+## Server HTTP and SQLite baseline (2026-10-30)
+
+Run from the repository root:
+
+```sh
+npm run test:perf:server
+npm run perf:server
+```
+
+Both commands build shared contracts and the server. No additional dependency is
+required. The benchmark uses compiled production core modules and a separate
+server child process on an ephemeral `127.0.0.1` port. All databases, logs and
+home/config paths are temporary; it never targets an existing service or user
+database. INFO request logging to a temporary file stays enabled. UI assets,
+real model providers and network services are outside this benchmark.
+
+The fixture is a directed ring of 25, 100 or 300 synthetic sessions, with 10
+messages and two context entries per session; every fifth context matches the
+FTS query `needle`. SQLite and HTTP phases use separate freshly seeded files.
+HTTP adds the normal `web-console` pseudo-session. Only seeding runs inside an
+outer transaction; measured inserts retain normal autocommit and FTS triggers.
+Each operation discards ten warm-up observations, then records 100 samples.
+HTTP runs at concurrency 1 and 8 with keep-alive sockets and closed-loop load.
+There are six SQLite cases and ten HTTP cases per fixture: 4,800 measured
+observations in total, plus warm-ups and untimed correctness probes.
+
+SQLite timings cover the real core functions, including statement preparation,
+queries and result conversion. HTTP latency covers the entire JSON response and
+client parsing in a separate process. Correctness assertions are excluded from
+individual latency but included in wall throughput and CPU. p50/p95 use nearest
+rank. Successful operations per second are observed under that closed-loop
+workload; they are not maximum capacity or an open-loop load-test result.
+
+Read cases run before inserts. Warm-up writes remain in the database: SQLite
+ends with 110 extra messages and 110 extra contexts; HTTP ends with 220 extra
+contexts. Context query and publication also perform the normal heartbeat/audit
+writes. Final row counts and FTS lookups verify committed inserts. Seed/build
+time is excluded; `startupMs` measures `startHttpServer` with modules already
+loaded, not a cold process or Electron launch.
+
+Output: `test-results/performance/server-database.json`. It contains every raw
+latency, failures, before/after row counts, database/WAL/SHM bytes, SQLite
+pragmas, server/client CPU deltas, RSS/heap snapshots, process-lifetime maximum
+RSS, source revision and environment. CPU snapshots include driver/IPC overhead.
+RSS is a snapshot; lifetime maximum RSS includes seeding and earlier cases and
+must not be read as a per-case peak or a memory-leak diagnosis. Source `dirty`
+tracks benchmark/server/shared/manifests/CI files, including new benchmark files.
+The CI `server-performance` job runs the tests and benchmark, retaining
+`server-database-performance` even when measurement fails. Timing is not a CI
+gate; non-200 responses, malformed/incorrect JSON, wrong counts and timeouts fail.
+Catchable coordinator termination cleans the child and temporary files; a
+worker exits on IPC disconnect. Uncatchable process termination can leave a
+temporary directory and cannot guarantee a final report.
+
+Optional environment settings (PowerShell: `$env:NAME = "value"`; clear overrides
+after experiments before collecting default baseline reports):
+
+| Setting | Default | Accepted values |
+| --- | --- | --- |
+| `PERF_SERVER_SIZES` | `25,100,300` | Unique comma-separated session counts, 2–3000 |
+| `PERF_SERVER_SAMPLES` | `100` | Integer 20–10000 per operation |
+| `PERF_SERVER_WARMUP` | `10` | Integer 1–1000 |
+| `PERF_SERVER_CONCURRENCY` | `1,8` | Unique comma-separated concurrency levels, 1–64 |
+| `PERF_SERVER_OUTPUT` | `test-results/performance/server-database.json` | Report path |
+
+Each request has a 10-second deadline, IPC a 30-second deadline, and each fixture
+a 180-second overall deadline. The CI job has a ten-minute limit; unusually large
+custom settings can reach these limits and are not a supported capacity claim.
+
+### Windows observation
+
+Source `24ce67c`, clean measurement sources; v22.23.4, Windows 10.0.26300, 12th Gen Intel(R) Core(TM) i7-12650H, approximately 15.7 GiB RAM; SQLite 3.53.4. WAL, synchronous=NORMAL, 4096-byte pages, 1000-page autocheckpoint and 10-second busy timeout. This run was collected without concurrent project build/test jobs. Raw data: [server/database report](performance/2026-10-30-server-database.json). All 4,800 measured operations passed.
+
+SQLite p50 / p95 in milliseconds:
+
+| Operation | 25 sessions | 100 sessions | 300 sessions |
+| --- | ---: | ---: | ---: |
+| sessions-list | 0.130 / 0.362 | 0.280 / 0.361 | 0.811 / 1.023 |
+| graph | 0.357 / 0.430 | 0.854 / 0.960 | 2.378 / 2.646 |
+| messages-list-50 | 0.065 / 0.123 | 0.060 / 0.085 | 0.056 / 0.082 |
+| context-fts-25 | 0.071 / 0.105 | 0.114 / 0.153 | 0.201 / 0.250 |
+| message-insert | 0.196 / 0.300 | 0.188 / 0.284 | 0.183 / 0.318 |
+| context-insert-fts | 0.120 / 0.215 | 0.084 / 0.134 | 0.096 / 0.178 |
+
+HTTP at 300 sessions, 3,000 initial messages and 600 initial contexts:
+
+| Operation | Concurrency | p50 (ms) | p95 (ms) | Successful requests/s |
+| --- | ---: | ---: | ---: | ---: |
+| health | 1 | 0.275 | 0.388 | 3425.9 |
+| health | 8 | 0.789 | 1.181 | 9173.7 |
+| graph | 1 | 4.444 | 5.665 | 215.5 |
+| graph | 8 | 27.406 | 30.593 | 288.8 |
+| messages-list-50 | 1 | 0.480 | 0.595 | 1952.2 |
+| messages-list-50 | 8 | 2.207 | 4.863 | 3308.4 |
+| context-fts-25 | 1 | 0.891 | 1.375 | 889.8 |
+| context-fts-25 | 8 | 5.153 | 11.909 | 1362.8 |
+| context-insert-fts | 1 | 0.648 | 0.854 | 1260.3 |
+| context-insert-fts | 8 | 3.904 | 10.308 | 1592.4 |
+
+Graph HTTP scaling (p95 milliseconds / observed successful requests per second):
+
+| Sessions | Concurrency 1 | Concurrency 8 |
+| ---: | ---: | ---: |
+| 25 | 1.209 / 966.5 | 7.868 / 1314.1 |
+| 100 | 2.008 / 566.0 | 13.415 / 696.8 |
+| 300 | 5.665 / 215.5 | 30.593 / 288.8 |
+
+Resource observations at 300 sessions (per 100 measured requests):
+
+| Operation | Concurrency | Server CPU user+system (ms) | Server RSS after (MiB) |
+| --- | ---: | ---: | ---: |
+| graph | 1 | 358.0 | 184.7 |
+| graph | 8 | 328.0 | 183.7 |
+| context-insert-fts | 1 | 47.0 | 171.8 |
+| context-insert-fts | 8 | 77.0 | 172.8 |
+
+Increasing concurrency raises graph latency while only modestly improving its
+observed throughput. Use the graph endpoint as a profiling target; these data
+do not establish its internal bottleneck or justify a schema/index change.
+The synthetic ring, small payloads, warm OS cache and single Node/SQLite writer
+exclude dense graphs, real data distributions, cold disks, multi-process writer
+contention, long-running memory growth and device diversity. Repeat on the same
+hardware and on representative devices/data before choosing regression limits.
