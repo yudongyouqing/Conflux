@@ -1,9 +1,17 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useMessages, useGraph, useSessions, usePeerMessages, useEdgeMessages, useEdgeAsk } from "../hooks";
+import {
+  useMessages,
+  useGraph,
+  useSessions,
+  usePeerMessages,
+  useEdgeMessages,
+  useEdgeAsk,
+} from "../hooks";
 import { api } from "../api";
 import { MentionComposer } from "./MentionComposer";
 import { MessageCard } from "./MessageCard";
+import { MessageDeliveryControl } from "./MessageDeliveryControl";
 import { MarkdownText } from "./MarkdownText";
 import { StatusDot } from "./StatusDot";
 import { ArrowLeft, Send } from "lucide-react";
@@ -26,7 +34,9 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
   // sends). Channel mode shows the full exchange and speaks as the channel's
   // initiator; peer mode is the legacy web-only view.
   const [conv, setConv] = useState<
-    { kind: "edge"; edgeId: number; from: string; to: string } | { kind: "peer"; peer: string } | null
+    | { kind: "edge"; edgeId: number; from: string; to: string }
+    | { kind: "peer"; peer: string }
+    | null
   >(null);
   const [draft, setDraft] = useState("");
 
@@ -75,9 +85,7 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
   );
 
   const peerSession = sessions.data?.sessions.find((s) => s.id === peer);
-  const peerName = peer
-    ? (peerSession?.name ?? nameMap.get(peer) ?? peer.slice(0, 8))
-    : null;
+  const peerName = peer ? (peerSession?.name ?? nameMap.get(peer) ?? peer.slice(0, 8)) : null;
   const nameOf = (id: string) => nameMap.get(id) ?? id.slice(0, 8);
   // edge endpoint list arrives newest-first (EdgeFlowView contract); the
   // bubble stream wants chronological order
@@ -89,10 +97,7 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
     if (!question) return;
     if (channel) {
       if (edgeAsk.isPending) return;
-      edgeAsk.mutate(
-        { edgeId: channel.edgeId, question },
-        { onSuccess: () => setDraft("") },
-      );
+      edgeAsk.mutate({ edgeId: channel.edgeId, question }, { onSuccess: () => setDraft("") });
       return;
     }
     if (!peer || ask.isPending) return;
@@ -136,38 +141,43 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
         </div>
         <div className="flex-1 overflow-y-auto p-4">
           <div className="max-w-3xl mx-auto space-y-2">
-          {(channel ? channelList : (thread.data?.messages ?? [])).length === 0 && (
-            <div className="text-xs text-ink-faint text-center py-6">暂无往来消息</div>
-          )}
-          {(channel ? channelList : (thread.data?.messages ?? [])).map((m) => {
-            // Ask and answer are SEPARATE bubbles: the question rides the
-            // asker's side, the reply the answerer's — a chat exchange, not
-            // a Q/A card.
-            const mine = channel ? m.from_session === channel.from : m.from_session === WEB_CONSOLE_ID;
-            return (
-              <div key={m.id} className="space-y-2">
-                <div className={`flex ${mine ? "justify-end" : "justify-start"}`}>
-                  <div
-                    className={`max-w-[68%] rounded-xl px-3 py-2 text-xs ${
-                      mine ? "bg-accent text-white" : "bg-paper text-ink border border-line"
-                    }`}
-                  >
-                    <MarkdownText tone={mine ? "blue" : "light"}>{m.question}</MarkdownText>
-                    {mine && m.status === "pending" && (
-                      <div className="mt-1 text-2xs text-white/70">等待对方处理…</div>
-                    )}
-                  </div>
-                </div>
-                {m.reply && (
-                  <div className={`flex ${mine ? "justify-start" : "justify-end"}`}>
-                    <div className="max-w-[68%] rounded-xl px-3 py-2 text-xs bg-paper text-ink border border-line">
-                      <MarkdownText>{m.reply}</MarkdownText>
+            {(channel ? channelList : (thread.data?.messages ?? [])).length === 0 && (
+              <div className="text-xs text-ink-faint text-center py-6">暂无往来消息</div>
+            )}
+            {(channel ? channelList : (thread.data?.messages ?? [])).map((m) => {
+              // Ask and answer are SEPARATE bubbles: the question rides the
+              // asker's side, the reply the answerer's — a chat exchange, not
+              // a Q/A card.
+              const mine = channel
+                ? m.from_session === channel.from
+                : m.from_session === WEB_CONSOLE_ID;
+              return (
+                <div key={m.id} className="space-y-2">
+                  <div className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+                    <div className="max-w-[85%] sm:max-w-[68%] min-w-0">
+                      <div
+                        className={`rounded-xl px-3 py-2 text-xs ${
+                          mine ? "bg-accent text-on-accent" : "bg-paper text-ink border border-line"
+                        }`}
+                      >
+                        <MarkdownText tone={mine ? "blue" : "light"}>{m.question}</MarkdownText>
+                        {mine && m.status === "pending" && (
+                          <div className="mt-1 text-2xs text-on-accent/80">等待对方读取…</div>
+                        )}
+                      </div>
+                      <MessageDeliveryControl message={m} />
                     </div>
                   </div>
-                )}
-              </div>
-            );
-          })}
+                  {m.reply && (
+                    <div className={`flex ${mine ? "justify-start" : "justify-end"}`}>
+                      <div className="max-w-[68%] rounded-xl px-3 py-2 text-xs bg-paper text-ink border border-line">
+                        <MarkdownText>{m.reply}</MarkdownText>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
         {/* fixed-target composer */}
@@ -193,15 +203,13 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
             <button
               onClick={sendDraft}
               disabled={!draft.trim() || sending}
-              className="inline-flex items-center gap-1.5 text-sm text-white bg-accent hover:bg-accent-deep rounded-lg px-3 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="inline-flex items-center gap-1.5 text-sm text-on-accent bg-accent hover:bg-accent-deep rounded-lg px-3 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Send size={13} /> 发送
             </button>
           </div>
           {askError && (
-            <div className="text-xs text-red-500 mt-1">
-              发送失败: {(askError as Error).message}
-            </div>
+            <div className="text-xs text-danger mt-1">发送失败: {(askError as Error).message}</div>
           )}
         </div>
       </div>
@@ -224,56 +232,63 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
       {/* ---- list filters ---- */}
       <div className="p-3 bg-surface border-b border-line">
         <div className="flex items-center gap-2 max-w-3xl mx-auto">
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="bg-surface text-ink text-xs rounded-lg px-2.5 py-1.5 border border-line outline-none focus:border-accent"
-        >
-          <option value="all">全部状态</option>
-          <option value="pending">待回复</option>
-          <option value="seen">已读未答</option>
-          <option value="replied">已回复</option>
-          <option value="read">已读</option>
-        </select>
-        <input
-          type="text"
-          placeholder="搜索消息内容..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="flex-1 bg-surface text-ink text-xs rounded-lg px-2.5 py-1.5 border border-line placeholder-gray-400 outline-none focus:border-accent"
-        />
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="bg-surface text-ink text-xs rounded-lg px-2.5 py-1.5 border border-line outline-none focus:border-accent"
+          >
+            <option value="all">全部状态</option>
+            <option value="pending">待回复</option>
+            <option value="seen">已读未答</option>
+            <option value="replied">已回复</option>
+            <option value="read">已读</option>
+          </select>
+          <input
+            type="text"
+            placeholder="搜索消息内容..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="flex-1 bg-surface text-ink text-xs rounded-lg px-2.5 py-1.5 border border-line placeholder-gray-400 outline-none focus:border-accent"
+          />
         </div>
       </div>
       <div className="flex-1 overflow-y-auto p-4">
         <div className="max-w-3xl mx-auto space-y-2">
           {isLoading && <div className="text-ink-faint text-sm text-center mt-8">加载中...</div>}
-        {!isLoading && filtered.length === 0 && (
-          <div className="text-ink-faint text-sm text-center mt-8">
-            {search ? "无匹配消息" : "暂无消息"}
-          </div>
-        )}
-        {filtered.map((msg) => (
-          <MessageCard
-            key={msg.id}
-            msg={msg}
-            fromName={nameMap.get(msg.from_session)}
-            toName={nameMap.get(msg.to_session)}
-            toStatus={statusMap.get(msg.to_session)}
-            onClick={() => {
-              // The full-height conversation view IS the detail view — the
-              // side DetailPanel must not light up next to it. Feed cards
-              // open the message's CHANNEL (any A→B pair) — the web-console
-              // peer thread would be empty for third-party exchanges.
-              onSelectMessage(null);
-              if (msg.edge_id != null) {
-                setConv({ kind: "edge", edgeId: msg.edge_id, from: msg.from_session, to: msg.to_session });
-              } else {
-                openThread(msg.from_session === WEB_CONSOLE_ID ? msg.to_session : msg.from_session);
-              }
-            }}
-            selected={msg.id === selectedMessageId}
-          />
-        ))}
+          {!isLoading && filtered.length === 0 && (
+            <div className="text-ink-faint text-sm text-center mt-8">
+              {search ? "无匹配消息" : "暂无消息"}
+            </div>
+          )}
+          {filtered.map((msg) => (
+            <MessageCard
+              key={msg.id}
+              msg={msg}
+              fromName={nameMap.get(msg.from_session)}
+              toName={nameMap.get(msg.to_session)}
+              toStatus={statusMap.get(msg.to_session)}
+              onClick={() => {
+                // The full-height conversation view IS the detail view — the
+                // side DetailPanel must not light up next to it. Feed cards
+                // open the message's CHANNEL (any A→B pair) — the web-console
+                // peer thread would be empty for third-party exchanges.
+                onSelectMessage(null);
+                if (msg.edge_id != null) {
+                  setConv({
+                    kind: "edge",
+                    edgeId: msg.edge_id,
+                    from: msg.from_session,
+                    to: msg.to_session,
+                  });
+                } else {
+                  openThread(
+                    msg.from_session === WEB_CONSOLE_ID ? msg.to_session : msg.from_session,
+                  );
+                }
+              }}
+              selected={msg.id === selectedMessageId}
+            />
+          ))}
         </div>
       </div>
     </div>

@@ -64,13 +64,15 @@ export function pushMailTyped(db: DB, sessionId: string, io: TmuxIO = realTmuxIO
 
   const agentId = Number(meta.agent_id);
   if (Number.isFinite(agentId) && agentId > 0) {
-    // tmuxSessionName IS the agent namer: conflux/agent-<id>
-    const name = tmuxSessionName(agentId);
+    // Managed launches stamp a unique instance target; legacy presets use the shared name.
+    const name = stamped ?? tmuxSessionName(agentId);
     if (io.alive(name)) return deliver(db, sessionId, name, "agent-tmux", io);
   }
 
   // the user's own terminal — see the claude-only / idle-only caveats above
-  const pid = [meta.claude_pid, meta.runtime_pid].map(Number).find((n) => Number.isFinite(n) && n > 0) ?? null;
+  const pid =
+    [meta.claude_pid, meta.runtime_pid].map(Number).find((n) => Number.isFinite(n) && n > 0) ??
+    null;
   const isClaude = (session.runtime ?? "claude") === "claude";
   if (pid !== null && isClaude && session.status === "active" && !busy) {
     const pane = io.paneForPid(pid);

@@ -3,7 +3,14 @@ import { after, afterEach, mock, test } from "node:test";
 import { JSDOM } from "jsdom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React, { createElement, type ReactNode } from "react";
-import { useGraph, useMessages } from "../src/hooks.ts";
+import {
+  useGraph,
+  useMessages,
+  useRetryMessage,
+  useStartRuntimeAgent,
+  useStopRuntimeInstance,
+  useResumeRuntimeInstance,
+} from "../src/hooks.ts";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost" });
 Object.assign(globalThis, {
@@ -79,4 +86,38 @@ test("useMessages continues loading messages when inbox preflight fails", async 
   await waitFor(() => assert.deepEqual(result.current.data?.messages, [{ id: 10 }]));
 
   assert.deepEqual(requests, ["/messages/inbox", "/messages?status=all&limit=100"]);
+});
+
+test("successful retry refreshes every message view and graph without creating a message", async () => {
+  mock.method(globalThis, "fetch", async () =>
+    Response.json({ message: { id: 17 }, wake: { woken: true } }),
+  );
+  const { result, queryClient } = setupHook(() => useRetryMessage());
+  for (const key of ["messages", "peer-messages", "edge-messages", "graph"]) {
+    queryClient.setQueryData([key, "existing"], {});
+  }
+  await result.current.mutateAsync(17);
+  for (const key of ["messages", "peer-messages", "edge-messages", "graph"]) {
+    assert.equal(queryClient.getQueryState([key, "existing"])?.isInvalidated, true);
+  }
+});
+
+test("runtime start, stop and resume refresh affected runtime and session views", async () => {
+  mock.method(globalThis, "fetch", async () =>
+    Response.json({ started: true, instance: { id: "new-instance" } }),
+  );
+  const { result, queryClient } = setupHook(() => ({
+    start: useStartRuntimeAgent(),
+    stop: useStopRuntimeInstance(),
+    resume: useResumeRuntimeInstance(),
+  }));
+  const keys = ["runtimes", "runtime-instances", "sessions", "graph"];
+  keys.forEach((key) => queryClient.setQueryData([key], {}));
+  await result.current.start.mutateAsync(7);
+  assert.equal(queryClient.getQueryState(["runtime-instances"])?.isInvalidated, true);
+  for (const mutation of [result.current.stop, result.current.resume]) {
+    keys.forEach((key) => queryClient.setQueryData([key], {}));
+    await mutation.mutateAsync("existing-instance");
+    keys.forEach((key) => assert.equal(queryClient.getQueryState([key])?.isInvalidated, true));
+  }
 });

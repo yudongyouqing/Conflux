@@ -1,16 +1,23 @@
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { dirname } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
 import { STALE_AFTER_MS } from "../config.js";
 import { logger } from "../log.js";
-import type { RuntimeAgent, RuntimeId } from "@conflux/shared";
-import { cleanTerminalEnv, cmdQuote, openInTerminal } from "./terminal.js";
+import type { RuntimeAgent, RuntimeId, RuntimeInstance } from "@conflux/shared";
+import { cleanTerminalEnv, posixQuote, openInTerminal } from "./terminal.js";
 import { RUNTIME_IDS, RUNTIME_REGISTRY, runtimeDescriptor } from "./runtime-registry.js";
-import { HEADLESS_ALLOWED_TOOLS } from "./wake/commands.js";
-import { getSetting, getTerminalSettings, setSetting } from "./app-settings.js";
-import { getSession } from "./sessions.js";
+import { HEADLESS_ALLOWED_TOOLS, projectHasConfluxMcp } from "./wake/commands.js";
+import { defaultServerEntry, ensureWakeMcpConfig } from "./wake/launcher.js";
+import { getTerminalSettings } from "./app-settings.js";
+import {
+  createRuntimeInstance,
+  failRuntimeInstance,
+  refreshRuntimeInstances,
+} from "./runtime-instances.js";
 
 // moved to terminal.ts; re-exported for existing importers
 export { cleanTerminalEnv } from "./terminal.js";
@@ -175,7 +182,14 @@ export function deleteRuntimeAgent(db: DB, id: number): boolean {
  * session row back to this definition.
  */
 export function buildRuntimeEnv(
-  agent: { runtime: string; base_url?: string | null; api_key?: string | null; model?: string | null; extra_env?: string | null; id: number },
+  agent: {
+    runtime: string;
+    base_url?: string | null;
+    api_key?: string | null;
+    model?: string | null;
+    extra_env?: string | null;
+    id: number;
+  },
   baseEnv: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...baseEnv };
@@ -221,9 +235,11 @@ export const RUNTIME_OPERATOR_PROMPT = [
 ].join("");
 
 /** CLI arguments for the runtime (model / system prompt presets). */
-export function buildRuntimeArgs(
-  agent: { runtime: string; model?: string | null; instructions?: string | null },
-): string[] {
+export function buildRuntimeArgs(agent: {
+  runtime: string;
+  model?: string | null;
+  instructions?: string | null;
+}): string[] {
   const def = runtimeDescriptor(agent.runtime);
   const args: string[] = [];
   if (agent.model) args.push("--model", agent.model);
@@ -245,12 +261,22 @@ export function buildRuntimeArgs(
  * triggers it. On non-Windows platforms we refuse rather than fake support
  * (spawn-in-current-terminal needs a TTY we don't have).
  */
+export interface StartRuntimeOptions {
+  platform?: NodeJS.Platform;
+  comspec?: string;
+  launch?: (...args: Parameters<typeof openInTerminal>) => unknown;
+  /** Internal immutable safe configuration, combined with current verified credentials. */
+  agent?: RuntimeAgent;
+  instance?: RuntimeInstance;
+  resumeSessionId?: string;
+}
+
 export function startRuntimeAgent(
   db: DB,
   id: number,
-  opts: { platform?: NodeJS.Platform; comspec?: string } = {},
-): { started: true } {
-  const agent = getRuntimeAgent(db, id);
+  opts: StartRuntimeOptions = {},
+): { started: true; instance: RuntimeInstance } {
+  const agent = opts.agent ?? getRuntimeAgent(db, id);
   if (!agent) throw new Error(`runtime agent not found: ${id}`);
 
   const platform = opts.platform ?? process.platform;
@@ -268,62 +294,153 @@ export function startRuntimeAgent(
   const defaultExe = def.settingsKey ? settings[def.settingsKey] : def.executable;
   const executable = process.env[def.executableEnv] || defaultExe;
   const args = buildRuntimeArgs(agent);
-  const command = [cmdQuote(executable), ...args.map(cmdQuote)].join(" ");
+  if (opts.resumeSessionId) {
+    if (agent.runtime === "codex") args.unshift("resume", opts.resumeSessionId);
+    else args.push("--resume", opts.resumeSessionId);
+  }
 
   // #128: prefer tmux — a named session (conflux/agent-<id>) lets the wake
   // system inject prompts into the LIVE process later, instead of spawning
   // a headless zombie with a diverged context
   const env = buildRuntimeEnv(agent, cleanTerminalEnv());
+  env.CONFLUX_HOME = dirname(db.name);
+  const instance = opts.instance ?? createRuntimeInstance(db, agent);
+  env.CONFLUX_RUNTIME_INSTANCE_ID = instance.id;
+  const tmuxName = `conflux/agent-${id}-${instance.id}`;
+  if (platform === "darwin") env.CONFLUX_TMUX_SESSION = tmuxName;
+  if (opts.resumeSessionId) env.CONFLUX_RESUME_SESSION_ID = opts.resumeSessionId;
+  if (agent.runtime === "codex") args.push(...buildCodexManagedMcpArgs(env, db));
+  else if (!projectHasConfluxMcp(agent.workdir))
+    args.push(
+      "--mcp-config",
+      ensureWakeMcpConfig(dirname(db.name), undefined, managedMcpLaunch(db)),
+    );
+  const command = buildManagedRuntimeCommand(executable, args, env, platform);
   const envPrefix = Object.entries(env)
-    .filter(([k]) => k !== "PATH" && k !== "HOME")
-    .map(([k, v]) => `${k}=${cmdQuote(String(v))}`)
+    .filter(([k]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k))
+    .map(([k, v]) => `${k}=${posixQuote(String(v))}`)
     .join(" ");
-  const fullCommand = envPrefix ? `${envPrefix} ${command}` : command;
+  const fullCommand = envPrefix ? `env ${envPrefix} ${command}` : command;
 
-  if (platform === "darwin") {
+  if (platform === "darwin" && !opts.launch) {
     try {
-      
-      const sessionName = `conflux/agent-${id}`;
+      const sessionName = tmuxName;
       execFileSync(
         "tmux",
         [
-          "new-session", "-d", "-s", sessionName,
+          "new-session",
+          "-d",
+          "-s",
+          sessionName,
           ...(agent.workdir ? ["-c", agent.workdir] : []),
-          "sh", "-c", cmdQuote(fullCommand),
+          "sh",
+          "-c",
+          fullCommand,
         ],
         { timeout: 5000, stdio: "ignore" },
       );
       // attach a visible window so the user can see it (non-blocking)
-      execFileSync(
-        "tmux",
-        ["new-window", "-t", sessionName, "-n", `attach-${agent.name}`],
-        { timeout: 3000, stdio: "ignore" },
-      ).toString();
+      execFileSync("tmux", ["new-window", "-t", sessionName, "-n", `attach-${agent.name}`], {
+        timeout: 3000,
+        stdio: "ignore",
+      }).toString();
       logger.info({ agentId: id, sessionName }, "runtime agent launched in tmux (injectable)");
-      return { started: true };
+      return { started: true, instance };
     } catch {
       logger.info({ agentId: id }, "tmux launch failed, falling back to terminal");
     }
   }
 
-  openInTerminal(
-    settings,
-    {
-      command,
-      cwd: agent.workdir || undefined,
-      title: `Conflux · ${agent.name}`,
-      env,
-    },
-    opts,
-  );
+  try {
+    (opts.launch ?? openInTerminal)(
+      settings,
+      {
+        command,
+        cwd: agent.workdir || undefined,
+        title: `Conflux · ${agent.name}`,
+        env,
+      },
+      opts,
+    );
+  } catch (error) {
+    failRuntimeInstance(db, instance.id);
+    throw error;
+  }
   logger.info({ agentId: id, runtime: agent.runtime, name: agent.name }, "runtime agent launched");
-  return { started: true };
+  return { started: true, instance };
 }
 
 // ---- scheduled headless runs (patrol pattern) --------------------------------
 
 /** Wake-up prompt for scheduled runs; the operator system prompt does the rest. */
 export const SCHEDULED_WAKE_PROMPT = "定时唤醒:请按系统指令检查并处理收件箱,然后简短结束。";
+
+/** Codex sanitizes MCP child env; explicit per-launch overrides carry only identity. */
+export function buildCodexManagedMcpArgs(env: NodeJS.ProcessEnv, db?: DB): string[] {
+  const keys = [
+    "CONFLUX_RUNTIME_INSTANCE_ID",
+    "CONFLUX_AGENT_ID",
+    "CONFLUX_AGENT_RUNTIME",
+    "CONFLUX_TMUX_SESSION",
+    "CONFLUX_RESUME_SESSION_ID",
+  ];
+  const literal = (value: string) => (value.includes("'") ? `'''${value}'''` : `'${value}'`);
+  const args = keys.flatMap((key) =>
+    env[key] ? ["-c", `mcp_servers.conflux.env.${key}=${literal(env[key]!)}`] : [],
+  );
+  if (db) {
+    const launch = managedMcpLaunch(db);
+    args.push(
+      "-c",
+      `mcp_servers.conflux.command=${literal(launch.command)}`,
+      "-c",
+      `mcp_servers.conflux.args=[${launch.args.map(literal).join(",")}]`,
+    );
+    if (process.versions.electron)
+      args.push("-c", "mcp_servers.conflux.env.ELECTRON_RUN_AS_NODE='1'");
+  }
+  return args;
+}
+
+export function managedMcpLaunch(db: DB): {
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+} {
+  const entry = defaultServerEntry();
+  return {
+    command: process.execPath,
+    args: [
+      ...(entry.endsWith(".ts") ? ["--import", pathToFileURL(require.resolve("tsx")).href] : []),
+      entry,
+      "--data-dir",
+      dirname(db.name),
+      "mcp",
+    ],
+    ...(process.versions.electron ? { env: { ELECTRON_RUN_AS_NODE: "1" } } : {}),
+  };
+}
+
+/** Expand argv after cmd's metacharacter parsing; dynamic values never become shell syntax. */
+export function buildManagedRuntimeCommand(
+  executable: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+): string {
+  if (platform !== "win32") return [executable, ...args].map(posixQuote).join(" ");
+  const quoteArg = (value: string) =>
+    `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/g, "$1$1")}"`;
+  env.CONFLUX_RUNTIME_EXECUTABLE = quoteArg(executable);
+  const placeholders = args.map((arg, index) => {
+    const key = `CONFLUX_RUNTIME_ARG_${index}`;
+    env[key] = quoteArg(arg);
+    return `!${key}!`;
+  });
+  env.CONFLUX_RUNTIME_SHELL = process.env.comspec ?? "cmd.exe";
+  env.CONFLUX_RUNTIME_COMMAND_LINE = `!CONFLUX_RUNTIME_EXECUTABLE! ${placeholders.join(" ")}`;
+  return `@${quoteArg(env.CONFLUX_RUNTIME_SHELL)} /d /v:on /s /c "${env.CONFLUX_RUNTIME_COMMAND_LINE}"`;
+}
 
 /** Args for a one-shot headless run (claude -p / codex exec). */
 export function buildHeadlessArgs(
@@ -349,13 +466,22 @@ export function buildHeadlessArgs(
 }
 
 /** Is a spawned instance of this preset still alive? (skip overlapping runs) */
-export function hasActiveRun(db: DB, agentId: number): boolean {
+export function hasActiveRun(db: DB, agentId: number, refresh = true): boolean {
+  if (refresh) refreshRuntimeInstances(db);
+  if (
+    db
+      .prepare(
+        "SELECT id FROM runtime_instances WHERE preset_id = ? AND (state IN ('starting', 'running', 'stale') OR (state = 'failed' AND ended_at IS NULL)) LIMIT 1",
+      )
+      .get(agentId)
+  )
+    return true;
   const rows = db
     .prepare(
       `SELECT id, metadata FROM sessions
        WHERE status = 'active' AND metadata LIKE ?`,
     )
-    .all(`%"agent_id":${agentId},%`) as { id: string; metadata: string | null }[];
+    .all(`%"agent_id":%`) as { id: string; metadata: string | null }[];
   return rows.some((r) => {
     try {
       return JSON.parse(r.metadata ?? "{}").agent_id === agentId;
@@ -400,22 +526,60 @@ export function runScheduledAgent(
   const def = runtimeDescriptor(agent.runtime);
   const defaultExe = def.settingsKey ? settings[def.settingsKey] : def.executable;
   const executable = process.env[def.executableEnv] || defaultExe;
-  const parts = [cmdQuote(executable), ...buildHeadlessArgs(agent).map(cmdQuote)];
-  const command = parts.join(" ");
 
   const env = buildRuntimeEnv(agent, cleanTerminalEnv());
-  const child = spawn(process.env.comspec ?? "cmd.exe", ["/d", "/s", "/c", command], {
-    // NOT detached: DETACHED_PROCESS children die silently with the spawner
-    // on Windows. windowsHide gives the child its own invisible console —
-    // proven working for headless claude runs.
-    detached: process.platform !== "win32",
-    stdio: "ignore",
-    env,
-    cwd: agent.workdir || undefined,
-    windowsVerbatimArguments: process.platform === "win32",
-    windowsHide: true,
-  });
+  env.CONFLUX_HOME = dirname(db.name);
+  refreshRuntimeInstances(db);
+  const instance = db
+    .transaction(() => {
+      if (hasActiveRun(db, id, false))
+        throw Object.assign(new Error("runtime already has an active instance"), {
+          statusCode: 409,
+        });
+      return createRuntimeInstance(db, agent);
+    })
+    .immediate();
+  env.CONFLUX_RUNTIME_INSTANCE_ID = instance.id;
+  const headlessArgs = buildHeadlessArgs(agent);
+  // Config options must precede the prompt's -- separator.
+  const args =
+    agent.runtime === "codex"
+      ? [...buildCodexManagedMcpArgs(env, db), ...headlessArgs]
+      : [
+          ...(!projectHasConfluxMcp(agent.workdir)
+            ? [
+                "--mcp-config",
+                ensureWakeMcpConfig(dirname(db.name), undefined, managedMcpLaunch(db)),
+              ]
+            : []),
+          ...headlessArgs,
+        ];
+  const command = buildManagedRuntimeCommand(executable, args, env, platform);
+  const child = spawn(
+    platform === "win32" ? (process.env.comspec ?? "cmd.exe") : "/bin/sh",
+    [...(platform === "win32" ? ["/d", "/s", "/c"] : ["-c"]), command],
+    {
+      // NOT detached: DETACHED_PROCESS children die silently with the spawner
+      // on Windows. windowsHide gives the child its own invisible console —
+      // proven working for headless claude runs.
+      detached: process.platform !== "win32",
+      stdio: "ignore",
+      env,
+      cwd: agent.workdir || undefined,
+      windowsVerbatimArguments: process.platform === "win32",
+      windowsHide: true,
+    },
+  );
   child.unref();
+  child.once("error", () => {
+    if (db.open) failRuntimeInstance(db, instance.id);
+  });
+  child.once("exit", () => {
+    if (db.open)
+      db.prepare(
+        "UPDATE runtime_instances SET state = 'ended', ended_at = ?, updated_at = ? WHERE id = ?",
+      ).run(nowIso(), nowIso(), instance.id);
+  });
 
   db.prepare(`UPDATE runtime_agents SET last_scheduled_run = ? WHERE id = ?`).run(nowIso(), id);
   logger.info({ agentId: id, name: agent.name }, "scheduled runtime agent run launched");
@@ -431,8 +595,9 @@ export function tickScheduledAgents(
   launcher: (db: DB, id: number) => unknown = runScheduledAgent,
 ): number {
   let launched = 0;
+  refreshRuntimeInstances(db);
   for (const agent of listRuntimeAgents(db)) {
-    if (!isDue(agent) || hasActiveRun(db, agent.id)) continue;
+    if (!isDue(agent) || hasActiveRun(db, agent.id, false)) continue;
     try {
       launcher(db, agent.id);
       launched++;

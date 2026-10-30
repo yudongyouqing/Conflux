@@ -8,7 +8,14 @@ import {
 } from "../../core/runtime-agents.js";
 import { logAudit } from "../../core/audit.js";
 import { RUNTIME_IDS } from "../../core/runtime-registry.js";
-import type { ServerContext } from "../context.js";
+import { WEB_CONSOLE_ID, type ServerContext } from "../context.js";
+import {
+  listRuntimeInstances,
+  stopRuntimeInstance,
+  resumeRuntimeInstance,
+  type RuntimeProcessIO,
+} from "../../core/runtime-instances.js";
+import type { StartRuntimeOptions } from "../../core/runtime-agents.js";
 
 interface RuntimeAgentBody {
   name: string;
@@ -22,8 +29,45 @@ interface RuntimeAgentBody {
   interval_min?: number | null;
 }
 
-export function registerRuntimeRoutes(app: FastifyInstance, ctx: ServerContext): void {
+export function registerRuntimeRoutes(
+  app: FastifyInstance,
+  ctx: ServerContext,
+  io: StartRuntimeOptions & RuntimeProcessIO = {},
+): void {
   const { db, sendError, sendHttpError } = ctx;
+
+  app.get("/runtime-instances", {}, async (_req, reply) => {
+    try {
+      return reply.send({ instances: listRuntimeInstances(db, io) });
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+  for (const action of ["stop", "resume"] as const) {
+    app.post<{ Params: { id: string } }>(
+      `/runtime-instances/:id/${action}`,
+      {},
+      async (req, reply) => {
+        try {
+          const result =
+            action === "stop"
+              ? { instance: stopRuntimeInstance(db, req.params.id, io) }
+              : resumeRuntimeInstance(db, req.params.id, io);
+          logAudit(db, {
+            interface: "http",
+            action: `${action}_runtime_instance`,
+            args: { id: req.params.id },
+            result: { instance_id: result.instance.id, state: result.instance.state },
+          });
+          return reply.send(result);
+        } catch (error) {
+          return sendError(reply, error, WEB_CONSOLE_ID, `${action}_runtime_instance`, {
+            id: req.params.id,
+          });
+        }
+      },
+    );
+  }
 
   // ---- runtime agents (user-defined CLI agent presets: Claude Code / Codex) ----
 
@@ -93,7 +137,7 @@ export function registerRuntimeRoutes(app: FastifyInstance, ctx: ServerContext):
   // POST /runtimes/:id/start — launch the preset in a new terminal window
   app.post<{ Params: { id: string } }>("/runtimes/:id/start", {}, async (req, reply) => {
     try {
-      const result = startRuntimeAgent(db, Number(req.params.id));
+      const result = startRuntimeAgent(db, Number(req.params.id), io);
       logAudit(db, {
         interface: "http",
         action: "start_runtime_agent",

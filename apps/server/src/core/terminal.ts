@@ -190,7 +190,15 @@ export function buildLaunchPlan(
   // cmd-syntax `title &&` prefix would not parse there.
   const pwshSpec = (file: string): LaunchSpec => ({
     file,
-    args: ["-NoLogo", "-NoProfile", "-NoExit", "-Command", command],
+    args: [
+      "-NoLogo",
+      "-NoProfile",
+      "-NoExit",
+      "-Command",
+      opts.env?.CONFLUX_RUNTIME_SHELL && opts.env?.CONFLUX_RUNTIME_COMMAND_LINE
+        ? "& $env:CONFLUX_RUNTIME_SHELL /d /v:on /s /c $env:CONFLUX_RUNTIME_COMMAND_LINE"
+        : command,
+    ],
     cwd,
   });
   // Plain new console window: the proven `cmd /c start` chain (a windowless

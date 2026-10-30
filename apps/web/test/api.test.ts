@@ -65,3 +65,41 @@ test("HTTP errors include response text and status", async () => {
 
   await assert.rejects(api.getGraph(), { message: "HTTP 404: agent missing" });
 });
+
+test("message retry identifies the console and uses the existing message endpoint", async () => {
+  let request: { url: string; init?: RequestInit } | undefined;
+  mock.method(globalThis, "fetch", async (input: string | URL | Request, init?: RequestInit) => {
+    request = { url: String(input), init };
+    return Response.json({ message: { id: 17 }, wake: { woke: false } });
+  });
+  await api.retryMessage(17);
+  assert.equal(request?.url, "/messages/17/retry");
+  assert.equal(request?.init?.method, "POST");
+  assert.equal(new Headers(request?.init?.headers).get("X-Session-Id"), "web-console");
+});
+
+test("browser inbox reads identify the console so incoming questions can become seen", async () => {
+  let headers: HeadersInit | undefined;
+  mock.method(globalThis, "fetch", async (_input: unknown, init?: RequestInit) => {
+    headers = init?.headers;
+    return Response.json({ messages: [] });
+  });
+  await api.checkInbox();
+  assert.equal(new Headers(headers).get("X-Session-Id"), "web-console");
+});
+
+test("runtime instance controls use the instance id independently of presets", async () => {
+  const requests: Array<{ url: string; method: string }> = [];
+  mock.method(globalThis, "fetch", async (input: string | URL | Request, init?: RequestInit) => {
+    requests.push({ url: String(input), method: init?.method ?? "GET" });
+    return Response.json({});
+  });
+  await api.getRuntimeInstances();
+  await api.stopRuntimeInstance("run/a");
+  await api.resumeRuntimeInstance("run/a");
+  assert.deepEqual(requests, [
+    { url: "/runtime-instances", method: "GET" },
+    { url: "/runtime-instances/run%2Fa/stop", method: "POST" },
+    { url: "/runtime-instances/run%2Fa/resume", method: "POST" },
+  ]);
+});
