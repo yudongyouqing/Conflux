@@ -15,6 +15,7 @@ artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
 files:
   - apps/desktop/**/*
   - apps/server/dist/**/*
+  - apps/server/skills/**/*
   - apps/web/dist/**/*
 
 asar: true

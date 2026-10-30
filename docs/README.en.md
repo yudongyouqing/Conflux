@@ -101,6 +101,8 @@ For startup, port, database, MCP, or migration issues, see the [troubleshooting 
 
 See the [performance baseline](PERFORMANCE.md) for local request and graph-build measurements.
 
+Session directory: install client skills with `conflux commands install --client all` and reconnect the updated MCP server. Use `$conflux list` (or `/skills`) in Codex and `/conflux list` in Claude Code. See the [session directory guide](SESSION-DIRECTORY.md) for resource mentions and host-specific limitations.
+
 ## 🧭 Architecture
 
 ```mermaid

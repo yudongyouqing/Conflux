@@ -101,6 +101,8 @@ npm start   # → http://127.0.0.1:9527
 
 性能基线与本地指标见[性能文档](docs/PERFORMANCE.md)。
 
+会话列表与引用：Codex 使用 `$conflux list`（或 `/skills` 选择 conflux），Claude Code 使用 `/conflux list`；先运行 `conflux commands install --client all` 安装客户端技能，并重连更新后的 MCP。完整说明见[会话目录](docs/SESSION-DIRECTORY.md)。
+
 ## 🧭 架构
 
 ```mermaid
