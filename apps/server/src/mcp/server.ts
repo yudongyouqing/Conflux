@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "node:crypto";
 import type { RuntimeId } from "@conflux/shared";
 
 import { resolveConfig, type Scope } from "../config.js";
@@ -108,8 +108,8 @@ export function adoptMcpSession(
 export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
   const config = resolveConfig(opts.scope ?? "global", opts.overrideDataDir);
   const db: DB = openDb(config);
-  const connectionId = uuidv4();
-  let sessionId = uuidv4();
+  const connectionId = randomUUID();
+  let sessionId: string = randomUUID();
   const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
   let identity = detectMcpRuntime();
 

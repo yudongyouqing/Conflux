@@ -1,5 +1,5 @@
 import { Command, Option } from "commander";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -1124,7 +1124,7 @@ async function remote(
   body?: unknown,
 ): Promise<unknown> {
   const url = `${baseUrl.replace(/\/$/, "")}${path}`;
-  const sid = process.env.CONFLUX_SESSION_ID || uuidv4();
+  const sid = process.env.CONFLUX_SESSION_ID || randomUUID();
   const headers: Record<string, string> = {
     "X-Session-Id": sid,
     "Content-Type": "application/json",
@@ -1213,7 +1213,7 @@ function resolveCliSessionId(db: DB): string {
   const env = process.env.CONFLUX_SESSION_ID;
   if (env && env.trim().length > 0) return env;
 
-  const sid = uuidv4();
+  const sid = randomUUID();
   registerSession(db, {
     id: sid,
     name: `cli-${process.env.USER || process.env.USERNAME || "anon"}`,
