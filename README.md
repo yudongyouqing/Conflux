@@ -276,7 +276,7 @@ npm run package:desktop       # Windows NSIS 安装包
 - ✅ 主题系统（设计令牌 + 自定义主题导入）、数据管理（分类清除 + 自动备份）
 - ✅ 会话优先级 P0/P1/P2、能力检索 `search_sessions`、channel watch CLI、hooks 存量会话补录
 - ✅ GitHub Releases 自动更新链路；签名由发布环境 Secrets 按平台启用
-- 🚧 首个正式版本 tag 的跨平台安装包、签名与自动更新验证
+- 🚧 v0.2.0 三平台安装包已发布（未签名，2026-10-28）；实机安装、退出清理与打包版自动更新验收待完成（[发布验收](https://github.com/yudongyouqing/Conflux/issues/267)），dev 上的新功能未包含在该安装包中
 
 当前待办与历史计划状态见 [项目待办](docs/PROJECT-TODO.md)，性能测量方法见 [性能基线](docs/PERFORMANCE.md)。
 
