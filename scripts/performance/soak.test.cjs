@@ -58,7 +58,7 @@ test(
     assert.equal(report.phases.fixed.reads.unexpected, 0);
     assert.equal(report.phases.write.reads.unexpected, 0);
     assert.equal(report.phases.write.writes.unexpected, 0);
-    assert.ok(report.phases.write.writes.succeeded >= 15, "write phase must produce continuous load");
+    assert.ok(report.phases.write.writes.succeeded >= 12, "write phase must produce continuous load");
     assert.ok(report.timeSeries.length >= 11, "sampling must cover both phases");
     for (const sample of report.timeSeries) {
       assert.ok(sample.worker.rss > 0);
@@ -71,6 +71,77 @@ test(
     assert.equal(report.integrity.uniqueIds, report.integrity.writesAcknowledged);
     assert.equal(report.analysis.leakVerdict, "not-assessed");
     assert.ok(report.analysis.workerRss.max >= report.analysis.workerRss.min);
+  },
+);
+
+test(
+  "write phase cannot pass without actual writes",
+  { timeout: 120000 },
+  async () => {
+    const report = await runSoak({
+      config: readSoakConfig({
+        PERF_SOAK_FIXED_MS: "250",
+        PERF_SOAK_WRITE_MS: "1000",
+        PERF_SOAK_SAMPLE_MS: "250",
+        PERF_SOAK_WRITE_INTERVAL_MS: "50",
+        PERF_SOAK_SIZE: "8",
+      }),
+      simulateWriteFailure: true,
+    });
+    assert.equal(report.status, "failed");
+    assert.equal(report.integrity.passed, false);
+    assert.ok(report.integrity.minimumWrites >= 1, "the gate must define a minimum write count");
+    assert.equal(report.integrity.writesAcknowledged, 0);
+    assert.match(report.error, /minimum/i);
+  },
+);
+
+test(
+  "slow sampling must not starve the paced write load",
+  { timeout: 120000 },
+  async () => {
+    const report = await runSoak({
+      config: readSoakConfig({
+        PERF_SOAK_FIXED_MS: "250",
+        PERF_SOAK_WRITE_MS: "2000",
+        PERF_SOAK_SAMPLE_MS: "250",
+        PERF_SOAK_WRITE_INTERVAL_MS: "50",
+        PERF_SOAK_SIZE: "8",
+      }),
+      sampleDelayMs: 400,
+    });
+    assert.equal(report.error, undefined, `soak run failed: ${report.error}`);
+    assert.equal(report.status, "passed");
+    assert.ok(report.phases.write.writes.succeeded >= 20, `writes starved: ${report.phases.write.writes.succeeded}`);
+    assert.ok(report.timeSeries.length >= 2, "sampling stopped entirely under slow samples");
+  },
+);
+
+test(
+  "fixed phase sleeps between samples instead of busy-waiting",
+  { timeout: 120000 },
+  async () => {
+    const before = process.cpuUsage();
+    const report = await runSoak({
+      config: readSoakConfig({
+        PERF_SOAK_FIXED_MS: "2000",
+        PERF_SOAK_WRITE_MS: "1000",
+        PERF_SOAK_SAMPLE_MS: "250",
+        PERF_SOAK_WRITE_INTERVAL_MS: "50",
+        PERF_SOAK_SIZE: "8",
+      }),
+    });
+    const cpu = process.cpuUsage(before);
+    const coordinatorCpuMs = (cpu.user + cpu.system) / 1000;
+    assert.equal(report.status, "passed");
+    assert.ok(
+      report.phases.fixed.idleWakeups <= 100,
+      `sampler woke ${report.phases.fixed.idleWakeups} times with nothing due — it must sleep until the next tick, not poll`,
+    );
+    assert.ok(
+      coordinatorCpuMs < 1500,
+      `coordinator burned ${coordinatorCpuMs.toFixed(0)} ms CPU — the gap between samples must sleep, not spin`,
+    );
   },
 );
 

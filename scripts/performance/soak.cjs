@@ -53,7 +53,7 @@ function makeToken(prefix) {
   return `${prefix}${Date.now().toString(36)}${Math.floor(Math.random() * 1679616).toString(36)}`;
 }
 
-async function runSoak({ config, directory, output } = {}) {
+async function runSoak({ config, directory, output, sampleDelayMs = 0, simulateWriteFailure = false } = {}) {
   const report = {
     schemaVersion: 1,
     kind: "soak",
@@ -78,22 +78,25 @@ async function runSoak({ config, directory, output } = {}) {
       totalMemoryBytes: totalmem(),
     },
     config,
+    diagnostics: { sampleDelayMs, simulateWriteFailure },
     methodology: {
       topology: "one HTTP server worker process seeded once; load is driven over loopback HTTP",
       phases:
-        "fixed phase issues reads only; write phase adds paced POST /context writes (interval paces starts, responses awaited)",
-      sampling: "worker CPU/memory/counts/storage via IPC snapshot each sample tick; coordinator RSS and active handles recorded alongside",
+        "fixed phase issues reads only; write phase adds paced POST /context writes on an independent loop (one interval after each completion) so slow sampling cannot starve them",
+      sampling:
+        "worker CPU/memory/counts/storage via IPC snapshot each sample tick; coordinator RSS and active handles recorded alongside; the sampler sleeps until the next due tick instead of polling (idleWakeups counts wakes that found nothing due)",
       memory: "RSS/heap from process.memoryUsage; sawtooth reflects GC, monotone trends need data-growth context",
       wal: "wal_autocheckpoint(1000 pages) plus the 64MB/30s monitor bound the WAL; walBytes is the sampled file size",
       integrity: "acknowledged write ids must be unique and match the final context row count; FTS marker checks cover all writes up to the 500-row query limit, else a sample",
       scope: "single-machine observation; no thresholds or leak verdicts are derived from one run",
     },
     phases: {
-      fixed: { configuredMs: config.fixedMs, reads: { succeeded: 0, unexpected: 0 } },
+      fixed: { configuredMs: config.fixedMs, reads: { succeeded: 0, unexpected: 0 }, idleWakeups: 0 },
       write: {
         configuredMs: config.writeMs,
         reads: { succeeded: 0, unexpected: 0 },
         writes: { attempted: 0, succeeded: 0, expectedLock: 0, unexpected: 0, unexpectedErrors: [] },
+        idleWakeups: 0,
       },
     },
     timeSeries: [],
@@ -147,6 +150,12 @@ async function runSoak({ config, directory, output } = {}) {
 
   async function writeOnce(index) {
     const writes = report.phases.write.writes;
+    // Regression hook: simulates a harness that fails to deliver any
+    // write, proving the minimum-writes gate rejects such a run.
+    if (simulateWriteFailure) {
+      writes.attempted++;
+      return;
+    }
     // Zero-padded so each write gets a fixed-length FTS token; prefix
     // queries then match exactly one row instead of numeric prefixes
     // like "5" also hitting "54".
@@ -182,6 +191,9 @@ async function runSoak({ config, directory, output } = {}) {
   let url = null;
 
   async function sample(phase, startedAt) {
+    // Regression hook: simulates a slow sampler (e.g. rpc backlog under
+    // load) so tests can prove the write pacer survives it.
+    if (sampleDelayMs > 0) await sleep(sampleDelayMs);
     const snapshot = await rpc({ command: "snapshot" });
     const memory = process.memoryUsage();
     report.timeSeries.push({
@@ -209,24 +221,38 @@ async function runSoak({ config, directory, output } = {}) {
   async function runPhase(phase, durationMs) {
     const startedAt = Date.now();
     const endAt = startedAt + durationMs;
-    let nextSample = startedAt;
+    const phaseStats = report.phases[phase];
     let writeIndex = 0;
-    let nextWrite = startedAt;
-    while (!terminated && Date.now() < endAt) {
-      const now = Date.now();
-      if (now >= nextSample) {
-        nextSample += config.sampleMs;
-        await sample(phase, startedAt);
-        await readOnce(phase);
-        continue;
+    const sampler = async () => {
+      let nextSample = startedAt;
+      while (!terminated && Date.now() < endAt) {
+        const now = Date.now();
+        if (now >= nextSample) {
+          nextSample += config.sampleMs;
+          await sample(phase, startedAt);
+          await readOnce(phase);
+          continue;
+        }
+        // Sleep until the tick is due (bounded so interruption stays
+        // responsive) — polling the clock in a tight loop burned CPU for
+        // nothing in the fixed phase.
+        phaseStats.idleWakeups++;
+        await sleep(Math.max(1, Math.min(5000, nextSample - Date.now())));
       }
-      if (phase === "write" && now >= nextWrite) {
-        nextWrite += config.writeIntervalMs;
-        await writeOnce(writeIndex++);
-        continue;
-      }
-      await sleep(Math.min(50, Math.max(0, Math.min(nextSample, nextWrite) - now)));
-    }
+    };
+    // The write pacer runs on its own loop so a slow sample can never
+    // starve the paced write load; cadence resumes one interval after each
+    // completion, which skips missed slots instead of bursting.
+    const pacer =
+      phase === "write"
+        ? async () => {
+            while (!terminated && Date.now() < endAt) {
+              await writeOnce(writeIndex++);
+              await sleep(Math.max(1, config.writeIntervalMs));
+            }
+          }
+        : null;
+    await (pacer ? Promise.all([sampler(), pacer()]) : sampler());
   }
 
   async function stopServer() {
@@ -274,18 +300,24 @@ async function runSoak({ config, directory, output } = {}) {
         if (hit.json.entries.length !== 1) ftsVerified = false;
       }
     }
+    // A write phase that produced no meaningful write load must fail the
+    // run however correct the row accounting is: half the ideal cadence is
+    // the floor below which the phase counts as "did not actually write".
+    const minimumWrites = Math.max(1, Math.floor(config.writeMs / (config.writeIntervalMs * 2)));
     report.integrity = {
       contextsBefore,
       contextsAfter,
       expectedContexts,
       writesAttempted: writes.attempted,
       writesAcknowledged: writes.succeeded,
+      minimumWrites,
       uniqueIds,
       ftsVerified,
       passed:
         contextsAfter === expectedContexts &&
         uniqueIds === writes.succeeded &&
         ftsVerified &&
+        writes.succeeded >= minimumWrites &&
         writes.unexpected === 0 &&
         report.phases.fixed.reads.unexpected === 0 &&
         report.phases.write.reads.unexpected === 0,
@@ -306,11 +338,9 @@ async function runSoak({ config, directory, output } = {}) {
       leakVerdict: "not-assessed",
     };
 
-    assert.deepEqual(
-      [report.integrity.passed, terminated],
-      [true, false],
-      "soak integrity failed or run was interrupted",
-    );
+    assert.equal(terminated, false, "soak run was interrupted");
+    if (!report.integrity.passed)
+      throw Error(`soak integrity failed: ${JSON.stringify(report.integrity)}`);
     await stopServer();
     report.status = "passed";
     return report;
