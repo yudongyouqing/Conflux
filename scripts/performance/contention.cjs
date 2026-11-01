@@ -380,6 +380,7 @@ async function runContention({ config, directory, output } = {}) {
     {
       const token = makeToken("ctb");
       const httpSucceededBefore = aggregates.httpWrites.succeeded;
+      const httpExpectedLockBefore = aggregates.httpWrites.expectedLock;
       const httpUnexpectedBefore = aggregates.httpWrites.unexpected;
       const burst = rpc(writer, { command: "write-burst", count: config.writesPerSide, token });
       for (let i = 0; i < config.writesPerSide; i++)
@@ -401,7 +402,7 @@ async function runContention({ config, directory, output } = {}) {
         name: "two-writer-burst",
         http: {
           succeeded: httpSucceededHere,
-          expectedLock: aggregates.httpWrites.expectedLock,
+          expectedLock: aggregates.httpWrites.expectedLock - httpExpectedLockBefore,
           unexpected: aggregates.httpWrites.unexpected - httpUnexpectedBefore,
         },
         writer: {
