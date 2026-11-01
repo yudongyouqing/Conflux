@@ -35,6 +35,7 @@
 - [x] 完善浅色/深色色板和语义状态色，保留已有自定义主题；通过默认色板对比度、持久化与桌面/窄屏浏览器验证，截图见[协作控制](COLLABORATION-CONTROLS.md)。
 - [x] 增加 MCP 会话目录、资源引用和 Codex/Claude Code 的 Conflux 技能入口，见[会话目录](SESSION-DIRECTORY.md)。
 - [x] 补充目标会话不明确时的候选查找与技能选项确认规则；终端标题变化时依据完整 ID、项目、运行时和活跃时间定位，用户选择前不发送。SDK/stdio 通过；真实宿主问答展示保留在手工验收中。
+- [x] 运行实例进程级 E2E：可控 claude/codex 形态子进程走生产检查/终止路径（PowerShell CIM、/proc、ps、taskkill/SIGTERM），覆盖 PID+创建令牌绑定、注册超时、失联仍在、PID 复用、归属不匹配、重复恢复、启动失败、延迟退出与特殊字符路径，见 #273；套件串行执行（test:process-e2e）。真实 Codex/Claude Code 宿主验收仍开放。
 - [ ] 补充真实 MCP 宿主的候选问答和实例启动/停止/恢复、桌面故障注入/托盘退出、backfill CLI 幂等验收；主题/高亮已补隔离浏览器记录，原生外观联动仍需实测，具体步骤见验收核查表。
 - [x] 分离 channel watch 的启动与更新等待：启动允许 15 秒、消息更新仍限 3 秒，提前退出立即报告诊断；补充慢启动和失败回归，见 [#242](https://github.com/yudongyouqing/Conflux/issues/242)。
 - [x] 普通 CI 纳入完整桌面测试、lint、发布配置测试与设计令牌检查，见 [#244](https://github.com/yudongyouqing/Conflux/issues/244)。
