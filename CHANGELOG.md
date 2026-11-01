@@ -9,6 +9,17 @@
 - Remove the `muiltchat` CLI bin and all `MUILTCHAT_*` environment variables. Use `conflux` and equivalent `CONFLUX_*` names before upgrading. Internal desktop, Agent and MCP launchers now use the new names. Existing `.muiltchat` data directories remain in place; no data is moved or deleted. The published v0.2.0 artifacts are unchanged.
 - 移除 `muiltchat` 命令入口与全部 `MUILTCHAT_*` 环境变量，升级前请改用 `conflux` 和相同后缀的 `CONFLUX_*`。现有数据目录保持原位，旧版 v0.2.0 安装包不受影响。
 
+### Added / 新增（均在 dev，未随 v0.2.0 发布 / all merged into dev only, not in v0.2.0）
+
+- MCP session directory commands, mention resources, and a Conflux skill entry for Codex and Claude Code.
+- MCP 会话目录命令、mention 资源引用，以及 Codex / Claude Code 的 Conflux 技能入口。
+- Message wake outcomes with manual retry, and managed runtime instance stop/resume; read/reply states stay independent of delivery retries.
+- 消息唤醒结果与手动重试、受管运行实例的停止/恢复；已读/回复状态与投递重试相互独立。
+- Refined light/dark semantic palettes with existing custom themes preserved.
+- 完善浅色/深色语义色板，保留已有自定义主题。
+- Server HTTP and SQLite performance baselines with raw samples retained as CI artifacts.
+- 服务器 HTTP 与 SQLite 性能基准，原始样本由 CI 保存为产物。
+
 ## [0.2.0] - 2026-10-27
 
 ### 新增
