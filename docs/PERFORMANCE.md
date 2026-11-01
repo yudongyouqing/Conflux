@@ -282,3 +282,78 @@ The synthetic ring, small payloads, warm OS cache and single Node/SQLite writer
 exclude dense graphs, real data distributions, cold disks, multi-process writer
 contention, long-running memory growth and device diversity. Repeat on the same
 hardware and on representative devices/data before choosing regression limits.
+Multi-process contention and a long-running soak are covered separately in the
+sections below.
+
+## Cross-process SQLite contention (2026-11-01)
+
+```sh
+npm run perf:contention          # full run, report to test-results/performance/contention.json
+node --test scripts/performance/contention.test.cjs   # short smoke of every scenario
+```
+
+The benchmark forks the real HTTP server (built `apps/server/dist`) and an
+external CLI/MCP-style writer process against **one temporary SQLite file**.
+Lock state is never guessed from sleeps: the writer acknowledges `BEGIN
+IMMEDIATE` and every release over IPC before victims run. The writer's
+test-only second connection shortens its own `busy_timeout` to observe timeout
+classification quickly; production connections keep `busy_timeout = 10000`
+from `core/db.ts`, which is unchanged.
+
+Scenarios and the observations recorded in
+[the 2026-11-01 report](performance/2026-11-01-contention.json)
+(Windows 11, i7-12650H, 16 GB, Node v22.23.4, source `d0f3ee4`, clean tree):
+
+| Scenario | Observation |
+| --- | --- |
+| read-during-uncommitted-write | `/healthz` (write-free) stayed available during the hold; a second-connection reader saw 0 of the 3 uncommitted rows and all 3 after commit. An audited data read (`/context/query`) fired during the hold returned only after the release (2.8 ms with a ~1 ms release): audited reads join write contention through their audit/heartbeat rows. |
+| release-recovery | A write fired while the lock was held succeeded after the release: 170.7 ms total wait (includes the 150 ms arrival cushion), 16.8 ms from release acknowledgement to response, exactly one row. |
+| short-timeout-victim | With `busy_timeout = 50` the victim write failed with `SQLITE_BUSY`, left zero rows, and a retry after the release succeeded in 0.8 ms. |
+| production-timeout | Against a hold longer than 10 s the HTTP write returned `503`/`DATA_LOCKED` after 21.8 s: the insert busy-waits the full 10 s, then the error path's own audit write waits on the still-held lock for roughly another 10 s before the reply. A follow-up write succeeded 9.3 ms after the release. |
+| two-writer-burst | 120 HTTP writes and 120 external writer inserts interleaved on one file: all succeeded with zero lock errors (busy_timeout absorbed the contention); HTTP write p50 1.1 ms / p95 8.9 ms, writer-side inserts p50 0.2 ms. FTS found exactly the 240 distinct markers; both processes observed identical row counts — no duplicates, no losses. |
+| writer-death-recovery | Killing the writer mid-transaction released the lock; all 3 uncommitted rows were rolled back; a follow-up write succeeded 1.8 ms later. |
+
+Run totals: 123 writes succeeded, 1 expected lock error (the deliberate
+production-timeout case), 0 unexpected errors, 10/10 reads succeeded. The WAL
+reached 4.3 MB against a 376 KB database with active readers preventing a
+truncating checkpoint. The audited-read and double-timeout behaviors are
+observations about the current audit design, recorded rather than changed.
+These are single-machine observations on loopback with synchronous
+better-sqlite3 — not pass/fail limits and not capacity claims.
+
+## Long-running soak (2026-11-01)
+
+```sh
+npm run perf:soak    # configurable via PERF_SOAK_* environment variables
+node --test scripts/performance/soak.test.cjs   # short smoke (CI)
+```
+
+The soak runs the seeded HTTP server while a coordinator samples it every
+second over IPC: worker RSS/heap/external, cumulative CPU, database/WAL/shm
+bytes, page counts, row counts and coordinator active handles, all stored as
+a time series. A **fixed phase** (reads only) precedes a **write phase** with
+paced `POST /context` writes, separating steady-state read memory from
+growth caused by inserted data. CI runs the short smoke only; long runs are
+intentionally local and never become CI gates.
+
+The recorded 30-minute run
+([report](performance/2026-11-01-soak.json), same host and clean source
+`d0f3ee4` as the contention run above) used a 5-minute fixed phase and a
+25-minute write phase (one write every 250 ms, sampled every 1 s):
+
+| Observation | Value |
+| --- | --- |
+| Reads | 300 fixed + 1,500 write-phase reads, all succeeded, 0 unexpected errors |
+| Writes | 6,000 attempted / 6,000 acknowledged / 0 lock errors / 0 unexpected errors |
+| Integrity | contexts 50 → 6,050 rows, exactly the 6,000 unique acknowledged ids; FTS marker sampling verified |
+| Worker RSS | first 98.6 MB, last 93.9 MB, min 78.4 MB, max 101.3 MB — ended below its start after the full run |
+| Worker heapUsed | 28.9 MB → 24.9 MB (min 19.3, max 29.7) — GC sawtooth, no monotone trend |
+| Worker external | +0.18 MB over 30 minutes |
+| Coordinator RSS | +10.1 MB — the harness itself accumulates 6,000 acknowledged ids and 1,800 samples; expected data growth, not a server observation |
+| Database / WAL | database +3.1 MB (6,000 contexts + 6,450 audit rows); WAL sawtooth bounded at 4.2 MB by `wal_autocheckpoint` |
+
+A single 30-minute run on one machine cannot prove the absence of a leak, and
+a high-water RSS mark cannot prove one; the RSS/heap declines above are
+observations under this workload, not verdicts. Slower leaks, other workflows
+(MCP/CLI traffic, wake spawning), other platforms and longer horizons need
+repeated runs before any conclusion. No thresholds were added to CI.
