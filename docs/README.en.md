@@ -276,7 +276,7 @@ Artifacts are written to `release/` (ignored by Git). Windows local packaging al
 - ✅ Theming (design tokens + custom palette import), data management (scoped clear + auto backup)
 - ✅ Session priority P0/P1/P2, capability search `search_sessions`, channel watch CLI, hooks backfill for running sessions
 - ✅ GitHub Releases automatic updates; platform signing is enabled through release Secrets
-- 🚧 First tagged release validation for cross-platform installers, signing, and auto-update
+- 🚧 v0.2.0 unsigned installers for all three platforms published (2026-10-28); real-device install, exit cleanup, and packaged auto-update acceptance pending ([release acceptance](https://github.com/yudongyouqing/Conflux/issues/267)). Features merged only into dev are not in that installer.
 
 See [project follow-ups](PROJECT-TODO.md) and the [performance baseline](PERFORMANCE.md).
 
