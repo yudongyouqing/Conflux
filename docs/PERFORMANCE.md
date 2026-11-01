@@ -325,12 +325,23 @@ covered by the `http-lock-contention` server test. These are single-machine
 observations on loopback with synchronous better-sqlite3 — not pass/fail
 limits and not capacity claims.
 
-Coverage boundary for `/healthz`: it stays answerable while the lock is
-held with no contended request in flight. During the synchronous busy-wait
-of a blocked write the single-threaded event loop cannot answer anything —
-including `/healthz` — until the wait ends. Concurrent responsiveness under
-an active lock wait is not claimed here and would require moving database
-work off the event loop first; it is tracked in the project TODO.
+Coverage boundary for `/healthz` — two distinct claims:
+
+- While only the lock is held (no contended request in flight), `/healthz`
+  answers fast (verified in the `http-lock-contention` server test).
+- While the server is synchronously waiting on a contended write, `/healthz`
+  is **blocked**: better-sqlite3 waits synchronously, so the single-threaded
+  event loop serves nothing until the wait ends. An independent client
+  process polling across the blocked window (same test,
+  `health-probe-child.cjs`) measured the in-flight probe frozen for
+  10,649 ms of a 10,957 ms write wait, with immediate recovery afterwards.
+
+Desktop impact: the Electron service monitor probes HTTP health every
+15 s with a 2 s timeout (`apps/desktop/src/service-health.cjs`), so a lock
+wait longer than that produces 1–2 probe timeouts and can read as an
+unhealthy service. Making health answer during a lock wait requires moving
+database work off the event loop; that architectural change is tracked in
+the project TODO, separate from the audit fix.
 
 ## Long-running soak (2026-11-01)
 

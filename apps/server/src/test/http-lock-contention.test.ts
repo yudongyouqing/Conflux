@@ -4,6 +4,9 @@ import { performance } from "node:perf_hooks";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { fileURLToPath } from "node:url";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -18,16 +21,27 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 // run took 18.6 s for a single 10 s timeout), so elapsed time is only a
 // loose guard while the log line proves which code path ran.
 //
-// Coverage boundary: the health probes here run while only the lock is
-// held, i.e. with no contended request in flight. They do NOT prove that
-// /healthz answers during the ~10 s synchronous busy-wait of a blocked
-// write: better-sqlite3 waits synchronously, so the single-threaded event
-// loop cannot serve anything until the wait ends. Concurrent
-// responsiveness under an active lock wait would require moving database
-// work off the event loop and is tracked as a separate follow-up.
+// Health coverage is two distinct claims, tested separately:
+// 1. While only the lock is held (no contended request in flight),
+//    /healthz answers fast — asserted directly below.
+// 2. While the server is synchronously waiting on a contended write,
+//    /healthz is BLOCKED — better-sqlite3 waits synchronously, so the
+//    single-threaded event loop cannot serve anything until the wait ends.
+//    An independent client process (health-probe-child.cjs) polls across
+//    the blocked window and records the real in-flight latency; this is a
+//    documented limitation, not a claim of concurrent availability.
+//    Making health answer during a lock wait needs database work off the
+//    event loop — tracked as a separate follow-up.
 const BUSY_TIMEOUT_MS = 10000;
 
-test("lock held: health answers with no write in flight; write 503s after one timeout, then recovers", { timeout: 60000 }, async (t) => {
+interface ProbeLine {
+  sentAt: number;
+  receivedAt: number;
+  status: number | null;
+  err?: string;
+}
+
+test("lock held: health answers with no write in flight; blocked during the wait; write 503s after one timeout, then recovers", { timeout: 90000 }, async (t) => {
   const dataDir = mkdtempSync(join(tmpdir(), "muiltchat-http-lock-"));
   const dbPath = join(dataDir, "data.db");
   const logFile = join(dataDir, "server.log");
@@ -78,7 +92,45 @@ test("lock held: health answers with no write in flight; write 503s after one ti
   assert.equal(health.statusCode, 200);
   assert.ok(performance.now() - healthStart < 2000, "health must answer while only the lock is held");
 
+  // Claim 2: an independent client observes /healthz across the blocked
+  // window. The probe runs as its own process because an in-process client
+  // shares the frozen event loop and could never observe the freeze.
+  const port = (app.server.address() as { port: number }).port;
+  const probe = spawn(
+    process.execPath,
+    [fileURLToPath(new URL("./health-probe-child.cjs", import.meta.url)), `http://127.0.0.1:${port}`, "400"],
+    { stdio: ["ignore", "pipe", "inherit"] },
+  );
+  const probeExited = once(probe, "exit");
+  const probeLines: ProbeLine[] = [];
+  let stdout = "";
+  probe.stdout.on("data", (chunk: Buffer) => {
+    stdout += chunk.toString("utf8");
+    let index: number;
+    while ((index = stdout.indexOf("\n")) >= 0) {
+      const line = stdout.slice(0, index).trim();
+      stdout = stdout.slice(index + 1);
+      if (line.length > 0) probeLines.push(JSON.parse(line) as ProbeLine);
+    }
+  });
+  const baselineDeadline = Date.now() + 15000;
+  while (!(probeLines.length >= 2 && probeLines.every((l) => l.status === 200))) {
+    assert.ok(
+      Date.now() < baselineDeadline,
+      `probe never produced fast baseline responses; lines: ${JSON.stringify(probeLines)}; port: ${port}`,
+    );
+    await sleep(100);
+  }
+  for (const line of probeLines) {
+    assert.equal(line.status, 200);
+    assert.ok(
+      line.receivedAt - line.sentAt < 2000,
+      `baseline health probe took ${line.receivedAt - line.sentAt} ms before the blocked write`,
+    );
+  }
+
   const auditBefore = locker.prepare(`SELECT COUNT(*) AS n FROM audit_log`).get() as { n: number };
+  const linesBeforeWrite = probeLines.length;
 
   const writeStart = performance.now();
   const blocked = await app.inject({
@@ -111,6 +163,34 @@ test("lock held: health answers with no write in flight; write 503s after one ti
     "lock-error replies must skip the synchronous audit write",
   );
   assert.doesNotMatch(logText, /failed to audit HTTP error/);
+
+  // Let the probe record post-release recovery, then collect the timeline.
+  await sleep(1500);
+  probe.kill();
+  await Promise.race([probeExited, sleep(5000)]);
+  if (probe.exitCode === null && probe.signalCode === null) probe.kill();
+
+  const duringAndAfter = probeLines.slice(linesBeforeWrite);
+  const blockedProbes = duringAndAfter.filter((l) => l.receivedAt - l.sentAt >= 5000);
+  const latencies = duringAndAfter.map((l) => l.receivedAt - l.sentAt);
+  assert.ok(
+    blockedProbes.length >= 1,
+    `expected the in-flight health probe to be blocked by the synchronous wait; latencies: ${JSON.stringify(latencies)}`,
+  );
+  const maxBlockedMs = Math.max(...blockedProbes.map((l) => l.receivedAt - l.sentAt));
+  assert.ok(
+    maxBlockedMs >= 5000,
+    `the blocked health probe only waited ${maxBlockedMs} ms — expected it to span most of the lock wait`,
+  );
+  const tail = duringAndAfter.slice(-2);
+  assert.ok(
+    tail.length === 2 && tail.every((l) => l.status === 200 && l.receivedAt - l.sentAt < 3000),
+    `health must recover immediately after the wait ends; tail: ${JSON.stringify(tail)}`,
+  );
+  t.diagnostic(
+    `independent /healthz probe across the lock wait: ${duringAndAfter.length} probes, ` +
+      `blocked in-flight max ${maxBlockedMs} ms (write wait ${writeElapsed.toFixed(0)} ms), recovered tail fast`,
+  );
 
   // The failed contended write leaves no row; recovery works after release.
   locker.exec("ROLLBACK");
