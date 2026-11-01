@@ -304,9 +304,14 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
     fn: () => T | Promise<T>,
   ): Promise<{ ok: true; result: T } | { ok: false; error: string }> {
     tryAdopt(); // pick up /resume id changes instantly, not on the next 30s beat
-    touchLease();
     try {
       const result = await fn();
+      // The lease touch is a synchronous write; doing it BEFORE the body
+      // would queue a full busy_timeout ahead of a tool that is about to
+      // fail on a held lock, doubling the stall. Touch only after the
+      // body succeeded — a failed call does not extend the lease; the
+      // next successful call or the 30s beat refreshes it.
+      touchLease();
       logAudit(db, {
         caller_session: sessionId,
         interface: "mcp",
