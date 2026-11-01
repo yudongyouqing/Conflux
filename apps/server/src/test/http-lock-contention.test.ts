@@ -6,7 +6,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { fileURLToPath } from "node:url";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -98,7 +97,7 @@ test("lock held: health answers with no write in flight; blocked during the wait
   const port = (app.server.address() as { port: number }).port;
   const probe = spawn(
     process.execPath,
-    [fileURLToPath(new URL("./health-probe-child.cjs", import.meta.url)), `http://127.0.0.1:${port}`, "400"],
+    [join(__dirname, "health-probe-child.cjs"), `http://127.0.0.1:${port}`, "400"],
     { stdio: ["ignore", "pipe", "inherit"] },
   );
   const probeExited = once(probe, "exit");
