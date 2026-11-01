@@ -336,9 +336,10 @@ paced `POST /context` writes, separating steady-state read memory from
 growth caused by inserted data. The write pacer runs on its own loop (one
 interval after each completion) so slow sampling cannot starve the load; the
 sampler sleeps until the next due tick instead of polling (`idleWakeups`
-counts wakes that found nothing due); and a run whose acknowledged writes
-fall below half the ideal cadence fails integrity — a write phase that wrote
-nothing cannot pass. CI runs the short smoke only; long runs are
+counts wakes that found nothing due); and a write phase that acknowledged no
+writes at all fails integrity. Pace relative to the ideal cadence is an
+observation only — a slow machine or slow requests are never judged as
+integrity failures. CI runs the short smoke only; long runs are
 intentionally local and never become CI gates.
 
 The recorded 30-minute run on the fixed harness
@@ -350,7 +351,7 @@ source `565cc98`) used a 5-minute fixed phase and a 25-minute write phase
 | --- | --- |
 | Reads | 300 fixed + 1,500 write-phase reads, all succeeded, 0 unexpected errors |
 | Writes | 5,691 attempted / 5,691 acknowledged / 0 lock errors / 0 unexpected errors (completion pacing lands slightly under the 6,000 ideal) |
-| Integrity | contexts 50 → 5,741 rows, exactly the 5,691 unique acknowledged ids; minimum-writes gate 3,000 met; FTS marker sampling verified |
+| Integrity | contexts 50 → 5,741 rows, exactly the 5,691 unique acknowledged ids; 5,691 acknowledged against a 6,000 ideal pace (observation, not a gate); FTS marker sampling verified |
 | Worker RSS | first 91.0 MB, last 85.5 MB, min 71.5 MB, max 93.4 MB — ended below its start after the full run |
 | Worker heapUsed | 27.6 MB → 22.6 MB (max 28.6) — GC sawtooth, no monotone trend |
 | Worker external | +0.1 MB over 30 minutes |

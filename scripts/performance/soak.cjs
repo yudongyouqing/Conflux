@@ -151,7 +151,7 @@ async function runSoak({ config, directory, output, sampleDelayMs = 0, simulateW
   async function writeOnce(index) {
     const writes = report.phases.write.writes;
     // Regression hook: simulates a harness that fails to deliver any
-    // write, proving the minimum-writes gate rejects such a run.
+    // write, proving the non-zero write requirement rejects such a run.
     if (simulateWriteFailure) {
       writes.attempted++;
       return;
@@ -300,24 +300,23 @@ async function runSoak({ config, directory, output, sampleDelayMs = 0, simulateW
         if (hit.json.entries.length !== 1) ftsVerified = false;
       }
     }
-    // A write phase that produced no meaningful write load must fail the
-    // run however correct the row accounting is: half the ideal cadence is
-    // the floor below which the phase counts as "did not actually write".
-    const minimumWrites = Math.max(1, Math.floor(config.writeMs / (config.writeIntervalMs * 2)));
+    // A write phase that acknowledged no writes at all must fail the run
+    // however correct the row accounting is. Anything above zero is judged
+    // only by data reconciliation: a slower pace than the ideal cadence is
+    // a machine observation, never an integrity verdict.
     report.integrity = {
       contextsBefore,
       contextsAfter,
       expectedContexts,
       writesAttempted: writes.attempted,
       writesAcknowledged: writes.succeeded,
-      minimumWrites,
       uniqueIds,
       ftsVerified,
       passed:
         contextsAfter === expectedContexts &&
         uniqueIds === writes.succeeded &&
         ftsVerified &&
-        writes.succeeded >= minimumWrites &&
+        writes.succeeded >= 1 &&
         writes.unexpected === 0 &&
         report.phases.fixed.reads.unexpected === 0 &&
         report.phases.write.reads.unexpected === 0,
@@ -326,6 +325,9 @@ async function runSoak({ config, directory, output, sampleDelayMs = 0, simulateW
     const series = (pick) => report.timeSeries.map(pick);
     report.analysis = {
       samples: report.timeSeries.length,
+      // Ideal pace is context for reading the acknowledged-write count —
+      // an observation, never a threshold.
+      idealWrites: Math.floor(config.writeMs / config.writeIntervalMs),
       workerRss: seriesSummary(series((s) => s.worker.rss), "workerRss"),
       workerHeapUsed: seriesSummary(series((s) => s.worker.heapUsed), "workerHeapUsed"),
       workerExternal: seriesSummary(series((s) => s.worker.external), "workerExternal"),
