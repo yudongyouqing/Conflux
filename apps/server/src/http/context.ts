@@ -76,16 +76,27 @@ export function createServerContext(
     const status = statusOverride ?? publicStatus(err, mapped.code);
     logger.error({ err, sid, action, code: mapped.code, status }, "http request failed");
     if (sid && action) {
-      try {
-        logAudit(db, {
-          caller_session: sid,
-          interface: "http",
-          action,
-          args: args ?? {},
-          result: { code: mapped.code },
-        });
-      } catch (auditError) {
-        logger.warn({ err: auditError, action }, "failed to audit HTTP error");
+      // A lock error means another process still holds the write lock.
+      // Auditing it synchronously would busy-wait on that same lock for a
+      // second full busy_timeout before the reply goes out, so the
+      // structured error log above stays the record for this request.
+      if (mapped.code === "DATA_LOCKED") {
+        logger.warn(
+          { sid, action, code: mapped.code },
+          "skipping error audit while the database is locked",
+        );
+      } else {
+        try {
+          logAudit(db, {
+            caller_session: sid,
+            interface: "http",
+            action,
+            args: args ?? {},
+            result: { code: mapped.code },
+          });
+        } catch (auditError) {
+          logger.warn({ err: auditError, action }, "failed to audit HTTP error");
+        }
       }
     }
     return reply.code(status).send({ ...mapped, error: mapped.message });

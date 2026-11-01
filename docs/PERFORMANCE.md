@@ -302,24 +302,46 @@ from `core/db.ts`, which is unchanged.
 
 Scenarios and the observations recorded in
 [the 2026-11-01 report](performance/2026-11-01-contention.json)
-(Windows 11, i7-12650H, 16 GB, Node v22.23.4, source `d0f3ee4`, clean tree):
+(Windows 11, i7-12650H, 16 GB, Node v22.23.4; first recorded at source
+`d0f3ee4`, re-recorded after the lock-error audit fix at source `450794a`,
+both clean trees):
 
 | Scenario | Observation |
 | --- | --- |
 | read-during-uncommitted-write | `/healthz` (write-free) stayed available during the hold; a second-connection reader saw 0 of the 3 uncommitted rows and all 3 after commit. An audited data read (`/context/query`) fired during the hold returned only after the release (2.8 ms with a ~1 ms release): audited reads join write contention through their audit/heartbeat rows. |
 | release-recovery | A write fired while the lock was held succeeded after the release: 170.7 ms total wait (includes the 150 ms arrival cushion), 16.8 ms from release acknowledgement to response, exactly one row. |
 | short-timeout-victim | With `busy_timeout = 50` the victim write failed with `SQLITE_BUSY`, left zero rows, and a retry after the release succeeded in 0.8 ms. |
-| production-timeout | Against a hold longer than 10 s the HTTP write returned `503`/`DATA_LOCKED` after 21.8 s: the insert busy-waits the full 10 s, then the error path's own audit write waits on the still-held lock for roughly another 10 s before the reply. A follow-up write succeeded 9.3 ms after the release. |
+| production-timeout | Against a hold longer than 10 s the HTTP write returned `503`/`DATA_LOCKED`. Originally measured at 21.8 s: the insert busy-waits the full 10 s, then the error path's own audit write waited on the still-held lock for roughly another 10 s. After skipping the audit row for lock errors the reply arrives after one window — 11.0 s re-recorded, follow-up write recovered in 4.7 ms. |
 | two-writer-burst | 120 HTTP writes and 120 external writer inserts interleaved on one file: all succeeded with zero lock errors (busy_timeout absorbed the contention); HTTP write p50 1.1 ms / p95 8.9 ms, writer-side inserts p50 0.2 ms. FTS found exactly the 240 distinct markers; both processes observed identical row counts — no duplicates, no losses. |
 | writer-death-recovery | Killing the writer mid-transaction released the lock; all 3 uncommitted rows were rolled back; a follow-up write succeeded 1.8 ms later. |
 
-Run totals: 123 writes succeeded, 1 expected lock error (the deliberate
-production-timeout case), 0 unexpected errors, 10/10 reads succeeded. The WAL
-reached 4.3 MB against a 376 KB database with active readers preventing a
-truncating checkpoint. The audited-read and double-timeout behaviors are
-observations about the current audit design, recorded rather than changed.
-These are single-machine observations on loopback with synchronous
-better-sqlite3 — not pass/fail limits and not capacity claims.
+Run totals at `d0f3ee4`: 123 writes succeeded, 1 expected lock error (the
+deliberate production-timeout case), 0 unexpected errors, 10/10 reads
+succeeded. The WAL reached 4.3 MB against a 376 KB database with active
+readers preventing a truncating checkpoint. The audited-read behavior
+remains an observation about the audit design; the double-timeout half of
+it was removed by skipping the error-audit write while the lock is held,
+covered by the `http-lock-contention` server test. These are single-machine
+observations on loopback with synchronous better-sqlite3 — not pass/fail
+limits and not capacity claims.
+
+Coverage boundary for `/healthz` — two distinct claims:
+
+- While only the lock is held (no contended request in flight), `/healthz`
+  answers fast (verified in the `http-lock-contention` server test).
+- While the server is synchronously waiting on a contended write, `/healthz`
+  is **blocked**: better-sqlite3 waits synchronously, so the single-threaded
+  event loop serves nothing until the wait ends. An independent client
+  process polling across the blocked window (same test,
+  `health-probe-child.cjs`) measured the in-flight probe frozen for
+  10,649 ms of a 10,957 ms write wait, with immediate recovery afterwards.
+
+Desktop impact: the Electron service monitor probes HTTP health every
+15 s with a 2 s timeout (`apps/desktop/src/service-health.cjs`), so a lock
+wait longer than that produces 1–2 probe timeouts and can read as an
+unhealthy service. Making health answer during a lock wait requires moving
+database work off the event loop; that architectural change is tracked in
+the project TODO, separate from the audit fix.
 
 ## Long-running soak (2026-11-01)
 
