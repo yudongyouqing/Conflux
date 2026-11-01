@@ -1,18 +1,22 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openDb, stopWalCheckpoint } from "../core/db.js";
-import { registerSession } from "../core/sessions.js";
-import { startHttpServer } from "../http/server.js";
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Another process holding the SQLite write lock must degrade the HTTP API
 // gracefully: the write fails once (503 DATA_LOCKED after one busy
 // timeout), health stays answerable, and everything recovers after the
 // release. The error-audit write must not wait on the same lock a second
 // time — that used to double the user-visible stall.
+//
+// The audit-skip is asserted through the server log, not wall time: CI
+// runners oversleep sqlite's incremental busy callback (one observed macOS
+// run took 18.6 s for a single 10 s timeout), so elapsed time is only a
+// loose guard while the log line proves which code path ran.
 //
 // Coverage boundary: the health probes here run while only the lock is
 // held, i.e. with no contended request in flight. They do NOT prove that
@@ -26,6 +30,13 @@ const BUSY_TIMEOUT_MS = 10000;
 test("lock held: health answers with no write in flight; write 503s after one timeout, then recovers", { timeout: 60000 }, async (t) => {
   const dataDir = mkdtempSync(join(tmpdir(), "muiltchat-http-lock-"));
   const dbPath = join(dataDir, "data.db");
+  const logFile = join(dataDir, "server.log");
+  // Must be set before the first server module import so the shared pino
+  // destination points at the readable file.
+  process.env.CONFLUX_LOG_FILE = logFile;
+  const { openDb, stopWalCheckpoint } = await import("../core/db.js");
+  const { registerSession } = await import("../core/sessions.js");
+  const { startHttpServer } = await import("../http/server.js");
 
   const seedDb = openDb({ dataDir, dbPath, scope: "global" });
   registerSession(seedDb, { id: "s1", name: "one" });
@@ -79,16 +90,27 @@ test("lock held: health answers with no write in flight; write 503s after one ti
   const writeElapsed = performance.now() - writeStart;
   assert.equal(blocked.statusCode, 503);
   assert.equal(blocked.json().code, "DATA_LOCKED");
-  // One busy timeout, not two: the error-audit write must not queue behind
-  // the same lock for another full window.
+  // Loose guards only: the real busy timeout must elapse, and a pathological
+  // third wait would exceed this. The path discrimination lives in the log.
   assert.ok(
     writeElapsed >= BUSY_TIMEOUT_MS - 1000,
     `reply arrived after ${writeElapsed.toFixed(0)} ms — the real busy timeout must elapse`,
   );
   assert.ok(
-    writeElapsed < BUSY_TIMEOUT_MS + 5000,
-    `reply took ${writeElapsed.toFixed(0)} ms — the error path waited on the lock a second time`,
+    writeElapsed < 3 * BUSY_TIMEOUT_MS,
+    `reply took ${writeElapsed.toFixed(0)} ms — far beyond even an overslept single timeout`,
   );
+
+  // The decisive assertion: the lock-error reply skipped its audit write
+  // instead of queueing behind the same lock for another timeout.
+  await sleep(300);
+  const logText = readFileSync(logFile, "utf8");
+  assert.match(
+    logText,
+    /skipping error audit while the database is locked/,
+    "lock-error replies must skip the synchronous audit write",
+  );
+  assert.doesNotMatch(logText, /failed to audit HTTP error/);
 
   // The failed contended write leaves no row; recovery works after release.
   locker.exec("ROLLBACK");
