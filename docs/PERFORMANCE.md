@@ -325,6 +325,13 @@ covered by the `http-lock-contention` server test. These are single-machine
 observations on loopback with synchronous better-sqlite3 — not pass/fail
 limits and not capacity claims.
 
+Coverage boundary for `/healthz`: it stays answerable while the lock is
+held with no contended request in flight. During the synchronous busy-wait
+of a blocked write the single-threaded event loop cannot answer anything —
+including `/healthz` — until the wait ends. Concurrent responsiveness under
+an active lock wait is not claimed here and would require moving database
+work off the event loop first; it is tracked in the project TODO.
+
 ## Long-running soak (2026-11-01)
 
 ```sh

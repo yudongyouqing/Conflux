@@ -13,9 +13,17 @@ import { startHttpServer } from "../http/server.js";
 // timeout), health stays answerable, and everything recovers after the
 // release. The error-audit write must not wait on the same lock a second
 // time — that used to double the user-visible stall.
+//
+// Coverage boundary: the health probes here run while only the lock is
+// held, i.e. with no contended request in flight. They do NOT prove that
+// /healthz answers during the ~10 s synchronous busy-wait of a blocked
+// write: better-sqlite3 waits synchronously, so the single-threaded event
+// loop cannot serve anything until the wait ends. Concurrent
+// responsiveness under an active lock wait would require moving database
+// work off the event loop and is tracked as a separate follow-up.
 const BUSY_TIMEOUT_MS = 10000;
 
-test("lock conflict: health answers, write 503s after one timeout, then recovers", { timeout: 60000 }, async (t) => {
+test("lock held: health answers with no write in flight; write 503s after one timeout, then recovers", { timeout: 60000 }, async (t) => {
   const dataDir = mkdtempSync(join(tmpdir(), "muiltchat-http-lock-"));
   const dbPath = join(dataDir, "data.db");
 
