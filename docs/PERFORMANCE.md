@@ -333,24 +333,39 @@ second over IPC: worker RSS/heap/external, cumulative CPU, database/WAL/shm
 bytes, page counts, row counts and coordinator active handles, all stored as
 a time series. A **fixed phase** (reads only) precedes a **write phase** with
 paced `POST /context` writes, separating steady-state read memory from
-growth caused by inserted data. CI runs the short smoke only; long runs are
+growth caused by inserted data. The write pacer runs on its own loop (one
+interval after each completion) so slow sampling cannot starve the load; the
+sampler sleeps until the next due tick instead of polling (`idleWakeups`
+counts wakes that found nothing due); and a run whose acknowledged writes
+fall below half the ideal cadence fails integrity — a write phase that wrote
+nothing cannot pass. CI runs the short smoke only; long runs are
 intentionally local and never become CI gates.
 
-The recorded 30-minute run
-([report](performance/2026-11-01-soak.json), same host and clean source
-`d0f3ee4` as the contention run above) used a 5-minute fixed phase and a
-25-minute write phase (one write every 250 ms, sampled every 1 s):
+The recorded 30-minute run on the fixed harness
+([v2 report](performance/2026-11-01-soak-v2.json), same host and clean
+source `565cc98`) used a 5-minute fixed phase and a 25-minute write phase
+(250 ms pacing, 1 s sampling):
 
 | Observation | Value |
 | --- | --- |
 | Reads | 300 fixed + 1,500 write-phase reads, all succeeded, 0 unexpected errors |
-| Writes | 6,000 attempted / 6,000 acknowledged / 0 lock errors / 0 unexpected errors |
-| Integrity | contexts 50 → 6,050 rows, exactly the 6,000 unique acknowledged ids; FTS marker sampling verified |
-| Worker RSS | first 98.6 MB, last 93.9 MB, min 78.4 MB, max 101.3 MB — ended below its start after the full run |
-| Worker heapUsed | 28.9 MB → 24.9 MB (min 19.3, max 29.7) — GC sawtooth, no monotone trend |
-| Worker external | +0.18 MB over 30 minutes |
-| Coordinator RSS | +10.1 MB — the harness itself accumulates 6,000 acknowledged ids and 1,800 samples; expected data growth, not a server observation |
-| Database / WAL | database +3.1 MB (6,000 contexts + 6,450 audit rows); WAL sawtooth bounded at 4.2 MB by `wal_autocheckpoint` |
+| Writes | 5,691 attempted / 5,691 acknowledged / 0 lock errors / 0 unexpected errors (completion pacing lands slightly under the 6,000 ideal) |
+| Integrity | contexts 50 → 5,741 rows, exactly the 5,691 unique acknowledged ids; minimum-writes gate 3,000 met; FTS marker sampling verified |
+| Worker RSS | first 91.0 MB, last 85.5 MB, min 71.5 MB, max 93.4 MB — ended below its start after the full run |
+| Worker heapUsed | 27.6 MB → 22.6 MB (max 28.6) — GC sawtooth, no monotone trend |
+| Worker external | +0.1 MB over 30 minutes |
+| Worker CPU | ≈0.27 core-minutes total across the 30 minutes |
+| Coordinator RSS | +8.8 MB — the harness itself accumulates acknowledged ids and samples; expected data growth, not a server observation |
+| Scheduler | idleWakeups 302 fixed / 1,507 write — ≈1 per sample, no clock polling |
+| Database / WAL | database +2.9 MB (5,691 contexts + 6,141 audit rows); WAL sawtooth bounded at 4.0 MB by `wal_autocheckpoint` |
+
+The first 30-minute run
+([v1 report](performance/2026-11-01-soak.json), source `d0f3ee4`) is kept as
+historical evidence: its harness polled the clock through the fixed phase
+(`sleep(0)` loops) and could starve writes under slow sampling, so its
+coordinator-side CPU is not comparable; its write cadence still hit the
+6,000-write ideal (6,000/6,000 acknowledged) and its server-side series match
+the v2 observations.
 
 A single 30-minute run on one machine cannot prove the absence of a leak, and
 a high-water RSS mark cannot prove one; the RSS/heap declines above are
