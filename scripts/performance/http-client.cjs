@@ -1,6 +1,6 @@
 const http = require("node:http");
 
-function requestJson(url, { agent, body, timeoutMs = 10000 } = {}) {
+function requestJson(url, { agent, body, timeoutMs = 10000, acceptStatus } = {}) {
   return new Promise((resolve, reject) => {
     const payload = body === undefined ? undefined : JSON.stringify(body);
     const controller = new AbortController();
@@ -33,8 +33,17 @@ function requestJson(url, { agent, body, timeoutMs = 10000 } = {}) {
         response.on("end", () => {
           clearTimeout(timer);
           try {
-            if (response.statusCode !== 200) throw Error(`HTTP ${response.statusCode}`);
-            resolve({ json: JSON.parse(Buffer.concat(chunks).toString("utf8")), bytes });
+            // Observing expected error replies (e.g. 503 DATA_LOCKED under
+            // contention) needs the body, so those statuses resolve instead
+            // of throwing like every other non-200 response.
+            const accepted =
+              Array.isArray(acceptStatus) && acceptStatus.includes(response.statusCode);
+            if (response.statusCode !== 200 && !accepted) throw Error(`HTTP ${response.statusCode}`);
+            resolve({
+              json: JSON.parse(Buffer.concat(chunks).toString("utf8")),
+              bytes,
+              statusCode: response.statusCode,
+            });
           } catch (error) {
             reject(error);
           }
