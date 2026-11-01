@@ -50,6 +50,8 @@ export interface RuntimeInstance {
   updated_at: string;
   ended_at: string | null;
   resumed_from: string | null;
+  /** Set when a stop was requested but the process exit is not yet verified. */
+  stop_requested_at: string | null;
   can_stop: boolean;
   can_resume: boolean;
   limitation: string | null;

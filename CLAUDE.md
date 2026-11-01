@@ -24,6 +24,7 @@ Agent 协作规矩：
 npm run dev:desktop        # Electron 开发模式（唯一推荐入口，自动起 server+vite）
 npm run dev:all            # 同 dev:desktop（别名）；纯浏览器栈用 dev:web-stack
 npm test -w apps/server    # server 回归测试（core 层）
+npm run test:process-e2e -w apps/server  # 运行实例真实子进程 E2E（串行执行，勿与并行套件同时跑）
 node --test apps/desktop/test/dev-services.test.cjs apps/desktop/test/runtime-config.test.cjs apps/desktop/test/security.test.cjs
 npm run build              # shared → server → web 全量构建
 npm run lint               # eslint（server/web/shared 源码）
