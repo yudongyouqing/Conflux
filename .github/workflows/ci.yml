@@ -2,9 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main, dev, "feat/**", "feature/**", "refactor/**", "fix/**", "docs/**"]
-  pull_request:
     branches: [main, dev]
+  # Any PR base: stacked PRs target feature branches, and test/chore/ci
+  # branch pushes would otherwise never run checks at all.
+  pull_request:
 
 jobs:
   server-tests:
