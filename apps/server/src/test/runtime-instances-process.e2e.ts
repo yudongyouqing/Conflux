@@ -283,7 +283,8 @@ test("real subprocess binds by pid and creation identity, then stops with verifi
   // Wait for the child handle to reap the exit before asserting OS-level
   // absence — a just-exited child is briefly a zombie that still answers
   // kill(pid, 0), which races the verification above on slow runners.
-  await once(bound.child, "exit");
+  if (bound.child.exitCode === null && bound.child.signalCode === null)
+    await once(bound.child, "exit");
   assert.throws(() => process.kill(bound.pid, 0), { code: "ESRCH" }, "process must really be gone");
 });
 
@@ -469,7 +470,8 @@ test("resume spawns a new real instance with original conversation identity; dup
 
   // Stopping the resumed instance ends its session too.
   await stopForReal(db, resumed.id);
-  await (resumedChild ? once(resumedChild, "exit") : Promise.resolve());
+  if (resumedChild && resumedChild.exitCode === null && resumedChild.signalCode === null)
+    await once(resumedChild, "exit");
   assert.throws(() => process.kill(newReport.pid, 0), { code: "ESRCH" });
 });
 
