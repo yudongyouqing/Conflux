@@ -255,7 +255,13 @@ async function runContention({ config, directory, output } = {}) {
       const auditedReadWaitMs = performance.now() - auditedReadStartedAt;
       const victimAfter = await rpc(writer, { command: "victim-read", marker });
       expectedContextRows += 3;
-      const visibleAfterCommit = victimAfter.rows === 3 && entries.length === 3;
+      // The audited read's DATA reflects whichever side of the commit its
+      // queryContext snapshot landed on — with fast IPC the commit can beat
+      // the read, with fast TCP the read can win; both orders are correct
+      // WAL behavior. What the lock gates deterministically is the audit
+      // WRITE, so the post-commit visibility is asserted through the
+      // second connection read after the release acknowledgement.
+      const visibleAfterCommit = victimAfter.rows === 3 && (entries.length === 0 || entries.length === 3);
       report.scenarios.push({
         name: "read-during-uncommitted-write",
         status: isolationConfirmed && visibleAfterCommit ? "passed" : "failed",
@@ -263,7 +269,8 @@ async function runContention({ config, directory, output } = {}) {
         isolationConfirmed,
         visibleAfterCommit,
         uncommittedVisibleRows: during.rows,
-        committedRows: entries.length,
+        committedRows: victimAfter.rows,
+        auditedReadRows: entries.length,
         auditedReadWaitMs,
       });
       assert.equal(isolationConfirmed, true, "uncommitted rows leaked to WAL readers");
