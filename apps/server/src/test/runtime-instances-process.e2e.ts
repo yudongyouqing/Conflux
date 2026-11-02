@@ -79,7 +79,16 @@ function stopForReal(db: ReturnType<typeof makeDb>["db"], instanceId: string) {
       } catch (error) {
         const message = (error as Error).message;
         if (/process identity changed|无法验证进程身份/.test(message)) return null;
-        throw error;
+        // Enrich refusals with the observed state so CI failures pinpoint
+        // which guard fired instead of only the conflict message.
+        const current = getRuntimeInstance(db, instanceId);
+        const inspected = current?.runtime_pid
+          ? inspectRuntimeProcess(current.runtime_pid)
+          : null;
+        throw new Error(
+          `stop refused: ${message} | state=${current?.state} limitation=${current?.limitation} ` +
+            `pid=${current?.runtime_pid} inspect=${JSON.stringify(inspected)}`,
+        );
       }
     },
     (v) => v !== null && v.state === "ended",
@@ -100,9 +109,13 @@ class ShimHost {
   private readonly children = new Set<ChildProcess>();
 
   constructor(root: string) {
-    // Spaces, non-ASCII and shell metacharacters on purpose: the command
-    // line the inspector sees must survive them.
-    this.dir = join(root, "rt é (x) + 工");
+    // Non-ASCII and shell metacharacters on purpose: the command line the
+    // inspector sees must survive them. Spaces are included only where the
+    // platform can express argv boundaries — Windows CommandLine keeps
+    // quotes, Linux /proc/cmdline is NUL-separated (and re-quoted by the
+    // inspector); macOS `ps` joins argv with single spaces, so a spaced
+    // path is unidentifiable there by design and the name stays space-free.
+    this.dir = join(root, process.platform === "darwin" ? "rt-é-(x)+工" : "rt é (x) + 工");
     mkdirSync(this.dir, { recursive: true });
     for (const name of ["claude", "codex"]) {
       copyFileSync(shimSource, join(this.dir, name));
