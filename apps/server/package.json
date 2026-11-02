@@ -18,7 +18,8 @@
     "mcp": "tsx src/index.ts mcp",
     "serve": "tsx src/index.ts serve",
     "test": "node --import tsx --test \"src/test/*.test.ts\"",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "test:process-e2e": "node --import tsx --test \"src/test/*.e2e.ts\""
   },
   "engines": {
     "node": ">=18"

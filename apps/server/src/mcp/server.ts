@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import type { RuntimeId } from "@conflux/shared";
 
 import { resolveConfig, type Scope } from "../config.js";
-import { openDb, type DB } from "../core/db.js";
+import { isLockError, openDb, publicError, type DB } from "../core/db.js";
 import {
   registerSession,
   listSessions,
@@ -304,9 +304,14 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
     fn: () => T | Promise<T>,
   ): Promise<{ ok: true; result: T } | { ok: false; error: string }> {
     tryAdopt(); // pick up /resume id changes instantly, not on the next 30s beat
-    touchLease();
     try {
       const result = await fn();
+      // The lease touch is a synchronous write; doing it BEFORE the body
+      // would queue a full busy_timeout ahead of a tool that is about to
+      // fail on a held lock, doubling the stall. Touch only after the
+      // body succeeded — a failed call does not extend the lease; the
+      // next successful call or the 30s beat refreshes it.
+      touchLease();
       logAudit(db, {
         caller_session: sessionId,
         interface: "mcp",
@@ -316,6 +321,16 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
       });
       return { ok: true, result };
     } catch (err) {
+      // A lock error means another process still holds the write lock.
+      // Auditing it synchronously would busy-wait on that same lock for a
+      // second full busy_timeout, and the audit INSERT's own SQLITE_BUSY
+      // would escape this catch as a raw error — so skip the audit row
+      // (the pino log is the record) and return the mapped, readable
+      // message instead of leaking "database is locked" to the model.
+      if (isLockError(err)) {
+        logger.warn({ action, session: sessionId }, "skipping error audit while the database is locked");
+        return { ok: false, error: publicError(err).message };
+      }
       const message = err instanceof Error ? err.message : String(err);
       logAudit(db, {
         caller_session: sessionId,
