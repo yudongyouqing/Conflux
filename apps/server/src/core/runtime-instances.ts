@@ -468,10 +468,14 @@ export function inspectRuntimeProcess(pid: number): ProcessIdentity | "exited" |
         .map((arg) => (/\s/.test(arg) ? `"${arg}"` : arg))
         .join(" ");
     } else {
-      token = execFileSync("ps", ["-p", String(pid), "-o", "lstart="], {
+      // lstart has one-second granularity: two processes spawned in the
+      // same second (or a reused pid landing in the same second) would
+      // otherwise share a token, defeating reuse detection — scope the
+      // token to the pid so a different process can never match it.
+      token = `${pid}:${execFileSync("ps", ["-p", String(pid), "-o", "lstart="], {
         encoding: "utf8",
         timeout: 3000,
-      }).trim();
+      }).trim()}`;
       command = execFileSync("ps", ["-p", String(pid), "-o", "command="], {
         encoding: "utf8",
         timeout: 3000,
