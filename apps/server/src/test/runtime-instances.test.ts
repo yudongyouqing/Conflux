@@ -15,7 +15,10 @@ import { registerSession, endSession, mergeSessionMeta, getSession } from "../co
 import { askSession, getMessage } from "../core/messages.js";
 import { pushMailTyped } from "../core/mail-push.js";
 import {
+  type MacosProcessFields,
   macosProcessToken,
+  parseMacosPs,
+  processTokenMatches,
   createRuntimeInstance,
   bindRuntimeInstance,
   getRuntimeInstance,
@@ -240,30 +243,72 @@ test("stop requires instance ownership, current session PID and unchanged proces
   }
 });
 
-test("macOS token binds command line and parent, shrinking same-second reuse collisions", () => {
-  // lstart is second-granular; the token also binds the parent pid and a
-  // digest of the full command line so a same-second reused pid mismatches
-  // unless it ALSO shares the parent and the byte-identical command line —
-  // the documented residual window this cannot close.
-  const base = macosProcessToken(123, "Mon Nov  2 03:25:13 2026", "45", "node /opt/claude --resume x");
-  assert.equal(
-    macosProcessToken(123, "Mon Nov  2 03:25:13 2026", "45", "node /opt/claude --resume x"),
-    base,
+test("macOS generation token: same-second PID reuse is refused below the CPU floor", () => {
+  // Deterministic same-PID/same-second scenario: a reused pid that lands
+  // in the SAME lstart second with the SAME parent, pgid, session and
+  // byte-identical argv is still refused while its accumulated CPU time
+  // is below the floor the original process established at bind — the
+  // deployable generation signal. The residual window (identical static
+  // fields AND already MORE CPU than the original had at bind) remains
+  // open and documented; this test does not claim it closed.
+  const fields = (cpuCentis: number): MacosProcessFields => ({
+    lstart: "Mon Nov  2 03:25:13 2026",
+    ppid: "45",
+    pgid: "44",
+    sess: "44",
+    cpuCentis,
+    command: "node /opt/claude --resume x",
+  });
+  const bound = macosProcessToken(123, fields(250));
+  assert.ok(processTokenMatches(bound, macosProcessToken(123, fields(250))), "same observation matches");
+  assert.ok(processTokenMatches(bound, macosProcessToken(123, fields(900))), "more accumulated CPU matches (same process ran on)");
+  assert.ok(
+    !processTokenMatches(bound, macosProcessToken(123, fields(12))),
+    "a same-second reused pid with less accumulated CPU than the bind floor must be refused",
   );
-  assert.notEqual(
-    macosProcessToken(123, "Mon Nov  2 03:25:13 2026", "45", "node /opt/codex"),
-    base,
-    "a reused pid running a different command must not match",
+  assert.ok(
+    !processTokenMatches(bound, macosProcessToken(123, { ...fields(900), command: "node /opt/codex" })),
+    "different argv must not match",
   );
-  assert.notEqual(
-    macosProcessToken(123, "Mon Nov  2 03:25:13 2026", "46", "node /opt/claude --resume x"),
-    base,
-    "a reused pid under a different parent must not match",
+  assert.ok(
+    !processTokenMatches(bound, macosProcessToken(123, { ...fields(900), ppid: "46" })),
+    "different parent must not match",
   );
-  assert.notEqual(
-    macosProcessToken(123, "Mon Nov  2 03:25:14 2026", "45", "node /opt/claude --resume x"),
-    base,
+  assert.ok(
+    !processTokenMatches(bound, macosProcessToken(123, { ...fields(900), pgid: "99" })),
+    "different process group must not match",
+  );
+  assert.ok(
+    !processTokenMatches(bound, macosProcessToken(123, { ...fields(900), sess: "98" })),
+    "different session must not match",
+  );
+  assert.ok(
+    !processTokenMatches(bound, macosProcessToken(123, { ...fields(900), lstart: "Mon Nov  2 03:25:14 2026" })),
     "a later start second must not match",
+  );
+  // Non-macOS tokens (no floor segment) compare by plain equality.
+  assert.ok(processTokenMatches("boot-id:12345", "boot-id:12345"));
+  assert.ok(!processTokenMatches("boot-id:12345", "boot-id:12346"));
+  assert.ok(!processTokenMatches("macos:1:a:2:3:4:deadbeef:cpu>=10", "boot-id:12345"));
+});
+
+test("macOS ps parsing: a record with any missing identity field is unverifiable", () => {
+  const full =
+    "Mon Nov  2 03:25:13 2026           45      44      44       0:04.15 node /opt/claude --resume x";
+  const parsed = parseMacosPs(full);
+  assert.ok(parsed, "a complete record parses");
+  assert.equal(parsed.ppid, "45");
+  assert.equal(parsed.pgid, "44");
+  assert.equal(parsed.sess, "44");
+  assert.equal(parsed.cpuCentis, 415); // "0:04.15" = 4.15 s = 415 centiseconds
+  assert.equal(parsed.command, "node /opt/claude --resume x");
+  // Missing command (empty after fields) or a broken cputime makes the
+  // identity unverifiable — the inspector returns null and stop/resume
+  // refuse rather than guess.
+  assert.equal(parseMacosPs("Mon Nov  2 03:25:13 2026           45      44      44       0:04.15"), null);
+  assert.equal(
+    parseMacosPs("Mon Nov  2 03:25:13 2026           45      44      44       xx:yy node"),
+    null,
   );
 });
 
