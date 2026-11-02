@@ -479,15 +479,18 @@ export function inspectRuntimeProcess(pid: number): ProcessIdentity | "exited" |
       // limitation, not something this token claims to close. Windows CIM
       // (sub-second CreationDate) and Linux /proc (clock-tick starttime)
       // both provide true creation identity.
-      const lstart = execFileSync("ps", ["-p", String(pid), "-o", "lstart="], {
+      // -ww: ps truncates command output to the terminal width without
+      // it, and a truncated command line changes the token digest between
+      // observations of the SAME process — identity must be stable.
+      const lstart = execFileSync("ps", ["-ww", "-p", String(pid), "-o", "lstart="], {
         encoding: "utf8",
         timeout: 3000,
       }).trim();
-      const ppid = execFileSync("ps", ["-p", String(pid), "-o", "ppid="], {
+      const ppid = execFileSync("ps", ["-ww", "-p", String(pid), "-o", "ppid="], {
         encoding: "utf8",
         timeout: 3000,
       }).trim();
-      command = execFileSync("ps", ["-p", String(pid), "-o", "command="], {
+      command = execFileSync("ps", ["-ww", "-p", String(pid), "-o", "command="], {
         encoding: "utf8",
         timeout: 3000,
       }).trim();

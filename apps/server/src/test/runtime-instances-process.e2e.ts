@@ -280,6 +280,10 @@ test("real subprocess binds by pid and creation identity, then stops with verifi
   }
 
   await stopForReal(db, bound.instanceId);
+  // Wait for the child handle to reap the exit before asserting OS-level
+  // absence — a just-exited child is briefly a zombie that still answers
+  // kill(pid, 0), which races the verification above on slow runners.
+  await once(bound.child, "exit");
   assert.throws(() => process.kill(bound.pid, 0), { code: "ESRCH" }, "process must really be gone");
 });
 
@@ -436,10 +440,12 @@ test("resume spawns a new real instance with original conversation identity; dup
   // production inspector can later verify; env carries the instance id,
   // the data dir and the original conversation id.
   const newReportFile = join(shims.dir, "report-resumed.json");
+  let resumedChild: ChildProcess | undefined;
+
   const { instance: resumed } = resumeRuntimeInstance(db, first.instanceId, {
     platform: "win32",
     launch: (_settings, spec) => {
-      shims.spawnRuntime("claude", newReportFile, { env: spec.env });
+      resumedChild = shims.spawnRuntime("claude", newReportFile, { env: spec.env });
     },
   });
   assert.notEqual(resumed.id, first.instanceId);
@@ -463,6 +469,7 @@ test("resume spawns a new real instance with original conversation identity; dup
 
   // Stopping the resumed instance ends its session too.
   await stopForReal(db, resumed.id);
+  await (resumedChild ? once(resumedChild, "exit") : Promise.resolve());
   assert.throws(() => process.kill(newReport.pid, 0), { code: "ESRCH" });
 });
 
