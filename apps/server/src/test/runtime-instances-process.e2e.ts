@@ -490,20 +490,16 @@ test("delayed SIGTERM keeps stop control until absence is verified", { timeout: 
   // The second signal goes through the test's own channel (signal
   // delivery timing on CI runners is not deterministic); the completion
   // branch of a second stopRuntimeInstance call is covered by the injected
-  // unit regression. Here the refresh path must verify the exit.
-  if (process.platform === "darwin") {
-    // Observed on the macOS runner: two delivered SIGTERMs later the shim
-    // kept running, so the exit verification is not reliably observable
-    // there. Linux verifies this end of the flow; the completion branch is
-    // unit-covered. Recorded rather than burned down further.
-    t.diagnostic("skipping delayed-exit verification on darwin (runner signal behavior)");
-    return;
-  }
+  // unit regression. Here the refresh path must verify the exit; the shim
+  // guarantees it within 5 s of the first signal even if a second one is
+  // missed under runner load.
   bound.child.kill();
   const finished = await eventually(
     () => listRuntimeInstances(db).find((i) => i.id === bound.instanceId)!,
     (v) => v.state === "ended",
     "refresh never verified the delayed exit",
+    20,
+    750,
   );
   assert.equal(finished.state, "ended");
   assert.throws(() => process.kill(bound.pid, 0), { code: "ESRCH" });
