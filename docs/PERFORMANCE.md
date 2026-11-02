@@ -159,6 +159,39 @@ can contribute to the difference. Zoom improvements are observations, not a
 claimed direct effect of layout changes. Trees were not optimized; React/DOM
 work still creates long tasks and remains a separate optimization target.
 
+## Dense mesh baseline (2026-11-02)
+
+Both benchmarks gained a `dense` topology: every node talks to peers
+`i+1, i+2, i+5` (mod n) — a deterministic mesh with ~3× as many edges as
+nodes, the shape a busy multi-agent workspace produces (unlike the previous
+chain/tree/disconnected fixtures, which never exceed n−1 edges).
+
+Node layout medians on the recorded Windows host (source `236dae9`, same
+methodology as the initial baseline):
+
+| Nodes | Edges | Median (ms) | Max (ms) |
+| ---: | ---: | ---: | ---: |
+| 25 | 75 | 93.62 | 100.96 |
+| 100 | 300 | 455.53 | 476.59 |
+| 300 | 900 | 1543.36 | 1581.03 |
+
+Browser run (Chromium 156.0.8078.4, five measured navigations per case; raw
+data: [the 2026-11-02 report](performance/2026-11-02-browser.json)):
+
+| Topology | Nodes | Edges | Ready median (ms) | Zoom median (ms) | Long-task max (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| dense | 25 | 75 | 280.5 | 27.7 | 94.0 |
+| dense | 100 | 300 | 649.2 | 34.5 | 373.0 |
+| dense | 300 | 900 | 1583.2 | 40.2 | 1119.0 |
+
+Observation: dense meshes are an order of magnitude more expensive than
+trees of the same node count (layout ≈1.5 s at 300 nodes/900 edges; browser
+main-thread long tasks above 1.1 s). The long-directed-path optimization
+only recognizes chains — full Dagre runs dominate here, making dense meshes
+the clearest next optimization target. As with every section here: one
+machine, one run, no thresholds — CI records the same fixtures as
+observations only.
+
 ## Server HTTP and SQLite baseline (2026-10-30)
 
 Run from the repository root:
