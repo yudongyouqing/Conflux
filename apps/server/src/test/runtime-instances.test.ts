@@ -15,6 +15,7 @@ import { registerSession, endSession, mergeSessionMeta, getSession } from "../co
 import { askSession, getMessage } from "../core/messages.js";
 import { pushMailTyped } from "../core/mail-push.js";
 import {
+  macosProcessToken,
   createRuntimeInstance,
   bindRuntimeInstance,
   getRuntimeInstance,
@@ -237,6 +238,33 @@ test("stop requires instance ownership, current session PID and unchanged proces
   } finally {
     cleanup();
   }
+});
+
+test("macOS token binds command line and parent, shrinking same-second reuse collisions", () => {
+  // lstart is second-granular; the token also binds the parent pid and a
+  // digest of the full command line so a same-second reused pid mismatches
+  // unless it ALSO shares the parent and the byte-identical command line —
+  // the documented residual window this cannot close.
+  const base = macosProcessToken(123, "Mon Nov  2 03:25:13 2026", "45", "node /opt/claude --resume x");
+  assert.equal(
+    macosProcessToken(123, "Mon Nov  2 03:25:13 2026", "45", "node /opt/claude --resume x"),
+    base,
+  );
+  assert.notEqual(
+    macosProcessToken(123, "Mon Nov  2 03:25:13 2026", "45", "node /opt/codex"),
+    base,
+    "a reused pid running a different command must not match",
+  );
+  assert.notEqual(
+    macosProcessToken(123, "Mon Nov  2 03:25:13 2026", "46", "node /opt/claude --resume x"),
+    base,
+    "a reused pid under a different parent must not match",
+  );
+  assert.notEqual(
+    macosProcessToken(123, "Mon Nov  2 03:25:14 2026", "45", "node /opt/claude --resume x"),
+    base,
+    "a later start second must not match",
+  );
 });
 
 test("a requested stop completes once the exit is verifiable, without re-terminating", () => {
