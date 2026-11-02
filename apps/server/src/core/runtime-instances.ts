@@ -468,18 +468,33 @@ export function inspectRuntimeProcess(pid: number): ProcessIdentity | "exited" |
         .map((arg) => (/\s/.test(arg) ? `"${arg}"` : arg))
         .join(" ");
     } else {
-      // lstart has one-second granularity: two processes spawned in the
-      // same second (or a reused pid landing in the same second) would
-      // otherwise share a token, defeating reuse detection — scope the
-      // token to the pid so a different process can never match it.
-      token = `${pid}:${execFileSync("ps", ["-p", String(pid), "-o", "lstart="], {
-        encoding: "utf8",
-        timeout: 3000,
-      }).trim()}`;
-      command = execFileSync("ps", ["-p", String(pid), "-o", "command="], {
+      // macOS has no /proc, and ps exposes no sub-second creation stamp:
+      // lstart is one-second granular, so a REUSED pid landing in the same
+      // start second could still match. There is no more precise identity
+      // source reachable without native bindings, so the token binds every
+      // independently observable dimension — pid, lstart, parent pid and a
+      // digest of the full command line. Same-second reuse now slips
+      // through only when the new process ALSO has the same parent and a
+      // byte-identical command line; that residual window is a documented
+      // limitation, not something this token claims to close. Windows CIM
+      // (sub-second CreationDate) and Linux /proc (clock-tick starttime)
+      // both provide true creation identity.
+      // -ww: ps truncates command output to the terminal width without
+      // it, and a truncated command line changes the token digest between
+      // observations of the SAME process — identity must be stable.
+      const lstart = execFileSync("ps", ["-ww", "-p", String(pid), "-o", "lstart="], {
         encoding: "utf8",
         timeout: 3000,
       }).trim();
+      const ppid = execFileSync("ps", ["-ww", "-p", String(pid), "-o", "ppid="], {
+        encoding: "utf8",
+        timeout: 3000,
+      }).trim();
+      command = execFileSync("ps", ["-ww", "-p", String(pid), "-o", "command="], {
+        encoding: "utf8",
+        timeout: 3000,
+      }).trim();
+      token = macosProcessToken(pid, lstart, ppid, command);
     }
     if (!token || !command) return null;
     return runtimeIdentity(token, command);
@@ -498,6 +513,22 @@ export function inspectRuntimeProcess(pid: number): ProcessIdentity | "exited" |
     }
     return null;
   }
+}
+
+/**
+ * macOS process token: pid + lstart (second granularity) + parent pid + a
+ * digest of the full command line. Exported for regression coverage of the
+ * reuse-collision properties; see the inspector's macOS branch for the
+ * precision boundary this documents.
+ */
+export function macosProcessToken(
+  pid: number,
+  lstart: string,
+  ppid: string,
+  command: string,
+): string {
+  const commandDigest = createHash("sha256").update(command).digest("hex").slice(0, 16);
+  return `${pid}:${lstart}:${ppid}:${commandDigest}`;
 }
 
 function runtimeIdentity(token: string, command: string): ProcessIdentity {

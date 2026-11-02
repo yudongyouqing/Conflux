@@ -280,6 +280,11 @@ test("real subprocess binds by pid and creation identity, then stops with verifi
   }
 
   await stopForReal(db, bound.instanceId);
+  // Wait for the child handle to reap the exit before asserting OS-level
+  // absence — a just-exited child is briefly a zombie that still answers
+  // kill(pid, 0), which races the verification above on slow runners.
+  if (bound.child.exitCode === null && bound.child.signalCode === null)
+    await once(bound.child, "exit");
   assert.throws(() => process.kill(bound.pid, 0), { code: "ESRCH" }, "process must really be gone");
 });
 
@@ -436,10 +441,12 @@ test("resume spawns a new real instance with original conversation identity; dup
   // production inspector can later verify; env carries the instance id,
   // the data dir and the original conversation id.
   const newReportFile = join(shims.dir, "report-resumed.json");
+  let resumedChild: ChildProcess | undefined;
+
   const { instance: resumed } = resumeRuntimeInstance(db, first.instanceId, {
     platform: "win32",
     launch: (_settings, spec) => {
-      shims.spawnRuntime("claude", newReportFile, { env: spec.env });
+      resumedChild = shims.spawnRuntime("claude", newReportFile, { env: spec.env });
     },
   });
   assert.notEqual(resumed.id, first.instanceId);
@@ -463,10 +470,12 @@ test("resume spawns a new real instance with original conversation identity; dup
 
   // Stopping the resumed instance ends its session too.
   await stopForReal(db, resumed.id);
+  if (resumedChild && resumedChild.exitCode === null && resumedChild.signalCode === null)
+    await once(resumedChild, "exit");
   assert.throws(() => process.kill(newReport.pid, 0), { code: "ESRCH" });
 });
 
-test("delayed SIGTERM keeps stop control until absence is verified", { timeout: 120000 }, async (t) => {
+test("an ignored first SIGTERM keeps the stop requested and controllable", { timeout: 120000 }, async (t) => {
   if (process.platform === "win32") return t.skip("taskkill /F is immediate on Windows");
   const { db, cleanup: cleanupDb } = makeDb();
   t.after(() => cleanupDb());
@@ -477,26 +486,43 @@ test("delayed SIGTERM keeps stop control until absence is verified", { timeout: 
   const bound = await bindShim(db, agent, shims, "sess-stubborn", { mode: "delayed-exit" });
   await bindForReal(db, bound.instanceId, "sess-stubborn", bound.pid);
 
-  // First SIGTERM is ignored by the shim: stop stays requested but not done.
+  // The first SIGTERM is ignored by the shim: the stop is requested but
+  // not verified, and control stays available while the process lives.
   const requested = stopRuntimeInstance(db, bound.instanceId);
   assert.equal(requested.state, "running");
   assert.ok(requested.stop_requested_at);
   assert.match(requested.limitation ?? "", /等待进程退出/);
-
-  // The second termination is honored and the exit is verified.
-  // Stop control stays available while the process lives.
   const stillControllable = getRuntimeInstance(db, bound.instanceId)!;
   assert.equal(stillControllable.can_stop, true);
-  // The second signal goes through the test's own channel (signal
-  // delivery timing on CI runners is not deterministic); the completion
-  // Exit verification: the shim's signal handling is proven correct on
-  // plain POSIX (reproduced in WSL: both signals received, second exits),
-  // but on the CI runners' containerized environments a node process with
-  // an installed SIGTERM handler was repeatedly observed receiving none of
-  // the delivered signals. The stop-completion branch this tail would
-  // exercise is deterministically covered by the injected unit regression,
-  // and plain-SIGTERM exits are verified end to end by the other scenarios.
-  t.diagnostic(
-    "delayed-exit verification tail skipped: CI runner handler-mode signal delivery is unreliable; see the unit regression and the stay-mode scenarios",
+});
+
+test("the second signal completes the stop through the refresh path", {
+  timeout: 120000,
+  // The shim signal handling itself is proven correct on plain POSIX
+  // (reproduced in WSL: both signals received, the second exits), but on
+  // CI runners a node process with an installed SIGTERM handler was
+  // repeatedly observed receiving none of the delivered signals, so the
+  // exit end of this scenario is NOT EXECUTED there. Runs on local POSIX.
+  skip: process.env.CI ? "CI runners do not deliver signals to handler-mode node children (observed repeatedly); the completion branch is unit-covered" : false,
+}, async (t) => {
+  const { db, cleanup: cleanupDb } = makeDb();
+  t.after(() => cleanupDb());
+  const shims = new ShimHost(dirname(db.name));
+  t.after(async () => assert.deepEqual(await shims.cleanup(), []));
+
+  const agent = createRuntimeAgent(db, { name: "stubborn2", runtime: "claude", workdir: shims.dir });
+  const bound = await bindShim(db, agent, shims, "sess-stubborn2", { mode: "delayed-exit" });
+  await bindForReal(db, bound.instanceId, "sess-stubborn2", bound.pid);
+  stopRuntimeInstance(db, bound.instanceId);
+
+  bound.child.kill();
+  const finished = await eventually(
+    () => listRuntimeInstances(db).find((i) => i.id === bound.instanceId)!,
+    (v) => v.state === "ended",
+    "refresh never verified the delayed exit",
+    20,
+    750,
   );
+  assert.equal(finished.state, "ended");
+  assert.throws(() => process.kill(bound.pid, 0), { code: "ESRCH" });
 });
