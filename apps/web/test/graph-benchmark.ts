@@ -2,7 +2,12 @@ import { performance } from "node:perf_hooks";
 import type { GraphEdge, GraphNode } from "@conflux/shared";
 import { buildActiveView } from "../src/graph-builders.ts";
 
-/** Deterministic dense mesh: every node talks to peers i+1, i+2, i+5 (mod n). */
+/**
+ * Deterministic FIXED-DEGREE MESH: every node talks to peers i+1, i+2, i+5
+ * (mod n), so edge count is always ~3n. One repeatable dense-ish shape for
+ * layout comparison — not a claim about arbitrary dense graphs or any real
+ * workspace's degree distribution.
+ */
 function denseEdges(count: number): GraphEdge[] {
   const edges: GraphEdge[] = [];
   const seen = new Set<string>();

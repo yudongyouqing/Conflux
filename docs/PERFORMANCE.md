@@ -161,10 +161,11 @@ work still creates long tasks and remains a separate optimization target.
 
 ## Dense mesh baseline (2026-11-02)
 
-Both benchmarks gained a `dense` topology: every node talks to peers
-`i+1, i+2, i+5` (mod n) — a deterministic mesh with ~3× as many edges as
-nodes, the shape a busy multi-agent workspace produces (unlike the previous
-chain/tree/disconnected fixtures, which never exceed n−1 edges).
+Both benchmarks gained a `dense` topology: a **fixed-degree mesh** where
+every node talks to peers `i+1, i+2, i+5` (mod n), giving ~3n edges
+(previous fixtures never exceed n−1). It is one repeatable dense-ish shape
+chosen for determinism — it does not represent arbitrary dense graphs, and
+no real workspace degree distribution is claimed.
 
 Node layout medians on the recorded Windows host (source `236dae9`, same
 methodology as the initial baseline):
@@ -184,13 +185,14 @@ data: [the 2026-11-02 report](performance/2026-11-02-browser.json)):
 | dense | 100 | 300 | 649.2 | 34.5 | 373.0 |
 | dense | 300 | 900 | 1583.2 | 40.2 | 1119.0 |
 
-Observation: dense meshes are an order of magnitude more expensive than
+Observation: this fixed-degree mesh costs an order of magnitude more than
 trees of the same node count (layout ≈1.5 s at 300 nodes/900 edges; browser
 main-thread long tasks above 1.1 s). The long-directed-path optimization
-only recognizes chains — full Dagre runs dominate here, making dense meshes
-the clearest next optimization target. As with every section here: one
-machine, one run, no thresholds — CI records the same fixtures as
-observations only.
+only recognizes chains — full Dagre runs dominate here, making denser
+graphs the clearest next optimization target. The numbers describe THIS
+fixture on one machine in one run, not dense graphs in general and not real
+business data; CI records the same fixtures as observations only, and no
+thresholds are derived from them.
 
 ## Server HTTP and SQLite baseline (2026-10-30)
 

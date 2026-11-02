@@ -48,7 +48,9 @@ const summary = (values) => {
 };
 try {
   browser = await chromium.launch({ headless: true });
-  // Deterministic dense mesh matching the node benchmark: peers i+1, i+2, i+5 (mod n).
+  // Deterministic fixed-degree mesh matching the node benchmark: peers
+  // i+1, i+2, i+5 (mod n) — one repeatable dense-ish shape, not a claim
+  // about arbitrary dense graphs or real degree distributions.
   const denseEdges = (count) => {
     const edges = [];
     let nextId = 1;
