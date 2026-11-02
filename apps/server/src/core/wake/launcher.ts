@@ -33,6 +33,20 @@ export interface LaunchRequest {
 export type LaunchResult = { ok: true; command: string } | { ok: false; error: string };
 
 /**
+ * Environment for a spawned wake run. The woken executor's MCP/CLI must
+ * land on the SAME database this server owns: without an explicit
+ * CONFLUX_HOME a server started with a custom --data-dir or CONFLUX_HOME
+ * would wake children that silently fall back to the default data
+ * directory — the room-task executor in that situation cannot see its
+ * task rows at all. Exported for the no-cross-database regression.
+ */
+export function wakeRunEnv(req: { dataDir?: string }, baseEnv: NodeJS.ProcessEnv = process.env) {
+  const env = cleanTerminalEnv(baseEnv);
+  if (req.dataDir) env.CONFLUX_HOME = req.dataDir;
+  return env;
+}
+
+/**
  * Shell for headless wake launches. Windows runs the command string through
  * cmd.exe; everywhere else it must be /bin/sh — `process.env.comspec ??
  * "cmd.exe"` unconditionally spawns a nonexistent cmd.exe on macOS/Linux
@@ -96,7 +110,7 @@ export function launchWakeRun(req: LaunchRequest): LaunchResult {
   //     looking up `codex-current:<pid>`. Spawn first, pin immediately
   //     (the npm/tsx MCP chain takes seconds to boot — the pin always lands
   //     before the first tryAdopt), and the wake run acts as the target.
-  const env = cleanTerminalEnv();
+  const env = wakeRunEnv(req);
   env.CONFLUX_ASSUME_SESSION = req.sessionId;
   // claude wakes (pinCodex === false) get an explicit MCP mount so the
   // headless run can always reach check_inbox/reply_ask — but only

@@ -8,7 +8,7 @@ import {
   heartbeat,
 } from "../../core/sessions.js";
 import { getTerminalSettings } from "../../core/app-settings.js";
-import { openInTerminal, resumeCommand } from "../../core/terminal.js";
+import { openInTerminal, resumeCommand, cleanTerminalEnv } from "../../core/terminal.js";
 import { logAudit } from "../../core/audit.js";
 import type { ServerContext } from "../context.js";
 
@@ -30,6 +30,10 @@ function uuidv4(): string {
 
 export function registerSessionRoutes(app: FastifyInstance, ctx: ServerContext): void {
   const { db, audit, sendError, sendHttpError } = ctx;
+  // The resumed terminal's hooks/MCP must register against THIS server's
+  // database; without the explicit home a custom data dir would be lost and
+  // the terminal session would silently land in the default database.
+  const terminalEnv = { ...cleanTerminalEnv(), CONFLUX_HOME: ctx.dataDir };
 
   // POST /sessions/register
   app.post<{ Body: RegisterBody }>(
@@ -116,6 +120,7 @@ export function registerSessionRoutes(app: FastifyInstance, ctx: ServerContext):
         command: resumeCommand(runtime, id, executable),
         cwd: session.project_dir ?? undefined,
         title: `Conflux · ${session.name}`,
+        env: terminalEnv,
       });
       heartbeat(db, id);
       logAudit(db, {

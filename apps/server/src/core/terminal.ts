@@ -46,6 +46,10 @@ export function cleanTerminalEnv(baseEnv: NodeJS.ProcessEnv = process.env): Node
     "SHELL",
     "USER",
     "TMPDIR",
+    // The data-directory override must survive terminal/wake spawning: a
+    // server started with a custom home has to pass it to its children or
+    // they silently land in the default database.
+    "CONFLUX_HOME",
     "XDG_CONFIG_HOME",
     "XDG_DATA_HOME",
     "XDG_CACHE_HOME",
