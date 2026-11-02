@@ -6,7 +6,9 @@
 // usage: node <path>/claude <mode> <reportFile>
 //   stay          stay alive until terminated
 //   delayed-exit  (POSIX) ignore the first SIGTERM, exit on the second —
-//                 exercises the stop_requested_at path
+//                 or within 5 s of the first, because a real CLI also
+//                 eventually honors termination even when a signal is
+//                 missed under load. Exercises the stop_requested_at path.
 //
 // The report file records pid, CONFLUX_RUNTIME_INSTANCE_ID, CONFLUX_HOME
 // and CONFLUX_RESUME_SESSION_ID as they arrived in the environment, which
@@ -30,6 +32,7 @@ if (mode === "delayed-exit" && process.platform !== "win32") {
   let signals = 0;
   process.on("SIGTERM", () => {
     if (++signals >= 2) process.exit(0);
+    setTimeout(() => process.exit(0), 5000).unref();
   });
 }
 

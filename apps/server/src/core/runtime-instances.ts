@@ -341,8 +341,25 @@ export function stopRuntimeInstance(
 ): RuntimeInstance {
   const row = rowFor(db, id);
   const current = toPublic(db, row, io);
-  if (!current.can_stop || !row.runtime_pid)
+  if (!current.can_stop || !row.runtime_pid) {
+    // A stop was requested earlier and the termination signal was sent;
+    // the follow-up inspection right after SIGTERM can lose the race with
+    // the process exit. When a later stop finds the process verifiably
+    // gone, complete the stop instead of refusing — the operator asked for
+    // exactly this outcome.
+    if (row.stop_requested_at && row.runtime_pid) {
+      const identity = (io.inspect ?? inspectRuntimeProcess)(row.runtime_pid);
+      const exited = identity === "exited" || (!!identity && identity.token !== row.process_token);
+      if (exited) {
+        db.prepare(
+          "UPDATE runtime_instances SET state = 'ended', ended_at = ?, updated_at = ? WHERE id = ?",
+        ).run(nowIso(), nowIso(), id);
+        if (row.session_id) endSession(db, row.session_id);
+        return toPublic(db, rowFor(db, id), io);
+      }
+    }
     conflict(current.limitation ?? "runtime instance cannot be stopped safely");
+  }
   // Probe again immediately before termination to catch a PID reused since listing.
   const identity = (io.inspect ?? inspectRuntimeProcess)(row.runtime_pid);
   if (
@@ -441,12 +458,24 @@ export function inspectRuntimeProcess(pid: number): ProcessIdentity | "exited" |
     } else if (process.platform === "linux") {
       const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
       token = `${readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim()}:${stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19]}`;
-      command = readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ");
+      // cmdline is NUL-separated: argv elements containing spaces would
+      // lose their boundaries (and their basename) under naive
+      // whitespace tokenization, so re-quote them the way the tokenizer
+      // below already understands.
+      command = readFileSync(`/proc/${pid}/cmdline`, "utf8")
+        .split("\0")
+        .filter(Boolean)
+        .map((arg) => (/\s/.test(arg) ? `"${arg}"` : arg))
+        .join(" ");
     } else {
-      token = execFileSync("ps", ["-p", String(pid), "-o", "lstart="], {
+      // lstart has one-second granularity: two processes spawned in the
+      // same second (or a reused pid landing in the same second) would
+      // otherwise share a token, defeating reuse detection — scope the
+      // token to the pid so a different process can never match it.
+      token = `${pid}:${execFileSync("ps", ["-p", String(pid), "-o", "lstart="], {
         encoding: "utf8",
         timeout: 3000,
-      }).trim();
+      }).trim()}`;
       command = execFileSync("ps", ["-p", String(pid), "-o", "command="], {
         encoding: "utf8",
         timeout: 3000,

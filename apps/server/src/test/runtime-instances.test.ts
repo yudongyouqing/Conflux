@@ -11,7 +11,7 @@ import {
 import { execFileSync, spawnSync } from "node:child_process";
 import { dirname } from "node:path";
 import { buildLaunchPlan } from "../core/terminal.js";
-import { registerSession, endSession, mergeSessionMeta } from "../core/sessions.js";
+import { registerSession, endSession, mergeSessionMeta, getSession } from "../core/sessions.js";
 import { askSession, getMessage } from "../core/messages.js";
 import { pushMailTyped } from "../core/mail-push.js";
 import {
@@ -234,6 +234,44 @@ test("stop requires instance ownership, current session PID and unchanged proces
     });
     assert.deepEqual(killed, [123]);
     assert.equal(stopped.state, "ended");
+  } finally {
+    cleanup();
+  }
+});
+
+test("a requested stop completes once the exit is verifiable, without re-terminating", () => {
+  const { db, cleanup } = makeDb();
+  try {
+    const preset = createRuntimeAgent(db, { name: "test", runtime: "claude" });
+    const instance = createRuntimeInstance(db, preset);
+    registerSession(db, {
+      id: "owned",
+      name: "owned",
+      runtime: "claude",
+      runtime_pid: 123,
+      metadata: { runtime_instance_id: instance.id, agent_id: preset.id },
+    });
+    let alive = true;
+    const inspect = () =>
+      alive ? { runtime: "claude" as const, token: "creation-1" } : ("exited" as const);
+    assert.equal(bindRuntimeInstance(db, instance.id, "owned", 123, { inspect }), true);
+    // First stop sends the signal; the immediate re-inspect loses the race
+    // with the exit, so the stop stays requested but unverified.
+    const requested = stopRuntimeInstance(db, instance.id, {
+      inspect,
+      terminate: () => {},
+    });
+    assert.equal(requested.state, "running");
+    assert.ok(requested.stop_requested_at);
+    // The process exits on its own afterwards; a later stop must complete
+    // the stop instead of refusing with a bare conflict.
+    alive = false;
+    const finished = stopRuntimeInstance(db, instance.id, {
+      inspect,
+      terminate: () => assert.fail("must not re-terminate an exited process"),
+    });
+    assert.equal(finished.state, "ended");
+    assert.equal(getSession(db, "owned")?.status, "ended");
   } finally {
     cleanup();
   }
