@@ -226,10 +226,10 @@ async function bindShim(
   shims: ShimHost,
   sessionId: string,
   opts: { runtime?: "claude" | "codex"; direct?: boolean; mode?: string } = {},
-): Promise<{ instanceId: string; pid: number; report: ShimReport }> {
+): Promise<{ instanceId: string; pid: number; report: ShimReport; child: ChildProcess }> {
   const runtime = opts.runtime ?? "claude";
   const reportFile = join(shims.dir, `report-${sessionId}.json`);
-  shims.spawnRuntime(runtime, reportFile, opts);
+  const child = shims.spawnRuntime(runtime, reportFile, opts);
   const report = await shims.report(reportFile);
   const instance = createRuntimeInstance(db, agent);
   registerSession(db, {
