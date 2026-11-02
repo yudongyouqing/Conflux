@@ -25,6 +25,10 @@ jobs:
       # @conflux/shared, so the dist output must exist before they run.
       - run: npm run build -w packages/shared
       - run: npm test -w apps/server
+      # Process-level E2E runs serially after the suite: the production
+      # inspection timeout (2 s) is exceeded when many suites load the
+      # machine at once, which the parallel *.test.ts glob would do.
+      - run: npm run test:process-e2e -w apps/server
 
   desktop-tests:
     strategy:

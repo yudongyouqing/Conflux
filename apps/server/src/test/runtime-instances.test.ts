@@ -11,10 +11,11 @@ import {
 import { execFileSync, spawnSync } from "node:child_process";
 import { dirname } from "node:path";
 import { buildLaunchPlan } from "../core/terminal.js";
-import { registerSession, endSession, mergeSessionMeta } from "../core/sessions.js";
+import { registerSession, endSession, mergeSessionMeta, getSession } from "../core/sessions.js";
 import { askSession, getMessage } from "../core/messages.js";
 import { pushMailTyped } from "../core/mail-push.js";
 import {
+  macosProcessToken,
   createRuntimeInstance,
   bindRuntimeInstance,
   getRuntimeInstance,
@@ -234,6 +235,71 @@ test("stop requires instance ownership, current session PID and unchanged proces
     });
     assert.deepEqual(killed, [123]);
     assert.equal(stopped.state, "ended");
+  } finally {
+    cleanup();
+  }
+});
+
+test("macOS token binds command line and parent, shrinking same-second reuse collisions", () => {
+  // lstart is second-granular; the token also binds the parent pid and a
+  // digest of the full command line so a same-second reused pid mismatches
+  // unless it ALSO shares the parent and the byte-identical command line —
+  // the documented residual window this cannot close.
+  const base = macosProcessToken(123, "Mon Nov  2 03:25:13 2026", "45", "node /opt/claude --resume x");
+  assert.equal(
+    macosProcessToken(123, "Mon Nov  2 03:25:13 2026", "45", "node /opt/claude --resume x"),
+    base,
+  );
+  assert.notEqual(
+    macosProcessToken(123, "Mon Nov  2 03:25:13 2026", "45", "node /opt/codex"),
+    base,
+    "a reused pid running a different command must not match",
+  );
+  assert.notEqual(
+    macosProcessToken(123, "Mon Nov  2 03:25:13 2026", "46", "node /opt/claude --resume x"),
+    base,
+    "a reused pid under a different parent must not match",
+  );
+  assert.notEqual(
+    macosProcessToken(123, "Mon Nov  2 03:25:14 2026", "45", "node /opt/claude --resume x"),
+    base,
+    "a later start second must not match",
+  );
+});
+
+test("a requested stop completes once the exit is verifiable, without re-terminating", () => {
+  const { db, cleanup } = makeDb();
+  try {
+    const preset = createRuntimeAgent(db, { name: "test", runtime: "claude" });
+    const instance = createRuntimeInstance(db, preset);
+    registerSession(db, {
+      id: "owned",
+      name: "owned",
+      runtime: "claude",
+      runtime_pid: 123,
+      metadata: { runtime_instance_id: instance.id, agent_id: preset.id },
+    });
+    let alive = true;
+    const inspect = () =>
+      alive ? { runtime: "claude" as const, token: "creation-1" } : ("exited" as const);
+    assert.equal(bindRuntimeInstance(db, instance.id, "owned", 123, { inspect }), true);
+    // First stop sends the signal; the immediate re-inspect loses the race
+    // with the exit, so the stop stays requested but unverified.
+    const requested = stopRuntimeInstance(db, instance.id, {
+      inspect,
+      terminate: () => {},
+    });
+    assert.equal(requested.state, "running");
+    assert.ok(requested.stop_requested_at);
+    // The process exits on its own afterwards; a later stop must complete
+    // the stop instead of refusing with a bare conflict.
+    alive = false;
+    const finished = stopRuntimeInstance(db, instance.id, {
+      inspect,
+      terminate: () => assert.fail("must not re-terminate an exited process"),
+    });
+    assert.equal(finished.state, "ended");
+    assert.equal(getSession(db, "owned")?.status, "ended");
   } finally {
     cleanup();
   }
