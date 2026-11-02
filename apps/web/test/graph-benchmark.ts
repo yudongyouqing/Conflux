@@ -2,7 +2,29 @@ import { performance } from "node:perf_hooks";
 import type { GraphEdge, GraphNode } from "@conflux/shared";
 import { buildActiveView } from "../src/graph-builders.ts";
 
-for (const topology of ["chain", "tree", "disconnected"] as const) {
+/**
+ * Deterministic FIXED-DEGREE MESH: every node talks to peers i+1, i+2, i+5
+ * (mod n), so edge count is always ~3n. One repeatable dense-ish shape for
+ * layout comparison — not a claim about arbitrary dense graphs or any real
+ * workspace's degree distribution.
+ */
+function denseEdges(count: number): GraphEdge[] {
+  const edges: GraphEdge[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < count; i++) {
+    for (const k of [1, 2, 5]) {
+      const j = (i + k) % count;
+      if (i === j) continue;
+      const key = `${i}->${j}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      edges.push({ from: `n${i}`, to: `n${j}`, weight: 1, last_message: null });
+    }
+  }
+  return edges;
+}
+
+for (const topology of ["chain", "tree", "disconnected", "dense"] as const) {
   for (const count of [25, 100, 300]) {
     const nodes = Array.from({ length: count }, (_, i) => ({
       id: `n${i}`,
@@ -12,12 +34,16 @@ for (const topology of ["chain", "tree", "disconnected"] as const) {
       context_count: 0,
       pending_inbox: 0,
     })) as GraphNode[];
-    const edges = Array.from({ length: topology === "disconnected" ? 0 : count - 1 }, (_, i) => ({
-      from: `n${topology === "tree" ? Math.floor(i / 2) : i}`,
-      to: `n${i + 1}`,
-      weight: 1,
-      last_message: null,
-    })) as GraphEdge[];
+    const edges = (
+      topology === "dense"
+        ? denseEdges(count)
+        : Array.from({ length: topology === "disconnected" ? 0 : count - 1 }, (_, i) => ({
+            from: `n${topology === "tree" ? Math.floor(i / 2) : i}`,
+            to: `n${i + 1}`,
+            weight: 1,
+            last_message: null,
+          }))
+    ) as GraphEdge[];
     const input = { data: { nodes, edges }, onSelectEdge: () => {} };
     for (let i = 0; i < 3; i++) buildActiveView(input);
     const samples = Array.from({ length: 10 }, () => {

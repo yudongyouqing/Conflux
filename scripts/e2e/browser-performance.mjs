@@ -48,7 +48,26 @@ const summary = (values) => {
 };
 try {
   browser = await chromium.launch({ headless: true });
-  for (const topology of ["chain", "tree", "disconnected"]) {
+  // Deterministic fixed-degree mesh matching the node benchmark: peers
+  // i+1, i+2, i+5 (mod n) — one repeatable dense-ish shape, not a claim
+  // about arbitrary dense graphs or real degree distributions.
+  const denseEdges = (count) => {
+    const edges = [];
+    let nextId = 1;
+    const seen = new Set();
+    for (let i = 0; i < count; i++) {
+      for (const k of [1, 2, 5]) {
+        const j = (i + k) % count;
+        if (i === j) continue;
+        const key = `${i}->${j}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        edges.push({ id: nextId++, from: `n${i}`, to: `n${j}`, weight: 1, last_message: null });
+      }
+    }
+    return edges;
+  };
+  for (const topology of ["chain", "tree", "disconnected", "dense"]) {
     for (const count of [25, 100, 300]) {
       const graph = {
         nodes: Array.from({ length: count }, (_, i) => ({
@@ -59,13 +78,16 @@ try {
           context_count: 0,
           pending_inbox: 0,
         })),
-        edges: Array.from({ length: topology === "disconnected" ? 0 : count - 1 }, (_, i) => ({
-          id: i + 1,
-          from: `n${topology === "tree" ? Math.floor(i / 2) : i}`,
-          to: `n${i + 1}`,
-          weight: 1,
-          last_message: null,
-        })),
+        edges:
+          topology === "dense"
+            ? denseEdges(count)
+            : Array.from({ length: topology === "disconnected" ? 0 : count - 1 }, (_, i) => ({
+                id: i + 1,
+                from: `n${topology === "tree" ? Math.floor(i / 2) : i}`,
+                to: `n${i + 1}`,
+                weight: 1,
+                last_message: null,
+              })),
       };
       const runs = [];
       for (let run = 0; run <= samples; run++) {
