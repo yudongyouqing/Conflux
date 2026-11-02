@@ -25,7 +25,7 @@ interface DataClearBody {
 }
 
 export function registerSystemRoutes(app: FastifyInstance, ctx: ServerContext): void {
-  const { db, dataDir, sendError, sendHttpError } = ctx;
+  const { db, dataDir, sendError, sendHttpError, write } = ctx;
 
   // GET /graph — return nodes (sessions) + edges (communication links)
   app.get<{ Querystring: { status?: string } }>("/graph", {}, async (req, reply) => {
@@ -82,17 +82,20 @@ export function registerSystemRoutes(app: FastifyInstance, ctx: ServerContext): 
       );
     }
     try {
-      const result = clearData(db, categories, join(dataDir, "backups"));
-      logAudit(db, {
-        interface: "http",
-        action: "clear_data",
-        args: { ...categories },
-        result: {
-          backupPath: result.backupPath,
-          clearedSessions: result.cleared.sessions,
-          clearedMessages: result.cleared.messages,
-          clearedContextEntries: result.cleared.contextEntries,
-        },
+      const result = await write(() => {
+        const cleared = clearData(db, categories, join(dataDir, "backups"));
+        logAudit(db, {
+          interface: "http",
+          action: "clear_data",
+          args: { ...categories },
+          result: {
+            backupPath: cleared.backupPath,
+            clearedSessions: cleared.cleared.sessions,
+            clearedMessages: cleared.cleared.messages,
+            clearedContextEntries: cleared.cleared.contextEntries,
+          },
+        });
+        return cleared;
       });
       return reply.send(result);
     } catch (err) {
@@ -122,15 +125,18 @@ export function registerSystemRoutes(app: FastifyInstance, ctx: ServerContext): 
         return sendHttpError(reply, 400, "conflict must be skip, overwrite, or copy");
       }
       try {
-        const result = importData(db, req.body.bundle, {
-          conflict,
-          projectDir: process.env.CLAUDE_PROJECT_DIR || process.cwd(),
-        });
-        logAudit(db, {
-          interface: "http",
-          action: "import_data",
-          args: { conflict },
-          result: { ...result },
+        const result = await write(() => {
+          const imported = importData(db, req.body.bundle, {
+            conflict,
+            projectDir: process.env.CLAUDE_PROJECT_DIR || process.cwd(),
+          });
+          logAudit(db, {
+            interface: "http",
+            action: "import_data",
+            args: { conflict },
+            result: { ...imported },
+          });
+          return imported;
         });
         return reply.send(result);
       } catch (err) {

@@ -29,22 +29,26 @@ interface MessagesQs {
 }
 
 export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext): void {
-  const { db, requireSession, audit, sendError, sendHttpError } = ctx;
+  const { db, requireSession, audit, sendError, sendHttpError, write } = ctx;
 
   app.post<{ Params: { id: string } }>("/messages/:id/retry", {}, async (req, reply) => {
     let actor: string | undefined;
     try {
-      actor = requireSession(req);
-      const result = retryMessageDelivery(db, Number(req.params.id), actor);
-      logAudit(db, {
-        caller_session: actor,
-        interface: "http",
-        action: "retry_message_delivery",
-        args: { id: result.message.id },
-        result: {
-          state: result.message.delivery?.state,
-          attempts: result.message.delivery?.attempts,
-        },
+      const resolvedActor = requireSession(req);
+      actor = resolvedActor;
+      const result = await write(() => {
+        const retried = retryMessageDelivery(db, Number(req.params.id), resolvedActor);
+        logAudit(db, {
+          caller_session: resolvedActor,
+          interface: "http",
+          action: "retry_message_delivery",
+          args: { id: retried.message.id },
+          result: {
+            state: retried.message.delivery?.state,
+            attempts: retried.message.delivery?.attempts,
+          },
+        });
+        return retried;
       });
       return reply.send(result);
     } catch (error) {
@@ -70,17 +74,20 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
     async (req, reply) => {
       const sid = requireSession(req);
       try {
-        const { message: msg, wake } = askAndMaybeWake(db, {
-          from_session: sid,
-          to_session: req.body.to_session,
-          question: req.body.question,
+        const { message: msg, wake } = await write(() => {
+          const asked = askAndMaybeWake(db, {
+            from_session: sid,
+            to_session: req.body.to_session,
+            question: req.body.question,
+          });
+          audit(
+            sid,
+            "ask_session",
+            { to_session: req.body.to_session },
+            { message_id: asked.message.id, wake: asked.wake },
+          );
+          return asked;
         });
-        audit(
-          sid,
-          "ask_session",
-          { to_session: req.body.to_session },
-          { message_id: msg.id, wake },
-        );
         return reply.send({ message: msg, wake });
       } catch (err) {
         return sendError(reply, err, sid, "ask_session");
@@ -92,8 +99,11 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
   app.get("/messages/inbox", {}, async (req, reply) => {
     const sid = requireSession(req);
     try {
-      const inbox = checkInbox(db, sid);
-      audit(sid, "check_inbox", {}, { count: inbox.length });
+      const inbox = await write(() => {
+        const found = checkInbox(db, sid);
+        audit(sid, "check_inbox", {}, { count: found.length });
+        return found;
+      });
       return reply.send({ inbox });
     } catch (err) {
       return sendError(reply, err, sid, "check_inbox");
@@ -117,8 +127,11 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
     async (req, reply) => {
       const sid = requireSession(req);
       try {
-        const msg = replyAskAndPush(db, Number(req.params.id), sid, req.body.reply);
-        audit(sid, "reply_ask", { id: req.params.id }, { message_id: msg.id });
+        const msg = await write(() => {
+          const replied = replyAskAndPush(db, Number(req.params.id), sid, req.body.reply);
+          audit(sid, "reply_ask", { id: req.params.id }, { message_id: replied.id });
+          return replied;
+        });
         return reply.send({ message: msg });
       } catch (err) {
         return sendError(reply, err, sid, "reply_ask");
@@ -130,8 +143,11 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
   app.get<{ Querystring: { since?: string } }>("/messages/replies", {}, async (req, reply) => {
     const sid = requireSession(req);
     try {
-      const replies = checkReplies(db, sid, req.query.since);
-      audit(sid, "check_replies", { since: req.query.since }, { count: replies.length });
+      const replies = await write(() => {
+        const found = checkReplies(db, sid, req.query.since);
+        audit(sid, "check_replies", { since: req.query.since }, { count: found.length });
+        return found;
+      });
       return reply.send({ replies });
     } catch (err) {
       return sendError(reply, err, sid, "check_replies");
@@ -216,18 +232,23 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
         // /web/ask from_session). No heartbeat for CLI senders: speaking
         // for them must not fake their liveness.
         const from = edge.from_session;
-        if (from === WEB_CONSOLE_ID) heartbeat(db, WEB_CONSOLE_ID);
-        const { message: msg, wake } = askAndMaybeWake(db, {
-          from_session: from,
-          to_session: edge.to_session,
-          question: req.body.question,
-        });
-        logAudit(db, {
-          caller_session: from,
-          interface: "http",
-          action: "edge_ask",
-          args: { edge: edgeId },
-          result: { message_id: msg.id, wake },
+        const { message: msg, wake } = await write(() => {
+          // No heartbeat for CLI senders: speaking for them must not fake
+          // their liveness.
+          if (from === WEB_CONSOLE_ID) heartbeat(db, WEB_CONSOLE_ID);
+          const asked = askAndMaybeWake(db, {
+            from_session: from,
+            to_session: edge.to_session,
+            question: req.body.question,
+          });
+          logAudit(db, {
+            caller_session: from,
+            interface: "http",
+            action: "edge_ask",
+            args: { edge: edgeId },
+            result: { message_id: asked.message.id, wake: asked.wake },
+          });
+          return asked;
         });
         return reply.send({ message: msg, wake });
       } catch (err) {
@@ -276,20 +297,22 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
             throw httpError(400, "from_session and to_session must differ");
           }
           from = sender.id; // speak AS this session; do NOT heartbeat it (no fake liveness)
-        } else {
-          heartbeat(db, WEB_CONSOLE_ID);
         }
-        const { message: msg, wake } = askAndMaybeWake(db, {
-          from_session: from,
-          to_session: req.body.to_session,
-          question: req.body.question,
-        });
-        logAudit(db, {
-          caller_session: from,
-          interface: "http",
-          action: "web_ask",
-          args: { to_session: req.body.to_session, from_session: from },
-          result: { message_id: msg.id, wake },
+        const { message: msg, wake } = await write(() => {
+          if (from === WEB_CONSOLE_ID) heartbeat(db, WEB_CONSOLE_ID);
+          const asked = askAndMaybeWake(db, {
+            from_session: from,
+            to_session: req.body.to_session,
+            question: req.body.question,
+          });
+          logAudit(db, {
+            caller_session: from,
+            interface: "http",
+            action: "web_ask",
+            args: { to_session: req.body.to_session, from_session: from },
+            result: { message_id: asked.message.id, wake: asked.wake },
+          });
+          return asked;
         });
         return reply.send({ message: msg, wake });
       } catch (err) {

@@ -360,23 +360,29 @@ covered by the `http-lock-contention` server test. These are single-machine
 observations on loopback with synchronous better-sqlite3 — not pass/fail
 limits and not capacity claims.
 
-Coverage boundary for `/healthz` — two distinct claims:
+Coverage for `/healthz` during lock waits (re-measured after the
+yielding-retry change):
 
 - While only the lock is held (no contended request in flight), `/healthz`
   answers fast (verified in the `http-lock-contention` server test).
-- While the server is synchronously waiting on a contended write, `/healthz`
-  is **blocked**: better-sqlite3 waits synchronously, so the single-threaded
-  event loop serves nothing until the wait ends. An independent client
-  process polling across the blocked window (same test,
-  `health-probe-child.cjs`) measured the in-flight probe frozen for
-  10,649 ms of a 10,957 ms write wait, with immediate recovery afterwards.
+- While a contended write is WAITING for the lock, `/healthz` now stays
+  responsive: the HTTP server drives its busy budget in JavaScript
+  (`ServerContext.write` → `retryOnBusy`), yielding the event loop
+  between attempts instead of sleeping inside sqlite. The independent
+  probe process measured **28/28 successful probes with a 48 ms maximum
+  latency across a 10,042 ms write wait** on this host — the desktop
+  service monitor (15 s interval, 2 s timeout) reads healthy throughout,
+  eliminating the previously documented 1–2 false-unhealthy windows.
 
-Desktop impact: the Electron service monitor probes HTTP health every
-15 s with a 2 s timeout (`apps/desktop/src/service-health.cjs`), so a lock
-wait longer than that produces 1–2 probe timeouts and can read as an
-unhealthy service. Making health answer during a lock wait requires moving
-database work off the event loop; that architectural change is tracked in
-the project TODO, separate from the audit fix.
+Scope of the isolation: write closures run inside one immediate
+transaction retried with yields; routes that interleave database work with
+process inspection or spawning (runtime-instance stop/resume/start,
+instance listing) deliberately stay outside the wrapper — under a held
+external lock they fail fast with DATA_LOCKED instead of blocking the
+server. Historical note: before this change the same probe measured the
+in-flight request frozen for 10,649 ms of a 10,957 ms wait (the blocking
+architecture was documented then, and that record remains accurate for
+those commits).
 
 ## Long-running soak (2026-11-01)
 
