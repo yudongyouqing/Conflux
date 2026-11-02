@@ -108,10 +108,10 @@ test("real-process backfill registers once, stays idempotent and ignores the exi
   }
   const third = await runBackfill(db, home);
   assert.equal(third.registered.length, 0, `dead process must not register: ${JSON.stringify(third)}`);
-  assert.equal(
-    third.skippedBound >= 1,
-    true,
-    "the previously bound session row remains — only new pids are candidates",
-  );
+  // skippedBound counts LIVE bound pids; a dead pid is not in the probe's
+  // live set at all, so the row simply is not a candidate anymore — what
+  // must hold is that it still exists, bound to the dead pid.
+  const finalRow = getSession(db, sessionId)!;
+  assert.equal(finalRow.runtime_pid, child.pid, "the registered row survives with its pid binding");
   assert.equal(seen.claude.has(child.pid!), true, "the probe had observed the shim before the kill");
 });
