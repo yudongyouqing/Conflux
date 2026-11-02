@@ -9,6 +9,7 @@ This repository is an npm workspaces monorepo for Conflux (legacy alias `muiltch
 - `npm install` installs all workspace dependencies.
 - `npm run build` builds shared types, the server, and the web app.
 - `npm test -w apps/server` runs the server and CLI Node test suite.
+- `npm run test:process-e2e -w apps/server` runs the runtime-instance subprocess E2E serially (the production process-inspection timeout is exceeded under the parallel suite's load).
 - `npm test -w apps/web` runs web unit tests.
 - `npm run test:desktop` runs Electron/desktop tests.
 - `npm run lint` checks server, web, and shared TypeScript with ESLint.
