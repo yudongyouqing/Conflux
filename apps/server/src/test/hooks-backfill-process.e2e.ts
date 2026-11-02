@@ -6,7 +6,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { makeDb } from "./helpers.js";
-import { runBackfill } from "../core/hooks-backfill.js";
+import { runBackfill, runtimeProcInfo } from "../core/hooks-backfill.js";
 import { probeRuntimePids } from "../core/liveness.js";
 import { getSession } from "../core/sessions.js";
 import { getSetting } from "../core/app-settings.js";
@@ -67,6 +67,19 @@ test("real-process backfill registers once, stays idempotent and ignores the exi
       message: { content: "refactor the parser module" },
     })}\n`,
   );
+
+  // Environment sanity: the matcher requires lsof-resolvable cwd. On
+  // GitHub macOS runners lsof cannot read other processes' cwd (SIP), so
+  // the production matcher — by design — treats the pid as unverifiable.
+  // Record that honestly as a skip instead of failing.
+  const info = await runtimeProcInfo(child.pid!);
+  if (info?.cwd !== projectDir) {
+    return t.skip(
+      "this environment cannot resolve the child cwd via lsof (got " +
+        JSON.stringify(info) +
+        ") — the matcher correctly refuses to guess",
+    );
+  }
 
   // The production probe must see our shim as a live claude pid.
   const seen = await (async () => {
