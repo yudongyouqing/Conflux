@@ -28,6 +28,20 @@ export interface PublicErrorContext {
   port?: number;
 }
 
+/**
+ * Is this failure a "another process holds the write lock" error? Callers
+ * use it to avoid queueing MORE synchronous writes (error audits) behind
+ * the same held lock, which would stall the reply for another busy timeout
+ * and whose own SQLITE_BUSY would escape the error handler.
+ */
+export function isLockError(error: unknown): boolean {
+  if (!isRecord(error)) return false;
+  const rawCode = typeof error.code === "string" ? error.code : "";
+  if (/^SQLITE_(BUSY|LOCKED)/.test(rawCode)) return true;
+  const rawMessage = typeof error.message === "string" ? error.message : "";
+  return /\bdatabase is locked\b/i.test(rawMessage);
+}
+
 /** Convert internal failures into a stable, non-sensitive public response. */
 export function publicError(error: unknown, context: PublicErrorContext = {}): PublicError {
   const value = isRecord(error) ? error : {};
