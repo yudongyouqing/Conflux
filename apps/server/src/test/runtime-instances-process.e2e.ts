@@ -71,7 +71,11 @@ async function bindForReal(
   );
 }
 
-function stopForReal(db: ReturnType<typeof makeDb>["db"], instanceId: string) {
+function stopForReal(
+  db: ReturnType<typeof makeDb>["db"],
+  instanceId: string,
+  child?: ChildProcess,
+) {
   return eventually(
     () => {
       try {
@@ -80,14 +84,19 @@ function stopForReal(db: ReturnType<typeof makeDb>["db"], instanceId: string) {
         const message = (error as Error).message;
         if (/process identity changed|无法验证进程身份/.test(message)) return null;
         // Enrich refusals with the observed state so CI failures pinpoint
-        // which guard fired instead of only the conflict message.
+        // which guard fired instead of only the conflict message. The child
+        // handle's exit status distinguishes a crashed shim from a killed one.
         const current = getRuntimeInstance(db, instanceId);
         const inspected = current?.runtime_pid
           ? inspectRuntimeProcess(current.runtime_pid)
           : null;
+        const childState = child
+          ? ` childExit=${child.exitCode}/${child.signalCode} stderr=${(shimsStderr(child) ?? "").slice(-400)}`
+          : "";
         throw new Error(
           `stop refused: ${message} | state=${current?.state} limitation=${current?.limitation} ` +
-            `pid=${current?.runtime_pid} inspect=${JSON.stringify(inspected)}`,
+            `pid=${current?.runtime_pid} inspect=${JSON.stringify(inspected)}${childState}`,
+          { cause: error },
         );
       }
     },
@@ -95,6 +104,13 @@ function stopForReal(db: ReturnType<typeof makeDb>["db"], instanceId: string) {
     `stop of ${instanceId} never verified the exit`,
   );
 }
+
+/** stderr tail of a spawned shim, kept for crash diagnostics. */
+function shimsStderr(child: ChildProcess): string | null {
+  if (!child.pid) return null;
+  return shimsStderrCache.get(child.pid) ?? null;
+}
+let shimsStderrCache = new Map<number, string>();
 
 interface ShimReport {
   pid: number;
@@ -107,6 +123,8 @@ interface ShimReport {
 class ShimHost {
   readonly dir: string;
   private readonly children = new Set<ChildProcess>();
+  /** stderr tail per child, for crash diagnostics on CI. */
+  readonly stderr = new Map<number, string>();
 
   constructor(root: string) {
     // Non-ASCII and shell metacharacters on purpose: the command line the
@@ -142,14 +160,22 @@ class ShimHost {
     const child = direct
       ? spawn(script, [opts.mode ?? "stay", reportFile], {
           env: opts.env,
-          stdio: "ignore",
+          stdio: ["ignore", "ignore", "pipe"],
         })
       : spawn(process.execPath, [script, opts.mode ?? "stay", reportFile], {
           env: opts.env,
-          stdio: "ignore",
+          stdio: ["ignore", "ignore", "pipe"],
         });
+    let errTail = "";
+    child.stderr?.on("data", (chunk: Buffer) => {
+      errTail = (errTail + chunk.toString("utf8")).slice(-2000);
+    });
+    child.once("exit", () => {
+      this.stderr.set(child.pid!, errTail);
+      shimsStderrCache.set(child.pid!, errTail);
+      this.children.delete(child);
+    });
     this.children.add(child);
-    child.once("exit", () => this.children.delete(child));
     return child;
   }
 
