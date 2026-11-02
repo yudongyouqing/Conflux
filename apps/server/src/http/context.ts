@@ -1,5 +1,5 @@
 import type { FastifyReply } from "fastify";
-import { publicError, type DB, type PublicErrorCode } from "../core/db.js";
+import { isLockError, publicError, type DB, type PublicErrorCode } from "../core/db.js";
 import { heartbeat } from "../core/sessions.js";
 import { logAudit } from "../core/audit.js";
 import { logger } from "../log.js";
@@ -80,7 +80,7 @@ export function createServerContext(
       // Auditing it synchronously would busy-wait on that same lock for a
       // second full busy_timeout before the reply goes out, so the
       // structured error log above stays the record for this request.
-      if (mapped.code === "DATA_LOCKED") {
+      if (mapped.code === "DATA_LOCKED" || isLockError(err)) {
         logger.warn(
           { sid, action, code: mapped.code },
           "skipping error audit while the database is locked",

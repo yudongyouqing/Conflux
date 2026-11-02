@@ -2,9 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main, dev, "feat/**", "feature/**", "refactor/**", "fix/**", "docs/**"]
-  pull_request:
     branches: [main, dev]
+  # Any PR base: stacked PRs target feature branches, and test/chore/ci
+  # branch pushes would otherwise never run checks at all.
+  pull_request:
 
 jobs:
   server-tests:
@@ -25,6 +26,10 @@ jobs:
       # @conflux/shared, so the dist output must exist before they run.
       - run: npm run build -w packages/shared
       - run: npm test -w apps/server
+      # Process-level E2E runs serially after the suite: the production
+      # inspection timeout (2 s) is exceeded when many suites load the
+      # machine at once, which the parallel *.test.ts glob would do.
+      - run: npm run test:process-e2e -w apps/server
 
   desktop-tests:
     strategy:
