@@ -341,8 +341,25 @@ export function stopRuntimeInstance(
 ): RuntimeInstance {
   const row = rowFor(db, id);
   const current = toPublic(db, row, io);
-  if (!current.can_stop || !row.runtime_pid)
+  if (!current.can_stop || !row.runtime_pid) {
+    // A stop was requested earlier and the termination signal was sent;
+    // the follow-up inspection right after SIGTERM can lose the race with
+    // the process exit. When a later stop finds the process verifiably
+    // gone, complete the stop instead of refusing — the operator asked for
+    // exactly this outcome.
+    if (row.stop_requested_at && row.runtime_pid) {
+      const identity = (io.inspect ?? inspectRuntimeProcess)(row.runtime_pid);
+      const exited = identity === "exited" || (!!identity && identity.token !== row.process_token);
+      if (exited) {
+        db.prepare(
+          "UPDATE runtime_instances SET state = 'ended', ended_at = ?, updated_at = ? WHERE id = ?",
+        ).run(nowIso(), nowIso(), id);
+        if (row.session_id) endSession(db, row.session_id);
+        return toPublic(db, rowFor(db, id), io);
+      }
+    }
     conflict(current.limitation ?? "runtime instance cannot be stopped safely");
+  }
   // Probe again immediately before termination to catch a PID reused since listing.
   const identity = (io.inspect ?? inspectRuntimeProcess)(row.runtime_pid);
   if (
@@ -441,16 +458,43 @@ export function inspectRuntimeProcess(pid: number): ProcessIdentity | "exited" |
     } else if (process.platform === "linux") {
       const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
       token = `${readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim()}:${stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19]}`;
-      command = readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ");
+      // cmdline is NUL-separated: argv elements containing spaces would
+      // lose their boundaries (and their basename) under naive
+      // whitespace tokenization, so re-quote them the way the tokenizer
+      // below already understands.
+      command = readFileSync(`/proc/${pid}/cmdline`, "utf8")
+        .split("\0")
+        .filter(Boolean)
+        .map((arg) => (/\s/.test(arg) ? `"${arg}"` : arg))
+        .join(" ");
     } else {
-      token = execFileSync("ps", ["-p", String(pid), "-o", "lstart="], {
+      // macOS has no /proc, and ps exposes no sub-second creation stamp:
+      // lstart is one-second granular, so a REUSED pid landing in the same
+      // start second could still match. There is no more precise identity
+      // source reachable without native bindings, so the token binds every
+      // independently observable dimension — pid, lstart, parent pid and a
+      // digest of the full command line. Same-second reuse now slips
+      // through only when the new process ALSO has the same parent and a
+      // byte-identical command line; that residual window is a documented
+      // limitation, not something this token claims to close. Windows CIM
+      // (sub-second CreationDate) and Linux /proc (clock-tick starttime)
+      // both provide true creation identity.
+      // -ww: ps truncates command output to the terminal width without
+      // it, and a truncated command line changes the token digest between
+      // observations of the SAME process — identity must be stable.
+      const lstart = execFileSync("ps", ["-ww", "-p", String(pid), "-o", "lstart="], {
         encoding: "utf8",
         timeout: 3000,
       }).trim();
-      command = execFileSync("ps", ["-p", String(pid), "-o", "command="], {
+      const ppid = execFileSync("ps", ["-ww", "-p", String(pid), "-o", "ppid="], {
         encoding: "utf8",
         timeout: 3000,
       }).trim();
+      command = execFileSync("ps", ["-ww", "-p", String(pid), "-o", "command="], {
+        encoding: "utf8",
+        timeout: 3000,
+      }).trim();
+      token = macosProcessToken(pid, lstart, ppid, command);
     }
     if (!token || !command) return null;
     return runtimeIdentity(token, command);
@@ -469,6 +513,22 @@ export function inspectRuntimeProcess(pid: number): ProcessIdentity | "exited" |
     }
     return null;
   }
+}
+
+/**
+ * macOS process token: pid + lstart (second granularity) + parent pid + a
+ * digest of the full command line. Exported for regression coverage of the
+ * reuse-collision properties; see the inspector's macOS branch for the
+ * precision boundary this documents.
+ */
+export function macosProcessToken(
+  pid: number,
+  lstart: string,
+  ppid: string,
+  command: string,
+): string {
+  const commandDigest = createHash("sha256").update(command).digest("hex").slice(0, 16);
+  return `${pid}:${lstart}:${ppid}:${commandDigest}`;
 }
 
 function runtimeIdentity(token: string, command: string): ProcessIdentity {
