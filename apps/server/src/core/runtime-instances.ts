@@ -441,7 +441,15 @@ export function inspectRuntimeProcess(pid: number): ProcessIdentity | "exited" |
     } else if (process.platform === "linux") {
       const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
       token = `${readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim()}:${stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19]}`;
-      command = readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ");
+      // cmdline is NUL-separated: argv elements containing spaces would
+      // lose their boundaries (and their basename) under naive
+      // whitespace tokenization, so re-quote them the way the tokenizer
+      // below already understands.
+      command = readFileSync(`/proc/${pid}/cmdline`, "utf8")
+        .split("\0")
+        .filter(Boolean)
+        .map((arg) => (/\s/.test(arg) ? `"${arg}"` : arg))
+        .join(" ");
     } else {
       token = execFileSync("ps", ["-p", String(pid), "-o", "lstart="], {
         encoding: "utf8",

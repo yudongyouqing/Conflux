@@ -157,9 +157,25 @@ class ShimHost {
     const alive = [...this.children].filter(
       (child) => child.exitCode === null && child.signalCode === null,
     );
+    // Bounded waits throughout: a shim that ignores SIGTERM must never
+    // keep the suite (or a CI runner) waiting forever.
     for (const child of alive) child.kill();
-    await Promise.all(alive.map((child) => once(child, "exit").catch(() => undefined)));
-    return alive
+    await Promise.all(
+      alive.map((child) =>
+        Promise.race([once(child, "exit").catch(() => undefined), sleep(3000)]),
+      ),
+    );
+    const stubborn = alive.filter(
+      (child) => child.exitCode === null && child.signalCode === null,
+    );
+    for (const child of stubborn) child.kill("SIGKILL");
+    if (stubborn.length)
+      await Promise.all(
+        stubborn.map((child) =>
+          Promise.race([once(child, "exit").catch(() => undefined), sleep(3000)]),
+        ),
+      );
+    return stubborn
       .filter((child) => child.exitCode === null && child.signalCode === null)
       .map((child) => child.pid!);
   }
