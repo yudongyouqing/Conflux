@@ -484,7 +484,14 @@ test("delayed SIGTERM keeps stop control until absence is verified", { timeout: 
   assert.match(requested.limitation ?? "", /等待进程退出/);
 
   // The second termination is honored and the exit is verified.
-  const ended = stopRuntimeInstance(db, bound.instanceId);
-  assert.equal(ended.state, "ended");
+  const secondStop = stopRuntimeInstance(db, bound.instanceId);
+  // The second signal's exit confirmation is asynchronous by nature —
+  // poll the refresh path until the exit is verified.
+  const finished = await eventually(
+    () => listRuntimeInstances(db).find((i) => i.id === bound.instanceId)!,
+    (v) => v.state === "ended",
+    `second stop never verified the exit (stop returned ${secondStop.state})`,
+  );
+  assert.equal(finished.state, "ended");
   assert.throws(() => process.kill(bound.pid, 0), { code: "ESRCH" });
 });
