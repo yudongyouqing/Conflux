@@ -251,11 +251,13 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: ServerContext): v
           }
         }
 
-        const assistantTurn = addTurn(db, {
-          conversation_id: conv.id,
-          role: "assistant",
-          content: fullResponse || "(no response)",
-        });
+        const assistantTurn = await write(() =>
+          addTurn(db, {
+            conversation_id: conv.id,
+            role: "assistant",
+            content: fullResponse || "(no response)",
+          }),
+        );
 
         sse({ type: "done", conversation_id: conv.id, turn_id: assistantTurn.id });
         logger.info(

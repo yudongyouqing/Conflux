@@ -18,7 +18,9 @@ export interface SyncAskInput {
   /** poll interval (default 2 s; tests shrink it) */
   pollMs?: number;
   /** wake trigger — defaults to the real askAndMaybeWake */
-  wake?: (input: { from_session: string; to_session: string; question: string }) => ReturnType<typeof askAndMaybeWake>;
+  wake?: (
+    input: { from_session: string; to_session: string; question: string },
+  ) => Promise<ReturnType<typeof askAndMaybeWake>> | ReturnType<typeof askAndMaybeWake>;
   /** sleep primitive — injectable for tests */
   sleep?: (ms: number) => Promise<void>;
 }
@@ -51,7 +53,7 @@ export async function askAndReplySync(db: DB, input: SyncAskInput): Promise<Sync
       askAndMaybeWake(db, i));
 
   const started = Date.now();
-  const r = doWake({
+  const r = await doWake({
     from_session: input.from_session,
     to_session: input.to_session,
     question: input.question,

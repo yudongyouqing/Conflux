@@ -9,7 +9,7 @@ import { getTerminalSettings } from "./app-settings.js";
 import { badge, flattenOneLine } from "./inject-format.js";
 import { tmuxInject } from "./wake/tmux-inject.js";
 import { roomMembers, getChatRoom } from "./chat-rooms.js";
-import { askAndMaybeWake } from "./ask.js";
+import { prepareAsk, completeAsk, type AskPrepared } from "./ask.js";
 
 /**
  * Room orchestration engine (#152): agents coordinate through a shared room
@@ -100,8 +100,40 @@ export function summonAgent(
     prompt: string;
   },
 ): { task: RoomTask; injected: boolean; method: string } {
-  const task = createTask(db, input);
+  return completeSummon(db, input, prepareSummon(db, input));
+}
 
+/**
+ * Phase 1 — DATABASE ONLY: the task row. Callers retrying the transaction
+ * on lock contention (the HTTP server's ctx.write) must wrap ONLY this
+ * phase; the delivery channels below cannot be rolled back.
+ */
+export function prepareSummon(
+  db: DB,
+  input: {
+    room_id: number;
+    initiator_session_id: string;
+    executor_session_id: string;
+    prompt: string;
+  },
+): RoomTask {
+  return createTask(db, input);
+}
+
+/**
+ * Phase 2 — EXTERNAL delivery (terminal injection / headless wake spawn),
+ * strictly after phase 1 commits. Never inside a retried transaction.
+ */
+export function completeSummon(
+  db: DB,
+  input: {
+    room_id: number;
+    initiator_session_id: string;
+    executor_session_id: string;
+    prompt: string;
+  },
+  task: RoomTask,
+): { task: RoomTask; injected: boolean; method: string } {
   // Try live injection first, fall back to headless wake
   const injected = injectIntoProcess(db, input.executor_session_id, input.prompt, task.id, task.task_token);
   let method = injected ? "tmux" : "";
@@ -207,10 +239,27 @@ export interface BroadcastResult {
  * self-selects whether to answer. Replies come back through reply_ask and
  * stay visible in the room's shared thread (messages.room_id).
  */
-export function broadcastToRoom(
+export async function broadcastToRoom(
   db: DB,
   input: { room_id: number; sender_session_id: string; prompt: string },
-): BroadcastResult {
+): Promise<BroadcastResult> {
+  return completeBroadcast(db, input, prepareBroadcast(db, input));
+}
+
+/**
+ * Phase 1 — DATABASE ONLY: room/member reads, the self-select question
+ * insert and the per-member delivery claims. Safe to retry as a whole.
+ */
+export interface BroadcastPrepared {
+  members: string[];
+  question: string;
+  prepared: AskPrepared[];
+}
+
+export function prepareBroadcast(
+  db: DB,
+  input: { room_id: number; sender_session_id: string; prompt: string },
+): BroadcastPrepared {
   const room = getChatRoom(db, input.room_id);
   if (!room) throw new Error(`room not found: ${input.room_id}`);
 
@@ -221,16 +270,17 @@ export function broadcastToRoom(
     `${input.prompt}（聊天室「${room.name}」广播：适合你回答就用 Conflux 的 ` +
     `reply_ask 回复本条消息，回复会进房间共享线程；不适合则保持沉默，不要做其他事）`;
 
-  const message_ids: number[] = [];
+  const prepared: AskPrepared[] = [];
   for (const member of members) {
     try {
-      const { message } = askAndMaybeWake(db, {
-        from_session: input.sender_session_id,
-        to_session: member,
-        question,
-        room_id: input.room_id,
-      });
-      message_ids.push(message.id);
+      prepared.push(
+        prepareAsk(db, {
+          from_session: input.sender_session_id,
+          to_session: member,
+          question,
+          room_id: input.room_id,
+        }),
+      );
     } catch (err) {
       // one unreachable member must not block the rest (priority gate etc.)
       logger.warn(
@@ -239,11 +289,34 @@ export function broadcastToRoom(
       );
     }
   }
+  return { members, question, prepared };
+}
+
+/**
+ * Phase 2 — EXTERNAL per-member wakes / typed pushes, strictly after the
+ * commit of phase 1. Never inside a retried transaction.
+ */
+export async function completeBroadcast(
+  db: DB,
+  input: { room_id: number; sender_session_id: string; prompt: string },
+  preparedBroadcast: BroadcastPrepared,
+): Promise<BroadcastResult> {
+  const message_ids: number[] = [];
+  for (const prepared of preparedBroadcast.prepared) {
+    try {
+      message_ids.push((await completeAsk(db, prepared)).message.id);
+    } catch (err) {
+      logger.warn(
+        { room: input.room_id, member: prepared.message.to_session, err: err instanceof Error ? err.message : String(err) },
+        "broadcast: member delivery failed",
+      );
+    }
+  }
   logger.info(
-    { room: input.room_id, sender: input.sender_session_id, addressed: members.length },
+    { room: input.room_id, sender: input.sender_session_id, addressed: preparedBroadcast.members.length },
     "room broadcast sent",
   );
-  return { room_id: input.room_id, members, message_ids };
+  return { room_id: input.room_id, members: preparedBroadcast.members, message_ids };
 }
 
 /**

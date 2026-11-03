@@ -3,7 +3,13 @@ import { join } from "node:path";
 import { getGraph } from "../../core/graph.js";
 import { queryAudit } from "../../core/audit.js";
 import { exportData, importData, type ImportConflictStrategy } from "../../core/data-transfer.js";
-import { clearData, getClearableCounts, type ClearCategories } from "../../core/data-clear.js";
+import {
+  prepareClearBackup,
+  applyClearData,
+  rotateBackups,
+  getClearableCounts,
+  type ClearCategories,
+} from "../../core/data-clear.js";
 import { logAudit } from "../../core/audit.js";
 import type { ServerContext } from "../context.js";
 
@@ -82,22 +88,27 @@ export function registerSystemRoutes(app: FastifyInstance, ctx: ServerContext): 
       );
     }
     try {
-      const result = await write(() => {
-        const cleared = clearData(db, categories, join(dataDir, "backups"));
+      // The backup FILE is written once, before the retried database
+      // phase — a file cannot be rolled back and a retry must not mint
+      // duplicate backup stamps. The deletes retry as one transaction.
+      const backupDir = join(dataDir, "backups");
+      const backupPath = prepareClearBackup(db, categories, backupDir);
+      const cleared = await write(() => applyClearData(db, categories));
+      rotateBackups(backupDir);
+      await write(() =>
         logAudit(db, {
           interface: "http",
           action: "clear_data",
           args: { ...categories },
           result: {
-            backupPath: cleared.backupPath,
-            clearedSessions: cleared.cleared.sessions,
-            clearedMessages: cleared.cleared.messages,
-            clearedContextEntries: cleared.cleared.contextEntries,
+            backupPath,
+            clearedSessions: cleared.sessions,
+            clearedMessages: cleared.messages,
+            clearedContextEntries: cleared.contextEntries,
           },
-        });
-        return cleared;
-      });
-      return reply.send(result);
+        }),
+      );
+      return reply.send({ backupPath, cleared });
     } catch (err) {
       return sendError(reply, err);
     }

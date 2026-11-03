@@ -26,18 +26,18 @@ function setup(db: DB) {
   return createChatRoom(db, { name: "测试房间", members: ["agent-b", "agent-c"] });
 }
 
-test("summon → write result → initiator notified when all done", () => {
+test("summon → write result → initiator notified when all done", async () => {
   const db = freshDb();
   const room = setup(db);
 
   // Human summons two agents in parallel
-  const { task: t1 } = summonAgent(db, {
+  const { task: t1 } = await summonAgent(db, {
     room_id: room.id,
     initiator_session_id: "web-console",
     executor_session_id: "agent-b",
     prompt: "分析代码",
   });
-  const { task: t2 } = summonAgent(db, {
+  const { task: t2 } = await summonAgent(db, {
     room_id: room.id,
     initiator_session_id: "web-console",
     executor_session_id: "agent-c",
@@ -77,13 +77,13 @@ test("summon → write result → initiator notified when all done", () => {
   assert.ok(status.some((s) => s.executor_session_id === "agent-b" && s.status === "done"));
 });
 
-test("cascade: executor can summon other agents mid-execution", () => {
+test("cascade: executor can summon other agents mid-execution", async () => {
   const db = freshDb();
   const room = setup(db);
   registerSession(db, { id: "agent-d", name: "Agent D" });
 
   // Human summons B
-  const { task: tB } = summonAgent(db, {
+  const { task: tB } = await summonAgent(db, {
     room_id: room.id,
     initiator_session_id: "web-console",
     executor_session_id: "agent-b",
@@ -91,7 +91,7 @@ test("cascade: executor can summon other agents mid-execution", () => {
   });
 
   // B cascades: summons D (B is now the initiator for D's task)
-  const { task: tD } = summonAgent(db, {
+  const { task: tD } = await summonAgent(db, {
     room_id: room.id,
     initiator_session_id: "agent-b",
     executor_session_id: "agent-d",
@@ -115,10 +115,10 @@ test("cascade: executor can summon other agents mid-execution", () => {
   assert.equal(rB.allDone, true);
 });
 
-test("executor mismatch is rejected", () => {
+test("executor mismatch is rejected", async () => {
   const db = freshDb();
   const room = setup(db);
-  const { task } = summonAgent(db, {
+  const { task } = await summonAgent(db, {
     room_id: room.id,
     initiator_session_id: "web-console",
     executor_session_id: "agent-b",
@@ -135,11 +135,11 @@ test("executor mismatch is rejected", () => {
 import { broadcastToRoom, listRoomMessages } from "../core/room-orchestrator.js";
 import { replyAsk, getMessage } from "../core/messages.js";
 
-test("broadcast addresses every member except the sender, with room_id + self-select clause", () => {
+test("broadcast addresses every member except the sender, with room_id + self-select clause", async () => {
   const db = freshDb();
   const room = setup(db); // members: agent-b, agent-c
 
-  const res = broadcastToRoom(db, {
+  const res = await broadcastToRoom(db, {
     room_id: room.id,
     sender_session_id: "web-console",
     prompt: "谁来分析一下 CI 失败原因",
@@ -158,11 +158,11 @@ test("broadcast addresses every member except the sender, with room_id + self-se
   }
 });
 
-test("broadcast from a member session excludes itself", () => {
+test("broadcast from a member session excludes itself", async () => {
   const db = freshDb();
   const room = setup(db);
 
-  const res = broadcastToRoom(db, {
+  const res = await broadcastToRoom(db, {
     room_id: room.id,
     sender_session_id: "agent-b",
     prompt: "我需要数据支持",
@@ -171,11 +171,11 @@ test("broadcast from a member session excludes itself", () => {
   assert.deepEqual(res.members, ["agent-c"], "发起者不广播给自己");
 });
 
-test("broadcast thread: replies land in the shared room thread with names", () => {
+test("broadcast thread: replies land in the shared room thread with names", async () => {
   const db = freshDb();
   const room = setup(db);
 
-  const res = broadcastToRoom(db, {
+  const res = await broadcastToRoom(db, {
     room_id: room.id,
     sender_session_id: "web-console",
     prompt: "谁能看看这个报错",
@@ -193,12 +193,12 @@ test("broadcast thread: replies land in the shared room thread with names", () =
   assert.equal(answered.room_id, room.id);
 });
 
-test("broadcast to an empty room is a no-op, not an error", () => {
+test("broadcast to an empty room is a no-op, not an error", async () => {
   const db = freshDb();
   registerSession(db, { id: "web-console", name: "Web 控制台" });
   const room = createChatRoom(db, { name: "空房", members: [] });
 
-  const res = broadcastToRoom(db, {
+  const res = await broadcastToRoom(db, {
     room_id: room.id,
     sender_session_id: "web-console",
     prompt: "有人吗",

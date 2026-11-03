@@ -1,6 +1,14 @@
 import type { FastifyInstance } from "fastify";
 import { createChatRoom, deleteChatRoom, getChatRoom, listChatRooms, roomMembers, joinRoom, leaveRoom } from "../../core/chat-rooms.js";
-import { readRoom, roomStatus, summonAgent, broadcastToRoom, listRoomMessages } from "../../core/room-orchestrator.js";
+import {
+  readRoom,
+  roomStatus,
+  prepareSummon,
+  completeSummon,
+  prepareBroadcast,
+  completeBroadcast,
+  listRoomMessages,
+} from "../../core/room-orchestrator.js";
 import { logAudit } from "../../core/audit.js";
 import type { ServerContext } from "../context.js";
 
@@ -92,8 +100,12 @@ export function registerChatRoomRoutes(app: FastifyInstance, ctx: ServerContext)
     { Params: { id: string }; Body: { executor_session_id: string; prompt: string; sender_session_id?: string } }
   >("/chat-rooms/:id/summon", {}, async (req, reply) => {
     try {
-      const result = await write(() => {
-        const summoned = summonAgent(db, {
+      // Phase 1 (retryable, database-only): the task row + audit. Phase 2
+      // (terminal injection / headless wake spawn) runs strictly after the
+      // commit — an injected prompt or spawned process cannot be rolled
+      // back, and a retry must never re-run either.
+      const task = await write(() => {
+        const created = prepareSummon(db, {
           room_id: Number(req.params.id),
           initiator_session_id: req.body.sender_session_id ?? "web-console",
           executor_session_id: req.body.executor_session_id,
@@ -103,10 +115,16 @@ export function registerChatRoomRoutes(app: FastifyInstance, ctx: ServerContext)
           interface: "http",
           action: "room_summon",
           args: { room_id: Number(req.params.id), executor: req.body.executor_session_id },
-          result: { task_id: summoned.task.id, method: summoned.method },
+          result: { task_id: created.id },
         });
-        return summoned;
+        return created;
       });
+      const result = completeSummon(db, {
+        room_id: Number(req.params.id),
+        initiator_session_id: req.body.sender_session_id ?? "web-console",
+        executor_session_id: req.body.executor_session_id,
+        prompt: req.body.prompt,
+      }, task);
       return reply.send(result);
     } catch (err) {
       return sendError(reply, err);
@@ -118,8 +136,11 @@ export function registerChatRoomRoutes(app: FastifyInstance, ctx: ServerContext)
     { Params: { id: string }; Body: { prompt: string; sender_session_id?: string } }
   >("/chat-rooms/:id/broadcast", {}, async (req, reply) => {
     try {
-      const result = await write(() => {
-        const broadcast = broadcastToRoom(db, {
+      // Phase 1 (retryable, database-only): question inserts + delivery
+      // claims + audit. Phase 2 (per-member wakes / typed pushes) runs
+      // strictly after the commit.
+      const prepared = await write(() => {
+        const ready = prepareBroadcast(db, {
           room_id: Number(req.params.id),
           sender_session_id: req.body.sender_session_id ?? "web-console",
           prompt: req.body.prompt,
@@ -127,11 +148,15 @@ export function registerChatRoomRoutes(app: FastifyInstance, ctx: ServerContext)
         logAudit(db, {
           interface: "http",
           action: "room_broadcast",
-          args: { room_id: Number(req.params.id), members: broadcast.members.length },
-          result: { message_ids: broadcast.message_ids },
+          args: { room_id: Number(req.params.id), members: ready.members.length },
         });
-        return broadcast;
+        return ready;
       });
+      const result = completeBroadcast(db, {
+        room_id: Number(req.params.id),
+        sender_session_id: req.body.sender_session_id ?? "web-console",
+        prompt: req.body.prompt,
+      }, prepared);
       return reply.send(result);
     } catch (err) {
       return sendError(reply, err);

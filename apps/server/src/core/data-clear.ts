@@ -49,7 +49,7 @@ export function getClearableCounts(db: DB): ClearableCounts {
 }
 
 /** Keep only the newest CLEAR_BACKUP_KEEP clear-backup files in dir. */
-function rotateBackups(backupDir: string): void {
+export function rotateBackups(backupDir: string): void {
   const files = readdirSync(backupDir)
     .filter((f) => f.startsWith("clear-backup-") && f.endsWith(".json"))
     .map((f) => {
@@ -84,12 +84,44 @@ export function clearData(
     return { backupPath: null, cleared: { sessions: 0, messages: 0, contextEntries: 0 } };
   }
 
-  // Full bundle first — the restore path is the existing /data/import.
+  const backupPath = prepareClearBackup(db, categories, backupDir);
+  const cleared = applyClearData(db, categories);
+  rotateBackups(backupDir);
+  return { backupPath, cleared };
+}
+
+/**
+ * Phase 1 — EXTERNAL: writes the pre-clear full-bundle backup file (the
+ * restore path is the existing /data/import). Runs ONCE, before any
+ * retried database phase: a file cannot be rolled back, and a retry that
+ * re-ran it would mint duplicate backup stamps. Returns null when no
+ * category was selected.
+ */
+export function prepareClearBackup(
+  db: DB,
+  categories: ClearCategories,
+  backupDir: string,
+): string | null {
+  if (!categories.sessions && !categories.messages && !categories.context) return null;
   mkdirSync(backupDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const backupPath = join(backupDir, `clear-backup-${stamp}.json`);
   writeFileSync(backupPath, JSON.stringify(exportData(db), null, 2), "utf8");
+  return backupPath;
+}
 
+/**
+ * Phase 2 — DATABASE ONLY: the category deletes. Safe to retry inside one
+ * transaction; a rollback restores the deleted rows and the retry re-runs.
+ * Backup rotation (file cleanup) stays with the caller, after the commit.
+ */
+export function applyClearData(
+  db: DB,
+  categories: ClearCategories,
+): { sessions: number; messages: number; contextEntries: number } {
+  if (!categories.sessions && !categories.messages && !categories.context) {
+    return { sessions: 0, messages: 0, contextEntries: 0 };
+  }
   const before = getClearableCounts(db);
 
   if (categories.messages) db.prepare("DELETE FROM messages").run();
@@ -107,14 +139,9 @@ export function clearData(
   }
 
   const after = getClearableCounts(db);
-  rotateBackups(backupDir);
-
   return {
-    backupPath,
-    cleared: {
-      sessions: before.sessions - after.sessions,
-      messages: before.messages - after.messages,
-      contextEntries: before.contextEntries - after.contextEntries,
-    },
+    sessions: before.sessions - after.sessions,
+    messages: before.messages - after.messages,
+    contextEntries: before.contextEntries - after.contextEntries,
   };
 }

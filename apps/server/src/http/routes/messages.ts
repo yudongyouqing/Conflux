@@ -50,7 +50,7 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
         });
         return claimed;
       });
-      const result = completeAsk(db, prepared);
+      const result = await completeAsk(db, prepared);
       return reply.send(result);
     } catch (error) {
       return sendError(reply, error, actor, "retry_message_delivery", { id: req.params.id });
@@ -87,7 +87,7 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
           audit(sid, "ask_session", { to_session: req.body.to_session }, { message_id: claimed.message.id });
           return claimed;
         });
-        const { message: msg, wake } = completeAsk(db, prepared);
+        const { message: msg, wake } = await completeAsk(db, prepared);
         return reply.send({ message: msg, wake });
       } catch (err) {
         return sendError(reply, err, sid, "ask_session");
@@ -246,7 +246,7 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
           });
           return claimed;
         });
-        const { message: msg, wake } = completeAsk(db, prepared);
+        const { message: msg, wake } = await completeAsk(db, prepared);
         return reply.send({ message: msg, wake });
       } catch (err) {
         return sendError(reply, err, undefined, "edge_ask");
@@ -311,7 +311,7 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
           });
           return claimed;
         });
-        const { message: msg, wake } = completeAsk(db, prepared);
+        const { message: msg, wake } = await completeAsk(db, prepared);
         return reply.send({ message: msg, wake });
       } catch (err) {
         return sendError(reply, err, WEB_CONSOLE_ID, "web_ask");

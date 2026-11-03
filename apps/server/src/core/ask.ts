@@ -3,7 +3,8 @@ import { askSession, getMessage, type Message } from "./messages.js";
 import { wakeSessionForMail, type WakeResult } from "./wake/index.js";
 import { WEB_CONSOLE_ID } from "@conflux/shared";
 import { randomUUID } from "node:crypto";
-import { nowIso } from "./db.js";
+import { nowIso, retryOnBusy, isLockError } from "./db.js";
+import { logger } from "../log.js";
 
 /**
  * THE ask path: deliver a question and, when the addressee cannot see it
@@ -27,17 +28,17 @@ export interface AskOutcome {
   wake: WakeResult;
 }
 
-export function askAndMaybeWake(db: DB, opts: AskOptions): AskOutcome {
+export async function askAndMaybeWake(db: DB, opts: AskOptions): Promise<AskOutcome> {
   return completeAsk(db, prepareAsk(db, opts));
 }
 
 /** The caller is resolved by the interface, never from a retry request body. */
-export function retryMessageDelivery(
+export async function retryMessageDelivery(
   db: DB,
   id: number,
   actor: string,
-  wake: typeof wakeSessionForMail = wakeSessionForMail,
-): AskOutcome {
+  wake: Parameters<typeof completeAsk>[2] = wakeSessionForMail,
+): Promise<AskOutcome> {
   return completeAsk(db, prepareRetryDelivery(db, id, actor), wake);
 }
 
@@ -70,28 +71,54 @@ export function prepareRetryDelivery(db: DB, id: number, actor: string): AskPrep
  * WOULD erase the delivery claim that deduplicates it, so a retry would
  * launch the wake a second time. Execute strictly after phase 1 commits.
  */
-export function completeAsk(
+export async function completeAsk(
   db: DB,
   prepared: AskPrepared,
-  wakeFn: typeof wakeSessionForMail = wakeSessionForMail,
-): AskOutcome {
+  wakeFn: (
+    db: DB,
+    sessionId: string,
+  ) => Promise<WakeResult> | WakeResult = wakeSessionForMail as (
+    db: DB,
+    sessionId: string,
+  ) => WakeResult,
+): Promise<AskOutcome> {
   const { message, claim } = prepared;
   if (!claim) return { message, wake: { woke: false, reason: "message already received" } };
   let wake: WakeResult;
   try {
-    wake = wakeFn(db, message.to_session);
+    wake = await wakeFn(db, message.to_session);
   } catch {
     wake = { woke: false, reason: "wake attempt failed", disposition: "failed" };
   }
-  db.prepare(
-    `UPDATE message_deliveries SET state = ?, reason = ?, claim_token = NULL,
-    claim_expires_at = NULL WHERE message_id = ? AND claim_token = ?`,
-  ).run(
-    wake.woke ? "woken" : (wake.disposition ?? "queued"),
-    wake.woke ? null : wake.reason.slice(0, 500),
-    message.id,
-    claim.token,
-  );
+  // The status write-back is DATABASE-ONLY and keyed by the one-shot claim
+  // token, so it retries safely on its own — the external wake above
+  // already ran exactly once and must never re-run. If even the retry
+  // budget is exhausted the message is still committed and delivered:
+  // report the accepted state instead of throwing (a thrown error here
+  // tells the caller the send FAILED and baits a duplicate send); the 60 s
+  // claim expiry re-opens the delivery for a manual retry.
+  try {
+    await retryOnBusy(db, () =>
+      db
+        .prepare(
+          `UPDATE message_deliveries SET state = ?, reason = ?, claim_token = NULL,
+           claim_expires_at = NULL WHERE message_id = ? AND claim_token = ?`,
+        )
+        .run(
+          wake.woke ? "woken" : (wake.disposition ?? "queued"),
+          wake.woke ? null : wake.reason.slice(0, 500),
+          message.id,
+          claim.token,
+        ),
+    );
+  } catch (err) {
+    if (!isLockError(err)) throw err;
+    logger.warn(
+      { messageId: message.id },
+      "delivery status write-back stayed locked — message accepted, status pending (claim expires)",
+    );
+    return { message: getMessage(db, message.id) ?? message, wake };
+  }
   // A typed wake may already have marked the question seen.
   return { message: getMessage(db, message.id)!, wake };
 }
