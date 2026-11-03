@@ -186,7 +186,10 @@ export function bindRuntimeInstance(
   // Adoption can replace a temporary MCP session with its hook conversation,
   // but it must never move the instance to a different OS process.
   const storedToken = row.process_token;
-  if (storedToken && (!processTokenMatches(storedToken, identity.token) || row.runtime_pid !== pid))
+  if (
+    storedToken &&
+    (classifyProcessToken(storedToken, identity.token) !== "same" || row.runtime_pid !== pid)
+  )
     return false;
   db.prepare(
     `UPDATE runtime_instances SET session_id = ?, runtime_pid = ?, process_token = ?,
@@ -228,13 +231,17 @@ function resumableSession(db: DB, row: InstanceRow): string | null {
 function toPublic(db: DB, row: InstanceRow, io: RuntimeProcessIO): RuntimeInstance {
   const session = row.session_id ? getSession(db, row.session_id) : null;
   const identity = row.runtime_pid ? (io.inspect ?? inspectRuntimeProcess)(row.runtime_pid) : null;
-  const tokenStillMatches =
-    !!row.process_token &&
-    !!identity &&
-    identity !== "exited" &&
-    processTokenMatches(row.process_token, identity.token);
-  const sameProcess = !!identity && identity !== "exited" && identity.runtime === row.runtime && tokenStillMatches;
-  const gone = identity === "exited" || (!!identity && !tokenStillMatches);
+  const relation =
+    row.process_token && identity && identity !== "exited"
+      ? classifyProcessToken(row.process_token, identity.token)
+      : null;
+  const sameProcess = relation === "same" && identity !== "exited" && identity?.runtime === row.runtime;
+  // Only a CONFIRMED exit or replacement ends the instance. A "changed"
+  // relation (same generation, mutated descriptor fields) means the live
+  // process was re-parented or retitled — it must NOT be treated as gone,
+  // or the row could be resumed while the original process still runs.
+  const gone = identity === "exited" || relation === "replaced";
+  const changedButAlive = relation === "changed";
   const canStop =
     sameProcess && ownedSession(db, row) && row.state !== "ended" && row.state !== "failed";
   const terminal = ["ended", "stale", "failed"].includes(row.state);
@@ -257,6 +264,7 @@ function toPublic(db: DB, row: InstanceRow, io: RuntimeProcessIO): RuntimeInstan
   if (!row.runtime_pid || !row.process_token)
     limitation = "尚未绑定可验证的运行时进程，无法安全停止";
   else if (!ownedSession(db, row)) limitation = "会话与实例的进程归属不匹配，拒绝停止";
+  else if (changedButAlive) limitation = "进程仍在运行但身份字段已变化（父进程/进程组/命令行），拒绝停止与恢复";
   else if (!sameProcess && !gone) limitation = "无法验证进程身份，拒绝停止或恢复";
   else if (gone && identity !== "exited") limitation = "原进程 PID 已被复用，拒绝停止";
   if (terminal && !credentialsValid)
@@ -292,11 +300,14 @@ function refreshInstances(db: DB, io: RuntimeProcessIO, onlyId?: string): void {
       state = "failed";
     if (row.runtime_pid) {
       const identity = (io.inspect ?? inspectRuntimeProcess)(row.runtime_pid);
-      if (
-        identity === "exited" ||
-        (identity && (!row.process_token || !processTokenMatches(row.process_token, identity.token)))
-      )
-        state = "ended";
+      // A "changed" relation (live process, mutated descriptors) must NOT
+      // end the row — ended rows become resumable and would double-run a
+      // session whose original process is still alive.
+      const refreshRelation =
+        row.process_token && identity && identity !== "exited"
+          ? classifyProcessToken(row.process_token, identity.token)
+          : null;
+      if (identity === "exited" || refreshRelation === "replaced") state = "ended";
       else if (
         session?.status === "ended" ||
         !session ||
@@ -354,9 +365,11 @@ export function stopRuntimeInstance(
     // exactly this outcome.
     if (row.stop_requested_at && row.runtime_pid) {
       const identity = (io.inspect ?? inspectRuntimeProcess)(row.runtime_pid);
-      const exited =
-        identity === "exited" ||
-        (!!identity && (!row.process_token || !processTokenMatches(row.process_token, identity.token)));
+      const completionRelation =
+        row.process_token && identity && identity !== "exited"
+          ? classifyProcessToken(row.process_token, identity.token)
+          : null;
+      const exited = identity === "exited" || completionRelation === "replaced";
       if (exited) {
         db.prepare(
           "UPDATE runtime_instances SET state = 'ended', ended_at = ?, updated_at = ? WHERE id = ?",
@@ -373,16 +386,21 @@ export function stopRuntimeInstance(
     !identity ||
     identity === "exited" ||
     identity.runtime !== row.runtime ||
-    !row.process_token || !processTokenMatches(row.process_token, identity.token) ||
+    !row.process_token || classifyProcessToken(row.process_token, identity.token) !== "same" ||
     !ownedSession(db, row)
   ) {
     conflict("process identity changed; refusing to stop");
   }
   (io.terminate ?? terminateRuntimeProcess)(row.runtime_pid);
   const after = (io.inspect ?? inspectRuntimeProcess)(row.runtime_pid);
-  const exited =
-    after === "exited" ||
-    (after && (!row.process_token || !processTokenMatches(row.process_token, after.token)));
+  const afterRelation =
+    row.process_token && after && after !== "exited"
+      ? classifyProcessToken(row.process_token, after.token)
+      : null;
+  // Only confirmed death or a confirmed replacement verifies the stop; a
+  // post-termination "changed" reading means the process is still alive
+  // with mutated identity fields and the stop stays requested.
+  const exited = after === "exited" || afterRelation === "replaced";
   // SIGTERM can be delayed or ignored. Keep ownership and the stop control
   // available until absence of the original process is actually verified.
   if (exited) {
@@ -583,24 +601,80 @@ export function macosProcessToken(pid: number, fields: MacosProcessFields): stri
 }
 
 /**
- * Compare a stored process token against a freshly inspected one. Tokens
- * match when every static field is equal AND the macOS cputime floor is
- * satisfied: the live process must have accumulated at least the CPU time
- * the bound process had when the token was stored (a fresh replacement
- * process starts near zero, so a same-second reuse with less accumulated
- * CPU is refused). Non-macOS tokens have no floor segment and compare by
- * plain equality.
+ * Three-way relation between a stored process token and a fresh inspection:
+ *
+ *  - "same":      the very same process generation (all fields equal, CPU
+ *                 floor satisfied on macOS).
+ *  - "replaced":  CONFIRMED different process generation — the creation
+ *                 identity itself differs (macOS: different lstart second,
+ *                 or a CPU floor violation, which only a fresh process can
+ *                 produce; Windows/Linux tokens are pure creation stamps,
+ *                 so any mismatch is a replacement).
+ *  - "changed":   the creation identity still fits (same lstart, CPU floor
+ *                 satisfied) but MUTABLE descriptor fields differ — the
+ *                 same LIVE process was re-parented, changed its process
+ *                 group/session, or rewrote its argv/title. This is NOT an
+ *                 exit: marking such a row ended would let it be resumed
+ *                 while the original process still runs.
  */
-export function processTokenMatches(stored: string, current: string): boolean {
-  if (stored === current) return true;
-  const storedParts = stored.split(":");
-  const currentParts = current.split(":");
-  if (storedParts[0] !== "macos" || currentParts[0] !== "macos") return false;
-  const storedFloor = storedParts.at(-1) ?? "";
-  const currentFloor = currentParts.at(-1) ?? "";
-  if (!storedFloor.startsWith("cpu>=") || !currentFloor.startsWith("cpu>=")) return false;
-  if (storedParts.slice(0, -1).join(":") !== currentParts.slice(0, -1).join(":")) return false;
-  return Number(currentFloor.slice(5)) >= Number(storedFloor.slice(5));
+export type ProcessTokenRelation = "same" | "replaced" | "changed";
+
+export function classifyProcessToken(stored: string, current: string): ProcessTokenRelation {
+  if (stored === current) return "same";
+  const a = parseMacosToken(stored);
+  const b = parseMacosToken(current);
+  if (!a || !b) return "replaced";
+  // Creation identity differs, or the live process has LESS accumulated
+  // CPU than the stored floor — only a fresh process can do that.
+  if (a.lstart !== b.lstart || !Number.isFinite(b.cpuCentis)) return "replaced";
+  if (b.cpuCentis < a.cpuCentis) return "replaced";
+  // Same generation. Equal descriptors (only the CPU floor grew) are the
+  // same process; a differing descriptor field means the live process
+  // mutated (re-parenting, setpgrp, rewritten argv/title).
+  const staticsEqual =
+    a.pid === b.pid &&
+    a.ppid === b.ppid &&
+    a.pgid === b.pgid &&
+    a.sess === b.sess &&
+    a.digest === b.digest;
+  return staticsEqual ? "same" : "changed";
+}
+
+/**
+ * Parse a macOS token back into its fields. lstart itself contains colons
+ * ("Mon Nov  2 03:25:13 2026"), so the layout is anchored from both ends:
+ * "macos:<pid>:<lstart…>:<ppid>:<pgid>:<sess>:<digest16>:cpu>=<N>" —
+ * everything between the pid and the last five segments is the lstart.
+ * Returns null for tokens in any other shape (non-macOS platforms).
+ */
+function parseMacosToken(token: string): {
+  pid: string;
+  lstart: string;
+  ppid: string;
+  pgid: string;
+  sess: string;
+  digest: string;
+  cpuCentis: number;
+} | null {
+  const parts = token.split(":");
+  if (parts[0] !== "macos" || parts.length < 8) return null;
+  const floor = parts.at(-1) ?? "";
+  if (!floor.startsWith("cpu>=")) return null;
+  const cpuCentis = Number(floor.slice(5));
+  if (!Number.isFinite(cpuCentis)) return null;
+  const digest = parts.at(-2) ?? "";
+  const sess = parts.at(-3) ?? "";
+  const pgid = parts.at(-4) ?? "";
+  const ppid = parts.at(-5) ?? "";
+  const pid = parts[1];
+  const lstart = parts.slice(2, -5).join(":");
+  if (!pid || !lstart || !ppid || !pgid || !sess || !digest) return null;
+  return { pid, lstart, ppid, pgid, sess, digest, cpuCentis };
+}
+
+/** Back-compat boolean view: only "same" counts as a match. */
+function processTokenMatches(stored: string, current: string): boolean {
+  return classifyProcessToken(stored, current) === "same";
 }
 
 function runtimeIdentity(token: string, command: string): ProcessIdentity {

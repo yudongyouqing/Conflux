@@ -18,7 +18,7 @@ import {
   type MacosProcessFields,
   macosProcessToken,
   parseMacosPs,
-  processTokenMatches,
+  classifyProcessToken,
   createRuntimeInstance,
   bindRuntimeInstance,
   getRuntimeInstance,
@@ -243,14 +243,7 @@ test("stop requires instance ownership, current session PID and unchanged proces
   }
 });
 
-test("macOS generation token: same-second PID reuse is refused below the CPU floor", () => {
-  // Deterministic same-PID/same-second scenario: a reused pid that lands
-  // in the SAME lstart second with the SAME parent, pgid, session and
-  // byte-identical argv is still refused while its accumulated CPU time
-  // is below the floor the original process established at bind — the
-  // deployable generation signal. The residual window (identical static
-  // fields AND already MORE CPU than the original had at bind) remains
-  // open and documented; this test does not claim it closed.
+test("macOS token relations: same / replaced / changed are distinguished", () => {
   const fields = (cpuCentis: number): MacosProcessFields => ({
     lstart: "Mon Nov  2 03:25:13 2026",
     ppid: "45",
@@ -260,36 +253,107 @@ test("macOS generation token: same-second PID reuse is refused below the CPU flo
     command: "node /opt/claude --resume x",
   });
   const bound = macosProcessToken(123, fields(250));
-  assert.ok(processTokenMatches(bound, macosProcessToken(123, fields(250))), "same observation matches");
-  assert.ok(processTokenMatches(bound, macosProcessToken(123, fields(900))), "more accumulated CPU matches (same process ran on)");
-  assert.ok(
-    !processTokenMatches(bound, macosProcessToken(123, fields(12))),
-    "a same-second reused pid with less accumulated CPU than the bind floor must be refused",
+
+  // same
+  assert.equal(classifyProcessToken(bound, macosProcessToken(123, fields(250))), "same");
+  assert.equal(classifyProcessToken(bound, macosProcessToken(123, fields(900))), "same");
+
+  // replaced: confirmed new generation
+  assert.equal(
+    classifyProcessToken(bound, macosProcessToken(123, fields(12))),
+    "replaced",
+    "a same-second reused pid with less accumulated CPU than the bind floor is a replacement",
   );
-  assert.ok(
-    !processTokenMatches(bound, macosProcessToken(123, { ...fields(900), command: "node /opt/codex" })),
-    "different argv must not match",
+  assert.equal(
+    classifyProcessToken(bound, macosProcessToken(123, { ...fields(900), lstart: "Mon Nov  2 03:25:14 2026" })),
+    "replaced",
+    "a different creation second is a replacement",
   );
-  assert.ok(
-    !processTokenMatches(bound, macosProcessToken(123, { ...fields(900), ppid: "46" })),
-    "different parent must not match",
+  // Non-macOS tokens (no floor segment) are pure creation stamps.
+  assert.equal(classifyProcessToken("boot-id:12345", "boot-id:12345"), "same");
+  assert.equal(classifyProcessToken("boot-id:12345", "boot-id:12346"), "replaced");
+  assert.equal(classifyProcessToken("macos:1:a:2:3:4:deadbeef:cpu>=10", "boot-id:12345"), "replaced");
+
+  // changed: same generation (same lstart, floor satisfied) but a MUTABLE
+  // descriptor field differs — the process is ALIVE, re-parented/retitled.
+  assert.equal(
+    classifyProcessToken(bound, macosProcessToken(123, { ...fields(900), ppid: "1" })),
+    "changed",
+    "re-parenting (parent exited, ppid now 1) is a live process, not an exit",
   );
-  assert.ok(
-    !processTokenMatches(bound, macosProcessToken(123, { ...fields(900), pgid: "99" })),
-    "different process group must not match",
+  assert.equal(
+    classifyProcessToken(bound, macosProcessToken(123, { ...fields(900), pgid: "99" })),
+    "changed",
   );
-  assert.ok(
-    !processTokenMatches(bound, macosProcessToken(123, { ...fields(900), sess: "98" })),
-    "different session must not match",
+  assert.equal(
+    classifyProcessToken(bound, macosProcessToken(123, { ...fields(900), sess: "98" })),
+    "changed",
   );
-  assert.ok(
-    !processTokenMatches(bound, macosProcessToken(123, { ...fields(900), lstart: "Mon Nov  2 03:25:14 2026" })),
-    "a later start second must not match",
+  assert.equal(
+    classifyProcessToken(bound, macosProcessToken(123, { ...fields(900), command: "node /opt/claude --resume RETITLED" })),
+    "changed",
+    "a rewritten argv/process title is a live process, not an exit",
   );
-  // Non-macOS tokens (no floor segment) compare by plain equality.
-  assert.ok(processTokenMatches("boot-id:12345", "boot-id:12345"));
-  assert.ok(!processTokenMatches("boot-id:12345", "boot-id:12346"));
-  assert.ok(!processTokenMatches("macos:1:a:2:3:4:deadbeef:cpu>=10", "boot-id:12345"));
+});
+
+test("a live process with changed identity fields is not ended, stopped or resumed", () => {
+  const { db, cleanup } = makeDb();
+  try {
+    const preset = createRuntimeAgent(db, { name: "test", runtime: "claude" });
+    const instance = createRuntimeInstance(db, preset);
+    registerSession(db, {
+      id: "owned",
+      name: "owned",
+      runtime: "claude",
+      runtime_pid: 123,
+      metadata: { runtime_instance_id: instance.id, agent_id: preset.id },
+    });
+    const bound = macosProcessToken(123, {
+      lstart: "Mon Nov  2 03:25:13 2026",
+      ppid: "45",
+      pgid: "44",
+      sess: "44",
+      cpuCentis: 250,
+      command: "node /opt/claude --resume x",
+    });
+    assert.equal(
+      bindRuntimeInstance(db, instance.id, "owned", 123, {
+        inspect: () => ({ runtime: "claude", token: bound }),
+      }),
+      true,
+    );
+    // The same LIVE process re-parents (ppid 45 → 1) and rewrites its title.
+    const changed = macosProcessToken(123, {
+      lstart: "Mon Nov  2 03:25:13 2026",
+      ppid: "1",
+      pgid: "44",
+      sess: "44",
+      cpuCentis: 900,
+      command: "node /opt/claude --resume RETITLED",
+    });
+    const inspectChanged = () => ({ runtime: "claude" as const, token: changed });
+
+    // Refresh must NOT end the row (ending it would allow a resume that
+    // double-runs a session whose process is still alive).
+    db.prepare("UPDATE sessions SET last_heartbeat_at = ? WHERE id = 'owned'").run(
+      new Date(Date.now() - 300_000).toISOString(),
+    );
+    const listed = listRuntimeInstances(db, { inspect: inspectChanged }).find(
+      (i) => i.id === instance.id,
+    )!;
+    assert.equal(listed.state, "stale", "a changed-but-alive process goes stale, never ended");
+    assert.equal(listed.can_stop, false);
+    assert.equal(listed.can_resume, false, "resume must be refused while the original process lives");
+    assert.match(listed.limitation ?? "", /仍在运行但身份字段已变化/);
+
+    // Stop is refused with the changed-but-alive reason, not a reuse claim.
+    assert.throws(
+      () => stopRuntimeInstance(db, instance.id, { inspect: inspectChanged }),
+      /仍在运行但身份字段已变化/,
+    );
+  } finally {
+    cleanup();
+  }
 });
 
 test("macOS ps parsing: a record with any missing identity field is unverifiable", () => {
