@@ -66,6 +66,15 @@ export async function reconcileRuntimeState(
 export async function startHttpServer(opts: HttpServerOptions = {}): Promise<FastifyInstance> {
   const config = resolveConfig(opts.scope ?? "global", opts.overrideDataDir);
   const db: DB = openDb(config);
+  // The HTTP server cannot afford sqlite's internal busy sleep: it parks
+  // the database thread and with it the whole event loop, so ONE
+  // lock-contended write froze /healthz (and tripped the desktop service
+  // watchdog) for the entire busy timeout. This connection instead fails
+  // fast and ServerContext.write drives the same total retry budget with
+  // the loop yielded between attempts. CLI/MCP connections keep the
+  // in-process blocking behavior — their event loops have nothing else to
+  // serve.
+  db.pragma("busy_timeout = 50");
   const host = resolveHttpHost(opts.host);
   const port = resolveHttpPort(opts.port);
   const webDist = process.env.CONFLUX_WEB_DIST

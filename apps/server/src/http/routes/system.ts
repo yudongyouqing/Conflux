@@ -3,7 +3,13 @@ import { join } from "node:path";
 import { getGraph } from "../../core/graph.js";
 import { queryAudit } from "../../core/audit.js";
 import { exportData, importData, type ImportConflictStrategy } from "../../core/data-transfer.js";
-import { clearData, getClearableCounts, type ClearCategories } from "../../core/data-clear.js";
+import {
+  clearDataToPath,
+  rotateBackups,
+  getClearableCounts,
+  type ClearCategories,
+} from "../../core/data-clear.js";
+import { mkdirSync } from "node:fs";
 import { logAudit } from "../../core/audit.js";
 import type { ServerContext } from "../context.js";
 
@@ -25,7 +31,7 @@ interface DataClearBody {
 }
 
 export function registerSystemRoutes(app: FastifyInstance, ctx: ServerContext): void {
-  const { db, dataDir, sendError, sendHttpError } = ctx;
+  const { db, dataDir, sendError, sendHttpError, write } = ctx;
 
   // GET /graph — return nodes (sessions) + edges (communication links)
   app.get<{ Querystring: { status?: string } }>("/graph", {}, async (req, reply) => {
@@ -82,19 +88,35 @@ export function registerSystemRoutes(app: FastifyInstance, ctx: ServerContext): 
       );
     }
     try {
-      const result = clearData(db, categories, join(dataDir, "backups"));
-      logAudit(db, {
-        interface: "http",
-        action: "clear_data",
-        args: { ...categories },
-        result: {
-          backupPath: result.backupPath,
-          clearedSessions: result.cleared.sessions,
-          clearedMessages: result.cleared.messages,
-          clearedContextEntries: result.cleared.contextEntries,
-        },
+      // The backup path is minted ONCE per request; the snapshot, the
+      // backup file and the deletes run inside ONE retried immediate
+      // transaction (clearDataToPath), so everything removed is in the
+      // backup — including rows other connections committed while an
+      // earlier attempt waited on the lock — and a retry overwrites the
+      // same file instead of minting duplicate stamps. The audit lives in
+      // the same transaction: it cannot fail after the clear committed and
+      // report a successful clear as failed.
+      const backupDir = join(dataDir, "backups");
+      mkdirSync(backupDir, { recursive: true });
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const backupPath = join(backupDir, `clear-backup-${stamp}.json`);
+      const cleared = await write(() => {
+        const result = clearDataToPath(db, categories, backupPath);
+        logAudit(db, {
+          interface: "http",
+          action: "clear_data",
+          args: { ...categories },
+          result: {
+            backupPath,
+            clearedSessions: result.cleared.sessions,
+            clearedMessages: result.cleared.messages,
+            clearedContextEntries: result.cleared.contextEntries,
+          },
+        });
+        return result.cleared;
       });
-      return reply.send(result);
+      rotateBackups(backupDir);
+      return reply.send({ backupPath, cleared });
     } catch (err) {
       return sendError(reply, err);
     }
@@ -122,15 +144,18 @@ export function registerSystemRoutes(app: FastifyInstance, ctx: ServerContext): 
         return sendHttpError(reply, 400, "conflict must be skip, overwrite, or copy");
       }
       try {
-        const result = importData(db, req.body.bundle, {
-          conflict,
-          projectDir: process.env.CLAUDE_PROJECT_DIR || process.cwd(),
-        });
-        logAudit(db, {
-          interface: "http",
-          action: "import_data",
-          args: { conflict },
-          result: { ...result },
+        const result = await write(() => {
+          const imported = importData(db, req.body.bundle, {
+            conflict,
+            projectDir: process.env.CLAUDE_PROJECT_DIR || process.cwd(),
+          });
+          logAudit(db, {
+            interface: "http",
+            action: "import_data",
+            args: { conflict },
+            result: { ...imported },
+          });
+          return imported;
         });
         return reply.send(result);
       } catch (err) {

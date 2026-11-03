@@ -665,10 +665,10 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       const o = this.optsWithGlobals();
       const res = await runOp(
         program,
-        () => {
+        async () => {
           const db = openDbFrom(o);
           const sid = resolveCliSessionId(db);
-          const result = askAndMaybeWake(db, {
+          const result = await askAndMaybeWake(db, {
             from_session: sid,
             to_session: o.to,
             question,
@@ -698,11 +698,11 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       const id = Number(rawId);
       const result = await runOp(
         program,
-        () =>
-          withDb(openDbFrom(o), (db) => {
+        async () =>
+          withDb(openDbFrom(o), async (db) => {
             const actor = resolveCliSessionId(db);
             try {
-              const outcome = retryMessageDelivery(db, id, actor);
+              const outcome = await retryMessageDelivery(db, id, actor);
               logAudit(db, {
                 interface: "cli",
                 caller_session: actor,
@@ -823,10 +823,10 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       const id = Number(o.id);
       const res = await runOp(
         program,
-        () => {
+        async () => {
           const db = openDbFrom(o);
           const sid = resolveCliSessionId(db);
-          const m = replyAskAndPush(db, id, sid, reply);
+          const m = await replyAskAndPush(db, id, sid, reply);
           logAudit(db, {
             caller_session: sid,
             interface: "cli",
@@ -1213,12 +1213,10 @@ function openDbFrom(o: CliOpts): DB {
  * A leaked better-sqlite3 handle keeps data.db locked on Windows long
  * after the command's work is done (issue #83).
  */
-function withDb<T>(db: DB, fn: (db: DB) => T): T {
-  try {
-    return fn(db);
-  } finally {
-    db.close();
-  }
+function withDb<T>(db: DB, fn: (db: DB) => T | Promise<T>): T | Promise<T> {
+  return Promise.resolve(undefined)
+    .then(() => fn(db))
+    .finally(() => db.close()) as T | Promise<T>;
 }
 
 /**

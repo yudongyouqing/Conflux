@@ -20,17 +20,18 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 // run took 18.6 s for a single 10 s timeout), so elapsed time is only a
 // loose guard while the log line proves which code path ran.
 //
-// Health coverage is two distinct claims, tested separately:
+// Health coverage, two claims:
 // 1. While only the lock is held (no contended request in flight),
 //    /healthz answers fast — asserted directly below.
-// 2. While the server is synchronously waiting on a contended write,
-//    /healthz is BLOCKED — better-sqlite3 waits synchronously, so the
-//    single-threaded event loop cannot serve anything until the wait ends.
-//    An independent client process (health-probe-child.cjs) polls across
-//    the blocked window and records the real in-flight latency; this is a
-//    documented limitation, not a claim of concurrent availability.
-//    Making health answer during a lock wait needs database work off the
-//    event loop — tracked as a separate follow-up.
+// 2. While a contended write is WAITING for the lock, /healthz must stay
+//    responsive too: the HTTP server drives its busy budget with the event
+//    loop yielded between attempts (ServerContext.write), so the wait no
+//    longer freezes the loop. An independent client process polls across
+//    the wait window and records the real latency — the desktop service
+//    watchdog (15 s interval, 2 s timeout) reads healthy throughout.
+//    Write-path closures that must not be retried or held in a
+//    transaction (process termination/spawn routes) still fail fast with
+//    DATA_LOCKED instead of blocking.
 const BUSY_TIMEOUT_MS = 10000;
 
 interface ProbeLine {
@@ -40,7 +41,7 @@ interface ProbeLine {
   err?: string;
 }
 
-test("lock held: health answers with no write in flight; blocked during the wait; write 503s after one timeout, then recovers", { timeout: 90000 }, async (t) => {
+test("lock held: health stays responsive during the write's lock wait; write 503s after the budget, then recovers", { timeout: 90000 }, async (t) => {
   const dataDir = mkdtempSync(join(tmpdir(), "muiltchat-http-lock-"));
   const dbPath = join(dataDir, "data.db");
   const logFile = join(dataDir, "server.log");
@@ -170,25 +171,25 @@ test("lock held: health answers with no write in flight; blocked during the wait
   if (probe.exitCode === null && probe.signalCode === null) probe.kill();
 
   const duringAndAfter = probeLines.slice(linesBeforeWrite);
-  const blockedProbes = duringAndAfter.filter((l) => l.receivedAt - l.sentAt >= 5000);
   const latencies = duringAndAfter.map((l) => l.receivedAt - l.sentAt);
+  // The acceptance bound is the desktop watchdog's own probe timeout
+  // (2 s): every health response during the write's lock wait must stay
+  // far under it, or the watchdog would report the service unhealthy.
+  const maxDuringWait = Math.max(0, ...latencies);
   assert.ok(
-    blockedProbes.length >= 1,
-    `expected the in-flight health probe to be blocked by the synchronous wait; latencies: ${JSON.stringify(latencies)}`,
+    duringAndAfter.length >= 3,
+    `expected several probe samples across the wait window; got ${JSON.stringify(duringAndAfter)}`,
   );
-  const maxBlockedMs = Math.max(...blockedProbes.map((l) => l.receivedAt - l.sentAt));
   assert.ok(
-    maxBlockedMs >= 5000,
-    `the blocked health probe only waited ${maxBlockedMs} ms — expected it to span most of the lock wait`,
+    duringAndAfter.every((l) => l.status === 200),
+    `health probes must succeed during the lock wait: ${JSON.stringify(duringAndAfter)}`,
   );
-  const tail = duringAndAfter.slice(-2);
   assert.ok(
-    tail.length === 2 && tail.every((l) => l.status === 200 && l.receivedAt - l.sentAt < 3000),
-    `health must recover immediately after the wait ends; tail: ${JSON.stringify(tail)}`,
+    maxDuringWait < 2000,
+    `health latency during the lock wait must stay under the watchdog's 2 s timeout; observed max ${maxDuringWait} ms (all: ${JSON.stringify(latencies)})`,
   );
   t.diagnostic(
-    `independent /healthz probe across the lock wait: ${duringAndAfter.length} probes, ` +
-      `blocked in-flight max ${maxBlockedMs} ms (write wait ${writeElapsed.toFixed(0)} ms), recovered tail fast`,
+    `independent /healthz probe across the lock wait: ${duringAndAfter.length} probes, max latency ${maxDuringWait} ms while the write waited ${writeElapsed.toFixed(0)} ms`,
   );
 
   // The failed contended write leaves no row; recovery works after release.

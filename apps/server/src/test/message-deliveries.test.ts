@@ -15,10 +15,10 @@ function fixture() {
   return fixture;
 }
 
-test("asks persist queued wake attempts without changing the read lifecycle", () => {
+test("asks persist queued wake attempts without changing the read lifecycle", async () => {
   const { db, cleanup } = fixture();
   try {
-    const { message } = askAndMaybeWake(db, {
+    const { message } = await askAndMaybeWake(db, {
       from_session: "sender",
       to_session: "target",
       question: "hello",
@@ -32,7 +32,7 @@ test("asks persist queued wake attempts without changing the read lifecycle", ()
   }
 });
 
-test("retry reuses the pending message and records explicit wake failure", () => {
+test("retry reuses the pending message and records explicit wake failure", async () => {
   const { db, cleanup } = fixture();
   try {
     const message = askSession(db, {
@@ -40,7 +40,7 @@ test("retry reuses the pending message and records explicit wake failure", () =>
       to_session: "target",
       question: "hello",
     });
-    const result = retryMessageDelivery(db, message.id, "sender", () => ({
+    const result = await retryMessageDelivery(db, message.id, "sender", () => ({
       woke: false,
       reason: "refused",
       disposition: "failed",
@@ -55,7 +55,7 @@ test("retry reuses the pending message and records explicit wake failure", () =>
   }
 });
 
-test("retry enforces actor and lifecycle, and addresses the current forwarded recipient", () => {
+test("retry enforces actor and lifecycle, and addresses the current forwarded recipient", async () => {
   const { db, cleanup } = fixture();
   try {
     const message = askSession(db, {
@@ -63,23 +63,23 @@ test("retry enforces actor and lifecycle, and addresses the current forwarded re
       to_session: "target",
       question: "hello",
     });
-    assert.throws(() => retryMessageDelivery(db, message.id, "other"), { statusCode: 403 });
-    assert.throws(() => retryMessageDelivery(db, 99999, "sender"), { statusCode: 404 });
+    await assert.rejects(retryMessageDelivery(db, message.id, "other"), { statusCode: 403 });
+    await assert.rejects(retryMessageDelivery(db, 99999, "sender"), { statusCode: 404 });
     db.prepare("UPDATE messages SET to_session = 'successor' WHERE id = ?").run(message.id);
     let recipient = "";
-    retryMessageDelivery(db, message.id, "successor", (_db, id) => {
+    await retryMessageDelivery(db, message.id, "successor", (_db: unknown, id: string) => {
       recipient = id;
       return { woke: true };
     });
     assert.equal(recipient, "successor");
     checkInbox(db, "successor");
-    assert.throws(() => retryMessageDelivery(db, message.id, "sender"), { statusCode: 409 });
+    await assert.rejects(retryMessageDelivery(db, message.id, "sender"), { statusCode: 409 });
   } finally {
     cleanup();
   }
 });
 
-test("an atomic claim prevents nested retries and expired claims recover once", () => {
+test("an atomic claim prevents nested retries and expired claims recover once", async () => {
   const { db, cleanup } = fixture();
   try {
     const message = askSession(db, {
@@ -87,21 +87,21 @@ test("an atomic claim prevents nested retries and expired claims recover once", 
       to_session: "target",
       question: "hello",
     });
-    retryMessageDelivery(db, message.id, "sender", () => {
-      assert.throws(() => retryMessageDelivery(db, message.id, "target"), { statusCode: 409 });
+    await retryMessageDelivery(db, message.id, "sender", async () => {
+      await assert.rejects(retryMessageDelivery(db, message.id, "target"), { statusCode: 409 });
       return { woke: true };
     });
     db.prepare(
       "UPDATE message_deliveries SET claim_token = 'abandoned', claim_expires_at = '2000-01-01T00:00:00.000Z' WHERE message_id = ?",
     ).run(message.id);
-    const retried = retryMessageDelivery(db, message.id, "sender", () => ({ woke: true }));
+    const retried = await retryMessageDelivery(db, message.id, "sender", () => ({ woke: true }));
     assert.equal(retried.message.delivery?.attempts, 2);
   } finally {
     cleanup();
   }
 });
 
-test("legacy messages have no invented delivery and thrown launch errors are failed", () => {
+test("legacy messages have no invented delivery and thrown launch errors are failed", async () => {
   const { db, cleanup } = fixture();
   try {
     const message = askSession(db, {
@@ -110,7 +110,7 @@ test("legacy messages have no invented delivery and thrown launch errors are fai
       question: "hello",
     });
     assert.equal(getMessage(db, message.id)?.delivery, undefined);
-    const retried = retryMessageDelivery(db, message.id, "sender", () => {
+    const retried = await retryMessageDelivery(db, message.id, "sender", () => {
       throw new Error("secret launch details");
     });
     assert.equal(retried.message.delivery?.state, "failed");
@@ -120,13 +120,13 @@ test("legacy messages have no invented delivery and thrown launch errors are fai
   }
 });
 
-test("initial send succeeds when a reader consumes the message before wake claiming", () => {
+test("initial send succeeds when a reader consumes the message before wake claiming", async () => {
   const { db, cleanup } = fixture();
   try {
     db.exec(
       "CREATE TRIGGER test_reader AFTER INSERT ON messages BEGIN UPDATE messages SET status = 'seen' WHERE id = new.id; END;",
     );
-    const result = askAndMaybeWake(db, {
+    const result = await askAndMaybeWake(db, {
       from_session: "sender",
       to_session: "target",
       question: "already consumed",
@@ -139,13 +139,13 @@ test("initial send succeeds when a reader consumes the message before wake claim
   }
 });
 
-test("initial send succeeds when another delivery attempt already claimed the persisted message", () => {
+test("initial send succeeds when another delivery attempt already claimed the persisted message", async () => {
   const { db, cleanup } = fixture();
   try {
     db.exec(`CREATE TRIGGER test_other_retry AFTER INSERT ON messages BEGIN
       INSERT INTO message_deliveries (message_id, state, attempts, last_attempted_at, claim_token, claim_expires_at)
       VALUES (new.id, 'queued', 1, '2026-10-30T00:00:00Z', 'other-worker', '2999-01-01T00:00:00Z'); END;`);
-    const result = askAndMaybeWake(db, {
+    const result = await askAndMaybeWake(db, {
       from_session: "sender",
       to_session: "target",
       question: "claimed concurrently",

@@ -42,6 +42,38 @@ export function isLockError(error: unknown): boolean {
   return /\bdatabase is locked\b/i.test(rawMessage);
 }
 
+/**
+ * Retry a lock-contended database operation while YIELDING to the event
+ * loop between attempts. sqlite's internal busy handler sleeps on the
+ * database thread, which freezes a server's whole event loop for the full
+ * busy_timeout; callers that cannot afford that (the HTTP server) set a
+ * very short connection-level busy_timeout and drive the retry budget
+ * here instead, so concurrent requests stay served during the wait.
+ *
+ * The operation must be retry-safe: a lock error may only escape before
+ * any partial effect. Wrapping the closure in an immediate transaction
+ * (BEGIN IMMEDIATE takes the write lock up front or fails before anything
+ * happens) guarantees that; better-sqlite3 also rolls a throwing
+ * transaction back entirely.
+ */
+export async function retryOnBusy<T>(
+  db: DB,
+  op: () => T,
+  opts: { budgetMs?: number; pauseMs?: number } = {},
+): Promise<T> {
+  const budgetMs = opts.budgetMs ?? BUSY_TIMEOUT_MS;
+  const pauseMs = opts.pauseMs ?? 25;
+  const startedAt = Date.now();
+  for (;;) {
+    try {
+      return op();
+    } catch (error) {
+      if (!isLockError(error) || Date.now() - startedAt >= budgetMs) throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, pauseMs));
+  }
+}
+
 /** Convert internal failures into a stable, non-sensitive public response. */
 export function publicError(error: unknown, context: PublicErrorContext = {}): PublicError {
   const value = isRecord(error) ? error : {};
@@ -333,6 +365,15 @@ CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_log(caller_session);
 `;
 
 /**
+ * Total time a database operation keeps retrying a held write lock before
+ * surfacing SQLITE_BUSY. The HTTP server implements this budget in
+ * JavaScript (yielding between attempts) instead of sqlite's internal
+ * busy-handler sleep, which would freeze the event loop for the whole
+ * budget — CLI/MCP connections keep the in-process blocking behavior.
+ */
+export const BUSY_TIMEOUT_MS = 10_000;
+
+/**
  * Open (or reuse) a single database connection per process.
  * Uses WAL mode for safe multi-process concurrent reads + single writer.
  */
@@ -340,7 +381,7 @@ export function openDb(config: Config): DB {
   const db = new Database(config.dbPath);
   try {
     db.pragma(`journal_mode = WAL`);
-    db.pragma(`busy_timeout = 10000`);
+    db.pragma(`busy_timeout = ${BUSY_TIMEOUT_MS}`);
     db.pragma(`synchronous = NORMAL`);
     db.pragma(`foreign_keys = ON`);
 

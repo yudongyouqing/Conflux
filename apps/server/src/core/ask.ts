@@ -3,7 +3,8 @@ import { askSession, getMessage, type Message } from "./messages.js";
 import { wakeSessionForMail, type WakeResult } from "./wake/index.js";
 import { WEB_CONSOLE_ID } from "@conflux/shared";
 import { randomUUID } from "node:crypto";
-import { nowIso } from "./db.js";
+import { nowIso, retryOnBusy, isLockError } from "./db.js";
+import { logger } from "../log.js";
 
 /**
  * THE ask path: deliver a question and, when the addressee cannot see it
@@ -27,28 +28,102 @@ export interface AskOutcome {
   wake: WakeResult;
 }
 
-export function askAndMaybeWake(db: DB, opts: AskOptions): AskOutcome {
-  const message = askSession(db, opts);
-  return attemptMessageWake(db, message.id, opts.from_session, wakeSessionForMail, true);
+export async function askAndMaybeWake(db: DB, opts: AskOptions): Promise<AskOutcome> {
+  return completeAsk(db, prepareAsk(db, opts));
 }
 
 /** The caller is resolved by the interface, never from a retry request body. */
-export function retryMessageDelivery(
+export async function retryMessageDelivery(
   db: DB,
   id: number,
   actor: string,
-  wake: typeof wakeSessionForMail = wakeSessionForMail,
-): AskOutcome {
-  return attemptMessageWake(db, id, actor, wake);
+  wake: Parameters<typeof completeAsk>[2] = wakeSessionForMail,
+): Promise<AskOutcome> {
+  return completeAsk(db, prepareRetryDelivery(db, id, actor), wake);
 }
 
-function attemptMessageWake(
+/**
+ * Phase 1 of the ask path — DATABASE ONLY: the question insert and the
+ * delivery claim in one transaction. Callers that retry the transaction on
+ * lock contention (the HTTP server's ctx.write) must wrap ONLY this phase:
+ * a rollback here is clean, so a retry can never duplicate anything.
+ */
+export interface AskPrepared {
+  message: Message;
+  /** Non-null when this call acquired the delivery claim and a wake should run. */
+  claim: { id: number; token: string } | null;
+}
+
+export function prepareAsk(db: DB, opts: AskOptions): AskPrepared {
+  const message = askSession(db, opts);
+  return claimMessageWake(db, message.id, opts.from_session, true);
+}
+
+/** Phase 1 for manual retries — the same database-only contract as prepareAsk. */
+export function prepareRetryDelivery(db: DB, id: number, actor: string): AskPrepared {
+  return claimMessageWake(db, id, actor, false);
+}
+
+/**
+ * Phase 2 of the ask path — runs the EXTERNAL wake (process spawn, typed
+ * push) and records its outcome. Never call this inside a retried
+ * transaction: the spawn/push cannot be rolled back while the rollback
+ * WOULD erase the delivery claim that deduplicates it, so a retry would
+ * launch the wake a second time. Execute strictly after phase 1 commits.
+ */
+export async function completeAsk(
   db: DB,
-  id: number,
-  actor: string,
-  wakeFn = wakeSessionForMail,
-  initial = false,
-): AskOutcome {
+  prepared: AskPrepared,
+  wakeFn: (
+    db: DB,
+    sessionId: string,
+  ) => Promise<WakeResult> | WakeResult = wakeSessionForMail as (
+    db: DB,
+    sessionId: string,
+  ) => WakeResult,
+): Promise<AskOutcome> {
+  const { message, claim } = prepared;
+  if (!claim) return { message, wake: { woke: false, reason: "message already received" } };
+  let wake: WakeResult;
+  try {
+    wake = await wakeFn(db, message.to_session);
+  } catch {
+    wake = { woke: false, reason: "wake attempt failed", disposition: "failed" };
+  }
+  // The status write-back is DATABASE-ONLY and keyed by the one-shot claim
+  // token, so it retries safely on its own — the external wake above
+  // already ran exactly once and must never re-run. If even the retry
+  // budget is exhausted the message is still committed and delivered:
+  // report the accepted state instead of throwing (a thrown error here
+  // tells the caller the send FAILED and baits a duplicate send); the 60 s
+  // claim expiry re-opens the delivery for a manual retry.
+  try {
+    await retryOnBusy(db, () =>
+      db
+        .prepare(
+          `UPDATE message_deliveries SET state = ?, reason = ?, claim_token = NULL,
+           claim_expires_at = NULL WHERE message_id = ? AND claim_token = ?`,
+        )
+        .run(
+          wake.woke ? "woken" : (wake.disposition ?? "queued"),
+          wake.woke ? null : wake.reason.slice(0, 500),
+          message.id,
+          claim.token,
+        ),
+    );
+  } catch (err) {
+    if (!isLockError(err)) throw err;
+    logger.warn(
+      { messageId: message.id },
+      "delivery status write-back stayed locked — message accepted, status pending (claim expires)",
+    );
+    return { message: getMessage(db, message.id) ?? message, wake };
+  }
+  // A typed wake may already have marked the question seen.
+  return { message: getMessage(db, message.id)!, wake };
+}
+
+function claimMessageWake(db: DB, id: number, actor: string, initial: boolean): AskPrepared {
   const token = randomUUID();
   let claimAcquired = false;
   const message = db
@@ -88,22 +163,5 @@ function attemptMessageWake(
       return message;
     })
     .immediate();
-  if (!claimAcquired) return { message, wake: { woke: false, reason: "message already received" } };
-  let wake: WakeResult;
-  try {
-    wake = wakeFn(db, message.to_session);
-  } catch {
-    wake = { woke: false, reason: "wake attempt failed", disposition: "failed" };
-  }
-  db.prepare(
-    `UPDATE message_deliveries SET state = ?, reason = ?, claim_token = NULL,
-    claim_expires_at = NULL WHERE message_id = ? AND claim_token = ?`,
-  ).run(
-    wake.woke ? "woken" : (wake.disposition ?? "queued"),
-    wake.woke ? null : wake.reason.slice(0, 500),
-    message.id,
-    token,
-  );
-  // A typed wake may already have marked the question seen.
-  return { message: getMessage(db, message.id)!, wake };
+  return { message, claim: claimAcquired ? { id: message.id, token } : null };
 }

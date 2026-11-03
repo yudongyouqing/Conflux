@@ -1,5 +1,12 @@
 import type { FastifyReply } from "fastify";
-import { isLockError, publicError, type DB, type PublicErrorCode } from "../core/db.js";
+import {
+  BUSY_TIMEOUT_MS,
+  isLockError,
+  publicError,
+  retryOnBusy,
+  type DB,
+  type PublicErrorCode,
+} from "../core/db.js";
 import { heartbeat } from "../core/sessions.js";
 import { logAudit } from "../core/audit.js";
 import { logger } from "../log.js";
@@ -30,6 +37,14 @@ export interface ServerContext {
     statusOverride?: number,
   ): FastifyReply;
   sendHttpError(reply: FastifyReply, status: number, message: string): FastifyReply;
+  /**
+   * Run a route's write closure (core operation + audit) as ONE retry-safe
+   * unit: an immediate transaction takes the write lock before any effect,
+   * and a lock error retries with the event loop yielded between attempts
+   * until the shared busy budget is spent. Concurrent requests — including
+   * /healthz — stay served while the closure waits for the lock.
+   */
+  write<T>(op: () => T): Promise<T>;
 }
 
 export function httpError(code: number, message: string): { statusCode: number; message: string } {
@@ -107,7 +122,15 @@ export function createServerContext(
     return reply.code(status).send({ ...mapped, error: mapped.message });
   }
 
-  return { db, dataDir, port, requireSession, audit, sendError, sendHttpError };
+  function write<T>(op: () => T): Promise<T> {
+    // BEGIN IMMEDIATE fails before any effect when the write lock is held,
+    // so retrying the whole closure can never duplicate a partially
+    // applied write; core functions using their own transactions nest as
+    // savepoints inside this one.
+    return retryOnBusy(db, () => db.transaction(op).immediate(), { budgetMs: BUSY_TIMEOUT_MS });
+  }
+
+  return { db, dataDir, port, requireSession, audit, sendError, sendHttpError, write };
 }
 
 export function safeSummary(value: unknown): Record<string, unknown> | null {

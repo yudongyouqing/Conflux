@@ -1,5 +1,5 @@
 import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { DB } from "./db.js";
 import { exportData } from "./data-transfer.js";
 
@@ -49,7 +49,7 @@ export function getClearableCounts(db: DB): ClearableCounts {
 }
 
 /** Keep only the newest CLEAR_BACKUP_KEEP clear-backup files in dir. */
-function rotateBackups(backupDir: string): void {
+export function rotateBackups(backupDir: string): void {
   const files = readdirSync(backupDir)
     .filter((f) => f.startsWith("clear-backup-") && f.endsWith(".json"))
     .map((f) => {
@@ -83,19 +83,65 @@ export function clearData(
   if (!categories.sessions && !categories.messages && !categories.context) {
     return { backupPath: null, cleared: { sessions: 0, messages: 0, contextEntries: 0 } };
   }
-
-  // Full bundle first — the restore path is the existing /data/import.
   mkdirSync(backupDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const backupPath = join(backupDir, `clear-backup-${stamp}.json`);
-  writeFileSync(backupPath, JSON.stringify(exportData(db), null, 2), "utf8");
+  const result = clearDataToPath(db, categories, backupPath);
+  rotateBackups(backupDir);
+  return result;
+}
 
-  const before = getClearableCounts(db);
+/**
+ * Atomic clear: the backup SNAPSHOT, the backup FILE and the deletes run
+ * in ONE immediate transaction. BEGIN IMMEDIATE takes the write lock
+ * before the snapshot, so no other connection can commit between what the
+ * backup contains and what the deletes remove — everything deleted is in
+ * the backup, including rows committed while an earlier attempt was
+ * waiting on the lock, and sessions-level cascade victims (their messages
+ * and contexts are plain rows at snapshot time).
+ *
+ * The backup path is decided by the CALLER, once per clear request: a
+ * retried transaction overwrites the same file with the snapshot of the
+ * attempt that actually commits — the file operation is idempotent, never
+ * a per-retry duplicate stamp. The file is written before the deletes
+ * inside the transaction, so a rollback that discards the deletes also
+ * discards the need for the backup; the committing attempt's file is
+ * exactly the pre-delete state it removes.
+ */
+export function clearDataToPath(
+  db: DB,
+  categories: ClearCategories,
+  backupPath: string,
+): ClearResult {
+  if (!categories.sessions && !categories.messages && !categories.context) {
+    return { backupPath: null, cleared: { sessions: 0, messages: 0, contextEntries: 0 } };
+  }
+  return db
+    .transaction(() => {
+      const snapshot = exportData(db);
+      // mkdir is idempotent; the same path is overwritten on a retry.
+      mkdirSync(dirname(backupPath), { recursive: true });
+      writeFileSync(backupPath, JSON.stringify(snapshot, null, 2), "utf8");
+      const before = getClearableCounts(db);
+      applyDeletes(db, categories);
+      const after = getClearableCounts(db);
+      return {
+        backupPath,
+        cleared: {
+          sessions: before.sessions - after.sessions,
+          messages: before.messages - after.messages,
+          contextEntries: before.contextEntries - after.contextEntries,
+        },
+      };
+    })
+    .immediate();
+}
 
+function applyDeletes(db: DB, categories: ClearCategories): void {
   if (categories.messages) db.prepare("DELETE FROM messages").run();
   if (categories.context) db.prepare("DELETE FROM context_entries").run();
   if (categories.sessions) {
-    // FK cascade (foreign_keys = ON) wipes this session's messages and
+    // FK cascade (foreign_keys = ON) wipes each session's messages and
     // context entries; edges carry no FK, so orphaned ones go manually.
     db.prepare("DELETE FROM sessions WHERE id != 'web-console'").run();
     db.prepare(
@@ -105,16 +151,5 @@ export function clearData(
     // pid → conversation markers now point at nothing
     db.prepare("DELETE FROM app_settings WHERE key LIKE 'claude-current:%'").run();
   }
-
-  const after = getClearableCounts(db);
-  rotateBackups(backupDir);
-
-  return {
-    backupPath,
-    cleared: {
-      sessions: before.sessions - after.sessions,
-      messages: before.messages - after.messages,
-      contextEntries: before.contextEntries - after.contextEntries,
-    },
-  };
 }
+
