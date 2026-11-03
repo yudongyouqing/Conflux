@@ -98,6 +98,26 @@ function deliver(
 }
 
 /**
+ * The typed-push half of a reply, split out of replyAskAndPush for callers
+ * whose database phase is retried in a transaction (the HTTP server's
+ * ctx.write): typing into a terminal is an EXTERNAL effect and must run
+ * strictly after the reply has committed — a rollback cannot untype it.
+ */
+export function maybePushReply(db: DB, askerSessionId: string, io: TmuxIO = realTmuxIO): void {
+  // auto_wake is the user's consent switch for Conflux steering sessions —
+  // typing into terminals without it hijacks turns the setting exists to stop
+  if (!getAutoWake(db)) return;
+  try {
+    pushMailTyped(db, askerSessionId, io);
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      "typed reply push failed — hook notice still owns delivery",
+    );
+  }
+}
+
+/**
  * replyAsk + best-effort typed push to the ASKER, so the answer lands in
  * their conversation immediately instead of surfacing on their next prompt.
  * All interfaces (MCP / HTTP / CLI) route replies through here.
@@ -110,16 +130,6 @@ export function replyAskAndPush(
   io: TmuxIO = realTmuxIO,
 ): Message {
   const msg = replyAsk(db, id, replierSessionId, reply);
-  // auto_wake is the user's consent switch for Conflux steering sessions —
-  // typing into terminals without it hijacks turns the setting exists to stop
-  if (!getAutoWake(db)) return msg;
-  try {
-    pushMailTyped(db, msg.from_session, io);
-  } catch (err) {
-    logger.warn(
-      { err: err instanceof Error ? err.message : String(err) },
-      "typed reply push failed — hook notice still owns delivery",
-    );
-  }
+  maybePushReply(db, msg.from_session, io);
   return msg;
 }
