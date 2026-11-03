@@ -7,8 +7,9 @@ import {
   listEdgeMessages,
   getEdge,
 } from "../../core/messages.js";
-import { replyAskAndPush } from "../../core/mail-push.js";
-import { askAndMaybeWake, retryMessageDelivery } from "../../core/ask.js";
+import { maybePushReply } from "../../core/mail-push.js";
+import { replyAsk } from "../../core/messages.js";
+import { prepareAsk, prepareRetryDelivery, completeAsk } from "../../core/ask.js";
 import { getSession, heartbeat } from "../../core/sessions.js";
 import { logAudit } from "../../core/audit.js";
 import { httpError, WEB_CONSOLE_ID, type ServerContext } from "../context.js";
@@ -36,20 +37,20 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
     try {
       const resolvedActor = requireSession(req);
       actor = resolvedActor;
-      const result = await write(() => {
-        const retried = retryMessageDelivery(db, Number(req.params.id), resolvedActor);
+      // Phase 1 (retryable, database-only): the delivery claim + audit.
+      // Phase 2 (external wake) runs strictly after the commit — a rollback
+      // would erase the claim and a retry would launch the wake twice.
+      const prepared = await write(() => {
+        const claimed = prepareRetryDelivery(db, Number(req.params.id), resolvedActor);
         logAudit(db, {
           caller_session: resolvedActor,
           interface: "http",
           action: "retry_message_delivery",
-          args: { id: retried.message.id },
-          result: {
-            state: retried.message.delivery?.state,
-            attempts: retried.message.delivery?.attempts,
-          },
+          args: { id: claimed.message.id },
         });
-        return retried;
+        return claimed;
       });
+      const result = completeAsk(db, prepared);
       return reply.send(result);
     } catch (error) {
       return sendError(reply, error, actor, "retry_message_delivery", { id: req.params.id });
@@ -74,20 +75,19 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
     async (req, reply) => {
       const sid = requireSession(req);
       try {
-        const { message: msg, wake } = await write(() => {
-          const asked = askAndMaybeWake(db, {
+        // Database-only phase (question insert + delivery claim + audit) is
+        // retried as one clean transaction; the wake spawn happens once,
+        // strictly after the commit.
+        const prepared = await write(() => {
+          const claimed = prepareAsk(db, {
             from_session: sid,
             to_session: req.body.to_session,
             question: req.body.question,
           });
-          audit(
-            sid,
-            "ask_session",
-            { to_session: req.body.to_session },
-            { message_id: asked.message.id, wake: asked.wake },
-          );
-          return asked;
+          audit(sid, "ask_session", { to_session: req.body.to_session }, { message_id: claimed.message.id });
+          return claimed;
         });
+        const { message: msg, wake } = completeAsk(db, prepared);
         return reply.send({ message: msg, wake });
       } catch (err) {
         return sendError(reply, err, sid, "ask_session");
@@ -118,20 +118,21 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
         body: {
           type: "object",
           required: ["reply"],
-          properties: {
-            reply: { type: "string", maxLength: 20000 },
-          },
+          properties: { reply: { type: "string", maxLength: 20000 } },
         },
       },
     },
     async (req, reply) => {
       const sid = requireSession(req);
       try {
+        // The reply write is retried as one transaction; typing the typed
+        // push into the asker's terminal is external and runs after commit.
         const msg = await write(() => {
-          const replied = replyAskAndPush(db, Number(req.params.id), sid, req.body.reply);
+          const replied = replyAsk(db, Number(req.params.id), sid, req.body.reply);
           audit(sid, "reply_ask", { id: req.params.id }, { message_id: replied.id });
           return replied;
         });
+        maybePushReply(db, msg.from_session);
         return reply.send({ message: msg });
       } catch (err) {
         return sendError(reply, err, sid, "reply_ask");
@@ -226,17 +227,12 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
         const edgeId = Number(req.params.id);
         const edge = getEdge(db, edgeId);
         if (!edge) return sendHttpError(reply, 404, "edge not found");
-        // Speak AS the channel's initiator — a web-console channel means
-        // the console itself; an A→B channel lets the UI continue the
-        // conversation on A's behalf ("let A ask B", same semantics as
-        // /web/ask from_session). No heartbeat for CLI senders: speaking
-        // for them must not fake their liveness.
         const from = edge.from_session;
-        const { message: msg, wake } = await write(() => {
+        const prepared = await write(() => {
           // No heartbeat for CLI senders: speaking for them must not fake
           // their liveness.
           if (from === WEB_CONSOLE_ID) heartbeat(db, WEB_CONSOLE_ID);
-          const asked = askAndMaybeWake(db, {
+          const claimed = prepareAsk(db, {
             from_session: from,
             to_session: edge.to_session,
             question: req.body.question,
@@ -246,10 +242,11 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
             interface: "http",
             action: "edge_ask",
             args: { edge: edgeId },
-            result: { message_id: asked.message.id, wake: asked.wake },
+            result: { message_id: claimed.message.id },
           });
-          return asked;
+          return claimed;
         });
+        const { message: msg, wake } = completeAsk(db, prepared);
         return reply.send({ message: msg, wake });
       } catch (err) {
         return sendError(reply, err, undefined, "edge_ask");
@@ -298,9 +295,9 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
           }
           from = sender.id; // speak AS this session; do NOT heartbeat it (no fake liveness)
         }
-        const { message: msg, wake } = await write(() => {
+        const prepared = await write(() => {
           if (from === WEB_CONSOLE_ID) heartbeat(db, WEB_CONSOLE_ID);
-          const asked = askAndMaybeWake(db, {
+          const claimed = prepareAsk(db, {
             from_session: from,
             to_session: req.body.to_session,
             question: req.body.question,
@@ -310,10 +307,11 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
             interface: "http",
             action: "web_ask",
             args: { to_session: req.body.to_session, from_session: from },
-            result: { message_id: asked.message.id, wake: asked.wake },
+            result: { message_id: claimed.message.id },
           });
-          return asked;
+          return claimed;
         });
+        const { message: msg, wake } = completeAsk(db, prepared);
         return reply.send({ message: msg, wake });
       } catch (err) {
         return sendError(reply, err, WEB_CONSOLE_ID, "web_ask");
