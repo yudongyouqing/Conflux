@@ -617,13 +617,39 @@ export function macosProcessToken(pid: number, fields: MacosProcessFields): stri
  *                 exit: marking such a row ended would let it be resumed
  *                 while the original process still runs.
  */
-export type ProcessTokenRelation = "same" | "replaced" | "changed";
+export type ProcessTokenRelation = "same" | "replaced" | "changed" | "unknown";
 
 export function classifyProcessToken(stored: string, current: string): ProcessTokenRelation {
   if (stored === current) return "same";
-  const a = parseMacosToken(stored);
-  const b = parseMacosToken(current);
-  if (!a || !b) return "replaced";
+  const a = parseMacosToken(stored) ?? null;
+  const b = parseMacosToken(current) ?? null;
+  if (a && b) return classifyCurrentFormat(a, b);
+  // A token stored by an older build (pre-generation format: pid, lstart,
+  // ppid, argv digest — no process group, session or CPU floor) cannot be
+  // confirmed against the richer current inspection on its own terms.
+  // Judging the LIVE process "replaced" from that mismatch would end the
+  // row and allow a resume next to a still-running original — so an
+  // unconfirmable legacy token is "unknown": stop and resume refuse until
+  // a fresh bind re-stores the current-format token.
+  const legacyStored = parseLegacyMacosToken(stored);
+  const currentFormat = b ?? parseLegacyMacosToken(current);
+  if (legacyStored && currentFormat) {
+    const matchesLegacy =
+      legacyStored.pid === currentFormat.pid &&
+      legacyStored.lstart === currentFormat.lstart &&
+      legacyStored.ppid === currentFormat.ppid &&
+      legacyStored.digest === currentFormat.digest;
+    if (matchesLegacy) return "same";
+    if (legacyStored.lstart !== currentFormat.lstart) return "replaced";
+    return "unknown";
+  }
+  return "replaced";
+}
+
+function classifyCurrentFormat(
+  a: NonNullable<ReturnType<typeof parseMacosToken>>,
+  b: NonNullable<ReturnType<typeof parseMacosToken>>,
+): ProcessTokenRelation {
   // Creation identity differs, or the live process has LESS accumulated
   // CPU than the stored floor — only a fresh process can do that.
   if (a.lstart !== b.lstart || !Number.isFinite(b.cpuCentis)) return "replaced";
@@ -638,6 +664,29 @@ export function classifyProcessToken(stored: string, current: string): ProcessTo
     a.sess === b.sess &&
     a.digest === b.digest;
   return staticsEqual ? "same" : "changed";
+}
+
+/**
+ * The pre-generation macOS token format stored by earlier builds:
+ * "<pid>:<lstart…>:<ppid>:<argvDigest16>". lstart contains colons, so the
+ * layout parses from both ends (first = pid, last = digest, second-to-last
+ * = ppid, middle = lstart). Returns null for anything else.
+ */
+export function parseLegacyMacosToken(token: string): {
+  pid: string;
+  lstart: string;
+  ppid: string;
+  digest: string;
+} | null {
+  const parts = token.split(":");
+  if (parts[0] === "macos" || parts.length < 4) return null;
+  const digest = parts.at(-1) ?? "";
+  const ppid = parts.at(-2) ?? "";
+  const pid = parts[0];
+  const lstart = parts.slice(1, -2).join(":");
+  if (!/^\d+$/.test(pid) || !/^\d+$/.test(ppid) || !/^[0-9a-f]{16}$/.test(digest)) return null;
+  if (!/[A-Z][a-z]{2} /.test(lstart)) return null;
+  return { pid, lstart, ppid, digest };
 }
 
 /**
