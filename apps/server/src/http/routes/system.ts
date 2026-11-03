@@ -4,12 +4,12 @@ import { getGraph } from "../../core/graph.js";
 import { queryAudit } from "../../core/audit.js";
 import { exportData, importData, type ImportConflictStrategy } from "../../core/data-transfer.js";
 import {
-  prepareClearBackup,
-  applyClearData,
+  clearDataToPath,
   rotateBackups,
   getClearableCounts,
   type ClearCategories,
 } from "../../core/data-clear.js";
+import { mkdirSync } from "node:fs";
 import { logAudit } from "../../core/audit.js";
 import type { ServerContext } from "../context.js";
 
@@ -88,26 +88,34 @@ export function registerSystemRoutes(app: FastifyInstance, ctx: ServerContext): 
       );
     }
     try {
-      // The backup FILE is written once, before the retried database
-      // phase — a file cannot be rolled back and a retry must not mint
-      // duplicate backup stamps. The deletes retry as one transaction.
+      // The backup path is minted ONCE per request; the snapshot, the
+      // backup file and the deletes run inside ONE retried immediate
+      // transaction (clearDataToPath), so everything removed is in the
+      // backup — including rows other connections committed while an
+      // earlier attempt waited on the lock — and a retry overwrites the
+      // same file instead of minting duplicate stamps. The audit lives in
+      // the same transaction: it cannot fail after the clear committed and
+      // report a successful clear as failed.
       const backupDir = join(dataDir, "backups");
-      const backupPath = prepareClearBackup(db, categories, backupDir);
-      const cleared = await write(() => applyClearData(db, categories));
-      rotateBackups(backupDir);
-      await write(() =>
+      mkdirSync(backupDir, { recursive: true });
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const backupPath = join(backupDir, `clear-backup-${stamp}.json`);
+      const cleared = await write(() => {
+        const result = clearDataToPath(db, categories, backupPath);
         logAudit(db, {
           interface: "http",
           action: "clear_data",
           args: { ...categories },
           result: {
             backupPath,
-            clearedSessions: cleared.sessions,
-            clearedMessages: cleared.messages,
-            clearedContextEntries: cleared.contextEntries,
+            clearedSessions: result.cleared.sessions,
+            clearedMessages: result.cleared.messages,
+            clearedContextEntries: result.cleared.contextEntries,
           },
-        }),
-      );
+        });
+        return result.cleared;
+      });
+      rotateBackups(backupDir);
       return reply.send({ backupPath, cleared });
     } catch (err) {
       return sendError(reply, err);
