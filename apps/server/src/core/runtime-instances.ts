@@ -185,7 +185,11 @@ export function bindRuntimeInstance(
     return false;
   // Adoption can replace a temporary MCP session with its hook conversation,
   // but it must never move the instance to a different OS process.
-  if (row.process_token && (row.process_token !== identity.token || row.runtime_pid !== pid))
+  const storedToken = row.process_token;
+  if (
+    storedToken &&
+    (classifyProcessToken(storedToken, identity.token) !== "same" || row.runtime_pid !== pid)
+  )
     return false;
   db.prepare(
     `UPDATE runtime_instances SET session_id = ?, runtime_pid = ?, process_token = ?,
@@ -227,12 +231,17 @@ function resumableSession(db: DB, row: InstanceRow): string | null {
 function toPublic(db: DB, row: InstanceRow, io: RuntimeProcessIO): RuntimeInstance {
   const session = row.session_id ? getSession(db, row.session_id) : null;
   const identity = row.runtime_pid ? (io.inspect ?? inspectRuntimeProcess)(row.runtime_pid) : null;
-  const sameProcess =
-    !!identity &&
-    identity !== "exited" &&
-    identity.runtime === row.runtime &&
-    identity.token === row.process_token;
-  const gone = identity === "exited" || (!!identity && identity.token !== row.process_token);
+  const relation =
+    row.process_token && identity && identity !== "exited"
+      ? classifyProcessToken(row.process_token, identity.token)
+      : null;
+  const sameProcess = relation === "same" && identity !== "exited" && identity?.runtime === row.runtime;
+  // Only a CONFIRMED exit or replacement ends the instance. A "changed"
+  // relation (same generation, mutated descriptor fields) means the live
+  // process was re-parented or retitled — it must NOT be treated as gone,
+  // or the row could be resumed while the original process still runs.
+  const gone = identity === "exited" || relation === "replaced";
+  const changedButAlive = relation === "changed";
   const canStop =
     sameProcess && ownedSession(db, row) && row.state !== "ended" && row.state !== "failed";
   const terminal = ["ended", "stale", "failed"].includes(row.state);
@@ -255,6 +264,7 @@ function toPublic(db: DB, row: InstanceRow, io: RuntimeProcessIO): RuntimeInstan
   if (!row.runtime_pid || !row.process_token)
     limitation = "尚未绑定可验证的运行时进程，无法安全停止";
   else if (!ownedSession(db, row)) limitation = "会话与实例的进程归属不匹配，拒绝停止";
+  else if (changedButAlive) limitation = "进程仍在运行但身份字段已变化（父进程/进程组/命令行），拒绝停止与恢复";
   else if (!sameProcess && !gone) limitation = "无法验证进程身份，拒绝停止或恢复";
   else if (gone && identity !== "exited") limitation = "原进程 PID 已被复用，拒绝停止";
   if (terminal && !credentialsValid)
@@ -290,8 +300,14 @@ function refreshInstances(db: DB, io: RuntimeProcessIO, onlyId?: string): void {
       state = "failed";
     if (row.runtime_pid) {
       const identity = (io.inspect ?? inspectRuntimeProcess)(row.runtime_pid);
-      if (identity === "exited" || (identity && identity.token !== row.process_token))
-        state = "ended";
+      // A "changed" relation (live process, mutated descriptors) must NOT
+      // end the row — ended rows become resumable and would double-run a
+      // session whose original process is still alive.
+      const refreshRelation =
+        row.process_token && identity && identity !== "exited"
+          ? classifyProcessToken(row.process_token, identity.token)
+          : null;
+      if (identity === "exited" || refreshRelation === "replaced") state = "ended";
       else if (
         session?.status === "ended" ||
         !session ||
@@ -349,7 +365,11 @@ export function stopRuntimeInstance(
     // exactly this outcome.
     if (row.stop_requested_at && row.runtime_pid) {
       const identity = (io.inspect ?? inspectRuntimeProcess)(row.runtime_pid);
-      const exited = identity === "exited" || (!!identity && identity.token !== row.process_token);
+      const completionRelation =
+        row.process_token && identity && identity !== "exited"
+          ? classifyProcessToken(row.process_token, identity.token)
+          : null;
+      const exited = identity === "exited" || completionRelation === "replaced";
       if (exited) {
         db.prepare(
           "UPDATE runtime_instances SET state = 'ended', ended_at = ?, updated_at = ? WHERE id = ?",
@@ -366,14 +386,21 @@ export function stopRuntimeInstance(
     !identity ||
     identity === "exited" ||
     identity.runtime !== row.runtime ||
-    identity.token !== row.process_token ||
+    !row.process_token || classifyProcessToken(row.process_token, identity.token) !== "same" ||
     !ownedSession(db, row)
   ) {
     conflict("process identity changed; refusing to stop");
   }
   (io.terminate ?? terminateRuntimeProcess)(row.runtime_pid);
   const after = (io.inspect ?? inspectRuntimeProcess)(row.runtime_pid);
-  const exited = after === "exited" || (after && after.token !== row.process_token);
+  const afterRelation =
+    row.process_token && after && after !== "exited"
+      ? classifyProcessToken(row.process_token, after.token)
+      : null;
+  // Only confirmed death or a confirmed replacement verifies the stop; a
+  // post-termination "changed" reading means the process is still alive
+  // with mutated identity fields and the stop stays requested.
+  const exited = after === "exited" || afterRelation === "replaced";
   // SIGTERM can be delayed or ignored. Keep ownership and the stop control
   // available until absence of the original process is actually verified.
   if (exited) {
@@ -470,31 +497,36 @@ export function inspectRuntimeProcess(pid: number): ProcessIdentity | "exited" |
     } else {
       // macOS has no /proc, and ps exposes no sub-second creation stamp:
       // lstart is one-second granular, so a REUSED pid landing in the same
-      // start second could still match. There is no more precise identity
-      // source reachable without native bindings, so the token binds every
-      // independently observable dimension — pid, lstart, parent pid and a
-      // digest of the full command line. Same-second reuse now slips
-      // through only when the new process ALSO has the same parent and a
-      // byte-identical command line; that residual window is a documented
-      // limitation, not something this token claims to close. Windows CIM
-      // (sub-second CreationDate) and Linux /proc (clock-tick starttime)
-      // both provide true creation identity.
+      // start second could still match on time alone. Investigation of
+      // deployable sources: lstart/etime (1 s), cputime (monotonic per
+      // process — usable as a GENERATION floor but not identity),
+      // launchctl procinfo (no creation timestamp), per-pid sysctl lookup
+      // (not exposed by the macOS sysctl CLI). True sub-second creation
+      // identity exists only behind libproc's proc_pidinfo — a native
+      // binding, which is a dependency decision left open, not something
+      // this code can assume. What IS deployable: bind every observable
+      // dimension — pid, lstart, ppid, pgid, session id, a digest of the
+      // full command line — plus a cputime floor captured at bind: a
+      // same-second reused pid with the same parent, pgid, session and
+      // byte-identical argv is still refused while its accumulated CPU
+      // time is below the original's at bind (a fresh process starts near
+      // zero). The residual window — same second, same parent/pgid/
+      // session, identical argv AND already more CPU than the original had
+      // at bind — remains open and documented, not claimed closed. Windows
+      // CIM (sub-second CreationDate) and Linux /proc (clock-tick
+      // starttime) both provide true creation identity.
       // -ww: ps truncates command output to the terminal width without
       // it, and a truncated command line changes the token digest between
       // observations of the SAME process — identity must be stable.
-      const lstart = execFileSync("ps", ["-ww", "-p", String(pid), "-o", "lstart="], {
-        encoding: "utf8",
-        timeout: 3000,
-      }).trim();
-      const ppid = execFileSync("ps", ["-ww", "-p", String(pid), "-o", "ppid="], {
-        encoding: "utf8",
-        timeout: 3000,
-      }).trim();
-      command = execFileSync("ps", ["-ww", "-p", String(pid), "-o", "command="], {
-        encoding: "utf8",
-        timeout: 3000,
-      }).trim();
-      token = macosProcessToken(pid, lstart, ppid, command);
+      const fields = execFileSync(
+        "ps",
+        ["-ww", "-p", String(pid), "-o", "lstart=,ppid=,pgid=,sess=,cputime=,command="],
+        { encoding: "utf8", timeout: 3000 },
+      );
+      const parsed = parseMacosPs(fields);
+      if (!parsed) return null;
+      command = parsed.command;
+      token = macosProcessToken(pid, parsed);
     }
     if (!token || !command) return null;
     return runtimeIdentity(token, command);
@@ -515,20 +547,188 @@ export function inspectRuntimeProcess(pid: number): ProcessIdentity | "exited" |
   }
 }
 
+export interface MacosProcessFields {
+  lstart: string;
+  ppid: string;
+  pgid: string;
+  sess: string;
+  /** Accumulated CPU time in centiseconds, parsed from cputime. */
+  cpuCentis: number;
+  command: string;
+}
+
 /**
- * macOS process token: pid + lstart (second granularity) + parent pid + a
- * digest of the full command line. Exported for regression coverage of the
- * reuse-collision properties; see the inspector's macOS branch for the
- * precision boundary this documents.
+ * Parse one `ps -o lstart=,ppid=,pgid=,sess=,cputime=,command=` record.
+ * Returns null when any identity field is missing — an unreadable field
+ * means unverifiable identity, and the callers refuse to act on it.
+ * cputime prints as [HH:]MM:SS.cc, centiseconds always last two digits.
  */
-export function macosProcessToken(
-  pid: number,
-  lstart: string,
-  ppid: string,
-  command: string,
-): string {
-  const commandDigest = createHash("sha256").update(command).digest("hex").slice(0, 16);
-  return `${pid}:${lstart}:${ppid}:${commandDigest}`;
+export function parseMacosPs(record: string): MacosProcessFields | null {
+  const lstart = record.slice(0, 24).trim();
+  const rest = record.slice(24).trimStart().split(/\s+/);
+  const [ppid, pgid, sess, cputime] = rest;
+  const command = rest.slice(4).join(" ");
+  if (!lstart || !ppid || !pgid || !sess || !cputime || !command) return null;
+  // cputime prints as [HH:]MM:SS.cc — convert the whole duration to
+  // centiseconds so the floor comparison is monotonic across magnitudes.
+  const segments = cputime.split(":").map(Number);
+  if (segments.some((n) => !Number.isFinite(n))) return null;
+  // [HH:]MM:SS.cc — fold left so each leading segment is one sexagesimal
+  // place: "1:02:03.50" → 3723.5 s, "0:04.15" → 4.15 s.
+  const seconds = segments.reduce((acc, segment) => acc * 60 + segment, 0);
+  const cpuCentis = Math.round(seconds * 100);
+  return { lstart, ppid, pgid, sess, cpuCentis, command };
+}
+
+/**
+ * macOS process token: pid + every ps-observable identity dimension + a
+ * cputime floor captured at bind time. See the inspector's macOS branch
+ * for the precision boundary and the residual reuse window this documents.
+ * Exported for regression coverage of the collision properties.
+ */
+export function macosProcessToken(pid: number, fields: MacosProcessFields): string {
+  const commandDigest = createHash("sha256").update(fields.command).digest("hex").slice(0, 16);
+  return [
+    "macos",
+    pid,
+    fields.lstart,
+    fields.ppid,
+    fields.pgid,
+    fields.sess,
+    commandDigest,
+    "cpu>=" + fields.cpuCentis,
+  ].join(":");
+}
+
+/**
+ * Three-way relation between a stored process token and a fresh inspection:
+ *
+ *  - "same":      the very same process generation (all fields equal, CPU
+ *                 floor satisfied on macOS).
+ *  - "replaced":  CONFIRMED different process generation — the creation
+ *                 identity itself differs (macOS: different lstart second,
+ *                 or a CPU floor violation, which only a fresh process can
+ *                 produce; Windows/Linux tokens are pure creation stamps,
+ *                 so any mismatch is a replacement).
+ *  - "changed":   the creation identity still fits (same lstart, CPU floor
+ *                 satisfied) but MUTABLE descriptor fields differ — the
+ *                 same LIVE process was re-parented, changed its process
+ *                 group/session, or rewrote its argv/title. This is NOT an
+ *                 exit: marking such a row ended would let it be resumed
+ *                 while the original process still runs.
+ */
+export type ProcessTokenRelation = "same" | "replaced" | "changed" | "unknown";
+
+export function classifyProcessToken(stored: string, current: string): ProcessTokenRelation {
+  if (stored === current) return "same";
+  const a = parseMacosToken(stored) ?? null;
+  const b = parseMacosToken(current) ?? null;
+  if (a && b) return classifyCurrentFormat(a, b);
+  // A token stored by an older build (pre-generation format: pid, lstart,
+  // ppid, argv digest — no process group, session or CPU floor) cannot be
+  // confirmed against the richer current inspection on its own terms.
+  // Judging the LIVE process "replaced" from that mismatch would end the
+  // row and allow a resume next to a still-running original — so an
+  // unconfirmable legacy token is "unknown": stop and resume refuse until
+  // a fresh bind re-stores the current-format token.
+  const legacyStored = parseLegacyMacosToken(stored);
+  const currentFormat = b ?? parseLegacyMacosToken(current);
+  if (legacyStored && currentFormat) {
+    const matchesLegacy =
+      legacyStored.pid === currentFormat.pid &&
+      legacyStored.lstart === currentFormat.lstart &&
+      legacyStored.ppid === currentFormat.ppid &&
+      legacyStored.digest === currentFormat.digest;
+    if (matchesLegacy) return "same";
+    if (legacyStored.pid !== currentFormat.pid) return "replaced";
+    if (legacyStored.lstart !== currentFormat.lstart) return "replaced";
+    return "unknown";
+  }
+  return "replaced";
+}
+
+function classifyCurrentFormat(
+  a: NonNullable<ReturnType<typeof parseMacosToken>>,
+  b: NonNullable<ReturnType<typeof parseMacosToken>>,
+): ProcessTokenRelation {
+  // The pid is embedded in the token itself: a different stored-vs-current
+  // pid means the stored identity names a DIFFERENT process (the row was
+  // re-pointed at another pid) — provably replaced, never "changed".
+  if (a.pid !== b.pid) return "replaced";
+  // Creation identity differs, or the live process has LESS accumulated
+  // CPU than the stored floor — only a fresh process can do that.
+  if (a.lstart !== b.lstart || !Number.isFinite(b.cpuCentis)) return "replaced";
+  if (b.cpuCentis < a.cpuCentis) return "replaced";
+  // Same generation. Equal descriptors (only the CPU floor grew) are the
+  // same process; a differing descriptor field means the live process
+  // mutated (re-parenting, setpgrp, rewritten argv/title).
+  const staticsEqual =
+    a.pid === b.pid &&
+    a.ppid === b.ppid &&
+    a.pgid === b.pgid &&
+    a.sess === b.sess &&
+    a.digest === b.digest;
+  return staticsEqual ? "same" : "changed";
+}
+
+/**
+ * The pre-generation macOS token format stored by earlier builds:
+ * "<pid>:<lstart…>:<ppid>:<argvDigest16>". lstart contains colons, so the
+ * layout parses from both ends (first = pid, last = digest, second-to-last
+ * = ppid, middle = lstart). Returns null for anything else.
+ */
+export function parseLegacyMacosToken(token: string): {
+  pid: string;
+  lstart: string;
+  ppid: string;
+  digest: string;
+} | null {
+  const parts = token.split(":");
+  if (parts[0] === "macos" || parts.length < 4) return null;
+  const digest = parts.at(-1) ?? "";
+  const ppid = parts.at(-2) ?? "";
+  const pid = parts[0];
+  const lstart = parts.slice(1, -2).join(":");
+  if (!/^\d+$/.test(pid) || !/^\d+$/.test(ppid) || !/^[0-9a-f]{16}$/.test(digest)) return null;
+  if (!/[A-Z][a-z]{2} /.test(lstart)) return null;
+  return { pid, lstart, ppid, digest };
+}
+
+/**
+ * Parse a macOS token back into its fields. lstart itself contains colons
+ * ("Mon Nov  2 03:25:13 2026"), so the layout is anchored from both ends:
+ * "macos:<pid>:<lstart…>:<ppid>:<pgid>:<sess>:<digest16>:cpu>=<N>" —
+ * everything between the pid and the last five segments is the lstart.
+ * Returns null for tokens in any other shape (non-macOS platforms).
+ */
+function parseMacosToken(token: string): {
+  pid: string;
+  lstart: string;
+  ppid: string;
+  pgid: string;
+  sess: string;
+  digest: string;
+  cpuCentis: number;
+} | null {
+  const parts = token.split(":");
+  if (parts[0] !== "macos" || parts.length < 8) return null;
+  const floor = parts.at(-1) ?? "";
+  if (!floor.startsWith("cpu>=")) return null;
+  const cpuCentis = Number(floor.slice(5));
+  if (!Number.isFinite(cpuCentis)) return null;
+  const digest = parts.at(-2) ?? "";
+  const sess = parts.at(-3) ?? "";
+  const pgid = parts.at(-4) ?? "";
+  const ppid = parts.at(-5) ?? "";
+  const pid = parts[1];
+  const lstart = parts.slice(2, -5).join(":");
+  if (!pid || !lstart || !ppid || !pgid || !sess || !digest) return null;
+  return { pid, lstart, ppid, pgid, sess, digest, cpuCentis };
+}
+
+/** Back-compat boolean view: only "same" counts as a match. */
+function processTokenMatches(stored: string, current: string): boolean {
+  return classifyProcessToken(stored, current) === "same";
 }
 
 function runtimeIdentity(token: string, command: string): ProcessIdentity {

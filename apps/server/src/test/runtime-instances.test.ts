@@ -15,7 +15,11 @@ import { registerSession, endSession, mergeSessionMeta, getSession } from "../co
 import { askSession, getMessage } from "../core/messages.js";
 import { pushMailTyped } from "../core/mail-push.js";
 import {
+  type MacosProcessFields,
   macosProcessToken,
+  parseMacosPs,
+  parseLegacyMacosToken,
+  classifyProcessToken,
   createRuntimeInstance,
   bindRuntimeInstance,
   getRuntimeInstance,
@@ -240,30 +244,282 @@ test("stop requires instance ownership, current session PID and unchanged proces
   }
 });
 
-test("macOS token binds command line and parent, shrinking same-second reuse collisions", () => {
-  // lstart is second-granular; the token also binds the parent pid and a
-  // digest of the full command line so a same-second reused pid mismatches
-  // unless it ALSO shares the parent and the byte-identical command line —
-  // the documented residual window this cannot close.
-  const base = macosProcessToken(123, "Mon Nov  2 03:25:13 2026", "45", "node /opt/claude --resume x");
+test("macOS token relations: same / replaced / changed are distinguished", () => {
+  const fields = (cpuCentis: number): MacosProcessFields => ({
+    lstart: "Mon Nov  2 03:25:13 2026",
+    ppid: "45",
+    pgid: "44",
+    sess: "44",
+    cpuCentis,
+    command: "node /opt/claude --resume x",
+  });
+  const bound = macosProcessToken(123, fields(250));
+
+  // same
+  assert.equal(classifyProcessToken(bound, macosProcessToken(123, fields(250))), "same");
+  assert.equal(classifyProcessToken(bound, macosProcessToken(123, fields(900))), "same");
+
+  // replaced: confirmed new generation
   assert.equal(
-    macosProcessToken(123, "Mon Nov  2 03:25:13 2026", "45", "node /opt/claude --resume x"),
-    base,
+    classifyProcessToken(bound, macosProcessToken(123, fields(12))),
+    "replaced",
+    "a same-second reused pid with less accumulated CPU than the bind floor is a replacement",
   );
-  assert.notEqual(
-    macosProcessToken(123, "Mon Nov  2 03:25:13 2026", "45", "node /opt/codex"),
-    base,
-    "a reused pid running a different command must not match",
+  assert.equal(
+    classifyProcessToken(bound, macosProcessToken(123, { ...fields(900), lstart: "Mon Nov  2 03:25:14 2026" })),
+    "replaced",
+    "a different creation second is a replacement",
   );
-  assert.notEqual(
-    macosProcessToken(123, "Mon Nov  2 03:25:13 2026", "46", "node /opt/claude --resume x"),
-    base,
-    "a reused pid under a different parent must not match",
+  // Non-macOS tokens (no floor segment) are pure creation stamps.
+  assert.equal(classifyProcessToken("boot-id:12345", "boot-id:12345"), "same");
+  assert.equal(classifyProcessToken("boot-id:12345", "boot-id:12346"), "replaced");
+  assert.equal(classifyProcessToken("macos:1:a:2:3:4:deadbeef:cpu>=10", "boot-id:12345"), "replaced");
+
+  // changed: same generation (same lstart, floor satisfied) but a MUTABLE
+  // descriptor field differs — the process is ALIVE, re-parented/retitled.
+  assert.equal(
+    classifyProcessToken(bound, macosProcessToken(123, { ...fields(900), ppid: "1" })),
+    "changed",
+    "re-parenting (parent exited, ppid now 1) is a live process, not an exit",
   );
-  assert.notEqual(
-    macosProcessToken(123, "Mon Nov  2 03:25:14 2026", "45", "node /opt/claude --resume x"),
-    base,
-    "a later start second must not match",
+  assert.equal(
+    classifyProcessToken(bound, macosProcessToken(123, { ...fields(900), pgid: "99" })),
+    "changed",
+  );
+  assert.equal(
+    classifyProcessToken(bound, macosProcessToken(123, { ...fields(900), sess: "98" })),
+    "changed",
+  );
+  assert.equal(
+    classifyProcessToken(bound, macosProcessToken(123, { ...fields(900), command: "node /opt/claude --resume RETITLED" })),
+    "changed",
+    "a rewritten argv/process title is a live process, not an exit",
+  );
+});
+
+test("a live process with changed identity fields is not ended, stopped or resumed", () => {
+  const { db, cleanup } = makeDb();
+  try {
+    const preset = createRuntimeAgent(db, { name: "test", runtime: "claude" });
+    const instance = createRuntimeInstance(db, preset);
+    registerSession(db, {
+      id: "owned",
+      name: "owned",
+      runtime: "claude",
+      runtime_pid: 123,
+      metadata: { runtime_instance_id: instance.id, agent_id: preset.id },
+    });
+    const bound = macosProcessToken(123, {
+      lstart: "Mon Nov  2 03:25:13 2026",
+      ppid: "45",
+      pgid: "44",
+      sess: "44",
+      cpuCentis: 250,
+      command: "node /opt/claude --resume x",
+    });
+    assert.equal(
+      bindRuntimeInstance(db, instance.id, "owned", 123, {
+        inspect: () => ({ runtime: "claude", token: bound }),
+      }),
+      true,
+    );
+    // The same LIVE process re-parents (ppid 45 → 1) and rewrites its title.
+    const changed = macosProcessToken(123, {
+      lstart: "Mon Nov  2 03:25:13 2026",
+      ppid: "1",
+      pgid: "44",
+      sess: "44",
+      cpuCentis: 900,
+      command: "node /opt/claude --resume RETITLED",
+    });
+    const inspectChanged = () => ({ runtime: "claude" as const, token: changed });
+
+    // Refresh must NOT end the row (ending it would allow a resume that
+    // double-runs a session whose process is still alive).
+    db.prepare("UPDATE sessions SET last_heartbeat_at = ? WHERE id = 'owned'").run(
+      new Date(Date.now() - 300_000).toISOString(),
+    );
+    const listed = listRuntimeInstances(db, { inspect: inspectChanged }).find(
+      (i) => i.id === instance.id,
+    )!;
+    assert.equal(listed.state, "stale", "a changed-but-alive process goes stale, never ended");
+    assert.equal(listed.can_stop, false);
+    assert.equal(listed.can_resume, false, "resume must be refused while the original process lives");
+    assert.match(listed.limitation ?? "", /仍在运行但身份字段已变化/);
+
+    // Stop is refused with the changed-but-alive reason, not a reuse claim.
+    assert.throws(
+      () => stopRuntimeInstance(db, instance.id, { inspect: inspectChanged }),
+      /仍在运行但身份字段已变化/,
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("a token naming a different pid is provably replaced, not changed", () => {
+  // The row was re-pointed at another live process (the E2E PID-reuse
+  // scenario): the stored token embeds the ORIGINAL pid, so a pid
+  // mismatch is proof of a different process even when both spawned in
+  // the same second with comparable CPU.
+  const fields = (pid: number, cpuCentis: number): MacosProcessFields => ({
+    lstart: "Mon Nov  2 03:25:13 2026",
+    ppid: "45",
+    pgid: "44",
+    sess: "44",
+    cpuCentis,
+    command: "node /opt/claude --resume x",
+  });
+  const stored = macosProcessToken(123, fields(123, 250));
+  const rePointed = macosProcessToken(7772, fields(7772, 900));
+  assert.equal(classifyProcessToken(stored, rePointed), "replaced");
+  const legacyStored = "123:Mon Nov  2 03:25:13 2026:45:0123456789abcdef";
+  assert.equal(classifyProcessToken(legacyStored, rePointed), "replaced");
+});
+
+test("legacy-format tokens from earlier builds are never judged a replacement they cannot prove", () => {
+  // Upgrade-compatibility: rows written by the previous build store the
+  // pre-generation token "<pid>:<lstart>:<ppid>:<digest>" — no process
+  // group, session or CPU floor. The same LIVE process inspected with the
+  // current format carries richer fields; the classifier must not call
+  // that "replaced" (it would end the row and allow resuming next to the
+  // still-running original).
+  const fields = (cpuCentis: number): MacosProcessFields => ({
+    lstart: "Mon Nov  2 03:25:13 2026",
+    ppid: "45",
+    pgid: "44",
+    sess: "44",
+    cpuCentis,
+    command: "node /opt/claude --resume x",
+  });
+  const legacy = parseLegacyMacosToken("123:Mon Nov  2 03:25:13 2026:45:0123456789abcdef");
+  assert.ok(legacy, "the legacy format parses");
+  assert.equal(legacy.pid, "123");
+  assert.equal(legacy.lstart, "Mon Nov  2 03:25:13 2026");
+  assert.equal(legacy.ppid, "45");
+  assert.equal(legacy.digest, "0123456789abcdef");
+
+  // Same generation, same descriptors → same: a fresh bind can re-store
+  // the current-format token (natural migration). The legacy digest must
+  // match the command, so derive it from the current token.
+  const currentSame = macosProcessToken(123, fields(900));
+  const realDigest = currentSame.split(":").at(-2)!;
+  const legacyStored = `123:Mon Nov  2 03:25:13 2026:45:${realDigest}`;
+  assert.equal(
+    parseLegacyMacosToken(legacyStored)?.digest,
+    realDigest,
+    "fixture: legacy digest matches the current inspection",
+  );
+  assert.equal(
+    classifyProcessToken(legacyStored, currentSame),
+    "same",
+    "legacy stored vs current inspection with matching identity is the same process",
+  );
+
+  // Legacy vs current with a DIFFERENT creation second is provably a new
+  // process; with equal creation but differing descriptors it is UNKNOWN —
+  // refuse, never end.
+  const currentLater = macosProcessToken(123, { ...fields(900), lstart: "Mon Nov  2 03:25:14 2026" });
+  assert.equal(
+    classifyProcessToken("123:Mon Nov  2 03:25:13 2026:45:0123456789abcdef", currentLater),
+    "replaced",
+  );
+  const currentRetitled = macosProcessToken(123, { ...fields(900), command: "node /opt/claude --resume RETITLED" });
+  assert.equal(
+    classifyProcessToken("123:Mon Nov  2 03:25:13 2026:45:0123456789abcdef", currentRetitled),
+    "unknown",
+    "legacy stored vs changed current descriptors cannot be confirmed — unknown, not replaced",
+  );
+
+  // Legacy vs legacy keeps the old semantics: equal → same, different
+  // creation second → replaced, otherwise unknown.
+  assert.equal(
+    classifyProcessToken(
+      "123:Mon Nov  2 03:25:13 2026:45:0123456789abcdef",
+      "123:Mon Nov  2 03:25:13 2026:45:0123456789abcdef",
+    ),
+    "same",
+  );
+  assert.equal(
+    classifyProcessToken(
+      "123:Mon Nov  2 03:25:13 2026:45:0123456789abcdef",
+      "123:Mon Nov  2 03:25:14 2026:45:0123456789abcdef",
+    ),
+    "replaced",
+  );
+  assert.equal(
+    classifyProcessToken(
+      "123:Mon Nov  2 03:25:13 2026:45:0123456789abcdef",
+      "123:Mon Nov  2 03:25:13 2026:46:0123456789abcdef",
+    ),
+    "unknown",
+  );
+
+  // Non-macOS tokens (Windows CIM / Linux boot_id) stay pure creation
+  // stamps: a mismatch remains a replacement.
+  assert.equal(classifyProcessToken("boot-id:12345", "boot-id:12346"), "replaced");
+});
+
+test("a live instance with a legacy stored token refuses stop and resume instead of ending", () => {
+  const { db, cleanup } = makeDb();
+  try {
+    const preset = createRuntimeAgent(db, { name: "legacy", runtime: "claude" });
+    const instance = createRuntimeInstance(db, preset);
+    registerSession(db, {
+      id: "owned",
+      name: "owned",
+      runtime: "claude",
+      runtime_pid: 123,
+      metadata: { runtime_instance_id: instance.id, agent_id: preset.id },
+    });
+    // The row stores a token in the OLD format (as an upgraded database
+    // would); the live process now reports the richer current format with
+    // a mutated descriptor (re-parented).
+    db.prepare("UPDATE runtime_instances SET session_id = 'owned', runtime_pid = 123, process_token = ?, state = 'running' WHERE id = ?").run(
+      "123:Mon Nov  2 03:25:13 2026:45:0123456789abcdef",
+      instance.id,
+    );
+    const current = macosProcessToken(123, {
+      lstart: "Mon Nov  2 03:25:13 2026",
+      ppid: "1",
+      pgid: "44",
+      sess: "44",
+      cpuCentis: 900,
+      command: "node /opt/claude --resume x",
+    });
+    const inspect = () => ({ runtime: "claude" as const, token: current });
+
+    const listed = listRuntimeInstances(db, { inspect }).find((i) => i.id === instance.id)!;
+    assert.equal(listed.state, "running", "an unconfirmable legacy identity must NOT end the row");
+    assert.equal(listed.can_stop, false);
+    assert.equal(listed.can_resume, false);
+    assert.match(listed.limitation ?? "", /无法验证进程身份/);
+    assert.throws(
+      () => stopRuntimeInstance(db, instance.id, { inspect }),
+      /无法验证进程身份/,
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test("macOS ps parsing: a record with any missing identity field is unverifiable", () => {
+  const full =
+    "Mon Nov  2 03:25:13 2026           45      44      44       0:04.15 node /opt/claude --resume x";
+  const parsed = parseMacosPs(full);
+  assert.ok(parsed, "a complete record parses");
+  assert.equal(parsed.ppid, "45");
+  assert.equal(parsed.pgid, "44");
+  assert.equal(parsed.sess, "44");
+  assert.equal(parsed.cpuCentis, 415); // "0:04.15" = 4.15 s = 415 centiseconds
+  assert.equal(parsed.command, "node /opt/claude --resume x");
+  // Missing command (empty after fields) or a broken cputime makes the
+  // identity unverifiable — the inspector returns null and stop/resume
+  // refuse rather than guess.
+  assert.equal(parseMacosPs("Mon Nov  2 03:25:13 2026           45      44      44       0:04.15"), null);
+  assert.equal(
+    parseMacosPs("Mon Nov  2 03:25:13 2026           45      44      44       xx:yy node"),
+    null,
   );
 });
 
