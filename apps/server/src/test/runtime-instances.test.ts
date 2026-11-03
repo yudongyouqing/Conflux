@@ -357,6 +357,26 @@ test("a live process with changed identity fields is not ended, stopped or resum
   }
 });
 
+test("a token naming a different pid is provably replaced, not changed", () => {
+  // The row was re-pointed at another live process (the E2E PID-reuse
+  // scenario): the stored token embeds the ORIGINAL pid, so a pid
+  // mismatch is proof of a different process even when both spawned in
+  // the same second with comparable CPU.
+  const fields = (pid: number, cpuCentis: number): MacosProcessFields => ({
+    lstart: "Mon Nov  2 03:25:13 2026",
+    ppid: "45",
+    pgid: "44",
+    sess: "44",
+    cpuCentis,
+    command: "node /opt/claude --resume x",
+  });
+  const stored = macosProcessToken(123, fields(123, 250));
+  const rePointed = macosProcessToken(7772, fields(7772, 900));
+  assert.equal(classifyProcessToken(stored, rePointed), "replaced");
+  const legacyStored = "123:Mon Nov  2 03:25:13 2026:45:0123456789abcdef";
+  assert.equal(classifyProcessToken(legacyStored, rePointed), "replaced");
+});
+
 test("legacy-format tokens from earlier builds are never judged a replacement they cannot prove", () => {
   // Upgrade-compatibility: rows written by the previous build store the
   // pre-generation token "<pid>:<lstart>:<ppid>:<digest>" — no process

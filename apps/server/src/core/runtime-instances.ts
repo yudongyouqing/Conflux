@@ -640,6 +640,7 @@ export function classifyProcessToken(stored: string, current: string): ProcessTo
       legacyStored.ppid === currentFormat.ppid &&
       legacyStored.digest === currentFormat.digest;
     if (matchesLegacy) return "same";
+    if (legacyStored.pid !== currentFormat.pid) return "replaced";
     if (legacyStored.lstart !== currentFormat.lstart) return "replaced";
     return "unknown";
   }
@@ -650,6 +651,10 @@ function classifyCurrentFormat(
   a: NonNullable<ReturnType<typeof parseMacosToken>>,
   b: NonNullable<ReturnType<typeof parseMacosToken>>,
 ): ProcessTokenRelation {
+  // The pid is embedded in the token itself: a different stored-vs-current
+  // pid means the stored identity names a DIFFERENT process (the row was
+  // re-pointed at another pid) — provably replaced, never "changed".
+  if (a.pid !== b.pid) return "replaced";
   // Creation identity differs, or the live process has LESS accumulated
   // CPU than the stored floor — only a fresh process can do that.
   if (a.lstart !== b.lstart || !Number.isFinite(b.cpuCentis)) return "replaced";
