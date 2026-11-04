@@ -44,6 +44,29 @@ test("uses Electron as Node and passes packaged server configuration", () => {
   assert.equal(Object.hasOwn(spec, "cwd"), false);
 });
 
+test("an inherited CONFLUX_HOME flows to the packaged server when no dataDir is set", () => {
+  // The packaged main calls startProductionService WITHOUT an explicit
+  // dataDir, so the parent environment is the only carrier of the data
+  // directory override — exactly the isolation contract real-device
+  // acceptance relies on (the port is pinned to the production port by
+  // design and must override any inherited value).
+  const spec = createProductionServiceSpec(
+    {
+      serverEntry: "C:\\app.asar\\apps\\server\\dist\\index.js",
+      webDist: "C:\\app.asar\\apps\\web\\dist",
+    },
+    {
+      env: {
+        CONFLUX_HOME: "C:\\acceptance\\sandbox-home",
+        CONFLUX_PORT: "19527",
+        PATH: "C:\\Windows\\System32",
+      },
+    },
+  );
+  assert.equal(spec.env.CONFLUX_HOME, "C:\\acceptance\\sandbox-home");
+  assert.equal(spec.env.CONFLUX_PORT, "9527", "the production port is pinned by design");
+});
+
 test("allows the packaged server health check to be cancelled", async () => {
   const child = pendingChild();
   const controller = new AbortController();
