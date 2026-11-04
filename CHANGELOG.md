@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+（无待发布条目 / Nothing pending.）
+
+## [0.3.0] - 2026-11-04
+
 ### Breaking changes / 不兼容变更
 
 - Remove the `muiltchat` CLI bin and all `MUILTCHAT_*` environment variables. Use `conflux` and equivalent `CONFLUX_*` names before upgrading. Internal desktop, Agent and MCP launchers now use the new names. Existing `.muiltchat` data directories remain in place; no data is moved or deleted. The published v0.2.0 artifacts are unchanged.
