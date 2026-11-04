@@ -33,6 +33,20 @@ export interface LaunchRequest {
 export type LaunchResult = { ok: true; command: string } | { ok: false; error: string };
 
 /**
+ * Environment for a spawned wake run. The woken executor's MCP/CLI must
+ * land on the SAME database this server owns: without an explicit
+ * CONFLUX_HOME a server started with a custom --data-dir or CONFLUX_HOME
+ * would wake children that silently fall back to the default data
+ * directory — the room-task executor in that situation cannot see its
+ * task rows at all. Exported for the no-cross-database regression.
+ */
+export function wakeRunEnv(req: { dataDir?: string }, baseEnv: NodeJS.ProcessEnv = process.env) {
+  const env = cleanTerminalEnv(baseEnv);
+  if (req.dataDir) env.CONFLUX_HOME = req.dataDir;
+  return env;
+}
+
+/**
  * Shell for headless wake launches. Windows runs the command string through
  * cmd.exe; everywhere else it must be /bin/sh — `process.env.comspec ??
  * "cmd.exe"` unconditionally spawns a nonexistent cmd.exe on macOS/Linux
@@ -53,14 +67,20 @@ export function wakeShell(platform: NodeJS.Platform = process.platform): {
  * install, so a woken claude always has check_inbox/reply_ask even when the
  * target project never mounted Conflux in its own .mcp.json (#105).
  */
-export function ensureWakeMcpConfig(dataDir?: string, serverEntry?: string): string {
+export function ensureWakeMcpConfig(
+  dataDir?: string,
+  serverEntry?: string,
+  launch?: { command: string; args: string[]; env?: Record<string, string> },
+): string {
   const dir = dataDir ?? resolveConfig("global").dataDir;
   const entry = serverEntry ?? defaultServerEntry();
   const path = join(dir, "wake-mcp.json");
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   writeFileSync(
     path,
-    JSON.stringify({ mcpServers: { conflux: { command: "npx", args: ["tsx", entry, "mcp"] } } }),
+    JSON.stringify({
+      mcpServers: { conflux: launch ?? { command: "npx", args: ["tsx", entry, "mcp"] } },
+    }),
     "utf8",
   );
   return path;
@@ -73,7 +93,7 @@ export function ensureWakeMcpConfig(dataDir?: string, serverEntry?: string): str
  * whose argv[1] is not the server entry (observed: empty entry in the
  * generated config, headless run started with a dead MCP mount).
  */
-function defaultServerEntry(): string {
+export function defaultServerEntry(): string {
   // __filename is available in both compiled CJS and under tsx (shimmed);
   // tsconfig targets CommonJS so import.meta is off the table here.
   const here = __filename;
@@ -90,19 +110,18 @@ export function launchWakeRun(req: LaunchRequest): LaunchResult {
   //     looking up `codex-current:<pid>`. Spawn first, pin immediately
   //     (the npm/tsx MCP chain takes seconds to boot — the pin always lands
   //     before the first tryAdopt), and the wake run acts as the target.
-  const env = cleanTerminalEnv();
+  const env = wakeRunEnv(req);
   env.CONFLUX_ASSUME_SESSION = req.sessionId;
   // claude wakes (pinCodex === false) get an explicit MCP mount so the
   // headless run can always reach check_inbox/reply_ask — but only
   // when the project doesn't already mount Conflux itself: an extra mount
   // changes the tools array and invalidates the whole cached prefix
-  const command =
-    req.pinCodex
-      ? req.command
-      : withMcpConfig(
-          req.command,
-          projectHasConfluxMcp(req.projectDir) ? null : ensureWakeMcpConfig(),
-        );
+  const command = req.pinCodex
+    ? req.command
+    : withMcpConfig(
+        req.command,
+        projectHasConfluxMcp(req.projectDir) ? null : ensureWakeMcpConfig(),
+      );
   const shell = wakeShell();
   // stdout piped for wake-log capture (#102 streaming); falls back to
   // "ignore" when the data dir is unknown (shouldn't happen — resolveConfig
@@ -184,7 +203,6 @@ export function pinCodexDescendants(db: DB, launcherPid: number, sessionId: stri
     },
   );
 }
-
 
 /** Append the spawned child's stdout to <dataDir>/wake-logs/<sessionId>.log */
 function pipeWakeLog(child: ReturnType<typeof spawn>, dataDir: string, sessionId: string): void {

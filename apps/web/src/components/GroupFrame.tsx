@@ -41,8 +41,8 @@ export function GroupFrame({ data }: NodeProps) {
   const active = d.activeCount ?? 0;
 
   const shell = isDir
-    ? "bg-slate-50/70 border-slate-200/90 hover:border-accent/70 hover:bg-accent-soft/40"
-    : "border-dashed border-slate-300/80 bg-slate-50/40 hover:border-slate-400";
+    ? "bg-paper/70 border-line/90 hover:border-accent/70 hover:bg-accent-soft/40"
+    : "border-dashed border-line-strong/80 bg-paper/40 hover:border-neutral";
 
   return (
     <div
@@ -56,26 +56,26 @@ export function GroupFrame({ data }: NodeProps) {
           className={`w-6 h-6 rounded-md border flex items-center justify-center flex-shrink-0 ${
             isDir
               ? "bg-accent-soft border-accent/20 text-accent"
-              : "bg-slate-100 border-slate-200 text-slate-400"
+              : "bg-neutral-soft border-line text-neutral"
           }`}
         >
           <Icon size={12} />
         </div>
         <span
-          className={`text-xs font-semibold truncate ${isDir ? "text-slate-600" : "text-slate-400"}`}
+          className={`text-xs font-semibold truncate ${isDir ? "text-ink-muted" : "text-neutral"}`}
           title={d.label ?? undefined}
         >
           {title}
         </span>
-        <span className="text-2xs text-slate-400 tabular-nums flex-shrink-0">{d.count}</span>
+        <span className="text-2xs text-ink-faint tabular-nums flex-shrink-0">{d.count}</span>
         {isDir && (
           <span
             className={`flex items-center gap-1 text-2xs font-medium flex-shrink-0 ${
-              active > 0 ? "text-emerald-600" : "text-slate-400"
+              active > 0 ? "text-success" : "text-neutral"
             }`}
             title={active > 0 ? `${active} 个会话在线` : "该目录暂无在线会话"}
           >
-            <span className={`w-1.5 h-1.5 rounded-full ${active > 0 ? "bg-emerald-500" : "bg-slate-300"}`} />
+            <span aria-hidden="true" className={`w-1.5 h-1.5 rounded-full ${active > 0 ? "bg-success" : "bg-neutral"}`} />
             {active > 0 ? `${active} 在线` : "离线"}
           </span>
         )}
@@ -85,22 +85,22 @@ export function GroupFrame({ data }: NodeProps) {
             {d.runtimeDots!.map((c, i) => (
               <span
                 key={i}
-                className={`w-2 h-2 rounded-full border border-white shadow-sm ${c}`}
+                className={`w-2 h-2 rounded-full border border-surface shadow-sm ${c}`}
               />
             ))}
           </span>
         )}
-        <span className="ml-auto text-slate-300 group-hover:text-slate-500 flex-shrink-0 transition-colors">
+        <span className="ml-auto text-ink-faint group-hover:text-ink-muted flex-shrink-0 transition-colors">
           {d.expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         </span>
       </div>
 
       {!d.expanded ? (
-        <div className="px-3 pb-2 text-2xs text-slate-400">
+        <div className="px-3 pb-2 text-2xs text-ink-faint">
           {d.count} 个会话 · 点击展开
         </div>
       ) : (d.hiddenCount ?? 0) > 0 ? (
-        <div className="absolute bottom-1.5 right-3 text-2xs font-medium text-slate-400 bg-surface/80 border border-slate-200 rounded-full px-1.5">
+        <div className="absolute bottom-1.5 right-3 text-2xs font-medium text-ink-faint bg-surface/80 border border-line rounded-full px-1.5">
           还有 {d.hiddenCount} 个未显示
         </div>
       ) : null}

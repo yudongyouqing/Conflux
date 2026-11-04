@@ -9,11 +9,9 @@ export type { Message, MessageStatus };
 
 /** P0 ranks 0 (most protected) … P2 ranks 2. Asks flow lower-rank → equal. */
 
-
 function metadataOf(db: DB, sessionId: string): string | null {
   const row = db.prepare(`SELECT metadata FROM sessions WHERE id = ?`).get(sessionId) as
-    | { metadata: string | null }
-    | undefined;
+    { metadata: string | null } | undefined;
   return row?.metadata ?? null;
 }
 
@@ -30,8 +28,34 @@ interface MessageRow {
   reply_seen_at: string | null;
 }
 
-function toMsg(row: MessageRow): Message {
-  return { ...row };
+function toMsg(db: DB, row: MessageRow): Message {
+  const delivery = db
+    .prepare(
+      `SELECT state, attempts, last_attempted_at, reason FROM message_deliveries WHERE message_id = ?`,
+    )
+    .get(row.id) as Message["delivery"];
+  return delivery ? { ...row, delivery } : { ...row };
+}
+
+function toMessages(db: DB, rows: MessageRow[]): Message[] {
+  if (!rows.length) return [];
+  const deliveries: (NonNullable<Message["delivery"]> & { message_id: number })[] = [];
+  for (let offset = 0; offset < rows.length; offset += 500) {
+    const chunk = rows.slice(offset, offset + 500);
+    deliveries.push(
+      ...(db
+        .prepare(
+          `SELECT message_id, state, attempts, last_attempted_at, reason
+      FROM message_deliveries WHERE message_id IN (${chunk.map(() => "?").join(",")})`,
+        )
+        .all(...chunk.map((row) => row.id)) as typeof deliveries),
+    );
+  }
+  const byId = new Map(deliveries.map(({ message_id, ...delivery }) => [message_id, delivery]));
+  return rows.map((row) => {
+    const delivery = byId.get(row.id);
+    return delivery ? { ...row, delivery } : { ...row };
+  });
 }
 
 export function askSession(
@@ -68,20 +92,13 @@ export function askSession(
       `INSERT INTO messages (from_session, to_session, question, status, created_at, edge_id, room_id)
        VALUES (?, ?, ?, 'pending', ?, ?, ?)`,
     )
-    .run(
-      input.from_session,
-      input.to_session,
-      input.question,
-      now,
-      edgeId,
-      input.room_id ?? null,
-    );
+    .run(input.from_session, input.to_session, input.question, now, edgeId, input.room_id ?? null);
   return getMessage(db, Number(res.lastInsertRowid))!;
 }
 
 export function getMessage(db: DB, id: number): Message | null {
   const row = db.prepare(`SELECT * FROM messages WHERE id = ?`).get(id) as MessageRow | undefined;
-  return row ? toMsg(row) : null;
+  return row ? toMsg(db, row) : null;
 }
 
 export function replyAsk(db: DB, id: number, replierSessionId: string, reply: string): Message {
@@ -123,8 +140,8 @@ export function checkInbox(db: DB, sessionId: string): Message[] {
       `UPDATE messages SET status = 'seen' WHERE status = 'pending' AND id IN (${placeholders})`,
     ).run(...ids);
   }
-  return rows.map((r) =>
-    r.status === "pending" ? { ...toMsg(r), status: "seen" as const } : toMsg(r),
+  return toMessages(db, rows).map((row) =>
+    row.status === "pending" ? { ...row, status: "seen" as const } : row,
   );
 }
 
@@ -146,7 +163,7 @@ export function checkReplies(db: DB, sessionId: string, since?: string): Message
       `UPDATE messages SET status = 'read' WHERE status = 'replied' AND id IN (${placeholders})`,
     ).run(...ids);
   }
-  return rows.map(toMsg);
+  return toMessages(db, rows);
 }
 
 /**
@@ -207,7 +224,7 @@ export function listPeerMessages(db: DB, a: string, b: string, limit = 200): Mes
        ORDER BY id DESC LIMIT ?`,
     )
     .all(a, b, b, a, Math.min(Math.max(limit, 1), 500)) as MessageRow[];
-  return rows.map(toMsg).reverse();
+  return toMessages(db, rows).reverse();
 }
 
 export function listMessages(
@@ -243,7 +260,7 @@ export function listMessages(
   const rows = db
     .prepare(`SELECT * FROM messages ${whereSql} ORDER BY created_at DESC LIMIT ?`)
     .all(...params, limit) as MessageRow[];
-  return rows.map(toMsg);
+  return toMessages(db, rows);
 }
 
 // ---- inbox delivery across /resume + proactive notices ----------------------
@@ -422,12 +439,12 @@ export function listEdgeMessages(db: DB, edgeId: number, limit: number | null = 
     const rows = db
       .prepare(`SELECT * FROM messages WHERE edge_id = ? ORDER BY id ASC`)
       .all(edgeId) as MessageRow[];
-    return rows.map(toMsg);
+    return toMessages(db, rows);
   }
   const rows = db
     .prepare(`SELECT * FROM messages WHERE edge_id = ? ORDER BY id DESC LIMIT ?`)
     .all(edgeId, Math.min(Math.max(limit, 1), 500)) as MessageRow[];
-  return rows.map(toMsg).reverse();
+  return toMessages(db, rows).reverse();
 }
 
 /** Channel header for the edge panel. */

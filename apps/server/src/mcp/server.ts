@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import type { RuntimeId } from "@conflux/shared";
 
 import { resolveConfig, type Scope } from "../config.js";
-import { openDb, type DB } from "../core/db.js";
+import { isLockError, openDb, publicError, type DB } from "../core/db.js";
 import {
   registerSession,
   listSessions,
@@ -30,11 +30,18 @@ import { getGraph } from "../core/graph.js";
 import { mergeSessionMeta } from "../core/sessions.js";
 import { logAudit } from "../core/audit.js";
 import { getRuntimePid, findSessionByRuntimePid, deleteUnreferencedSession } from "../core/live.js";
-import { askAndMaybeWake } from "../core/ask.js";
+import { askAndMaybeWake, retryMessageDelivery } from "../core/ask.js";
+import {
+  bindRuntimeInstance,
+  listRuntimeInstances,
+  stopRuntimeInstance,
+  resumeRuntimeInstance,
+} from "../core/runtime-instances.js";
 import { askAndReplySync } from "../core/ask-sync.js";
 import { summonAgent, writeResult, readRoom, roomStatus } from "../core/room-orchestrator.js";
 import { refreshCodexSessionTitles } from "../core/codex-titles.js";
 import { logger } from "../log.js";
+import { registerSessionDirectory } from "./session-directory.js";
 
 const INSTRUCTIONS = `
 Conflux: cross-session context + async messaging for AI coding assistants.
@@ -47,6 +54,7 @@ You share a SQLite file with other sessions, so you can:
   - query_context: FTS-search what other sessions have published
   - ask_session / reply_ask / check_inbox / check_replies: async Q&A between sessions
   - get_graph: see the session topology (who's online, who talked to whom)
+  - list_session_directory: show full peer IDs and resource URIs for user selection
 
 For messaging Claude Code peers you may prefer your NATIVE SendMessage tool
 (lower latency). When you do, call log_exchange once afterwards so the
@@ -59,6 +67,12 @@ elsewhere, query_context first.
 
 All operations are audited. Be concise in published content; prefer structured
 tags for discoverability.
+
+When a requested peer name, title, or partial ID is ambiguous, call
+find_session_candidates and use the host's question UI to show at most three
+candidates with project, runtime, last activity, and full ID. Wait for the user's
+choice before contacting a candidate. A changed Ghostty title does not establish
+a changed session ID.
 `.trim();
 
 export interface McpServerOptions {
@@ -125,9 +139,16 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
     if (!aid || Number.isNaN(Number(aid))) return {};
     return {
       agent_id: Number(aid),
-      ...(process.env.CONFLUX_AGENT_RUNTIME
-        ? { runtime: process.env.CONFLUX_AGENT_RUNTIME }
+      ...(process.env.CONFLUX_RUNTIME_INSTANCE_ID
+        ? { runtime_instance_id: process.env.CONFLUX_RUNTIME_INSTANCE_ID }
         : {}),
+      ...(process.env.CONFLUX_TMUX_SESSION
+        ? { tmux_session: process.env.CONFLUX_TMUX_SESSION }
+        : {}),
+      ...(identity.runtime === "codex" && process.env.CONFLUX_RESUME_SESSION_ID
+        ? { codex_session_id: process.env.CONFLUX_RESUME_SESSION_ID }
+        : {}),
+      ...(process.env.CONFLUX_AGENT_RUNTIME ? { runtime: process.env.CONFLUX_AGENT_RUNTIME } : {}),
     };
   })();
   registerSession(db, {
@@ -168,6 +189,7 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
   let beat: NodeJS.Timeout | undefined;
   let disposeStdio: (() => void) | undefined;
   let disconnected = false;
+  let refreshSessionResources: (() => void) | undefined;
 
   const disconnect = (reason: string): void => {
     if (disconnected) return;
@@ -228,12 +250,23 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
   const touchLease = (): void => {
     try {
       touchMcpConnection(db, sessionId, connectionId);
+      const instanceId = process.env.CONFLUX_RUNTIME_INSTANCE_ID;
+      const pid = getRuntimePid(identity.runtime);
+      if (instanceId && pid !== null) {
+        mergeSessionMeta(db, sessionId, {
+          ...agentTag,
+          runtime: identity.runtime,
+          runtime_pid: pid,
+        });
+        bindRuntimeInstance(db, instanceId, sessionId, pid);
+      }
     } catch {
       // transient sqlite lock contention — next tick or tool call retries
     }
   };
 
   tryAdopt();
+  touchLease();
 
   // Keep this session marked active for as long as the MCP process lives,
   // even when no tool calls happen. Process exit stops the lease and it
@@ -244,6 +277,7 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
       touchLease();
       // Codex has no hooks: keep the display title in sync with its rollouts.
       if (identity.runtime === "codex") refreshCodexSessionTitles(db, { onlySessionId: sessionId });
+      refreshSessionResources?.();
     } catch {
       // transient sqlite lock contention — next tick retries
     }
@@ -270,9 +304,14 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
     fn: () => T | Promise<T>,
   ): Promise<{ ok: true; result: T } | { ok: false; error: string }> {
     tryAdopt(); // pick up /resume id changes instantly, not on the next 30s beat
-    touchLease();
     try {
       const result = await fn();
+      // The lease touch is a synchronous write; doing it BEFORE the body
+      // would queue a full busy_timeout ahead of a tool that is about to
+      // fail on a held lock, doubling the stall. Touch only after the
+      // body succeeded — a failed call does not extend the lease; the
+      // next successful call or the 30s beat refreshes it.
+      touchLease();
       logAudit(db, {
         caller_session: sessionId,
         interface: "mcp",
@@ -282,6 +321,16 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
       });
       return { ok: true, result };
     } catch (err) {
+      // A lock error means another process still holds the write lock.
+      // Auditing it synchronously would busy-wait on that same lock for a
+      // second full busy_timeout, and the audit INSERT's own SQLITE_BUSY
+      // would escape this catch as a raw error — so skip the audit row
+      // (the pino log is the record) and return the mapped, readable
+      // message instead of leaking "database is locked" to the model.
+      if (isLockError(err)) {
+        logger.warn({ action, session: sessionId }, "skipping error audit while the database is locked");
+        return { ok: false, error: publicError(err).message };
+      }
       const message = err instanceof Error ? err.message : String(err);
       logAudit(db, {
         caller_session: sessionId,
@@ -293,6 +342,15 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
       return { ok: false, error: message };
     }
   }
+
+  refreshSessionResources = registerSessionDirectory(server, {
+    db,
+    currentSessionId: () => sessionId,
+    beforeRead: () => {
+      tryAdopt();
+      touchLease();
+    },
+  });
 
   // 1. register_session
   server.registerTool(
@@ -508,6 +566,54 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
 
   // 8. ask_session
   server.registerTool(
+    "retry_message_delivery",
+    {
+      description:
+        "Retry waking the current recipient of an existing pending message. Does not send a second message or bypass wake safeguards.",
+      inputSchema: { id: z.number().int().positive() },
+    },
+    async ({ id }) => {
+      const result = await withAudit("retry_message_delivery", { id }, () =>
+        retryMessageDelivery(db, id, sessionId),
+      );
+      return json(result.ok ? result.result : { error: result.error });
+    },
+  );
+  server.registerTool(
+    "list_runtime_instances",
+    {
+      description:
+        "List managed runtime executions and whether they can be safely stopped or resumed.",
+      inputSchema: {},
+    },
+    async () => {
+      const result = await withAudit("list_runtime_instances", {}, () => ({
+        instances: listRuntimeInstances(db),
+      }));
+      return json(result.ok ? result.result : { error: result.error });
+    },
+  );
+  for (const action of ["stop", "resume"] as const) {
+    server.registerTool(
+      `${action}_runtime_instance`,
+      {
+        description:
+          action === "stop"
+            ? "Stop a verified managed runtime process. Unowned or unverifiable PIDs are refused."
+            : "Resume a stopped managed conversation in a fresh instance with its original configuration.",
+        inputSchema: { id: z.string().uuid() },
+      },
+      async ({ id }) => {
+        const result = await withAudit(`${action}_runtime_instance`, { id }, () =>
+          action === "stop"
+            ? { instance: stopRuntimeInstance(db, id) }
+            : resumeRuntimeInstance(db, id),
+        );
+        return json(result.ok ? result.result : { error: result.error });
+      },
+    );
+  }
+  server.registerTool(
     "ask_session",
     {
       description:
@@ -592,7 +698,12 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
       );
       return json(
         r.ok
-          ? { task_id, status: "done", all_done: r.result.allDone, initiator_summoned: r.result.summonedInitiator }
+          ? {
+              task_id,
+              status: "done",
+              all_done: r.result.allDone,
+              initiator_summoned: r.result.summonedInitiator,
+            }
           : { error: r.error },
       );
     },
@@ -610,8 +721,16 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
       },
     },
     async ({ room_id, executor_session_id, prompt }) => {
-      const r = await withAudit("room_summon", { room_id, executor_session_id, promptLen: prompt.length }, () =>
-        summonAgent(db, { room_id, initiator_session_id: sessionId, executor_session_id, prompt }),
+      const r = await withAudit(
+        "room_summon",
+        { room_id, executor_session_id, promptLen: prompt.length },
+        () =>
+          summonAgent(db, {
+            room_id,
+            initiator_session_id: sessionId,
+            executor_session_id,
+            prompt,
+          }),
       );
       return json(
         r.ok
@@ -775,6 +894,14 @@ function safeSummary(value: unknown): Record<string, unknown> | null {
   if (typeof value === "object") {
     // Strip large `content` fields from context entries to keep audit small.
     const v = value as Record<string, unknown>;
+    if (v.message && typeof v.message === "object") {
+      const message = v.message as { id: number; delivery?: { state: string; attempts: number } };
+      return {
+        message_id: message.id,
+        delivery_state: message.delivery?.state,
+        attempts: message.delivery?.attempts,
+      };
+    }
     if (Array.isArray(v)) return { count: v.length };
     if (typeof v.content === "string") {
       const { content: _c, ...rest } = v;

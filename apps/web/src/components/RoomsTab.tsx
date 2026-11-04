@@ -99,7 +99,7 @@ export function RoomsTab({ sessions }: RoomsTabProps) {
           </div>
           <button
             onClick={() => setWizardOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-accent text-white text-xs font-medium hover:bg-accent-deep flex-shrink-0"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-accent text-on-accent text-xs font-medium hover:bg-accent-deep flex-shrink-0"
           >
             <Plus size={14} />
             新建聊天室

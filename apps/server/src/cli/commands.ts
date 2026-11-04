@@ -5,17 +5,17 @@ import { dirname, join, resolve } from "node:path";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 import { resolveConfig, type Scope, DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT } from "../config.js";
-import { openDb, type DB } from "../core/db.js";
+import { openDb, publicError, type DB } from "../core/db.js";
 import { migrateDataDir, readMigrationStatus } from "../core/config-migration.js";
 import { handleHookEvent, readJsonFile } from "../core/live.js";
 import { clearData, getClearableCounts } from "../core/data-clear.js";
 import { runBackfill } from "../core/hooks-backfill.js";
+import { installSessionCommands } from "./session-commands.js";
 import { logger } from "../log.js";
 import { registerSession, listSessions, endSession } from "../core/sessions.js";
 import { publishContext, updateContext, deleteContext, listMyContext } from "../core/context.js";
 import { queryContext } from "../core/search.js";
 import {
-  askSession,
   checkInbox,
   checkReplies,
   listMessages,
@@ -24,6 +24,12 @@ import {
   listEdgeMessages,
 } from "../core/messages.js";
 import { replyAskAndPush } from "../core/mail-push.js";
+import { askAndMaybeWake, retryMessageDelivery } from "../core/ask.js";
+import {
+  listRuntimeInstances,
+  stopRuntimeInstance,
+  resumeRuntimeInstance,
+} from "../core/runtime-instances.js";
 import {
   parseEdgeId,
   parseWatchInterval,
@@ -603,7 +609,9 @@ export function buildCli(_argv?: string | readonly string[]): Command {
     });
 
   // channel ---------------------------------------------------------
-  const channel = program.command("channel").description("inspect one directed conversation channel");
+  const channel = program
+    .command("channel")
+    .description("inspect one directed conversation channel");
 
   channel
     .command("show <edge-id>")
@@ -657,10 +665,10 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       const o = this.optsWithGlobals();
       const res = await runOp(
         program,
-        () => {
+        async () => {
           const db = openDbFrom(o);
           const sid = resolveCliSessionId(db);
-          const m = askSession(db, {
+          const result = await askAndMaybeWake(db, {
             from_session: sid,
             to_session: o.to,
             question,
@@ -670,9 +678,9 @@ export function buildCli(_argv?: string | readonly string[]): Command {
             interface: "cli",
             action: "ask_session",
             args: { to_session: o.to },
-            result: { message_id: m.id },
+            result: { message_id: result.message.id },
           });
-          return { message: m };
+          return result;
         },
         "POST",
         "/messages/ask",
@@ -680,6 +688,104 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       );
       console.log(JSON.stringify(res, null, 2));
     });
+
+  msg
+    .command("retry")
+    .description("retry waking an existing pending message without creating a duplicate")
+    .argument("<id>")
+    .action(async function (this: Command, rawId: string) {
+      const o = this.optsWithGlobals();
+      const id = Number(rawId);
+      const result = await runOp(
+        program,
+        async () =>
+          withDb(openDbFrom(o), async (db) => {
+            const actor = resolveCliSessionId(db);
+            try {
+              const outcome = await retryMessageDelivery(db, id, actor);
+              logAudit(db, {
+                interface: "cli",
+                caller_session: actor,
+                action: "retry_message_delivery",
+                args: { id },
+                result: {
+                  state: outcome.message.delivery?.state,
+                  attempts: outcome.message.delivery?.attempts,
+                },
+              });
+              return outcome;
+            } catch (error) {
+              logAudit(db, {
+                interface: "cli",
+                caller_session: actor,
+                action: "retry_message_delivery",
+                args: { id },
+                result: { code: publicError(error).code },
+              });
+              throw error;
+            }
+          }),
+        "POST",
+        `/messages/${id}/retry`,
+        {},
+      );
+      console.log(JSON.stringify(result, null, 2));
+    });
+
+  const runtime = program.command("runtime").description("manage owned runtime instances");
+  runtime
+    .command("instances")
+    .description("list managed runtime instances")
+    .action(async function (this: Command) {
+      const o = this.optsWithGlobals();
+      const result = await runOp(
+        program,
+        () => withDb(openDbFrom(o), (db) => ({ instances: listRuntimeInstances(db) })),
+        "GET",
+        "/runtime-instances",
+      );
+      console.log(JSON.stringify(result, null, 2));
+    });
+  for (const action of ["stop", "resume"] as const) {
+    runtime
+      .command(action)
+      .argument("<id>")
+      .description(`${action} a verified managed instance`)
+      .action(async function (this: Command, id: string) {
+        const o = this.optsWithGlobals();
+        const result = await runOp(
+          program,
+          () =>
+            withDb(openDbFrom(o), (db) => {
+              try {
+                const outcome =
+                  action === "stop"
+                    ? { instance: stopRuntimeInstance(db, id) }
+                    : resumeRuntimeInstance(db, id);
+                logAudit(db, {
+                  interface: "cli",
+                  action: `${action}_runtime_instance`,
+                  args: { id },
+                  result: { instance_id: outcome.instance.id, state: outcome.instance.state },
+                });
+                return outcome;
+              } catch (error) {
+                logAudit(db, {
+                  interface: "cli",
+                  action: `${action}_runtime_instance`,
+                  args: { id },
+                  result: { code: publicError(error).code },
+                });
+                throw error;
+              }
+            }),
+          "POST",
+          `/runtime-instances/${encodeURIComponent(id)}/${action}`,
+          {},
+        );
+        console.log(JSON.stringify(result, null, 2));
+      });
+  }
 
   msg
     .command("inbox")
@@ -717,10 +823,10 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       const id = Number(o.id);
       const res = await runOp(
         program,
-        () => {
+        async () => {
           const db = openDbFrom(o);
           const sid = resolveCliSessionId(db);
-          const m = replyAskAndPush(db, id, sid, reply);
+          const m = await replyAskAndPush(db, id, sid, reply);
           logAudit(db, {
             caller_session: sid,
             interface: "cli",
@@ -828,6 +934,31 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       console.log(JSON.stringify(res, null, 2));
     });
 
+  const commands = program
+    .command("commands")
+    .description("Conflux session-directory commands for Codex and Claude Code");
+  commands
+    .command("install")
+    .description("install the Conflux list skill for user-level access across projects")
+    .addOption(
+      new Option("--client <client>", "client to install for")
+        .choices(["all", "codex", "claude"])
+        .default("all"),
+    )
+    .option("--force", "back up and replace conflicting Conflux skill instructions")
+    .action(function (this: Command) {
+      const opts = this.opts();
+      const installed = installSessionCommands({ client: opts.client, force: opts.force });
+      for (const item of installed) {
+        console.log(
+          `${item.changed ? "installed" : "unchanged"} ${item.client}: ${item.path}${item.backup ? ` (backup: ${item.backup})` : ""}`,
+        );
+      }
+      console.log(
+        "Codex: /skills → conflux or $conflux list. Claude Code: /conflux list. Reconnect the Conflux MCP server to discover its directory prompt and resources.",
+      );
+    });
+
   // hooks ------------------------------------------------------------
   const hooks = program
     .command("hooks")
@@ -888,9 +1019,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
         if (report.registered.length > 0 || report.refreshed > 0) {
           console.log(
             `backfilled ${report.registered.length} running session(s)` +
-              (report.refreshed > 0
-                ? `, refreshed pid on ${report.refreshed} existing`
-                : ""),
+              (report.refreshed > 0 ? `, refreshed pid on ${report.refreshed} existing` : ""),
           );
         }
       } catch (err) {
@@ -911,7 +1040,8 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       }
       if (report.refreshed > 0)
         console.log(`refreshed pid on ${report.refreshed} existing session(s)`);
-      if (report.skippedBound > 0) console.log(`${report.skippedBound} process(es) already tracked`);
+      if (report.skippedBound > 0)
+        console.log(`${report.skippedBound} process(es) already tracked`);
       if (report.unmatchedPids > 0)
         console.log(`${report.unmatchedPids} process(es) had no verifiable transcript`);
       if (report.registered.length === 0 && report.refreshed === 0)
@@ -1083,12 +1213,10 @@ function openDbFrom(o: CliOpts): DB {
  * A leaked better-sqlite3 handle keeps data.db locked on Windows long
  * after the command's work is done (issue #83).
  */
-function withDb<T>(db: DB, fn: (db: DB) => T): T {
-  try {
-    return fn(db);
-  } finally {
-    db.close();
-  }
+function withDb<T>(db: DB, fn: (db: DB) => T | Promise<T>): T | Promise<T> {
+  return Promise.resolve(undefined)
+    .then(() => fn(db))
+    .finally(() => db.close()) as T | Promise<T>;
 }
 
 /**

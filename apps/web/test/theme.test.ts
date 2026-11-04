@@ -33,7 +33,7 @@ test("hexToChannels converts hex to rgb channel triplet, rejects bad input", () 
   assert.equal(hexToChannels("nope"), null);
 });
 
-test("normalizeThemeColors requires all 10 keys as 6-digit hex", () => {
+test("normalizeThemeColors requires all 8 keys as 6-digit hex", () => {
   const good = BUILTIN_THEMES[0].colors;
   assert.deepEqual(normalizeThemeColors(good), good);
   assert.equal(normalizeThemeColors({ ...good, accent: "#2 56" }), null, "非 hex 拒绝");
@@ -41,6 +41,8 @@ test("normalizeThemeColors requires all 10 keys as 6-digit hex", () => {
   delete missing.lineStrong;
   assert.equal(normalizeThemeColors(missing), null, "缺键拒绝");
   assert.equal(normalizeThemeColors("nope"), null);
+  assert.deepEqual(normalizeThemeColors({ ...good, inkMuted: "#ffffff", inkFaint: "#000000" }), good,
+    "legacy text colors are ignored without changing the eight-key import format");
 });
 
 test("applyThemeColors writes channel vars and null clears them", () => {
@@ -131,4 +133,39 @@ test("激活深色色板联动 data-theme=dark，切浅色板联动回 light", (
   assert.equal(written.get("--tk-paper"), "13 18 28");
   setActiveCustomTheme("汇流蓝（默认）", storage, root);
   assert.equal(dataset.theme, "light", "浅色色板联动回 light");
+});
+
+test("imported light and dark themes restore eight saved colors and derive button text from the accent", () => {
+  const storage = fakeStorage();
+  const written = new Map<string, string>();
+  const root = {
+    dataset: {} as Record<string, string>,
+    style: {
+      setProperty: (key: string, value: string) => void written.set(key, value),
+      removeProperty: (key: string) => void written.delete(key),
+    },
+  };
+  for (const [name, mode, base, accent, accentDeep, foreground] of [
+    ["导入浅色", "light", BUILTIN_THEMES[0], "#c2e4fa", "#a3cbed", "13 18 28"],
+    ["导入深色", "dark", BUILTIN_THEMES[5], "#234fa0", "#183f82", "255 255 255"],
+  ] as const) {
+    const colors = normalizeThemeColors({ ...base.colors, accent, accentDeep })!;
+    saveCustomTheme({ name, colors }, storage);
+    setActiveCustomTheme(name, storage, root);
+    assert.equal(root.dataset.theme, mode);
+    assert.equal(written.get("--tk-on-accent"), foreground,
+      "foreground follows accent contrast, even when it differs from paper mode");
+    written.clear();
+    refreshTokenApplication(storage, root);
+    assert.equal(root.dataset.theme, mode);
+    assert.equal(written.get("--tk-accent"), hexToChannels(accent));
+    assert.equal(written.get("--tk-surface"), hexToChannels(colors.surface));
+    assert.equal(written.get("--tk-on-accent"), foreground);
+    const persisted = listCustomThemes(storage).find((theme) => theme.name === name)!;
+    assert.deepEqual(persisted.colors, colors);
+    assert.equal(Object.keys(persisted.colors).length, 8);
+  }
+  setActiveCustomTheme(null, storage, root);
+  assert.equal(root.dataset.theme, "light");
+  assert.equal(written.size, 0, "returning to default clears derived and imported overrides");
 });

@@ -4,6 +4,12 @@ import { resolveConfig } from "../../apps/server/src/config.js";
 import { registerSession } from "../../apps/server/src/core/sessions.js";
 import { askSession, replyAsk } from "../../apps/server/src/core/messages.js";
 import { publishContext } from "../../apps/server/src/core/context.js";
+import { createRuntimeAgent } from "../../apps/server/src/core/runtime-agents.js";
+import {
+  createRuntimeInstance,
+  failRuntimeInstance,
+} from "../../apps/server/src/core/runtime-instances.js";
+import { setAutoWake } from "../../apps/server/src/core/app-settings.js";
 
 const home = process.argv[2];
 if (!home) {
@@ -13,7 +19,14 @@ if (!home) {
 process.env.CONFLUX_HOME = home;
 const db = openDb(resolveConfig("global"));
 const S: [string, string, string, string, string, boolean][] = [
-  ["cap-claude-conflux", "Conflux", "P0", "图谱工作台：Electron+React 工作空间开发", "claude", true],
+  [
+    "cap-claude-conflux",
+    "Conflux",
+    "P0",
+    "图谱工作台：Electron+React 工作空间开发",
+    "claude",
+    true,
+  ],
   ["cap-claude-voice", "voice-agent", "P1", "TAPD 话术校验需求开发中", "claude", false],
   ["cap-codex-mica", "winGhostty", "P1", "Mica 终端 M1-B 冒烟测试", "codex", false],
   ["cap-agent-recall", "AgentRecall", "P2", "会话记忆检索实验", "claude", false],
@@ -48,3 +61,15 @@ publishContext(db, {
   tags: ["wake", "architecture"],
 });
 console.log("seeded", home);
+if (process.argv.includes("--controls")) {
+  setAutoWake(db, false);
+  askSession(db, {
+    from_session: "web-console",
+    to_session: "cap-claude-conflux",
+    question: "隔离测试：重试同一条消息",
+  });
+  const preset = createRuntimeAgent(db, { name: "协作控制验收", runtime: "codex", workdir: home });
+  createRuntimeInstance(db, preset);
+  const failed = createRuntimeInstance(db, preset);
+  failRuntimeInstance(db, failed.id);
+}

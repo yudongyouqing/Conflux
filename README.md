@@ -101,6 +101,10 @@ npm start   # → http://127.0.0.1:9527
 
 性能基线与本地指标见[性能文档](docs/PERFORMANCE.md)。
 
+会话列表与引用：Codex 桌面版在 `/` 中选择 conflux，也可使用 `$conflux list`（CLI/IDE 使用 `/skills`）；Claude Code 使用 `/conflux list`。先运行 `conflux commands install --client all` 安装客户端技能，并重连更新后的 MCP。找不到名称或终端标题变化时，助手会提供候选供确认；见[会话目录](docs/SESSION-DIRECTORY.md)。
+
+消息可查看独立的唤醒尝试并重试，运行时页面可管理由 Conflux 启动的实例；安全停止与原对话恢复的条件见[协作控制](docs/COLLABORATION-CONTROLS.md)。
+
 ## 🧭 架构
 
 ```mermaid
@@ -272,7 +276,7 @@ npm run package:desktop       # Windows NSIS 安装包
 - ✅ 主题系统（设计令牌 + 自定义主题导入）、数据管理（分类清除 + 自动备份）
 - ✅ 会话优先级 P0/P1/P2、能力检索 `search_sessions`、channel watch CLI、hooks 存量会话补录
 - ✅ GitHub Releases 自动更新链路；签名由发布环境 Secrets 按平台启用
-- 🚧 首个正式版本 tag 的跨平台安装包、签名与自动更新验证
+- 🚧 v0.2.0 三平台安装包已发布（未签名，2026-10-28）；实机安装、退出清理与打包版自动更新验收待完成（[发布验收](https://github.com/yudongyouqing/Conflux/issues/267)），dev 上的新功能未包含在该安装包中
 
 当前待办与历史计划状态见 [项目待办](docs/PROJECT-TODO.md)，性能测量方法见 [性能基线](docs/PERFORMANCE.md)。
 

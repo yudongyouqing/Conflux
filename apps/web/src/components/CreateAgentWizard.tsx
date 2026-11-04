@@ -210,7 +210,7 @@ function AgentCreateForm({ onClose }: { onClose: () => void }) {
         <button
           onClick={handleCreate}
           disabled={!form.name || !form.model || !form.system_prompt || createMut.isPending}
-          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-accent hover:bg-accent-deep disabled:bg-paper disabled:text-ink-faint text-white transition-colors"
+          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-accent hover:bg-accent-deep disabled:bg-paper disabled:text-ink-faint text-on-accent transition-colors"
         >
           {createMut.isPending ? "创建中..." : "创建"}
         </button>
@@ -536,7 +536,7 @@ function RuntimeCreateForm({ onClose }: { onClose: () => void }) {
         <button
           onClick={submit}
           disabled={!form.name.trim() || !form.runtime || create.isPending}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent text-white text-xs hover:bg-accent-deep disabled:opacity-50"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent text-on-accent text-xs hover:bg-accent-deep disabled:opacity-50"
         >
           {create.isPending && <Loader2 size={12} className="animate-spin" />}
           创建

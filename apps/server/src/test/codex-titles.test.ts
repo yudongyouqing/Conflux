@@ -456,4 +456,128 @@ describe("refreshCodexSessionTitles", () => {
     assert.equal(getSession(db, "codex-follow")!.name, "数据库迁移计划");
     disposeHome(home);
   });
+
+  it("binds a managed runtime's unique rollout before its first prompt without renaming the preset", () => {
+    const home = fakeCodexHome();
+    try {
+      const cwd = "C:/Managed/Unique";
+      const uuid = "10101010-aaaa-bbbb-cccc-101010101010";
+      writeRollout(home, { uuid, cwd, startedAtMs: Date.now() - 5_000, prompts: [] });
+      registerSession(db, {
+        id: "managed-unique",
+        name: "My Codex preset",
+        description: "Keep this description",
+        project_dir: cwd,
+        metadata: {
+          runtime: "codex",
+          temp: true,
+          agent_id: 81,
+          runtime_instance_id: "instance-unique",
+        },
+      });
+      refreshCodexSessionTitles(db, { codexHome: home, onlySessionId: "managed-unique" });
+      const session = getSession(db, "managed-unique")!;
+      assert.equal(JSON.parse(session.metadata!).codex_session_id, uuid);
+      assert.equal(JSON.parse(session.metadata!).runtime_instance_id, "instance-unique");
+      assert.equal(session.name, "My Codex preset");
+      assert.equal(session.description, "Keep this description");
+    } finally {
+      disposeHome(home);
+    }
+  });
+
+  it("refuses managed rollout guesses shared with another CLI even on a single-session heartbeat", () => {
+    const home = fakeCodexHome();
+    try {
+      const cwd = "C:/Managed/Siblings";
+      registerCodexSession("managed-sibling", cwd, {
+        agent_id: 82,
+        runtime_instance_id: "instance-sibling",
+      });
+      registerCodexSession("unmanaged-sibling", cwd, {});
+      writeRollout(home, {
+        uuid: "20202020-aaaa-bbbb-cccc-202020202020",
+        cwd,
+        startedAtMs: Date.now() - 5_000,
+        prompts: ["a sibling's task"],
+      });
+      refreshCodexSessionTitles(db, { codexHome: home, onlySessionId: "managed-sibling" });
+      assert.equal(
+        JSON.parse(getSession(db, "managed-sibling")!.metadata!).codex_session_id,
+        undefined,
+      );
+      refreshCodexSessionTitles(db, { codexHome: home, onlySessionId: "unmanaged-sibling" });
+      assert.equal(
+        JSON.parse(getSession(db, "unmanaged-sibling")!.metadata!).codex_session_id,
+        undefined,
+      );
+    } finally {
+      disposeHome(home);
+    }
+  });
+
+  it("refuses ambiguous, old, and different-project rollouts for managed runtimes", () => {
+    const home = fakeCodexHome();
+    try {
+      const cwd = "C:/Managed/Ambiguous";
+      registerCodexSession("managed-ambiguous", cwd, {
+        agent_id: 83,
+        runtime_instance_id: "instance-ambiguous",
+      });
+      for (const [uuid, project, age] of [
+        ["30303030-aaaa-bbbb-cccc-303030303030", cwd, 5_000],
+        ["40404040-aaaa-bbbb-cccc-404040404040", cwd, 8_000],
+        ["50505050-aaaa-bbbb-cccc-505050505050", cwd, 86_400_000],
+        ["60606060-aaaa-bbbb-cccc-606060606060", "C:/Different", 5_000],
+      ] as const)
+        writeRollout(home, {
+          uuid,
+          cwd: project,
+          startedAtMs: Date.now() - age,
+          prompts: ["task"],
+        });
+      refreshCodexSessionTitles(db, { codexHome: home, onlySessionId: "managed-ambiguous" });
+      assert.equal(
+        JSON.parse(getSession(db, "managed-ambiguous")!.metadata!).codex_session_id,
+        undefined,
+      );
+      db.prepare("UPDATE sessions SET created_at = ? WHERE id = ?").run(
+        new Date(Date.now() + 600_000).toISOString(),
+        "managed-ambiguous",
+      );
+      refreshCodexSessionTitles(db, { codexHome: home, onlySessionId: "managed-ambiguous" });
+      assert.equal(
+        JSON.parse(getSession(db, "managed-ambiguous")!.metadata!).codex_session_id,
+        undefined,
+      );
+    } finally {
+      disposeHome(home);
+    }
+  });
+
+  it("retains an explicit managed resume thread and updates busy without changing its preset name", () => {
+    const home = fakeCodexHome();
+    try {
+      const cwd = "C:/Managed/Resume";
+      const uuid = "70707070-aaaa-bbbb-cccc-707070707070";
+      registerCodexSession("managed-resume", cwd, {
+        agent_id: 84,
+        runtime_instance_id: "instance-resume",
+        codex_session_id: uuid,
+      });
+      writeRollout(home, {
+        uuid,
+        cwd,
+        startedAtMs: Date.now() - 5 * 86_400_000,
+        prompts: ["original conversation"],
+      });
+      refreshCodexSessionTitles(db, { codexHome: home, onlySessionId: "managed-resume" });
+      const session = getSession(db, "managed-resume")!;
+      assert.equal(JSON.parse(session.metadata!).codex_session_id, uuid);
+      assert.equal(JSON.parse(session.metadata!).busy, true);
+      assert.equal(session.name, "Resume");
+    } finally {
+      disposeHome(home);
+    }
+  });
 });

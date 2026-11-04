@@ -28,6 +28,52 @@ export interface PublicErrorContext {
   port?: number;
 }
 
+/**
+ * Is this failure a "another process holds the write lock" error? Callers
+ * use it to avoid queueing MORE synchronous writes (error audits) behind
+ * the same held lock, which would stall the reply for another busy timeout
+ * and whose own SQLITE_BUSY would escape the error handler.
+ */
+export function isLockError(error: unknown): boolean {
+  if (!isRecord(error)) return false;
+  const rawCode = typeof error.code === "string" ? error.code : "";
+  if (/^SQLITE_(BUSY|LOCKED)/.test(rawCode)) return true;
+  const rawMessage = typeof error.message === "string" ? error.message : "";
+  return /\bdatabase is locked\b/i.test(rawMessage);
+}
+
+/**
+ * Retry a lock-contended database operation while YIELDING to the event
+ * loop between attempts. sqlite's internal busy handler sleeps on the
+ * database thread, which freezes a server's whole event loop for the full
+ * busy_timeout; callers that cannot afford that (the HTTP server) set a
+ * very short connection-level busy_timeout and drive the retry budget
+ * here instead, so concurrent requests stay served during the wait.
+ *
+ * The operation must be retry-safe: a lock error may only escape before
+ * any partial effect. Wrapping the closure in an immediate transaction
+ * (BEGIN IMMEDIATE takes the write lock up front or fails before anything
+ * happens) guarantees that; better-sqlite3 also rolls a throwing
+ * transaction back entirely.
+ */
+export async function retryOnBusy<T>(
+  db: DB,
+  op: () => T,
+  opts: { budgetMs?: number; pauseMs?: number } = {},
+): Promise<T> {
+  const budgetMs = opts.budgetMs ?? BUSY_TIMEOUT_MS;
+  const pauseMs = opts.pauseMs ?? 25;
+  const startedAt = Date.now();
+  for (;;) {
+    try {
+      return op();
+    } catch (error) {
+      if (!isLockError(error) || Date.now() - startedAt >= budgetMs) throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, pauseMs));
+  }
+}
+
 /** Convert internal failures into a stable, non-sensitive public response. */
 export function publicError(error: unknown, context: PublicErrorContext = {}): PublicError {
   const value = isRecord(error) ? error : {};
@@ -95,7 +141,7 @@ function safePublicMessage(value: string, fallback: string): string {
   return message;
 }
 
-const SCHEMA_VERSION = 13; // v13: room_tasks.task_token（一次性任务令牌修复 split-brain）
+const SCHEMA_VERSION = 14; // Separate wake attempts and owned runtime executions.
 
 // Keep checkpoint timers tied to their database handles. A process can open
 // more than one temporary database during tests and interface operations.
@@ -169,6 +215,39 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS idx_messages_to ON messages(to_session, status);
 CREATE INDEX IF NOT EXISTS idx_messages_from ON messages(from_session, status);
 CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
+
+CREATE TABLE IF NOT EXISTS message_deliveries (
+  message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+  state TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_attempted_at TEXT NOT NULL,
+  reason TEXT,
+  claim_token TEXT,
+  claim_expires_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS runtime_instances (
+  id TEXT PRIMARY KEY,
+  preset_id INTEGER NOT NULL,
+  preset_name TEXT NOT NULL,
+  runtime TEXT NOT NULL,
+  workdir TEXT,
+  preset_snapshot TEXT NOT NULL,
+  session_id TEXT,
+  runtime_pid INTEGER,
+  process_token TEXT,
+  state TEXT NOT NULL DEFAULT 'starting',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  ended_at TEXT,
+  resumed_from TEXT,
+  error TEXT,
+  stop_requested_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_runtime_instances_preset ON runtime_instances(preset_id, state);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_instances_resume ON runtime_instances(resumed_from)
+  WHERE resumed_from IS NOT NULL AND
+    (state IN ('starting', 'running', 'stale') OR (state = 'failed' AND ended_at IS NULL));
 
 -- Graph edges: directed, formed dynamically from communication history.
 -- Each ask_session / reply_ask upserts a row (weight + 1).
@@ -286,6 +365,15 @@ CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_log(caller_session);
 `;
 
 /**
+ * Total time a database operation keeps retrying a held write lock before
+ * surfacing SQLITE_BUSY. The HTTP server implements this budget in
+ * JavaScript (yielding between attempts) instead of sqlite's internal
+ * busy-handler sleep, which would freeze the event loop for the whole
+ * budget — CLI/MCP connections keep the in-process blocking behavior.
+ */
+export const BUSY_TIMEOUT_MS = 10_000;
+
+/**
  * Open (or reuse) a single database connection per process.
  * Uses WAL mode for safe multi-process concurrent reads + single writer.
  */
@@ -293,7 +381,7 @@ export function openDb(config: Config): DB {
   const db = new Database(config.dbPath);
   try {
     db.pragma(`journal_mode = WAL`);
-    db.pragma(`busy_timeout = 10000`);
+    db.pragma(`busy_timeout = ${BUSY_TIMEOUT_MS}`);
     db.pragma(`synchronous = NORMAL`);
     db.pragma(`foreign_keys = ON`);
 

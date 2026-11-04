@@ -21,7 +21,7 @@ interface QueryContextQs {
 }
 
 export function registerContextRoutes(app: FastifyInstance, ctx: ServerContext): void {
-  const { db, requireSession, audit, sendError, sendHttpError } = ctx;
+  const { db, requireSession, audit, sendError, sendHttpError, write } = ctx;
 
   // POST /context
   app.post<{ Body: ContextBody }>(
@@ -42,18 +42,21 @@ export function registerContextRoutes(app: FastifyInstance, ctx: ServerContext):
     async (req, reply) => {
       const sid = requireSession(req);
       try {
-        const entry = publishContext(db, {
-          session_id: sid,
-          title: req.body.title,
-          content: req.body.content,
-          tags: req.body.tags ?? null,
+        const entry = await write(() => {
+          const created = publishContext(db, {
+            session_id: sid,
+            title: req.body.title,
+            content: req.body.content,
+            tags: req.body.tags ?? null,
+          });
+          audit(
+            sid,
+            "publish_context",
+            { title: req.body.title, tags: req.body.tags },
+            { entry_id: created.id },
+          );
+          return created;
         });
-        audit(
-          sid,
-          "publish_context",
-          { title: req.body.title, tags: req.body.tags },
-          { entry_id: entry.id },
-        );
         return reply.send({ entry });
       } catch (err) {
         return sendError(reply, err, sid, "publish_context");
@@ -65,8 +68,11 @@ export function registerContextRoutes(app: FastifyInstance, ctx: ServerContext):
   app.get("/context/mine", {}, async (req, reply) => {
     const sid = requireSession(req);
     try {
-      const entries = listMyContext(db, sid);
-      audit(sid, "list_my_context", {}, { count: entries.length });
+      const entries = await write(() => {
+        const found = listMyContext(db, sid);
+        audit(sid, "list_my_context", {}, { count: found.length });
+        return found;
+      });
       return reply.send({ entries });
     } catch (err) {
       return sendError(reply, err, sid, "list_my_context");
@@ -77,13 +83,16 @@ export function registerContextRoutes(app: FastifyInstance, ctx: ServerContext):
   app.get<{ Querystring: QueryContextQs }>("/context/query", {}, async (req, reply) => {
     const sid = requireSession(req);
     try {
-      const entries = queryContext(db, {
-        query: req.query.query,
-        session_id: req.query.session_id,
-        tags: req.query.tags ? String(req.query.tags).split(",") : undefined,
-        limit: req.query.limit ? Number(req.query.limit) : undefined,
+      const entries = await write(() => {
+        const found = queryContext(db, {
+          query: req.query.query,
+          session_id: req.query.session_id,
+          tags: req.query.tags ? String(req.query.tags).split(",") : undefined,
+          limit: req.query.limit ? Number(req.query.limit) : undefined,
+        });
+        audit(sid, "query_context", req.query as Record<string, unknown>, { count: found.length });
+        return found;
       });
-      audit(sid, "query_context", req.query as Record<string, unknown>, { count: entries.length });
       return reply.send({ entries });
     } catch (err) {
       return sendError(reply, err, sid, "query_context");
@@ -108,12 +117,15 @@ export function registerContextRoutes(app: FastifyInstance, ctx: ServerContext):
     async (req, reply) => {
       const sid = requireSession(req);
       try {
-        const entry = updateContext(db, Number(req.params.id), sid, {
-          title: req.body.title,
-          content: req.body.content,
-          tags: req.body.tags,
+        const entry = await write(() => {
+          const updated = updateContext(db, Number(req.params.id), sid, {
+            title: req.body.title,
+            content: req.body.content,
+            tags: req.body.tags,
+          });
+          audit(sid, "update_context", { id: req.params.id }, updated ? { id: updated.id } : null);
+          return updated;
         });
-        audit(sid, "update_context", { id: req.params.id }, entry ? { id: entry.id } : null);
         if (!entry) return sendHttpError(reply, 404, "not found");
         return reply.send({ entry });
       } catch (err) {
@@ -126,8 +138,11 @@ export function registerContextRoutes(app: FastifyInstance, ctx: ServerContext):
   app.delete<{ Params: { id: string } }>("/context/:id", {}, async (req, reply) => {
     const sid = requireSession(req);
     try {
-      const ok = deleteContext(db, Number(req.params.id), sid);
-      audit(sid, "delete_context", { id: req.params.id }, { ok });
+      const ok = await write(() => {
+        const deleted = deleteContext(db, Number(req.params.id), sid);
+        audit(sid, "delete_context", { id: req.params.id }, { ok: deleted });
+        return deleted;
+      });
       if (!ok) return sendHttpError(reply, 404, "not found");
       return reply.send({ deleted: true });
     } catch (err) {

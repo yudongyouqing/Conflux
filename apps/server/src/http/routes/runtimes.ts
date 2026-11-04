@@ -8,7 +8,14 @@ import {
 } from "../../core/runtime-agents.js";
 import { logAudit } from "../../core/audit.js";
 import { RUNTIME_IDS } from "../../core/runtime-registry.js";
-import type { ServerContext } from "../context.js";
+import { WEB_CONSOLE_ID, type ServerContext } from "../context.js";
+import {
+  listRuntimeInstances,
+  stopRuntimeInstance,
+  resumeRuntimeInstance,
+  type RuntimeProcessIO,
+} from "../../core/runtime-instances.js";
+import type { StartRuntimeOptions } from "../../core/runtime-agents.js";
 
 interface RuntimeAgentBody {
   name: string;
@@ -22,8 +29,51 @@ interface RuntimeAgentBody {
   interval_min?: number | null;
 }
 
-export function registerRuntimeRoutes(app: FastifyInstance, ctx: ServerContext): void {
-  const { db, sendError, sendHttpError } = ctx;
+export function registerRuntimeRoutes(
+  app: FastifyInstance,
+  ctx: ServerContext,
+  io: StartRuntimeOptions & RuntimeProcessIO = {},
+): void {
+  const { db, sendError, sendHttpError, write } = ctx;
+
+  app.get("/runtime-instances", {}, async (_req, reply) => {
+    try {
+      return reply.send({ instances: listRuntimeInstances(db, io) });
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+  // The instance stop/resume/start routes and the instance listing stay
+  // OUTSIDE ctx.write deliberately: they interleave database work with
+  // process inspection and termination (or terminal spawning), which must
+  // neither hold the write transaction lock for seconds nor be re-run on a
+  // retry. Under a held external lock they fail fast with DATA_LOCKED
+  // instead of blocking the server for the busy budget.
+  for (const action of ["stop", "resume"] as const) {
+    app.post<{ Params: { id: string } }>(
+      `/runtime-instances/:id/${action}`,
+      {},
+      async (req, reply) => {
+        try {
+          const result =
+            action === "stop"
+              ? { instance: stopRuntimeInstance(db, req.params.id, io) }
+              : resumeRuntimeInstance(db, req.params.id, io);
+          logAudit(db, {
+            interface: "http",
+            action: `${action}_runtime_instance`,
+            args: { id: req.params.id },
+            result: { instance_id: result.instance.id, state: result.instance.state },
+          });
+          return reply.send(result);
+        } catch (error) {
+          return sendError(reply, error, WEB_CONSOLE_ID, `${action}_runtime_instance`, {
+            id: req.params.id,
+          });
+        }
+      },
+    );
+  }
 
   // ---- runtime agents (user-defined CLI agent presets: Claude Code / Codex) ----
 
@@ -62,11 +112,14 @@ export function registerRuntimeRoutes(app: FastifyInstance, ctx: ServerContext):
     },
     async (req, reply) => {
       try {
-        const agent = createRuntimeAgent(db, req.body);
-        logAudit(db, {
-          interface: "http",
-          action: "create_runtime_agent",
-          args: { id: agent.id, runtime: agent.runtime },
+        const agent = await write(() => {
+          const created = createRuntimeAgent(db, req.body);
+          logAudit(db, {
+            interface: "http",
+            action: "create_runtime_agent",
+            args: { id: created.id, runtime: created.runtime },
+          });
+          return created;
         });
         return reply.code(201).send({ agent });
       } catch (err) {
@@ -77,13 +130,17 @@ export function registerRuntimeRoutes(app: FastifyInstance, ctx: ServerContext):
 
   app.delete<{ Params: { id: string } }>("/runtimes/:id", {}, async (req, reply) => {
     try {
-      const ok = deleteRuntimeAgent(db, Number(req.params.id));
-      if (!ok) return sendHttpError(reply, 404, "runtime agent not found");
-      logAudit(db, {
-        interface: "http",
-        action: "delete_runtime_agent",
-        args: { id: req.params.id },
+      const ok = await write(() => {
+        const deleted = deleteRuntimeAgent(db, Number(req.params.id));
+        if (deleted)
+          logAudit(db, {
+            interface: "http",
+            action: "delete_runtime_agent",
+            args: { id: req.params.id },
+          });
+        return deleted;
       });
+      if (!ok) return sendHttpError(reply, 404, "runtime agent not found");
       return reply.send({ ok: true });
     } catch (err) {
       return sendError(reply, err);
@@ -93,7 +150,7 @@ export function registerRuntimeRoutes(app: FastifyInstance, ctx: ServerContext):
   // POST /runtimes/:id/start — launch the preset in a new terminal window
   app.post<{ Params: { id: string } }>("/runtimes/:id/start", {}, async (req, reply) => {
     try {
-      const result = startRuntimeAgent(db, Number(req.params.id));
+      const result = startRuntimeAgent(db, Number(req.params.id), io);
       logAudit(db, {
         interface: "http",
         action: "start_runtime_agent",

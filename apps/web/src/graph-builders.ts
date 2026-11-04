@@ -56,6 +56,7 @@ export function toSessionNode(n: GraphNode): Node<SessionNodeData> {
     data: {
       name: n.name,
       status: n.status,
+      busy: n.busy,
       type: n.type,
       context_count: n.context_count,
       pending_inbox: n.pending_inbox,

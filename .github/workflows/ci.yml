@@ -2,9 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main, dev, "feat/**", "feature/**", "refactor/**", "fix/**", "docs/**"]
-  pull_request:
     branches: [main, dev]
+  # Any PR base: stacked PRs target feature branches, and test/chore/ci
+  # branch pushes would otherwise never run checks at all.
+  pull_request:
 
 jobs:
   server-tests:
@@ -25,6 +26,10 @@ jobs:
       # @conflux/shared, so the dist output must exist before they run.
       - run: npm run build -w packages/shared
       - run: npm test -w apps/server
+      # Process-level E2E runs serially after the suite: the production
+      # inspection timeout (2 s) is exceeded when many suites load the
+      # machine at once, which the parallel *.test.ts glob would do.
+      - run: npm run test:process-e2e -w apps/server
 
   desktop-tests:
     strategy:
@@ -68,6 +73,25 @@ jobs:
         with:
           name: browser-performance
           path: test-results/performance/browser.json
+          if-no-files-found: error
+
+  server-performance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:perf:server
+      - run: npm run perf:server
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: server-database-performance
+          path: test-results/performance/server-database.json
           if-no-files-found: error
 
   e2e-web:

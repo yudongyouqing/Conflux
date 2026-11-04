@@ -151,7 +151,8 @@ export interface CodexTitleRefreshOptions {
  * while it is an untouched auto-registered placeholder or still carrying
  * the exact name we applied last time — any other name means
  * register_session (or a user rename) claimed it, and we never touch it
- * again.
+ * again. Managed runtime presets retain their names while their native
+ * thread IDs bind only from unambiguous launch matches or explicit stamps.
  * Returns how many rows were updated.
  */
 export function refreshCodexSessionTitles(db: DB, opts: CodexTitleRefreshOptions = {}): number {
@@ -177,7 +178,6 @@ export function refreshCodexSessionTitles(db: DB, opts: CodexTitleRefreshOptions
     if (row.description === AUTO_REGISTERED_DESCRIPTION) return true;
     return typeof meta.codex_name === "string" && row.name === meta.codex_name;
   });
-  if (eligible.length === 0) return 0;
 
   // Rollouts already owned by a stamped row (any status) are off-limits to
   // unstamped rows, across passes.
@@ -189,9 +189,7 @@ export function refreshCodexSessionTitles(db: DB, opts: CodexTitleRefreshOptions
     if (typeof id === "string") ownedSessionIds.add(id);
   }
 
-  const createdStamps = eligible
-    .map((r) => Date.parse(r.created_at))
-    .filter((t) => Number.isFinite(t));
+  const createdStamps = rows.map((r) => Date.parse(r.created_at)).filter((t) => Number.isFinite(t));
   const scanSince = Math.min(
     createdStamps.length > 0 ? Math.min(...createdStamps) : Date.now(),
     Date.now() - RESUME_LOOKBACK_MS,
@@ -199,6 +197,57 @@ export function refreshCodexSessionTitles(db: DB, opts: CodexTitleRefreshOptions
   const rollouts = listCodexRollouts(home, scanSince);
   if (rollouts.length === 0) return 0;
   const threadNames = readCodexThreadNames(home);
+
+  // Preset names are user configuration, but managed Codex executions still
+  // need their native thread identity for resume. Unlike cosmetic titles, a
+  // resume target cannot use the greedy sibling matcher. Require an exact
+  // project and a mutually unique launch-window match across ALL active
+  // sessions, including when only one MCP heartbeat requested this refresh.
+  const contenders = (
+    db
+      .prepare(
+        `SELECT id, name, description, project_dir, created_at, metadata
+    FROM sessions WHERE status = 'active' AND (runtime = 'codex' OR metadata LIKE '%"runtime":"codex"%')`,
+      )
+      .all() as SessionRow[]
+  ).filter((row) => typeof parseMeta(row).codex_session_id !== "string");
+  const managed = contenders.filter((row) => {
+    const meta = parseMeta(row);
+    return typeof meta.agent_id === "number" && typeof meta.runtime_instance_id === "string";
+  });
+  const launchCandidates = (row: SessionRow) =>
+    rollouts.filter(
+      (rollout) =>
+        rollout.codexSessionId !== null &&
+        !ownedSessionIds.has(rollout.codexSessionId) &&
+        rollout.startedAtMs !== null &&
+        rollout.cwd !== null &&
+        row.project_dir !== null &&
+        normalizeDir(rollout.cwd) === normalizeDir(row.project_dir) &&
+        Math.abs(rollout.startedAtMs - Date.parse(row.created_at)) <= ROLLOUT_SKEW_MS,
+    );
+  const candidatesByRow = new Map(contenders.map((row) => [row.id, launchCandidates(row)]));
+  const managedPaths = new Set<string>();
+  let updated = 0;
+  for (const row of managed) {
+    const candidates = candidatesByRow.get(row.id)!;
+    // Reserve ambiguous managed candidates from the cosmetic matcher too;
+    // otherwise its first greedy assignment would hide the ambiguity later.
+    for (const rollout of candidates) managedPaths.add(rollout.path);
+    if (candidates.length !== 1 || !rows.some((selected) => selected.id === row.id)) continue;
+    const rollout = candidates[0];
+    if (
+      contenders.some(
+        (other) =>
+          other.id !== row.id &&
+          candidatesByRow.get(other.id)!.some((candidate) => candidate.path === rollout.path),
+      )
+    )
+      continue;
+    mergeSessionMeta(db, row.id, { codex_session_id: rollout.codexSessionId });
+    ownedSessionIds.add(rollout.codexSessionId!);
+    updated++;
+  }
 
   // Stamped rows bind absolutely; unstamped rows go through the matcher.
   const stamped = new Map<string, CodexRollout>();
@@ -219,7 +268,11 @@ export function refreshCodexSessionTitles(db: DB, opts: CodexTitleRefreshOptions
       matchRows.push({ id: row.id, projectDir: row.project_dir, createdMs });
     }
   }
-  const matches = matchCodexRollouts(matchRows, rollouts, ownedSessionIds);
+  const matches = matchCodexRollouts(
+    matchRows,
+    rollouts.filter((r) => !managedPaths.has(r.path)),
+    ownedSessionIds,
+  );
 
   // Phase 2 — resumed conversations (see tier 3 in the module docblock):
   // rows left unmatched pair with old-start rollouts whose mtime says the
@@ -232,6 +285,7 @@ export function refreshCodexSessionTitles(db: DB, opts: CodexTitleRefreshOptions
       r.codexSessionId !== null &&
       r.startedAtMs !== null &&
       r.mtimeMs >= nowMs - RESUME_ACTIVE_MS &&
+      !managedPaths.has(r.path) &&
       !ownedSessionIds.has(r.codexSessionId!) &&
       !claimedPaths.has(r.path),
   );
@@ -252,7 +306,6 @@ export function refreshCodexSessionTitles(db: DB, opts: CodexTitleRefreshOptions
     claimedPaths.add(cands[0].path);
   }
 
-  let updated = 0;
   for (const row of eligible) {
     try {
       const rollout = stamped.get(row.id) ?? matches.get(row.id);

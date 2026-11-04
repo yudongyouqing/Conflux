@@ -101,6 +101,10 @@ For startup, port, database, MCP, or migration issues, see the [troubleshooting 
 
 See the [performance baseline](PERFORMANCE.md) for local request and graph-build measurements.
 
+Session directory: install client skills with `conflux commands install --client all` and reconnect the updated MCP server. Select conflux from `/` in Codex desktop, use `$conflux list` (CLI/IDE: `/skills`), or `/conflux list` in Claude Code. If a peer name or terminal title changed, the assistant offers candidates for confirmation; see the [session directory guide](SESSION-DIRECTORY.md).
+
+Messages expose wake attempts and manual retry. The runtime page manages instances launched by Conflux; see [collaboration controls](COLLABORATION-CONTROLS.md) for verified stop and original-conversation resume requirements.
+
 ## 🧭 Architecture
 
 ```mermaid
@@ -272,7 +276,7 @@ Artifacts are written to `release/` (ignored by Git). Windows local packaging al
 - ✅ Theming (design tokens + custom palette import), data management (scoped clear + auto backup)
 - ✅ Session priority P0/P1/P2, capability search `search_sessions`, channel watch CLI, hooks backfill for running sessions
 - ✅ GitHub Releases automatic updates; platform signing is enabled through release Secrets
-- 🚧 First tagged release validation for cross-platform installers, signing, and auto-update
+- 🚧 v0.2.0 unsigned installers for all three platforms published (2026-10-28); real-device install, exit cleanup, and packaged auto-update acceptance pending ([release acceptance](https://github.com/yudongyouqing/Conflux/issues/267)). Features merged only into dev are not in that installer.
 
 See [project follow-ups](PROJECT-TODO.md) and the [performance baseline](PERFORMANCE.md).
 

@@ -37,6 +37,20 @@ export function useMessages(filters?: { status?: string; limit?: number }) {
   });
 }
 
+export function useRetryMessage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.retryMessage,
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ["messages"] }),
+        qc.invalidateQueries({ queryKey: ["peer-messages"] }),
+        qc.invalidateQueries({ queryKey: ["edge-messages"] }),
+        qc.invalidateQueries({ queryKey: ["graph"] }),
+      ]),
+  });
+}
+
 export function useDaemonHealth() {
   return useQuery({
     queryKey: ["health"],
@@ -139,9 +153,47 @@ export function useDeleteRuntimeAgent() {
 }
 
 export function useStartRuntimeAgent() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: api.startRuntimeAgent,
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ["runtimes"] }),
+        qc.invalidateQueries({ queryKey: ["runtime-instances"] }),
+      ]),
   });
+}
+
+export function useRuntimeInstances() {
+  return useQuery({
+    queryKey: ["runtime-instances"],
+    queryFn: api.getRuntimeInstances,
+    refetchInterval: 5000,
+  });
+}
+
+function useRuntimeInstanceMutation(
+  action: typeof api.stopRuntimeInstance | typeof api.resumeRuntimeInstance,
+) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: action,
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ["runtime-instances"] }),
+        qc.invalidateQueries({ queryKey: ["runtimes"] }),
+        qc.invalidateQueries({ queryKey: ["sessions"] }),
+        qc.invalidateQueries({ queryKey: ["graph"] }),
+      ]),
+  });
+}
+
+export function useStopRuntimeInstance() {
+  return useRuntimeInstanceMutation(api.stopRuntimeInstance);
+}
+
+export function useResumeRuntimeInstance() {
+  return useRuntimeInstanceMutation(api.resumeRuntimeInstance);
 }
 
 // ---- terminal settings + open-in-terminal ----

@@ -32,6 +32,7 @@ export default defineConfig({
       "/docs": API_TARGET,
       "/web": API_TARGET,
       "/runtimes": API_TARGET,
+      "/runtime-instances": API_TARGET,
       "/chat-rooms": API_TARGET,
       "/wake": API_TARGET,
     },

@@ -63,6 +63,18 @@ body,
   --tk-accent: 37 99 235;
   --tk-accent-deep: 30 79 196;
   --tk-accent-soft: 235 241 254;
+  --tk-on-accent: 255 255 255;
+  --tk-success: 22 115 76;
+  --tk-success-soft: 232 244 237;
+  --tk-warning: 137 86 0;
+  --tk-warning-soft: 255 242 214;
+  --tk-danger: 179 52 64;
+  --tk-danger-soft: 252 236 239;
+  --tk-info: 33 93 176;
+  --tk-info-soft: 234 241 252;
+  --tk-neutral: 92 103 125;
+  --tk-neutral-soft: 237 240 245;
+  color-scheme: light;
 }
 
 body {
@@ -125,6 +137,17 @@ html[data-theme="dark"] {
   --tk-accent: 96 165 250;
   --tk-accent-deep: 59 130 246;
   --tk-accent-soft: 30 58 95;
+  --tk-on-accent: 13 18 28;
+  --tk-success: 116 212 165;
+  --tk-success-soft: 21 58 43;
+  --tk-warning: 237 193 108;
+  --tk-warning-soft: 62 50 30;
+  --tk-danger: 247 151 160;
+  --tk-danger-soft: 68 37 45;
+  --tk-info: 138 185 255;
+  --tk-info-soft: 32 55 80;
+  --tk-neutral: 167 179 199;
+  --tk-neutral-soft: 41 51 67;
   /* 深色底下细字看不清——全局提升一档字重 */
   font-weight: 450;
 }
@@ -243,7 +266,7 @@ html[data-theme="dark"] .font-medium { font-weight: 600; }
     height: 32px;
     border: 1px solid rgb(var(--tk-line));
     border-radius: 8px;
-    color: rgb(var(--tk-ink-muted));
+    color: rgb(var(--tk-ink) / 0.76);
   }
 
   .mobile-main .tab-surface {

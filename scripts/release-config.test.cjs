@@ -19,6 +19,9 @@ test("CI runs server tests, builds, desktop tests, and secret scan", () => {
   assert.match(ci, /node --test scripts\/release-config\.test\.cjs/);
   assert.match(ci, /npm run check:tokens/);
   assert.match(ci, /check:secrets/);
+  assert.match(ci, /npm run test:perf:server/);
+  assert.match(ci, /npm run perf:server/);
+  assert.match(ci, /server-database-performance/);
   assert.match(ci, /ubuntu-latest/);
   assert.match(ci, /windows-latest/);
   assert.match(ci, /macos-latest/);

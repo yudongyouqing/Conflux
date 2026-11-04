@@ -158,3 +158,281 @@ The historical 300-node chain readiness median was 839.1 ms; this run measured
 can contribute to the difference. Zoom improvements are observations, not a
 claimed direct effect of layout changes. Trees were not optimized; React/DOM
 work still creates long tasks and remains a separate optimization target.
+
+## Dense mesh baseline (2026-11-02)
+
+Both benchmarks gained a `dense` topology: a **fixed-degree mesh** where
+every node talks to peers `i+1, i+2, i+5` (mod n), giving ~3n edges
+(previous fixtures never exceed n−1). It is one repeatable dense-ish shape
+chosen for determinism — it does not represent arbitrary dense graphs, and
+no real workspace degree distribution is claimed.
+
+Node layout medians on the recorded Windows host (source `236dae9`, same
+methodology as the initial baseline):
+
+| Nodes | Edges | Median (ms) | Max (ms) |
+| ---: | ---: | ---: | ---: |
+| 25 | 75 | 93.62 | 100.96 |
+| 100 | 300 | 455.53 | 476.59 |
+| 300 | 900 | 1543.36 | 1581.03 |
+
+Browser run (Chromium 156.0.8078.4, five measured navigations per case; raw
+data: [the 2026-11-02 report](performance/2026-11-02-browser.json)):
+
+| Topology | Nodes | Edges | Ready median (ms) | Zoom median (ms) | Long-task max (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| dense | 25 | 75 | 280.5 | 27.7 | 94.0 |
+| dense | 100 | 300 | 649.2 | 34.5 | 373.0 |
+| dense | 300 | 900 | 1583.2 | 40.2 | 1119.0 |
+
+Observation: this fixed-degree mesh costs an order of magnitude more than
+trees of the same node count (layout ≈1.5 s at 300 nodes/900 edges; browser
+main-thread long tasks above 1.1 s). The long-directed-path optimization
+only recognizes chains — full Dagre runs dominate here, making denser
+graphs the clearest next optimization target. The numbers describe THIS
+fixture on one machine in one run, not dense graphs in general and not real
+business data; CI records the same fixtures as observations only, and no
+thresholds are derived from them.
+
+## Server HTTP and SQLite baseline (2026-10-30)
+
+Run from the repository root:
+
+```sh
+npm run test:perf:server
+npm run perf:server
+```
+
+Both commands build shared contracts and the server. No additional dependency is
+required. The benchmark uses compiled production core modules and a separate
+server child process on an ephemeral `127.0.0.1` port. All databases, logs and
+home/config paths are temporary; it never targets an existing service or user
+database. INFO request logging to a temporary file stays enabled. UI assets,
+real model providers and network services are outside this benchmark.
+
+The fixture is a directed ring of 25, 100 or 300 synthetic sessions, with 10
+messages and two context entries per session; every fifth context matches the
+FTS query `needle`. SQLite and HTTP phases use separate freshly seeded files.
+HTTP adds the normal `web-console` pseudo-session. Only seeding runs inside an
+outer transaction; measured inserts retain normal autocommit and FTS triggers.
+Each operation discards ten warm-up observations, then records 100 samples.
+HTTP runs at concurrency 1 and 8 with keep-alive sockets and closed-loop load.
+There are six SQLite cases and ten HTTP cases per fixture: 4,800 measured
+observations in total, plus warm-ups and untimed correctness probes.
+
+SQLite timings cover the real core functions, including statement preparation,
+queries and result conversion. HTTP latency covers the entire JSON response and
+client parsing in a separate process. Correctness assertions are excluded from
+individual latency but included in wall throughput and CPU. p50/p95 use nearest
+rank. Successful operations per second are observed under that closed-loop
+workload; they are not maximum capacity or an open-loop load-test result.
+
+Read cases run before inserts. Warm-up writes remain in the database: SQLite
+ends with 110 extra messages and 110 extra contexts; HTTP ends with 220 extra
+contexts. Context query and publication also perform the normal heartbeat/audit
+writes. Final row counts and FTS lookups verify committed inserts. Seed/build
+time is excluded; `startupMs` measures `startHttpServer` with modules already
+loaded, not a cold process or Electron launch.
+
+Output: `test-results/performance/server-database.json`. It contains every raw
+latency, failures, before/after row counts, database/WAL/SHM bytes, SQLite
+pragmas, server/client CPU deltas, RSS/heap snapshots, process-lifetime maximum
+RSS, source revision and environment. CPU snapshots include driver/IPC overhead.
+RSS is a snapshot; lifetime maximum RSS includes seeding and earlier cases and
+must not be read as a per-case peak or a memory-leak diagnosis. Source `dirty`
+tracks benchmark/server/shared/manifests/CI files, including new benchmark files.
+The CI `server-performance` job runs the tests and benchmark, retaining
+`server-database-performance` even when measurement fails. Timing is not a CI
+gate; non-200 responses, malformed/incorrect JSON, wrong counts and timeouts fail.
+Catchable coordinator termination cleans the child and temporary files; a
+worker exits on IPC disconnect. Uncatchable process termination can leave a
+temporary directory and cannot guarantee a final report.
+
+Optional environment settings (PowerShell: `$env:NAME = "value"`; clear overrides
+after experiments before collecting default baseline reports):
+
+| Setting | Default | Accepted values |
+| --- | --- | --- |
+| `PERF_SERVER_SIZES` | `25,100,300` | Unique comma-separated session counts, 2–3000 |
+| `PERF_SERVER_SAMPLES` | `100` | Integer 20–10000 per operation |
+| `PERF_SERVER_WARMUP` | `10` | Integer 1–1000 |
+| `PERF_SERVER_CONCURRENCY` | `1,8` | Unique comma-separated concurrency levels, 1–64 |
+| `PERF_SERVER_OUTPUT` | `test-results/performance/server-database.json` | Report path |
+
+Each request has a 10-second deadline, IPC a 30-second deadline, and each fixture
+a 180-second overall deadline. The CI job has a ten-minute limit; unusually large
+custom settings can reach these limits and are not a supported capacity claim.
+
+### Windows observation
+
+Source `24ce67c`, clean measurement sources; v22.23.4, Windows 10.0.26300, 12th Gen Intel(R) Core(TM) i7-12650H, approximately 15.7 GiB RAM; SQLite 3.53.4. WAL, synchronous=NORMAL, 4096-byte pages, 1000-page autocheckpoint and 10-second busy timeout. This run was collected without concurrent project build/test jobs. Raw data: [server/database report](performance/2026-10-30-server-database.json). All 4,800 measured operations passed.
+
+SQLite p50 / p95 in milliseconds:
+
+| Operation | 25 sessions | 100 sessions | 300 sessions |
+| --- | ---: | ---: | ---: |
+| sessions-list | 0.130 / 0.362 | 0.280 / 0.361 | 0.811 / 1.023 |
+| graph | 0.357 / 0.430 | 0.854 / 0.960 | 2.378 / 2.646 |
+| messages-list-50 | 0.065 / 0.123 | 0.060 / 0.085 | 0.056 / 0.082 |
+| context-fts-25 | 0.071 / 0.105 | 0.114 / 0.153 | 0.201 / 0.250 |
+| message-insert | 0.196 / 0.300 | 0.188 / 0.284 | 0.183 / 0.318 |
+| context-insert-fts | 0.120 / 0.215 | 0.084 / 0.134 | 0.096 / 0.178 |
+
+HTTP at 300 sessions, 3,000 initial messages and 600 initial contexts:
+
+| Operation | Concurrency | p50 (ms) | p95 (ms) | Successful requests/s |
+| --- | ---: | ---: | ---: | ---: |
+| health | 1 | 0.275 | 0.388 | 3425.9 |
+| health | 8 | 0.789 | 1.181 | 9173.7 |
+| graph | 1 | 4.444 | 5.665 | 215.5 |
+| graph | 8 | 27.406 | 30.593 | 288.8 |
+| messages-list-50 | 1 | 0.480 | 0.595 | 1952.2 |
+| messages-list-50 | 8 | 2.207 | 4.863 | 3308.4 |
+| context-fts-25 | 1 | 0.891 | 1.375 | 889.8 |
+| context-fts-25 | 8 | 5.153 | 11.909 | 1362.8 |
+| context-insert-fts | 1 | 0.648 | 0.854 | 1260.3 |
+| context-insert-fts | 8 | 3.904 | 10.308 | 1592.4 |
+
+Graph HTTP scaling (p95 milliseconds / observed successful requests per second):
+
+| Sessions | Concurrency 1 | Concurrency 8 |
+| ---: | ---: | ---: |
+| 25 | 1.209 / 966.5 | 7.868 / 1314.1 |
+| 100 | 2.008 / 566.0 | 13.415 / 696.8 |
+| 300 | 5.665 / 215.5 | 30.593 / 288.8 |
+
+Resource observations at 300 sessions (per 100 measured requests):
+
+| Operation | Concurrency | Server CPU user+system (ms) | Server RSS after (MiB) |
+| --- | ---: | ---: | ---: |
+| graph | 1 | 358.0 | 184.7 |
+| graph | 8 | 328.0 | 183.7 |
+| context-insert-fts | 1 | 47.0 | 171.8 |
+| context-insert-fts | 8 | 77.0 | 172.8 |
+
+Increasing concurrency raises graph latency while only modestly improving its
+observed throughput. Use the graph endpoint as a profiling target; these data
+do not establish its internal bottleneck or justify a schema/index change.
+The synthetic ring, small payloads, warm OS cache and single Node/SQLite writer
+exclude dense graphs, real data distributions, cold disks, multi-process writer
+contention, long-running memory growth and device diversity. Repeat on the same
+hardware and on representative devices/data before choosing regression limits.
+Multi-process contention and a long-running soak are covered separately in the
+sections below.
+
+## Cross-process SQLite contention (2026-11-01)
+
+```sh
+npm run perf:contention          # full run, report to test-results/performance/contention.json
+node --test scripts/performance/contention.test.cjs   # short smoke of every scenario
+```
+
+The benchmark forks the real HTTP server (built `apps/server/dist`) and an
+external CLI/MCP-style writer process against **one temporary SQLite file**.
+Lock state is never guessed from sleeps: the writer acknowledges `BEGIN
+IMMEDIATE` and every release over IPC before victims run. The writer's
+test-only second connection shortens its own `busy_timeout` to observe timeout
+classification quickly; production connections keep `busy_timeout = 10000`
+from `core/db.ts`, which is unchanged.
+
+Scenarios and the observations recorded in
+[the 2026-11-01 report](performance/2026-11-01-contention.json)
+(Windows 11, i7-12650H, 16 GB, Node v22.23.4; first recorded at source
+`d0f3ee4`, re-recorded after the lock-error audit fix at source `450794a`,
+both clean trees):
+
+| Scenario | Observation |
+| --- | --- |
+| read-during-uncommitted-write | `/healthz` (write-free) stayed available during the hold; a second-connection reader saw 0 of the 3 uncommitted rows and all 3 after commit. An audited data read (`/context/query`) fired during the hold returned only after the release (2.8 ms with a ~1 ms release): audited reads join write contention through their audit/heartbeat rows. |
+| release-recovery | A write fired while the lock was held succeeded after the release: 170.7 ms total wait (includes the 150 ms arrival cushion), 16.8 ms from release acknowledgement to response, exactly one row. |
+| short-timeout-victim | With `busy_timeout = 50` the victim write failed with `SQLITE_BUSY`, left zero rows, and a retry after the release succeeded in 0.8 ms. |
+| production-timeout | Against a hold longer than 10 s the HTTP write returned `503`/`DATA_LOCKED`. Originally measured at 21.8 s: the insert busy-waits the full 10 s, then the error path's own audit write waited on the still-held lock for roughly another 10 s. After skipping the audit row for lock errors the reply arrives after one window — 11.0 s re-recorded, follow-up write recovered in 4.7 ms. |
+| two-writer-burst | 120 HTTP writes and 120 external writer inserts interleaved on one file: all succeeded with zero lock errors (busy_timeout absorbed the contention); HTTP write p50 1.1 ms / p95 8.9 ms, writer-side inserts p50 0.2 ms. FTS found exactly the 240 distinct markers; both processes observed identical row counts — no duplicates, no losses. |
+| writer-death-recovery | Killing the writer mid-transaction released the lock; all 3 uncommitted rows were rolled back; a follow-up write succeeded 1.8 ms later. |
+
+Run totals at `d0f3ee4`: 123 writes succeeded, 1 expected lock error (the
+deliberate production-timeout case), 0 unexpected errors, 10/10 reads
+succeeded. The WAL reached 4.3 MB against a 376 KB database with active
+readers preventing a truncating checkpoint. The audited-read behavior
+remains an observation about the audit design; the double-timeout half of
+it was removed by skipping the error-audit write while the lock is held,
+covered by the `http-lock-contention` server test. These are single-machine
+observations on loopback with synchronous better-sqlite3 — not pass/fail
+limits and not capacity claims.
+
+Coverage for `/healthz` during lock waits (re-measured after the
+yielding-retry change):
+
+- While only the lock is held (no contended request in flight), `/healthz`
+  answers fast (verified in the `http-lock-contention` server test).
+- While a contended write is WAITING for the lock, `/healthz` now stays
+  responsive: the HTTP server drives its busy budget in JavaScript
+  (`ServerContext.write` → `retryOnBusy`), yielding the event loop
+  between attempts instead of sleeping inside sqlite. The independent
+  probe process measured **28/28 successful probes with a 48 ms maximum
+  latency across a 10,042 ms write wait** on this host — the desktop
+  service monitor (15 s interval, 2 s timeout) reads healthy throughout,
+  eliminating the previously documented 1–2 false-unhealthy windows.
+
+Scope of the isolation: write closures run inside one immediate
+transaction retried with yields; routes that interleave database work with
+process inspection or spawning (runtime-instance stop/resume/start,
+instance listing) deliberately stay outside the wrapper — under a held
+external lock they fail fast with DATA_LOCKED instead of blocking the
+server. Historical note: before this change the same probe measured the
+in-flight request frozen for 10,649 ms of a 10,957 ms wait (the blocking
+architecture was documented then, and that record remains accurate for
+those commits).
+
+## Long-running soak (2026-11-01)
+
+```sh
+npm run perf:soak    # configurable via PERF_SOAK_* environment variables
+node --test scripts/performance/soak.test.cjs   # short smoke (CI)
+```
+
+The soak runs the seeded HTTP server while a coordinator samples it every
+second over IPC: worker RSS/heap/external, cumulative CPU, database/WAL/shm
+bytes, page counts, row counts and coordinator active handles, all stored as
+a time series. A **fixed phase** (reads only) precedes a **write phase** with
+paced `POST /context` writes, separating steady-state read memory from
+growth caused by inserted data. The write pacer runs on its own loop (one
+interval after each completion) so slow sampling cannot starve the load; the
+sampler sleeps until the next due tick instead of polling (`idleWakeups`
+counts wakes that found nothing due); and a write phase that acknowledged no
+writes at all fails integrity. Pace relative to the ideal cadence is an
+observation only — a slow machine or slow requests are never judged as
+integrity failures. CI runs the short smoke only; long runs are
+intentionally local and never become CI gates.
+
+The recorded 30-minute run on the fixed harness
+([v2 report](performance/2026-11-01-soak-v2.json), same host and clean
+source `565cc98`) used a 5-minute fixed phase and a 25-minute write phase
+(250 ms pacing, 1 s sampling):
+
+| Observation | Value |
+| --- | --- |
+| Reads | 300 fixed + 1,500 write-phase reads, all succeeded, 0 unexpected errors |
+| Writes | 5,691 attempted / 5,691 acknowledged / 0 lock errors / 0 unexpected errors (completion pacing lands slightly under the 6,000 ideal) |
+| Integrity | contexts 50 → 5,741 rows, exactly the 5,691 unique acknowledged ids; 5,691 acknowledged against a 6,000 ideal pace (observation, not a gate); FTS marker sampling verified |
+| Worker RSS | first 91.0 MB, last 85.5 MB, min 71.5 MB, max 93.4 MB — ended below its start after the full run |
+| Worker heapUsed | 27.6 MB → 22.6 MB (max 28.6) — GC sawtooth, no monotone trend |
+| Worker external | +0.1 MB over 30 minutes |
+| Worker CPU | ≈0.27 core-minutes total across the 30 minutes |
+| Coordinator RSS | +8.8 MB — the harness itself accumulates acknowledged ids and samples; expected data growth, not a server observation |
+| Scheduler | idleWakeups 302 fixed / 1,507 write — ≈1 per sample, no clock polling |
+| Database / WAL | database +2.9 MB (5,691 contexts + 6,141 audit rows); WAL sawtooth bounded at 4.0 MB by `wal_autocheckpoint` |
+
+The first 30-minute run
+([v1 report](performance/2026-11-01-soak.json), source `d0f3ee4`) is kept as
+historical evidence: its harness polled the clock through the fixed phase
+(`sleep(0)` loops) and could starve writes under slow sampling, so its
+coordinator-side CPU is not comparable; its write cadence still hit the
+6,000-write ideal (6,000/6,000 acknowledged) and its server-side series match
+the v2 observations.
+
+A single 30-minute run on one machine cannot prove the absence of a leak, and
+a high-water RSS mark cannot prove one; the RSS/heap declines above are
+observations under this workload, not verdicts. Slower leaks, other workflows
+(MCP/CLI traffic, wake spawning), other platforms and longer horizons need
+repeated runs before any conclusion. No thresholds were added to CI.

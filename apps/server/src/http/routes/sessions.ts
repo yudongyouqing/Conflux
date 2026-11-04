@@ -8,7 +8,7 @@ import {
   heartbeat,
 } from "../../core/sessions.js";
 import { getTerminalSettings } from "../../core/app-settings.js";
-import { openInTerminal, resumeCommand } from "../../core/terminal.js";
+import { openInTerminal, resumeCommand, cleanTerminalEnv } from "../../core/terminal.js";
 import { logAudit } from "../../core/audit.js";
 import type { ServerContext } from "../context.js";
 
@@ -29,7 +29,11 @@ function uuidv4(): string {
 }
 
 export function registerSessionRoutes(app: FastifyInstance, ctx: ServerContext): void {
-  const { db, audit, sendError, sendHttpError } = ctx;
+  const { db, audit, sendError, sendHttpError, write } = ctx;
+  // The resumed terminal's hooks/MCP must register against THIS server's
+  // database; without the explicit home a custom data dir would be lost and
+  // the terminal session would silently land in the default database.
+  const terminalEnv = { ...cleanTerminalEnv(), CONFLUX_HOME: ctx.dataDir };
 
   // POST /sessions/register
   app.post<{ Body: RegisterBody }>(
@@ -50,13 +54,16 @@ export function registerSessionRoutes(app: FastifyInstance, ctx: ServerContext):
     async (req, reply) => {
       const sid = req.body.session_id || (req.headers["x-session-id"] as string) || uuidv4();
       try {
-        const session = registerSession(db, {
-          id: sid,
-          name: req.body.name,
-          description: req.body.description ?? null,
-          project_dir: process.env.CLAUDE_PROJECT_DIR || process.cwd(),
+        const session = await write(() => {
+          const created = registerSession(db, {
+            id: sid,
+            name: req.body.name,
+            description: req.body.description ?? null,
+            project_dir: process.env.CLAUDE_PROJECT_DIR || process.cwd(),
+          });
+          audit(sid, "register_session", { name: req.body.name }, { session_id: sid });
+          return created;
         });
-        audit(sid, "register_session", { name: req.body.name }, { session_id: sid });
         reply.header("X-Session-Id", sid);
         return reply.send({ session_id: sid, session });
       } catch (err) {
@@ -116,13 +123,16 @@ export function registerSessionRoutes(app: FastifyInstance, ctx: ServerContext):
         command: resumeCommand(runtime, id, executable),
         cwd: session.project_dir ?? undefined,
         title: `Conflux · ${session.name}`,
+        env: terminalEnv,
       });
-      heartbeat(db, id);
-      logAudit(db, {
-        interface: "http",
-        action: "open_terminal",
-        args: { session: id, runtime },
-        result,
+      await write(() => {
+        heartbeat(db, id);
+        logAudit(db, {
+          interface: "http",
+          action: "open_terminal",
+          args: { session: id, runtime },
+          result,
+        });
       });
       return reply.send(result);
     } catch (err) {

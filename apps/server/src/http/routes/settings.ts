@@ -15,7 +15,7 @@ import type { TerminalSettings } from "@conflux/shared";
 import type { ServerContext } from "../context.js";
 
 export function registerSettingsRoutes(app: FastifyInstance, ctx: ServerContext): void {
-  const { db, sendError } = ctx;
+  const { db, sendError, write } = ctx;
 
   // GET /settings — check API key status (derived from the provider registry)
   app.get("/settings", {}, async (_req, reply) => {
@@ -59,15 +59,18 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: ServerContext)
     },
     async (req, reply) => {
       try {
-        const terminal = saveTerminalSettings(db, req.body);
-        if (typeof req.body.auto_wake === "boolean") setAutoWake(db, req.body.auto_wake);
-        if (typeof req.body.wake_max_concurrent === "number") {
-          setWakeMaxConcurrent(db, req.body.wake_max_concurrent);
-        }
-        logAudit(db, {
-          interface: "http",
-          action: "save_terminal_settings",
-          args: { terminal: terminal.terminal },
+        const terminal = await write(() => {
+          const saved = saveTerminalSettings(db, req.body);
+          if (typeof req.body.auto_wake === "boolean") setAutoWake(db, req.body.auto_wake);
+          if (typeof req.body.wake_max_concurrent === "number") {
+            setWakeMaxConcurrent(db, req.body.wake_max_concurrent);
+          }
+          logAudit(db, {
+            interface: "http",
+            action: "save_terminal_settings",
+            args: { terminal: saved.terminal },
+          });
+          return saved;
         });
         return reply.send({
           terminal,

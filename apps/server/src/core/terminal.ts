@@ -46,6 +46,10 @@ export function cleanTerminalEnv(baseEnv: NodeJS.ProcessEnv = process.env): Node
     "SHELL",
     "USER",
     "TMPDIR",
+    // The data-directory override must survive terminal/wake spawning: a
+    // server started with a custom home has to pass it to its children or
+    // they silently land in the default database.
+    "CONFLUX_HOME",
     "XDG_CONFIG_HOME",
     "XDG_DATA_HOME",
     "XDG_CACHE_HOME",
@@ -190,7 +194,15 @@ export function buildLaunchPlan(
   // cmd-syntax `title &&` prefix would not parse there.
   const pwshSpec = (file: string): LaunchSpec => ({
     file,
-    args: ["-NoLogo", "-NoProfile", "-NoExit", "-Command", command],
+    args: [
+      "-NoLogo",
+      "-NoProfile",
+      "-NoExit",
+      "-Command",
+      opts.env?.CONFLUX_RUNTIME_SHELL && opts.env?.CONFLUX_RUNTIME_COMMAND_LINE
+        ? "& $env:CONFLUX_RUNTIME_SHELL /d /v:on /s /c $env:CONFLUX_RUNTIME_COMMAND_LINE"
+        : command,
+    ],
     cwd,
   });
   // Plain new console window: the proven `cmd /c start` chain (a windowless

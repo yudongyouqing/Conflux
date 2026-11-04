@@ -8,14 +8,16 @@ import type {
   MessageStatus,
   ModelConfig,
   RuntimeAgent,
+  RuntimeInstance,
   SessionSummary,
   TerminalOption,
   TerminalSettings,
   Turn,
 } from "@conflux/shared";
+import { WEB_CONSOLE_ID } from "@conflux/shared";
 
-async function get<T>(path: string): Promise<T> {
-  const res = await fetch(path);
+async function get<T>(path: string, headers?: Record<string, string>): Promise<T> {
+  const res = await fetch(path, headers ? { headers } : undefined);
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
@@ -23,10 +25,10 @@ async function get<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-async function post<T>(path: string, body: unknown): Promise<T> {
+async function post<T>(path: string, body: unknown, headers?: Record<string, string>): Promise<T> {
   const res = await fetch(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -79,11 +81,18 @@ export const api = {
     return get<{ messages: Message[] }>(`/messages?${qs.toString()}`);
   },
 
-  checkInbox: () => get<{ messages: Message[] }>("/messages/inbox"),
+  checkInbox: () =>
+    get<{ messages: Message[] }>("/messages/inbox", { "X-Session-Id": WEB_CONSOLE_ID }),
+
+  retryMessage: (id: number) =>
+    post<{ message: Message; wake: { woke: boolean; reason?: string } }>(
+      `/messages/${id}/retry`,
+      {},
+      { "X-Session-Id": WEB_CONSOLE_ID },
+    ),
 
   getSessions: (status = "all") =>
     get<{ sessions: SessionSummary[] }>(`/sessions?status=${encodeURIComponent(status)}`),
-
 
   getPeerMessages: (peer: string) =>
     get<{ messages: Message[] }>(`/web/peer-messages?peer=${encodeURIComponent(peer)}`),
@@ -118,7 +127,19 @@ export const api = {
 
   deleteRuntimeAgent: (id: number) => del<{ ok: boolean }>(`/runtimes/${id}`),
 
-  startRuntimeAgent: (id: number) => post<{ started: boolean }>(`/runtimes/${id}/start`, {}),
+  startRuntimeAgent: (id: number) =>
+    post<{ started: boolean; instance: RuntimeInstance }>(`/runtimes/${id}/start`, {}),
+
+  getRuntimeInstances: () => get<{ instances: RuntimeInstance[] }>("/runtime-instances"),
+
+  stopRuntimeInstance: (id: string) =>
+    post<{ instance: RuntimeInstance }>(`/runtime-instances/${encodeURIComponent(id)}/stop`, {}),
+
+  resumeRuntimeInstance: (id: string) =>
+    post<{ started: boolean; instance: RuntimeInstance }>(
+      `/runtime-instances/${encodeURIComponent(id)}/resume`,
+      {},
+    ),
 
   openSessionTerminal: (sessionId: string) =>
     post<{ opener: string }>(`/sessions/${encodeURIComponent(sessionId)}/open-terminal`, {}),
@@ -263,31 +284,34 @@ export const api = {
   // ---- Chat Rooms (#137) ----
   chatRooms: {
     list: () => get<{ rooms: import("@conflux/shared").ChatRoom[] }>("/chat-rooms"),
-    create: (body: {
-      name: string;
-      description?: string;
-      members: string[];
-    }) => post<{ room: import("@conflux/shared").ChatRoom }>("/chat-rooms", body),
+    create: (body: { name: string; description?: string; members: string[] }) =>
+      post<{ room: import("@conflux/shared").ChatRoom }>("/chat-rooms", body),
     delete: (id: number) => del<{ ok: boolean }>(`/chat-rooms/${id}`),
     join: (roomId: number, sessionId: string) =>
       post<{ ok: boolean }>(`/chat-rooms/${roomId}/join`, { session_id: sessionId }),
     leave: (sessionId: string) =>
-      post<{ ok: boolean }>('/chat-rooms/leave', { session_id: sessionId }),
+      post<{ ok: boolean }>("/chat-rooms/leave", { session_id: sessionId }),
     orchestrate: (roomId: number) =>
       get<{
         tasks: Array<{
-          id: number; room_id: number; initiator_session_id: string;
-          executor_session_id: string; prompt: string;
+          id: number;
+          room_id: number;
+          initiator_session_id: string;
+          executor_session_id: string;
+          prompt: string;
           status: "pending" | "running" | "done" | "failed";
-          result: string | null; created_at: string; completed_at: string | null;
+          result: string | null;
+          created_at: string;
+          completed_at: string | null;
         }>;
         status: Array<{ executor_session_id: string; status: string; n: number }>;
       }>(`/chat-rooms/${roomId}/orchestrate`),
     summon: (roomId: number, executorSessionId: string, prompt: string, senderIdentity?: string) =>
-      post<{ task_id: number; injected: boolean; method: string }>(
-        `/chat-rooms/${roomId}/summon`,
-        { executor_session_id: executorSessionId, prompt, sender_session_id: senderIdentity ?? "web-console" },
-      ),
+      post<{ task_id: number; injected: boolean; method: string }>(`/chat-rooms/${roomId}/summon`, {
+        executor_session_id: executorSessionId,
+        prompt,
+        sender_session_id: senderIdentity ?? "web-console",
+      }),
     broadcast: (roomId: number, prompt: string, senderIdentity?: string) =>
       post<{ room_id: number; members: string[]; message_ids: number[] }>(
         `/chat-rooms/${roomId}/broadcast`,
@@ -296,9 +320,16 @@ export const api = {
     messages: (roomId: number) =>
       get<{
         messages: Array<{
-          id: number; room_id: number; from_session: string; to_session: string;
-          from_name: string; to_name: string; question: string;
-          reply: string | null; status: string; created_at: string;
+          id: number;
+          room_id: number;
+          from_session: string;
+          to_session: string;
+          from_name: string;
+          to_name: string;
+          question: string;
+          reply: string | null;
+          status: string;
+          created_at: string;
         }>;
       }>(`/chat-rooms/${roomId}/messages`),
   },

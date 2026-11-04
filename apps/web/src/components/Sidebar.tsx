@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useDaemonHealth } from "../hooks";
 import type { GraphNode } from "@conflux/shared";
+import { sessionStatusAppearance } from "./StatusDot";
 
 export type TabId = "graph" | "messages" | "agents" | "rooms" | "runtimes" | "settings";
 
@@ -42,11 +43,6 @@ function timeGroup(ts: string | null | undefined, now = new Date()): string {
 
 const GROUP_ORDER = ["今天", "昨天", "本周", "更早"];
 const GROUP_PREVIEW = 10;
-
-function statusDot(node: GraphNode): string {
-  if (node.status !== "active") return "bg-ink-faint/60";
-  return node.busy ? "bg-amber-500" : "bg-emerald-500";
-}
 
 export function Sidebar({
   activeTab,
@@ -111,7 +107,7 @@ export function Sidebar({
       >
         <div className="flex items-center gap-2.5 h-10 border-b border-line px-4 app-no-drag">
         <div className="w-[26px] h-[26px] rounded-lg bg-accent flex items-center justify-center app-no-drag">
-          <Boxes size={14} className="text-white" />
+          <Boxes size={14} className="text-on-accent" />
         </div>
         <span className="font-semibold text-sm text-ink tracking-tight">Conflux</span>
         </div>
@@ -169,6 +165,7 @@ export function Sidebar({
               <div className="space-y-0.5">
                 {shown.map((s) => {
                   const selected = s.id === selectedSessionId;
+                  const status = sessionStatusAppearance(s.status, s.busy);
                   return (
                     <button
                       key={s.id}
@@ -180,10 +177,10 @@ export function Sidebar({
                           : "text-ink hover:bg-tile-hover"
                       }`}
                     >
-                      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${statusDot(s)}`} />
+                      <span role="img" aria-label={status.label} title={status.label} className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${status.className}`} />
                       <span className="truncate flex-1">{s.name}</span>
                       {s.priority === "P0" && (
-                        <span className="text-2xs font-semibold text-red-500 flex-shrink-0">
+                        <span className="text-2xs font-semibold text-warning flex-shrink-0">
                           P0
                         </span>
                       )}
@@ -217,7 +214,7 @@ export function Sidebar({
       {/* Bottom bar: status + low-frequency destinations */}
       <div className="border-t border-line p-2 flex items-center gap-1 flex-shrink-0">
         <span
-          className={`w-2 h-2 rounded-full flex-shrink-0 ${online ? "bg-emerald-500" : "bg-red-500"}`}
+          className={`w-2 h-2 rounded-full flex-shrink-0 ${online ? "bg-success" : "bg-neutral"}`}
           title={online ? "daemon 在线" : "daemon 离线"}
         />
         <span className="text-2xs text-ink-muted flex-1 truncate">

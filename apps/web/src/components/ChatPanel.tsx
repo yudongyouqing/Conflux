@@ -193,7 +193,7 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
           <button
             onClick={handleSend}
             disabled={!input.trim() || isStreaming}
-            className="flex items-center justify-center w-10 h-10 rounded-xl bg-accent hover:bg-accent-deep disabled:bg-line disabled:text-ink-faint text-white transition-colors flex-shrink-0 shadow-sm"
+            className="flex items-center justify-center w-10 h-10 rounded-xl bg-accent hover:bg-accent-deep disabled:bg-line disabled:text-ink-faint text-on-accent transition-colors flex-shrink-0 shadow-sm"
           >
             <Send size={16} />
           </button>
@@ -223,7 +223,7 @@ function MessageBubble({
           className={`flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center ${isUser ? "bg-accent" : "bg-line"}`}
         >
           {isUser ? (
-            <User size={13} className="text-white" />
+            <User size={13} className="text-on-accent" />
           ) : (
             <Bot size={13} className="text-ink-muted" />
           )}
@@ -241,14 +241,14 @@ function MessageBubble({
         className={`flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center ${isUser ? "bg-accent" : "bg-line"}`}
       >
         {isUser ? (
-          <User size={13} className="text-white" />
+          <User size={13} className="text-on-accent" />
         ) : (
           <Bot size={13} className="text-ink-muted" />
         )}
       </div>
       <div
         className={`max-w-[75%] px-4 py-2.5 rounded-xl shadow-sm ${
-          isUser ? "bg-accent text-white" : "bg-surface text-ink border border-line"
+          isUser ? "bg-accent text-on-accent" : "bg-surface text-ink border border-line"
         }`}
       >
         <MarkdownText tone={isUser ? "blue" : "light"}>{paced}</MarkdownText>

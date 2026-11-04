@@ -28,3 +28,13 @@ test("inline code stays plain (no hljs tokens)", () => {
   assert.match(html, /<code /);
   assert.doesNotMatch(html, /hljs-/);
 });
+
+test("outgoing markdown uses the palette foreground for emphasis, inline code, and list markers", () => {
+  const html = renderToStaticMarkup(createElement(MarkdownText, {
+    tone: "blue", children: "**重点** 和 `command`\n\n- first\n- second",
+  }));
+  assert.doesNotMatch(html, /text-white/, "nested elements must follow imported and dark accent contrast");
+  assert.match(html, /<strong class="text-on-accent font-semibold"/);
+  assert.match(html, /<code class="[^"]*text-on-accent/);
+  assert.match(html, /marker:text-on-accent/);
+});

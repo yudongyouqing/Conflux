@@ -38,7 +38,7 @@ interface ChatBody {
 }
 
 export function registerAgentRoutes(app: FastifyInstance, ctx: ServerContext): void {
-  const { db, sendError, sendHttpError } = ctx;
+  const { db, sendError, sendHttpError, write } = ctx;
 
   // ---- Agents (internal agent definitions) ----
 
@@ -70,12 +70,14 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: ServerContext): v
     },
     async (req, reply) => {
       try {
-        const agent = createAgent(db, {
-          name: req.body.name,
-          system_prompt: req.body.system_prompt,
-          model_config: req.body.model_config,
-          description: req.body.description ?? null,
-        });
+        const agent = await write(() =>
+          createAgent(db, {
+            name: req.body.name,
+            system_prompt: req.body.system_prompt,
+            model_config: req.body.model_config,
+            description: req.body.description ?? null,
+          }),
+        );
         return reply.send({ agent });
       } catch (err) {
         return sendError(reply, err);
@@ -131,12 +133,14 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: ServerContext): v
     },
     async (req, reply) => {
       try {
-        const agent = updateAgent(db, Number(req.params.id), {
-          name: req.body.name,
-          system_prompt: req.body.system_prompt,
-          model_config: req.body.model_config as ModelConfig | undefined,
-          description: req.body.description,
-        });
+        const agent = await write(() =>
+          updateAgent(db, Number(req.params.id), {
+            name: req.body.name,
+            system_prompt: req.body.system_prompt,
+            model_config: req.body.model_config as ModelConfig | undefined,
+            description: req.body.description,
+          }),
+        );
         if (!agent) return sendHttpError(reply, 404, "agent not found");
         return reply.send({ agent });
       } catch (err) {
@@ -194,15 +198,19 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: ServerContext): v
         conv = getConversation(db, req.body.conversation_id);
         if (!conv) return sendHttpError(reply, 404, "conversation not found");
       } else {
-        conv = createConversation(db, {
-          agent_id: agentId,
-          initiated_by: "web-ui",
-          title: req.body.message.slice(0, 60),
-        });
+        conv = await write(() =>
+          createConversation(db, {
+            agent_id: agentId,
+            initiated_by: "web-ui",
+            title: req.body.message.slice(0, 60),
+          }),
+        );
       }
 
       // Save user turn
-      addTurn(db, { conversation_id: conv.id, role: "user", content: req.body.message });
+      await write(() =>
+        addTurn(db, { conversation_id: conv.id, role: "user", content: req.body.message }),
+      );
 
       // Load full history
       const turns = getTurns(db, conv.id);
@@ -243,11 +251,13 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: ServerContext): v
           }
         }
 
-        const assistantTurn = addTurn(db, {
-          conversation_id: conv.id,
-          role: "assistant",
-          content: fullResponse || "(no response)",
-        });
+        const assistantTurn = await write(() =>
+          addTurn(db, {
+            conversation_id: conv.id,
+            role: "assistant",
+            content: fullResponse || "(no response)",
+          }),
+        );
 
         sse({ type: "done", conversation_id: conv.id, turn_id: assistantTurn.id });
         logger.info(
