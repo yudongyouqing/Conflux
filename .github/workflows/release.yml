@@ -96,8 +96,12 @@ jobs:
           $asar = "release/win-unpacked/resources/app.asar"
           if (-not (Test-Path $exe) -or -not (Test-Path $asar)) { throw "packaged output missing: $exe / $asar" }
           $env:ELECTRON_RUN_AS_NODE = "1"
-          & $exe scripts/packaged-module-smoke.cjs (Resolve-Path $asar).Path
-          if ($LASTEXITCODE -ne 0) { throw "Packaged module smoke failed ($LASTEXITCODE)" }
+          $stdout = Join-Path $env:RUNNER_TEMP "packaged-module-smoke.stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "packaged-module-smoke.stderr.log"
+          $smoke = Start-Process -FilePath (Resolve-Path $exe).Path -ArgumentList @("scripts/packaged-module-smoke.cjs", ('"{0}"' -f (Resolve-Path $asar).Path)) -WorkingDirectory $env:GITHUB_WORKSPACE -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          if (Test-Path $stdout) { Get-Content -LiteralPath $stdout }
+          if (Test-Path $stderr) { Get-Content -LiteralPath $stderr }
+          if ($smoke.ExitCode -ne 0) { throw "Packaged module smoke failed ($($smoke.ExitCode))" }
 
       - name: Build macOS release
         if: matrix.platform == 'macOS'
