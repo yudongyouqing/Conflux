@@ -17,10 +17,35 @@ files:
   - apps/server/dist/**/*
   - apps/server/skills/**/*
   - apps/web/dist/**/*
+  # The app dir is the repository root, so electron-builder collects the
+  # production dependency tree from the ROOT package.json. The root must
+  # depend on the desktop workspace so its runtime closure is collected.
+  # These patterns document the expected hoisted payload as well —
+  # v0.3.0 shipped without them and the packaged main crashed on
+  # require("node-pty") before any startup work.
+  - node_modules/argparse/**/*
+  - node_modules/better-sqlite3/**/*
+  - node_modules/builder-util-runtime/**/*
+  - node_modules/debug/**/*
+  - node_modules/electron-updater/**/*
+  - node_modules/fs-extra/**/*
+  - node_modules/graceful-fs/**/*
+  - node_modules/js-yaml/**/*
+  - node_modules/jsonfile/**/*
+  - node_modules/lazy-val/**/*
+  - node_modules/lodash.escaperegexp/**/*
+  - node_modules/lodash.isequal/**/*
+  - node_modules/ms/**/*
+  - node_modules/node-addon-api/**/*
+  - node_modules/node-pty/**/*
+  - node_modules/sax/**/*
+  - node_modules/tiny-typed-emitter/**/*
+  - node_modules/universalify/**/*
 
 asar: true
 asarUnpack:
   - "**/better-sqlite3/**"
+  - "**/node-pty/**"
 npmRebuild: true
 
 publish:

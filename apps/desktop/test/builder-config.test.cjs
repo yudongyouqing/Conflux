@@ -14,13 +14,18 @@ function readBuilderConfig() {
 test("production build config includes app, server, web, and native module resources", () => {
   const config = readBuilderConfig();
 
-  assert.deepEqual(config.files, [
+  assert.deepEqual(config.files.slice(0, 4), [
     "apps/desktop/**/*",
     "apps/server/dist/**/*",
     "apps/server/skills/**/*",
     "apps/web/dist/**/*",
   ]);
+  // The runtime dependency closure lives in packaged-deps.test.cjs, which
+  // recomputes it from the real node_modules instead of freezing a list.
+  assert.ok(config.files.includes("node_modules/node-pty/**/*"));
+  assert.ok(config.files.includes("node_modules/electron-updater/**/*"));
   assert.ok(config.asarUnpack.includes("**/better-sqlite3/**"));
+  assert.ok(config.asarUnpack.includes("**/node-pty/**"));
   assert.ok(config.win.target.some((target) => target.target === "nsis"));
   assert.equal(
     config.artifactName,
