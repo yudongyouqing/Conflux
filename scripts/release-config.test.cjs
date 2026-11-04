@@ -9,6 +9,17 @@ function read(relativePath) {
   return fs.readFileSync(path.join(ROOT, relativePath), "utf8");
 }
 
+test("all workspace versions and lockfile entries match the release version", () => {
+  const expected = JSON.parse(read("package.json")).version;
+  const lock = JSON.parse(read("package-lock.json"));
+  assert.equal(lock.version, expected);
+  for (const workspace of ["", "apps/server", "apps/web", "apps/desktop", "packages/shared"]) {
+    const manifest = JSON.parse(read(workspace ? `${workspace}/package.json` : "package.json"));
+    assert.equal(manifest.version, expected, `${workspace || "root"} manifest version`);
+    assert.equal(lock.packages[workspace].version, expected, `${workspace || "root"} lockfile version`);
+  }
+});
+
 test("CI runs server tests, builds, desktop tests, and secret scan", () => {
   const ci = read(".github/workflows/ci.yml");
   assert.match(ci, /npm test -w apps\/server/);
