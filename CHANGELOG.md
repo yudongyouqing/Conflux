@@ -6,6 +6,17 @@
 
 （无待发布条目 / Nothing pending.）
 
+## [0.3.1] - Unreleased / 未发布候选
+
+### Fixed / 修复
+
+- Include the desktop workspace in the root production dependency graph so packaged applications carry node-pty, electron-updater and their runtime dependencies; unpack native PTY payloads.
+- 将桌面 workspace 接入根生产依赖图，确保安装包包含 node-pty、electron-updater 及其运行时依赖，并解包原生 PTY 文件。
+- Verify packaged modules and native bindings on Windows, macOS and Linux, including PTY child exit and Windows resource cleanup. Manual workflow verification never publishes a Release.
+- 三平台验证成品模块与原生绑定，包含 PTY 子进程退出和 Windows 资源释放；手动工作流验证不会发布 Release。
+- v0.3.0 remains a prerelease after its desktop dependency failure. These candidate changes do not claim completed real-device GUI, installation or automatic-update acceptance.
+- v0.3.0 因桌面依赖缺失继续保留为预发布；本候选不将成品模块验证视为实机界面、安装或自动更新验收完成。
+
 ## [0.3.0] - 2026-11-04
 
 ### Breaking changes / 不兼容变更
@@ -13,7 +24,7 @@
 - Remove the `muiltchat` CLI bin and all `MUILTCHAT_*` environment variables. Use `conflux` and equivalent `CONFLUX_*` names before upgrading. Internal desktop, Agent and MCP launchers now use the new names. Existing `.muiltchat` data directories remain in place; no data is moved or deleted. The published v0.2.0 artifacts are unchanged.
 - 移除 `muiltchat` 命令入口与全部 `MUILTCHAT_*` 环境变量，升级前请改用 `conflux` 和相同后缀的 `CONFLUX_*`。现有数据目录保持原位，旧版 v0.2.0 安装包不受影响。
 
-### Added / 新增（均在 dev，未随 v0.2.0 发布 / all merged into dev only, not in v0.2.0）
+### Added / 新增（未随 v0.2.0 发布 / not in v0.2.0）
 
 - MCP session directory commands, mention resources, and a Conflux skill entry for Codex and Claude Code.
 - MCP 会话目录命令、mention 资源引用，以及 Codex / Claude Code 的 Conflux 技能入口。

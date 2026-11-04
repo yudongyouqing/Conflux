@@ -4,6 +4,10 @@ on:
   push:
     tags:
       - "v*"
+  # Manual verification runs: builds every platform and module-smokes the
+  # packaged tree; the publish job below is skipped because it only runs
+  # for real tags.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -46,6 +50,7 @@ jobs:
         run: npm ci
 
       - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         run: |
           $package = Get-Content package.json -Raw | ConvertFrom-Json
@@ -69,12 +74,38 @@ jobs:
       - name: Run desktop module tests
         run: npm run test:desktop
 
+      - name: Test packaged-module smoke lifecycle
+        run: node --test scripts/packaged-module-smoke.test.cjs
+
       - name: Build Windows release
         if: matrix.platform == 'Windows'
         env:
           CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
         run: npx electron-builder --projectDir apps/desktop --config electron-builder.yml --${{ matrix.flag }} ${{ matrix.target }} --publish never
+
+      # Module-load smoke against the PACKAGED tree: the desktop main
+      # crashed on a missing node-pty in v0.3.0 while the server healthz
+      # stayed green — health alone never proves the installer is complete.
+      - name: Smoke-test packaged modules (Windows)
+        timeout-minutes: 2
+        if: matrix.platform == 'Windows'
+        shell: pwsh
+        run: |
+          $exe = "release/win-unpacked/Conflux.exe"
+          $asar = "release/win-unpacked/resources/app.asar"
+          if (-not (Test-Path $exe) -or -not (Test-Path $asar)) { throw "packaged output missing: $exe / $asar" }
+          $env:ELECTRON_RUN_AS_NODE = "1"
+          $stdout = Join-Path $env:RUNNER_TEMP "packaged-module-smoke.stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "packaged-module-smoke.stderr.log"
+          $smoke = Start-Process -FilePath (Resolve-Path $exe).Path -ArgumentList @("scripts/packaged-module-smoke.cjs", ('"{0}"' -f (Resolve-Path $asar).Path)) -WorkingDirectory $env:GITHUB_WORKSPACE -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          $exited = $smoke.WaitForExit(45000)
+          if (-not $exited) { taskkill.exe /PID $smoke.Id /T /F }
+          if (Test-Path $stdout) { Get-Content -LiteralPath $stdout }
+          if (Test-Path $stderr) { Get-Content -LiteralPath $stderr }
+          if (-not $exited) { throw "Packaged module smoke did not exit within 45 seconds" }
+          $smoke.WaitForExit()
+          if ($smoke.ExitCode -ne 0) { throw "Packaged module smoke failed ($($smoke.ExitCode))" }
 
       - name: Build macOS release
         if: matrix.platform == 'macOS'
@@ -101,10 +132,33 @@ jobs:
         if: matrix.platform == 'Linux'
         run: npx electron-builder --projectDir apps/desktop --config electron-builder.yml --${{ matrix.flag }} ${{ matrix.target }} --publish never
 
+      - name: Smoke-test packaged modules (Linux)
+        timeout-minutes: 2
+        if: matrix.platform == 'Linux'
+        run: |
+          executable_name=$(node -p "require('./package.json').name.toLowerCase()")
+          exe="release/linux-unpacked/$executable_name"
+          asar="release/linux-unpacked/resources/app.asar"
+          test -x "$exe" || { echo "missing $exe"; exit 1; }
+          test -f "$asar" || { echo "missing $asar"; exit 1; }
+          ELECTRON_RUN_AS_NODE=1 "$exe" scripts/packaged-module-smoke.cjs "$(pwd)/$asar"
+
+      - name: Smoke-test packaged modules (macOS)
+        timeout-minutes: 2
+        if: matrix.platform == 'macOS'
+        run: |
+          apps=(release/mac*/Conflux.app)
+          [[ ${#apps[@]} -eq 1 && -d "${apps[0]}" ]] || { echo "expected exactly one packaged macOS app"; exit 1; }
+          exe="${apps[0]}/Contents/MacOS/Conflux"
+          asar="${apps[0]}/Contents/Resources/app.asar"
+          test -x "$exe" || { echo "missing $exe"; exit 1; }
+          test -f "$asar" || { echo "missing $asar"; exit 1; }
+          ELECTRON_RUN_AS_NODE=1 "$exe" scripts/packaged-module-smoke.cjs "$(pwd)/$asar"
+
       - name: Upload ${{ matrix.platform }} artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: conflux-${{ matrix.platform }}-${{ github.ref_name }}
+          name: conflux-${{ matrix.platform }}-${{ github.run_id }}
           path: |
             release/*.exe
             release/*.dmg
@@ -117,6 +171,7 @@ jobs:
   publish:
     name: Publish GitHub Release
     needs: desktop
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -127,7 +182,7 @@ jobs:
       - name: Download platform artifacts
         uses: actions/download-artifact@v8
         with:
-          pattern: conflux-*-${{ github.ref_name }}
+          pattern: conflux-*-${{ github.run_id }}
           path: release
           merge-multiple: true
 

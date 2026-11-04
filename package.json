@@ -1,6 +1,6 @@
 {
   "name": "conflux-monorepo",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Cross-session context query and conversation system for AI coding assistants (monorepo root)",
   "author": "Conflux contributors",
@@ -42,7 +42,8 @@
     "capture:screens": "node scripts/capture/capture.mjs"
   },
   "dependencies": {
-    "conflux": "file:apps/server"
+    "conflux": "file:apps/server",
+    "conflux-desktop": "file:apps/desktop"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
