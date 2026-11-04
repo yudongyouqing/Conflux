@@ -27,6 +27,13 @@ const CONFIG_PATH = path.join(DESKTOP, "electron-builder.yml");
 const ENTRY_DEPENDENCIES = ["node-pty", "electron-updater", "better-sqlite3"];
 const NATIVE_PACKAGES = ["node-pty", "better-sqlite3"];
 
+test("builder root production graph includes the desktop workspace", () => {
+  const rootPackage = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  const desktopPackage = JSON.parse(fs.readFileSync(path.join(DESKTOP, "package.json"), "utf8"));
+  assert.equal(rootPackage.dependencies[desktopPackage.name], "file:apps/desktop",
+    "builder collects node_modules from root production dependencies, not files globs alone");
+});
+
 function readBuilderConfig() {
   return YAML.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
 }

@@ -42,7 +42,8 @@
     "capture:screens": "node scripts/capture/capture.mjs"
   },
   "dependencies": {
-    "conflux": "file:apps/server"
+    "conflux": "file:apps/server",
+    "conflux-desktop": "file:apps/desktop"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

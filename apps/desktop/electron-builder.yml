@@ -18,9 +18,9 @@ files:
   - apps/server/skills/**/*
   - apps/web/dist/**/*
   # The app dir is the repository root, so electron-builder collects the
-  # production dependency tree from the ROOT package.json (a workspace
-  # root with no runtime deps). The desktop runtime dependencies are
-  # hoisted to the root node_modules and must be listed explicitly —
+  # production dependency tree from the ROOT package.json. The root must
+  # depend on the desktop workspace so its runtime closure is collected.
+  # These patterns document the expected hoisted payload as well —
   # v0.3.0 shipped without them and the packaged main crashed on
   # require("node-pty") before any startup work.
   - node_modules/argparse/**/*
