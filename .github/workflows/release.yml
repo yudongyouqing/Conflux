@@ -50,6 +50,7 @@ jobs:
         run: npm ci
 
       - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         run: |
           $package = Get-Content package.json -Raw | ConvertFrom-Json
@@ -73,6 +74,9 @@ jobs:
       - name: Run desktop module tests
         run: npm run test:desktop
 
+      - name: Test packaged-module smoke lifecycle
+        run: node --test scripts/packaged-module-smoke.test.cjs
+
       - name: Build Windows release
         if: matrix.platform == 'Windows'
         env:
@@ -84,6 +88,7 @@ jobs:
       # crashed on a missing node-pty in v0.3.0 while the server healthz
       # stayed green — health alone never proves the installer is complete.
       - name: Smoke-test packaged modules (Windows)
+        timeout-minutes: 2
         if: matrix.platform == 'Windows'
         shell: pwsh
         run: |
@@ -91,7 +96,8 @@ jobs:
           $asar = "release/win-unpacked/resources/app.asar"
           if (-not (Test-Path $exe) -or -not (Test-Path $asar)) { throw "packaged output missing: $exe / $asar" }
           $env:ELECTRON_RUN_AS_NODE = "1"
-          & $exe scripts/release/packaged-module-smoke.cjs (Resolve-Path $asar).Path
+          & $exe scripts/packaged-module-smoke.cjs (Resolve-Path $asar).Path
+          if ($LASTEXITCODE -ne 0) { throw "Packaged module smoke failed ($LASTEXITCODE)" }
 
       - name: Build macOS release
         if: matrix.platform == 'macOS'
@@ -119,22 +125,26 @@ jobs:
         run: npx electron-builder --projectDir apps/desktop --config electron-builder.yml --${{ matrix.flag }} ${{ matrix.target }} --publish never
 
       - name: Smoke-test packaged modules (Linux)
+        timeout-minutes: 2
         if: matrix.platform == 'Linux'
         run: |
           exe="release/linux-unpacked/conflux"
           asar="release/linux-unpacked/resources/app.asar"
           test -x "$exe" || { echo "missing $exe"; exit 1; }
           test -f "$asar" || { echo "missing $asar"; exit 1; }
-          ELECTRON_RUN_AS_NODE=1 "$exe" scripts/release/packaged-module-smoke.cjs "$(pwd)/$asar"
+          ELECTRON_RUN_AS_NODE=1 "$exe" scripts/packaged-module-smoke.cjs "$(pwd)/$asar"
 
       - name: Smoke-test packaged modules (macOS)
+        timeout-minutes: 2
         if: matrix.platform == 'macOS'
         run: |
-          exe="release/mac/Conflux.app/Contents/MacOS/Conflux"
-          asar="release/mac/Conflux.app/Contents/Resources/app.asar"
+          apps=(release/mac*/Conflux.app)
+          [[ ${#apps[@]} -eq 1 && -d "${apps[0]}" ]] || { echo "expected exactly one packaged macOS app"; exit 1; }
+          exe="${apps[0]}/Contents/MacOS/Conflux"
+          asar="${apps[0]}/Contents/Resources/app.asar"
           test -x "$exe" || { echo "missing $exe"; exit 1; }
           test -f "$asar" || { echo "missing $asar"; exit 1; }
-          ELECTRON_RUN_AS_NODE=1 "$exe" scripts/release/packaged-module-smoke.cjs "$(pwd)/$asar"
+          ELECTRON_RUN_AS_NODE=1 "$exe" scripts/packaged-module-smoke.cjs "$(pwd)/$asar"
 
       - name: Upload ${{ matrix.platform }} artifacts
         uses: actions/upload-artifact@v7
@@ -152,7 +162,7 @@ jobs:
   publish:
     name: Publish GitHub Release
     needs: desktop
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
