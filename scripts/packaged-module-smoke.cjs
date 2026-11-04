@@ -1,7 +1,7 @@
 const path = require("node:path");
 
 /** Wait for natural exit as well as output, so a passing probe leaves no child. */
-function waitForPtyEcho(child, { timeoutMs = 10000, exitGraceMs = 2000 } = {}) {
+function waitForPtyEcho(child, { timeoutMs = 10000, exitGraceMs = 2000, disposeOnExit = process.platform === "win32" } = {}) {
   return new Promise((resolve, reject) => {
     let output = "";
     let killTimer;
@@ -14,6 +14,12 @@ function waitForPtyEcho(child, { timeoutMs = 10000, exitGraceMs = 2000 } = {}) {
       clearTimeout(timer);
       clearTimeout(killTimer);
       for (const subscription of subscriptions) subscription?.dispose();
+      // node-pty on Windows owns ConPTY handles and a pipe worker beyond
+      // the shell's exit. Release that owned terminal explicitly; POSIX
+      // already closes on exit and must not signal an exited PID again.
+      if (disposeOnExit && !timedOut) {
+        try { child.kill(); } catch (cleanupError) { error ??= cleanupError; }
+      }
       if (error) reject(error);
       else resolve();
     };

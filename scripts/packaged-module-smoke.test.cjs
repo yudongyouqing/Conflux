@@ -16,13 +16,23 @@ function fixture() {
 test("echo alone does not pass until the PTY has exited", async () => {
   const f = fixture();
   let finished = false;
-  const result = waitForPtyEcho(f.child).then(() => { finished = true; });
+  const result = waitForPtyEcho(f.child, { disposeOnExit: false }).then(() => { finished = true; });
   f.data("conflux-pty-smoke\r\n");
   await new Promise(setImmediate);
   assert.equal(finished, false);
   f.exit(0);
   await result;
   assert.equal(f.kills(), 0);
+});
+
+test("Windows exit releases the owned ConPTY after observing the shell exit", async () => {
+  const f = fixture();
+  const result = waitForPtyEcho(f.child, { disposeOnExit: true });
+  f.data("conflux-pty-smoke");
+  assert.equal(f.kills(), 0);
+  f.exit(0);
+  await result;
+  assert.equal(f.kills(), 1);
 });
 
 test("failed exit and missing echo fail the smoke", async () => {

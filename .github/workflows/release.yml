@@ -98,9 +98,13 @@ jobs:
           $env:ELECTRON_RUN_AS_NODE = "1"
           $stdout = Join-Path $env:RUNNER_TEMP "packaged-module-smoke.stdout.log"
           $stderr = Join-Path $env:RUNNER_TEMP "packaged-module-smoke.stderr.log"
-          $smoke = Start-Process -FilePath (Resolve-Path $exe).Path -ArgumentList @("scripts/packaged-module-smoke.cjs", ('"{0}"' -f (Resolve-Path $asar).Path)) -WorkingDirectory $env:GITHUB_WORKSPACE -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          $smoke = Start-Process -FilePath (Resolve-Path $exe).Path -ArgumentList @("scripts/packaged-module-smoke.cjs", ('"{0}"' -f (Resolve-Path $asar).Path)) -WorkingDirectory $env:GITHUB_WORKSPACE -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          $exited = $smoke.WaitForExit(45000)
+          if (-not $exited) { taskkill.exe /PID $smoke.Id /T /F }
           if (Test-Path $stdout) { Get-Content -LiteralPath $stdout }
           if (Test-Path $stderr) { Get-Content -LiteralPath $stderr }
+          if (-not $exited) { throw "Packaged module smoke did not exit within 45 seconds" }
+          $smoke.WaitForExit()
           if ($smoke.ExitCode -ne 0) { throw "Packaged module smoke failed ($($smoke.ExitCode))" }
 
       - name: Build macOS release
