@@ -17,8 +17,23 @@
 - 消息唤醒结果与手动重试、受管运行实例的停止/恢复；已读/回复状态与投递重试相互独立。
 - Refined light/dark semantic palettes with existing custom themes preserved.
 - 完善浅色/深色语义色板，保留已有自定义主题。
-- Server HTTP and SQLite performance baselines with raw samples retained as CI artifacts.
-- 服务器 HTTP 与 SQLite 性能基准，原始样本由 CI 保存为产物。
+- Server HTTP and SQLite performance baselines with raw samples retained as CI artifacts, plus cross-process lock-contention benchmarks, a recorded 30-minute soak, and a fixed-degree mesh topology; the HTTP server drives its busy budget with the event loop yielded, keeping /healthz responsive (max 48 ms observed across a 10 s lock wait) during lock waits.
+- 服务器 HTTP 与 SQLite 性能基准（原始样本由 CI 保存为产物），另增跨进程锁竞争基准、一次 30 分钟 soak 记录与固定度数网状图拓扑；HTTP 服务等待写锁时以事件循环可让出的方式驱动忙等预算，锁等待期间 /healthz 保持响应（10 秒等待实测最大延迟 48ms）。
+- A serial process-level E2E suite for managed runtime instances (real ps/lsof/CIM inspection, termination, PID-reuse and delayed-exit guards) and a real-process hooks-backfill E2E on POSIX.
+- 受管运行实例的串行进程级 E2E 套件（真实 ps/lsof/CIM 检查、终止、PID 复用与延迟退出守卫），以及 POSIX 上真实进程的 hooks backfill E2E。
+- Upgrade-preservation regression: a v8-shaped database with user data migrates to the current schema with every row intact and searchable.
+- 升级保留回归：带用户数据的 v8 形态旧库升级到当前 schema，逐行保留且可检索。
+
+### Fixed / 修复
+
+- Lock errors no longer wait on the database twice: HTTP and MCP error paths skip the synchronous audit write behind a held lock and surface a mapped error (503 DATA_LOCKED).
+- 锁错误不再二次等待数据库：HTTP 与 MCP 错误路径跳过被持锁阻塞的同步审计写，并返回映射后的错误（503 DATA_LOCKED）。
+- Retried write transactions never re-run non-rollbackable side effects: wake launches, typed pushes, terminal injections and backup files execute strictly after the committing transaction; the clear-path backup snapshot now lives inside the deleting transaction, so everything removed is restorable from the backup.
+- 可重试写事务不再重放不可回滚的副作用：唤醒启动、typed 推送、终端注入与备份文件严格在提交后执行；清除路径的备份快照移入删除事务，实际删除的数据全部可从备份恢复。
+- Process identity hardening on POSIX: Linux preserves argv boundaries for spaced checkout paths, macOS binds a CPU-generation floor with a three-way same/replaced/changed relation, and an unconfirmable (legacy-format) token refuses stop and resume instead of ending the instance.
+- POSIX 进程身份加固：Linux 保留含空格路径的 argv 边界，macOS 绑定 CPU 代际下限并区分同进程/确认换代/仍存活但已变化三态，不可确认（旧格式）令牌拒绝停止与恢复而非结束实例。
+- Wake runs and resume terminals are pinned to the summoning server's data directory (CONFLUX_HOME), so a custom-home instance no longer spawns children that land in the default database.
+- 唤醒运行与恢复终端钉扎发起实例的实际数据目录（CONFLUX_HOME），自定义数据目录的实例不再唤醒出落到默认库的子进程。
 
 ## [0.2.0] - 2026-10-27
 
