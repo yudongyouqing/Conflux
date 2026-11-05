@@ -6,6 +6,7 @@ import React, { createElement, type ReactNode } from "react";
 import {
   useGraph,
   useMessages,
+  usePeerMessages,
   useRetryMessage,
   useStartRuntimeAgent,
   useStopRuntimeInstance,
@@ -82,10 +83,47 @@ test("useMessages continues loading messages when inbox preflight fails", async 
     return Response.json({ messages: [{ id: 10 }] });
   });
   const { result } = setupHook(() => useMessages());
-
   await waitFor(() => assert.deepEqual(result.current.data?.messages, [{ id: 10 }]));
-
   assert.deepEqual(requests, ["/messages/inbox", "/messages?status=all&limit=100"]);
+});
+
+test("useMessages with enabled=false never runs the queryFn, not even after invalidation", async () => {
+  const requests: string[] = [];
+  mock.method(globalThis, "fetch", async (input: string | URL | Request) => {
+    requests.push(String(input));
+    return Response.json({ messages: [] });
+  });
+  const { result, queryClient } = setupHook(() => useMessages({ status: "all" }, false));
+  await queryClient.invalidateQueries({ queryKey: ["messages"] });
+  await new Promise((r) => setTimeout(r, 20));
+  // a hidden activity page must not fire the inbox side effect from the
+  // background, no matter what invalidates the key
+  assert.deepEqual(requests, []);
+});
+
+test("usePeerMessages stays silent without a peer or when hidden", async () => {
+  const requests: string[] = [];
+  mock.method(globalThis, "fetch", async (input: string | URL | Request) => {
+    requests.push(String(input));
+    return Response.json({ messages: [] });
+  });
+  const hidden = setupHook(() => usePeerMessages(null), undefined);
+  const disabled = setupHook(() => usePeerMessages("peer-1", false), undefined);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(requests, []);
+  hidden.unmount();
+  disabled.unmount();
+});
+
+test("usePeerMessages forwards the query signal so target switches cancel stale reads", async () => {
+  let seenSignal: AbortSignal | undefined;
+  mock.method(globalThis, "fetch", async (input: string | URL | Request, init?: RequestInit) => {
+    if (String(input).startsWith("/web/peer-messages")) seenSignal = init?.signal;
+    return Response.json({ messages: [] });
+  });
+  const { result } = setupHook(() => usePeerMessages("peer-1"), undefined);
+  await waitFor(() => assert.deepEqual(result.current.data, { messages: [] }));
+  assert.ok(seenSignal instanceof AbortSignal);
 });
 
 test("successful retry refreshes every message view and graph without creating a message", async () => {

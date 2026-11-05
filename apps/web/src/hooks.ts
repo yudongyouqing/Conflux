@@ -18,21 +18,27 @@ export function useSessions(status: "active" | "all" = "active") {
   });
 }
 
-export function useMessages(filters?: { status?: string; limit?: number }) {
+export function useMessages(filters?: { status?: string; limit?: number }, enabled = true) {
   return useQuery({
     queryKey: ["messages", filters],
-    queryFn: async () => {
-      // Auto-mark pending messages addressed to web-console as seen
+    queryFn: async ({ signal }) => {
+      // Auto-mark pending messages addressed to web-console as seen. The
+      // preflight is part of the queryFn so a hidden activity page (enabled
+      // false) never fires read side effects from the background.
       try {
-        await api.checkInbox();
+        await api.checkInbox(signal);
       } catch {
         // web-console might not be registered yet; ignore and proceed
       }
-      return api.getMessages({
-        status: (filters?.status as never) ?? "all",
-        limit: filters?.limit ?? 100,
-      });
+      return api.getMessages(
+        {
+          status: (filters?.status as never) ?? "all",
+          limit: filters?.limit ?? 100,
+        },
+        signal,
+      );
     },
+    enabled,
     refetchInterval: 3000,
   });
 }
@@ -69,11 +75,11 @@ export function useSessionContext(sessionId: string | null) {
 }
 
 /** Two-way message flow between the web console and one session (Drawer view). */
-export function usePeerMessages(peer: string | null) {
+export function usePeerMessages(peer: string | null, enabled = true) {
   return useQuery({
     queryKey: ["peer-messages", peer],
-    queryFn: () => api.getPeerMessages(peer!),
-    enabled: !!peer,
+    queryFn: ({ signal }) => api.getPeerMessages(peer!, signal),
+    enabled: !!peer && enabled,
     refetchInterval: 5000,
   });
 }
