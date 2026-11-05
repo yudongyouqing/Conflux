@@ -135,6 +135,9 @@ try {
             ).observe({ type: "longtask", buffered: true });
           });
           await page.goto(url, { waitUntil: "domcontentloaded" });
+          // chat is the default surface now — walk to the graph before
+          // measuring its render (the click cost applies to every sample)
+          await page.getByRole("button", { name: "图谱", exact: true }).click();
           await page
             .waitForFunction(
               ({ nodes, edges }) =>
