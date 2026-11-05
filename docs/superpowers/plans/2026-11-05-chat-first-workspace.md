@@ -74,7 +74,7 @@ P5「模型助手加入房间」单独立项：先设计成员类型、消息归
 
 ### 任务 0：分支、上下文与验证基线
 
-- [ ] 获取最新 `origin/dev`，核对 `AGENTS.md`、`CLAUDE.md`、规划 issue 与本规格。
+- [x] 获取最新 `origin/dev`，核对 `AGENTS.md`、`CLAUDE.md`、规划 issue 与本规格。（P1 执行时 origin/dev 仍为 85791cf，与文档基线一致）
 
 ```powershell
 git fetch origin dev
@@ -83,8 +83,8 @@ git log -5 --oneline origin/dev
 gh issue view 302 --repo yudongyouqing/Conflux
 ```
 
-- [ ] 保留原工作区改动，使用现有隔离 worktree 或按仓库约定创建 `.worktrees/<branch>`；P1 分支示例 `feat/302-chat-first-home`。每一后继阶段先查询 issue，按该阶段实际 issue 号开分支，避免重复建单。
-- [ ] 只在功能实施环境安装依赖、建立基线。当前编写文档不需要重新安装或运行全套测试。
+- [x] 保留原工作区改动，使用现有隔离 worktree 或按仓库约定创建 `.worktrees/<branch>`；P1 分支示例 `feat/302-chat-first-home`。（已按约定创建 `.worktrees/feat/302-chat-first-home`，主工作区保持在 dev 未动）
+- [x] 只在功能实施环境安装依赖、建立基线。当前编写文档不需要重新安装或运行全套测试。（P1 worktree `npm ci` 后基线：web 61/61、build、lint 0 error、tokens clean）
 
 ```powershell
 npm ci
@@ -96,13 +96,13 @@ npm run check:tokens
 
 Windows 源路径含空格的原生 rebuild 问题仍由独立 issue 跟踪；需要原生重建时采用无空格隔离检出或 CI，不能清理用户已有检出、安装目录与数据库来绕过。
 
-- [ ] 记录通过/失败命令、基线 commit、环境。若新失败阻碍判断，先定位与隔离，不把它归为既有失败后直接忽略。
+- [x] 记录通过/失败命令、基线 commit、环境。若新失败阻碍判断，先定位与隔离，不把它归为既有失败后直接忽略。（P1 期间新发现 server 缺陷已独立为 #303，未混入本批）
 
 ### 任务 1：工作界面状态与恢复
 
 文件：新增 `workspace-state.ts`、`workspace-state.test.ts`，暂不更换默认首页。
 
-- [ ] 先写恢复选择与隔离草稿的失败测试。测试数据使用真实 ChatRoom 结构；错误 JSON、相同 id 不同 created_at、列表失败、空列表分别断言。
+- [x] 先写恢复选择与隔离草稿的失败测试。测试数据使用真实 ChatRoom 结构；错误 JSON、相同 id 不同 created_at、列表失败、空列表分别断言。
 
 ```ts
 test("room id reused with a different creation time is not restored", () => {
@@ -117,13 +117,13 @@ test("room id reused with a different creation time is not restored", () => {
 });
 ```
 
-- [ ] 运行聚焦命令，确认缺失导出/行为导致失败：
+- [x] 运行聚焦命令，确认缺失导出/行为导致失败：
 
 ```powershell
 node --import tsx --test apps/web/test/workspace-state.test.ts
 ```
 
-- [ ] 定义以下契约，实现 reducer、校验与 try/catch 存储边界：
+- [x] 定义以下契约，实现 reducer、校验与 try/catch 存储边界：
 
 ```ts
 export type ConversationTarget =
@@ -146,7 +146,7 @@ export function restoreRoom(
 
 草稿 reducer 至少支持 `edit` 与 `submitted`；submitted 携带发送时的 targetKey、revision，只有当前保存 revision 与发送快照相同时才清空。恢复函数只接受成功获得的房间列表，网络失败不调用空列表恢复。
 
-- [ ] 增加 room:7 与 session:7 不冲突、发送后编辑不被清空、存储访问抛错和未知版本回退的断言，聚焦测试通过后提交。
+- [x] 增加 room:7 与 session:7 不冲突、发送后编辑不被清空、存储访问抛错和未知版本回退的断言，聚焦测试通过后提交。（workspace-state.test.ts 9/9）
 
 提交建议：`feat(web): model chat targets and safe workspace restoration`。
 
@@ -154,9 +154,9 @@ export function restoreRoom(
 
 文件：`room-hooks.ts`、`hooks.ts`、`api.ts`、`room-hooks.test.ts`、`hooks.test.ts`。
 
-- [ ] 用已有 `QueryClientProvider` + Testing Library 模式写失败测试：房间 A→B 慢响应不串、隐藏页面不调用 inbox、不查询无效房间 id、不对 mutation 自动重试。测试必须挂载真实 hooks，不用对象快照替代。
-- [ ] 运行 `node --import tsx --test apps/web/test/room-hooks.test.ts apps/web/test/hooks.test.ts`，确认新增行为失败。
-- [ ] 新增有明确启用条件的房间 hooks；Query key 约定如下：
+- [x] 用已有 `QueryClientProvider` + Testing Library 模式写失败测试：房间 A→B 慢响应不串、隐藏页面不调用 inbox、不查询无效房间 id、不对 mutation 自动重试。测试必须挂载真实 hooks，不用对象快照替代。
+- [x] 运行聚焦测试，确认新增行为失败。（注意：tsx 的 JSX 转换跟随 cwd 的 tsconfig，聚焦运行需在 apps/web 目录或用 `npm test -w apps/web`）
+- [x] 新增有明确启用条件的房间 hooks；Query key 约定如下：
 
 ```ts
 ["chat-rooms"]
@@ -169,16 +169,16 @@ export function restoreRoom(
 
 `useMessages(filters, enabled = true)` 与 `usePeerMessages(peer, enabled = true)` 保持旧调用兼容。`useMessages` 的 queryFn 包括 inbox 请求，enabled=false 时整个 queryFn 不执行。房间创建/入退成员后精确失效房间列表与公共 graph，消息发送后失效提交目标的线程/任务，不更改当前选择。
 
-- [ ] 用 fake timers/Query 配置断言周期，避免真实等待多个五秒。断言一次启用不会启动多份房间列表刷新；非活动 query 即使失效也不自动执行副作用。
-- [ ] 聚焦测试通过并运行 `npm test -w apps/web`，提交 `refactor(web): centralize room queries and visibility lifecycle`。
+- [x] 用 Query 配置断言周期，避免真实等待多个五秒。断言一次启用不会启动多份房间列表刷新；非活动 query 即使失效也不自动执行副作用。（实测：切换目标即 abort 旧请求，慢响应既不写错缓存也不会到达）
+- [x] 聚焦测试通过并运行 `npm test -w apps/web`，提交 `refactor(web): centralize room queries and visibility lifecycle`。
 
 ### 任务 3：聊天首页外壳、房间导航与详情
 
 文件：`App.tsx`、`Sidebar.tsx`、`ChatRoomList.tsx`、`WorkspaceTab.tsx`、`WorkspaceDetails.tsx`、`RoomsTab.tsx`、`ChatRoomWizard.tsx`、`index.css`、`workspace.test.ts`。
 
-- [ ] 先写挂载失败测试：首次默认聊天、成功恢复/回退、列表失败显示重试而非引导、创建后选中新房间、删除当前房间后选下一个、后台列表刷新不抢走用户选择。
-- [ ] 运行 `node --import tsx --test apps/web/test/workspace.test.ts`，确认失败行为属于新增布局与选择。
-- [ ] 上提 rooms/selection/drafts 到工作界面所有者，ChatRoomList 改为受控组件；创建回调传回完整 ChatRoom：
+- [x] 先写挂载失败测试：首次默认聊天、成功恢复/回退、列表失败显示重试而非引导、创建后选中新房间、删除当前房间后选下一个、后台列表刷新不抢走用户选择。
+- [x] 运行聚焦测试（apps/web 目录下），确认失败行为属于新增布局与选择。
+- [x] 上提 rooms/selection/drafts 到工作界面所有者，ChatRoomList 改为受控组件；创建回调传回完整 ChatRoom。（含其中的段落要求：RoomsTab 引用已全部迁移并删除旧页面，handleSidebarSelect 强制跳 graph 的行为已取消）
 
 ```ts
 interface RoomNavigationProps {
@@ -198,14 +198,14 @@ interface WorkspaceTabProps {
 
 导航保留尚未替代的原 Agents、运行时、图谱入口；移除旧 RoomsTab 之前用 `rg -n 'RoomsTab|ChatRoomList' apps/web` 核对引用全部迁移。
 
-- [ ] 实现 >=1280px 三栏、768—1279px 详情抽屉、<768px 导航/详情互斥抽屉；复用 token，不更改主题色值。Esc 关闭抽屉，焦点回到触发按钮。
-- [ ] 单测、web 全套、build、tokens 通过后提交。P1 此时仍需任务 4 完成，不能只交空聊天外壳。
+- [x] 实现 >=1280px 三栏、768—1279px 详情抽屉、<768px 导航/详情互斥抽屉；复用 token，不更改主题色值。Esc 关闭抽屉，焦点回到触发按钮。（浏览器冒烟截图核对 guide/room/final 1440、details/nav 390、chat 320）
+- [x] 单测、web 全套、build、tokens 通过后提交。（与任务 4 合并为一个行为提交 `feat(web): make room and peer conversations the default workspace`，避免空壳中间态）
 
 ### 任务 4：受控房间聊天与单聊
 
 文件：`RoomChat.tsx`、`PeerConversation.tsx`、`MessageTab.tsx`、`WorkspaceTab.tsx`、`workspace.test.ts`、`api.test.ts`。
 
-- [ ] 写失败的交互回归，最少包括以下可观察断言：
+- [x] 写失败的交互回归，最少包括以下可观察断言：
 
 ```ts
 // A/B 房间请求分别延迟，切到 B 后放行 A 的响应。
@@ -218,10 +218,10 @@ assert.deepEqual(sentBody, { to_session: "peer-full-id", question: "检查构建
 
 完整用例再覆盖：重复点击只有一个 mutation、输入法组合 Enter 不发送、重名 @ 发送完整 id、成员离房后失效目标、超时不自动重发、提交完成保留新修订草稿。
 
-- [ ] 聚焦运行并确认修复前失败。新增测试使用 `test`、`assert` 和真实 QueryClient；不能只检查源码包含某字符串。
-- [ ] 从 MessageTab 提取 peer 分支到 PeerConversation，保留原 edge 分支和发言身份。PeerConversation 以 `peerId`、`draft`、`onDraftChange`、`onSubmitted(targetKey, revision)` 为受控输入；读取 usePeerMessages，提交沿用 api.webAsk。
-- [ ] RoomChat 改用任务 2 hooks 与上层草稿；定向调用原 summon、广播调用原 broadcast。捕获提交时 room/peer/草稿 revision，成功后仅更新该目标；不用当前 render 中可能已改变的目标补参数。切换页面不触发外部动作。
-- [ ] 运行 web 全套、build、lint；用真实临时库确认空房间、建房、成员操作、房间发送和单聊 URL。P1 PR 描述附桌面/窄屏截图及仍保留的旧入口，关联规划 issue，保持 issue 开放。
+- [x] 聚焦运行并确认修复前失败。新增测试使用 `test`、`assert` 和真实 QueryClient；不能只检查源码包含某字符串。
+- [x] 从 MessageTab 提取 peer 分支到 PeerConversation，保留原 edge 分支和发言身份。PeerConversation 以 `peerId`、`draft`、`onDraftChange`、`onSubmitted(targetKey, revision)` 为受控输入；读取 usePeerMessages，提交沿用 api.webAsk。
+- [x] RoomChat 改用任务 2 hooks 与上层草稿；定向调用原 summon、广播调用原 broadcast。捕获提交时 room/peer/草稿 revision，成功后仅更新该目标；不用当前 render 中可能已改变的目标补参数。切换页面不触发外部动作。
+- [x] 运行 web 全套、build、lint；用真实临时库确认空房间、建房、成员操作、房间发送和单聊 URL（scripts/e2e/chat-first-smoke.mjs，11 项断言+API 核对）。P1 PR 描述附截图及仍保留的旧入口，关联规划 issue，保持 issue 开放。（桌面交互验证因 9527 被真实实例占用按规格停止，留待 P4 打包验收；桌面测试套件 64/64 通过）
 
 提交建议：`feat(web): make room and peer conversations the default workspace`。
 
