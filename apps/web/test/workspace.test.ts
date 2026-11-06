@@ -449,7 +449,7 @@ test("an empty room blocks sending and points at member management", async () =>
   assert.ok(view.getAllByRole("button", { name: "添加成员" }).length >= 1);
 });
 
-test("a member leaving invalidates the directed target and falls back to broadcast hints", async () => {
+test("a member leaving keeps the directed target stale and blocks sending instead of widening", async () => {
   rememberRoom({ id: 7, createdAt: "2026-11-05T02:00:00Z" });
   const state = makeState({
     rooms: [chatRoom(7, "房间 A", ["peer-1", "peer-2"], ROOM_A)],
@@ -477,17 +477,134 @@ test("a member leaving invalidates the directed target and falls back to broadca
   await waitFor(() =>
     assert.equal(state.calls.some((c) => c.url === "/chat-rooms/leave"), true),
   );
-  // room list refresh drops the member → the directed target resets to broadcast
+
+  // the room list refresh drops the member → the directed target goes stale,
+  // and BOTH the button and Enter must refuse to send anything anywhere
   await waitFor(() =>
-    assert.ok((input as HTMLInputElement).value.startsWith("@成员一")),
+    assert.ok(within(composer).getByText(/已不在房间，请重新选择/)),
   );
   fireEvent.change(input, { target: { value: "还在吗" } });
+  const blocked = view.getByRole("button", { name: "召唤" }) as HTMLButtonElement;
+  await waitFor(() => assert.equal(blocked.disabled, true));
+  fireEvent.keyDown(input, { key: "Enter" });
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(state.calls.some((c) => c.url === "/chat-rooms/7/summon"), false);
+  assert.equal(state.calls.some((c) => c.url === "/chat-rooms/7/broadcast"), false);
+
+  // only an explicit re-decision (clear the target) returns to broadcast
+  fireEvent.click(within(composer).getByRole("button", { name: /清除目标/ }));
   fireEvent.click(view.getByRole("button", { name: "广播" }));
   await waitFor(() => {
     const call = state.calls.find((c) => c.url === "/chat-rooms/7/broadcast");
     assert.ok(call);
     assert.equal((call.body as { prompt: string }).prompt, "还在吗");
   });
+});
+
+test("a directed target survives room switches and never falls back to broadcast", async () => {
+  rememberRoom({ id: 7, createdAt: "2026-11-05T02:00:00Z" });
+  const state = makeState({
+    rooms: [ROOM_A, ROOM_B],
+    graph: {
+      nodes: [sessionNode("peer-1", "成员一"), sessionNode("peer-2", "成员二")],
+      edges: [],
+    },
+  });
+  mockApi(state);
+  const view = mountApp();
+  const input = await view.findByPlaceholderText(/^@某成员/);
+  const composer = view.container.querySelector(".room-composer") as HTMLElement;
+
+  fireEvent.change(input, { target: { value: "@成员一" } });
+  fireEvent.click(await within(composer).findByRole("button", { name: /成员一/ }));
+  fireEvent.change(input, { target: { value: "@成员一 仅发给你的检查内容" } });
+  assert.ok(view.getByRole("button", { name: "召唤" }));
+
+  // leave the room, come back: text AND the directed target must both survive
+  fireEvent.click(view.getByRole("button", { name: /房间 B/ }));
+  await view.findByRole("heading", { name: "房间 B" });
+  fireEvent.click(view.getByRole("button", { name: /房间 A/ }));
+  const returned = await view.findByPlaceholderText(/^@某成员/);
+  await waitFor(() =>
+    assert.equal((returned as HTMLInputElement).value, "@成员一 仅发给你的检查内容"),
+  );
+  assert.ok(view.getByRole("button", { name: "召唤" }), "directed target lost on return");
+
+  fireEvent.keyDown(returned, { key: "Enter" });
+  await waitFor(() => {
+    const summon = state.calls.find((c) => c.url === "/chat-rooms/7/summon");
+    assert.ok(summon, "the restored draft must be sent as a summon");
+    assert.equal((summon.body as { executor_session_id: string }).executor_session_id, "peer-1");
+  });
+  assert.equal(state.calls.some((c) => c.url === "/chat-rooms/7/broadcast"), false);
+});
+
+test("room send success clears its draft even after switching to a peer mid-flight", async () => {
+  rememberRoom({ id: 7, createdAt: "2026-11-05T02:00:00Z" });
+  const state = makeState({
+    rooms: [ROOM_A],
+    graph: { nodes: [sessionNode("peer-1", "独立会话")], edges: [] },
+  });
+  mockApi(state);
+  const fallbackFetch = globalThis.fetch;
+  let release!: (value: Response) => void;
+  mock.method(globalThis, "fetch", async (input: string | URL | Request, init?: RequestInit) => {
+    if (String(input) === "/chat-rooms/7/broadcast") {
+      return new Promise<Response>((resolve) => {
+        release = resolve;
+      });
+    }
+    return fallbackFetch(input, init);
+  });
+  const view = mountApp();
+  const input = await view.findByPlaceholderText(/^@某成员/);
+
+  fireEvent.change(input, { target: { value: "已经发出的任务" } });
+  fireEvent.click(view.getByRole("button", { name: "广播" }));
+  await waitFor(() => assert.equal(typeof release, "function"));
+
+  // the workspace moves on while the request is in flight; the success
+  // handling must not depend on the sending component staying alive
+  fireEvent.click(view.getByRole("button", { name: /独立会话/ }));
+  await view.findByPlaceholderText(/^向 独立会话 提问/);
+  await act(async () => {
+    release(Response.json({ room_id: 7, members: ["peer-1"], message_ids: [1] }));
+    await new Promise((r) => setTimeout(r, 30));
+  });
+
+  fireEvent.click(view.getByRole("button", { name: /房间 A/ }));
+  const returned = await view.findByPlaceholderText(/^@某成员/);
+  await waitFor(() =>
+    assert.equal((returned as HTMLInputElement).value, "", "successful old request left its submitted draft behind"),
+  );
+});
+
+test("the latest selected room survives opening a peer conversation", async () => {
+  rememberRoom({ id: 7, createdAt: ROOM_A.created_at });
+  const state = makeState({
+    rooms: [ROOM_A, ROOM_B],
+    graph: {
+      nodes: [sessionNode("peer-1", "成员一"), sessionNode("peer-2", "成员二")],
+      edges: [],
+    },
+  });
+  mockApi(state);
+  const view = mountApp();
+  await view.findByRole("heading", { name: "房间 A" });
+
+  fireEvent.click(view.getByRole("button", { name: /房间 B/ }));
+  await view.findByRole("heading", { name: "房间 B" });
+  await waitFor(() =>
+    assert.equal(JSON.parse(localStorage.getItem("conflux.workspace.v1")!).lastRoom.id, 9),
+  );
+
+  fireEvent.click(view.getByRole("button", { name: /成员一/ }));
+  await view.findByRole("heading", { name: "与 成员一 的对话" });
+  assert.equal(
+    JSON.parse(localStorage.getItem("conflux.workspace.v1")!).lastRoom.id,
+    9,
+    "opening a peer overwrote the last selected room",
+  );
 });
 
 test("ime composition Enter never submits", async () => {

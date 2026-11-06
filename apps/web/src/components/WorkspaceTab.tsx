@@ -24,6 +24,9 @@ export interface WorkspaceTabProps {
   draft: Draft;
   onDraftChange: (target: ConversationTarget, text: string) => void;
   onDraftSubmitted: (targetKey: string, revision: number) => void;
+  /** Directed executor for the current room target (workspace-owned). */
+  executorId: string | null;
+  onExecutorChange: (id: string | null) => void;
 }
 
 /**
@@ -47,6 +50,8 @@ export function WorkspaceTab({
   draft,
   onDraftChange,
   onDraftSubmitted,
+  executorId,
+  onExecutorChange,
 }: WorkspaceTabProps) {
   const detailsButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -166,6 +171,8 @@ export function WorkspaceTab({
             onDraftChange={(text) => onDraftChange(target, text)}
             onSubmitted={onDraftSubmitted}
             onManageMembers={onToggleDetails}
+            executorId={executorId}
+            onExecutorChange={onExecutorChange}
           />
         </div>
       </div>

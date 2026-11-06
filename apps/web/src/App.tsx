@@ -83,6 +83,9 @@ export default function App() {
   );
   const [target, setTarget] = useState<ConversationTarget>(null);
   const [drafts, dispatchDrafts] = useReducer(draftsReducer, {} as DraftMap);
+  // directed @-targets per room key — memory-only like drafts, so a room
+  // switch (and back) keeps both the text and where it was aimed
+  const [directedExecutors, setDirectedExecutors] = useState<Record<string, string>>({});
   const [wizardOpen, setWizardOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(preferenceRef.current.detailsOpen);
 
@@ -115,19 +118,19 @@ export default function App() {
   }, [roomsQuery.isSuccess, rooms]);
 
   // Persist the last selected room (id + creation time) and details
-  // preference. Writes never throw into the interaction; wait for the
-  // first successful list so a boot failure cannot clobber the memory.
+  // preference. The remembered room tracks every actual room selection in
+  // a live ref — opening a peer afterwards must keep the room memory, not
+  // rewind it to whatever the boot-time snapshot held. Writes never throw
+  // into the interaction; wait for the first successful list so a boot
+  // failure cannot clobber the memory.
+  const lastRoomRef = useRef(preferenceRef.current.lastRoom);
   useEffect(() => {
     if (!selectionReadyRef.current) return;
-    const room = target?.kind === "room" ? rooms.find((r) => r.id === target.id) : undefined;
-    saveWorkspacePreference({
-      version: 1,
-      lastRoom:
-        room && room.id === target?.id
-          ? { id: room.id, createdAt: room.created_at }
-          : preferenceRef.current.lastRoom,
-      detailsOpen,
-    });
+    if (target?.kind === "room") {
+      const room = rooms.find((r) => r.id === target.id);
+      if (room) lastRoomRef.current = { id: room.id, createdAt: room.created_at };
+    }
+    saveWorkspacePreference({ version: 1, lastRoom: lastRoomRef.current, detailsOpen });
   }, [target, rooms, detailsOpen]);
 
   const openRoom = useCallback((id: number) => {
@@ -142,19 +145,12 @@ export default function App() {
     setMobileNavOpen(false);
   }, []);
 
-  const handleRoomCreated = useCallback(
-    (room: ChatRoom) => {
-      setTarget({ kind: "room", id: room.id });
-      // persist immediately with the server's real creation time — the
-      // list refetch may still be in flight
-      saveWorkspacePreference({
-        version: 1,
-        lastRoom: { id: room.id, createdAt: room.created_at },
-        detailsOpen,
-      });
-    },
-    [detailsOpen],
-  );
+  const handleRoomCreated = useCallback((room: ChatRoom) => {
+    setTarget({ kind: "room", id: room.id });
+    // remember the server's real creation time immediately — the list
+    // refetch may still be in flight when the persist effect runs
+    lastRoomRef.current = { id: room.id, createdAt: room.created_at };
+  }, []);
 
   // Repair after delete: only when the deleted room is STILL the current
   // target does the selection fall back to the next valid room.
@@ -185,6 +181,21 @@ export default function App() {
 
   const handleDraftSubmitted = useCallback((key: string, revision: number) => {
     dispatchDrafts({ type: "submitted", targetKey: key, revision });
+  }, []);
+
+  const currentExecutor = target ? (directedExecutors[targetKey(target)] ?? null) : null;
+  const handleExecutorChange = useCallback((t: ConversationTarget, executorId: string | null) => {
+    if (!t) return;
+    const key = targetKey(t);
+    setDirectedExecutors((prev) => {
+      if (executorId == null) {
+        if (!(key in prev)) return prev;
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      }
+      return prev[key] === executorId ? prev : { ...prev, [key]: executorId };
+    });
   }, []);
 
   const toggleDetails = useCallback(() => {
@@ -364,6 +375,8 @@ export default function App() {
               draft={targetDraft}
               onDraftChange={handleDraftChange}
               onDraftSubmitted={handleDraftSubmitted}
+              executorId={currentExecutor}
+              onExecutorChange={(id) => handleExecutorChange(target, id)}
             />,
           )}
           {surface(

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
+import { useRef } from "react";
 import { api } from "./api";
 
 const ROOM_LIST_INTERVAL_MS = 5000;
@@ -103,35 +104,72 @@ export function useDeleteRoom() {
   });
 }
 
-export interface RoomSummonInput {
+/**
+ * Inputs may carry the draft's targetKey + revision captured at submit time.
+ * The success handler runs from the mutation itself (not the component), so
+ * the draft clears even when the sender unmounted while the request was in
+ * flight — per-mutate callbacks would silently die with the component.
+ */
+interface DraftClearing {
+  targetKey?: string;
+  revision?: number;
+}
+
+export type RoomSubmitted = (targetKey: string, revision: number) => void;
+
+export interface RoomSummonInput extends DraftClearing {
   roomId: number;
   executorSessionId: string;
   prompt: string;
   senderIdentity?: string;
 }
 
-export function useRoomSummon() {
+export function useRoomSummon(onSubmitted?: RoomSubmitted) {
   const qc = useQueryClient();
+  // latest-ref: the callback is a stable App-level dispatch, but keep it
+  // fresh without re-creating the mutation options
+  const submittedRef = useRef(onSubmitted);
+  submittedRef.current = onSubmitted;
   return useMutation({
-    mutationFn: ({ roomId, executorSessionId, prompt, senderIdentity }: RoomSummonInput) =>
-      api.chatRooms.summon(roomId, executorSessionId, prompt, senderIdentity),
+    mutationFn: ({ targetKey: _t, revision: _r, ...body }: RoomSummonInput) => {
+      void _t;
+      void _r;
+      return api.chatRooms.summon(body.roomId, body.executorSessionId, body.prompt, body.senderIdentity);
+    },
     retry: false,
-    onSuccess: (_data, vars) => invalidateRoomThread(qc, vars.roomId),
+    onSuccess: (_data, vars) => {
+      clearSubmittedDraft(submittedRef.current, vars);
+      return invalidateRoomThread(qc, vars.roomId);
+    },
   });
 }
 
-export interface RoomBroadcastInput {
+export interface RoomBroadcastInput extends DraftClearing {
   roomId: number;
   prompt: string;
   senderIdentity?: string;
 }
 
-export function useRoomBroadcast() {
+export function useRoomBroadcast(onSubmitted?: RoomSubmitted) {
   const qc = useQueryClient();
+  const submittedRef = useRef(onSubmitted);
+  submittedRef.current = onSubmitted;
   return useMutation({
-    mutationFn: ({ roomId, prompt, senderIdentity }: RoomBroadcastInput) =>
-      api.chatRooms.broadcast(roomId, prompt, senderIdentity),
+    mutationFn: ({ targetKey: _t, revision: _r, ...body }: RoomBroadcastInput) => {
+      void _t;
+      void _r;
+      return api.chatRooms.broadcast(body.roomId, body.prompt, body.senderIdentity);
+    },
     retry: false,
-    onSuccess: (_data, vars) => invalidateRoomThread(qc, vars.roomId),
+    onSuccess: (_data, vars) => {
+      clearSubmittedDraft(submittedRef.current, vars);
+      return invalidateRoomThread(qc, vars.roomId);
+    },
   });
+}
+
+function clearSubmittedDraft(onSubmitted: RoomSubmitted | undefined, vars: DraftClearing) {
+  if (vars.targetKey != null && vars.revision != null) {
+    onSubmitted?.(vars.targetKey, vars.revision);
+  }
 }

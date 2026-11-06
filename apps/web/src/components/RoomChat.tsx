@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Loader2, Play, CheckCircle2, Circle, AlertCircle, UserPlus } from "lucide-react";
 import type { ChatRoom, GraphNode } from "@conflux/shared";
 import { useRoomBroadcast, useRoomMessages, useRoomSummon, useRoomTasks } from "../room-hooks";
@@ -31,6 +31,14 @@ export interface RoomChatProps {
   onSubmitted: (targetKey: string, revision: number) => void;
   /** Empty rooms point here instead of a disabled mystery. */
   onManageMembers: () => void;
+  /**
+   * Directed executor for THIS room, owned by the workspace so it survives
+   * room switches alongside the draft (full session id; display names never
+   * route). A stale id (member left) blocks sending instead of widening to
+   * a broadcast until the user explicitly re-decides.
+   */
+  executorId: string | null;
+  onExecutorChange: (id: string | null) => void;
 }
 
 /**
@@ -48,24 +56,23 @@ export function RoomChat({
   onDraftChange,
   onSubmitted,
   onManageMembers,
+  executorId,
+  onExecutorChange,
 }: RoomChatProps) {
   const tasksQuery = useRoomTasks(room.id, active);
   const threadQuery = useRoomMessages(room.id, active);
-  const summon = useRoomSummon();
-  const broadcast = useRoomBroadcast();
+  const summon = useRoomSummon(onSubmitted);
+  const broadcast = useRoomBroadcast(onSubmitted);
 
   const [senderIdentity, setSenderIdentity] = useState<string>("web-console");
-  const [selectedExecutor, setSelectedExecutor] = useState<string>("");
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // a directed target is only valid while the member is still in the room
-  useEffect(() => {
-    if (selectedExecutor && !members.some((m) => m.id === selectedExecutor)) {
-      setSelectedExecutor("");
-    }
-  }, [members, selectedExecutor]);
+  // a directed target is valid only while the member is still in the room;
+  // it is kept (and sending blocked) rather than silently dropped — falling
+  // back to a broadcast would widen the audience without consent
+  const executorMissing = executorId != null && !members.some((m) => m.id === executorId);
 
   const nameOf = (id: string) => members.find((m) => m.id === id)?.name ?? id.slice(0, 8);
 
@@ -95,7 +102,7 @@ export function RoomChat({
       onDraftChange(`${draft.text.slice(0, atIdx)}@${member.name} `);
     }
     // the display text is decoration; the full session id is the target
-    setSelectedExecutor(member.id);
+    onExecutorChange(member.id);
     setMentionQuery(null);
     inputRef.current?.focus();
   };
@@ -133,19 +140,23 @@ export function RoomChat({
     const text = draft.text.trim();
     if (!text || summon.isPending || broadcast.isPending) return;
     if (members.length === 0) return; // nobody to receive a broadcast
-    // snapshot at submit time: these values, not a possibly-changed render
+    if (executorMissing) return; // stale target: block, never widen
+    // snapshot at submit time: these values, not a possibly-changed render.
+    // key+revision ride inside the mutation so the draft clears even if
+    // this component is gone when the response lands.
     const revision = draft.revision;
     const key = targetKey({ kind: "room", id: room.id });
-    if (selectedExecutor) {
-      summon.mutate(
-        { roomId: room.id, executorSessionId: selectedExecutor, prompt: text, senderIdentity },
-        { onSuccess: () => onSubmitted(key, revision) },
-      );
+    if (executorId) {
+      summon.mutate({
+        roomId: room.id,
+        executorSessionId: executorId,
+        prompt: text,
+        senderIdentity,
+        targetKey: key,
+        revision,
+      });
     } else {
-      broadcast.mutate(
-        { roomId: room.id, prompt: text, senderIdentity },
-        { onSuccess: () => onSubmitted(key, revision) },
-      );
+      broadcast.mutate({ roomId: room.id, prompt: text, senderIdentity, targetKey: key, revision });
     }
   };
 
@@ -291,19 +302,35 @@ export function RoomChat({
                   </option>
                 ))}
               </select>
-              {selectedExecutor ? (
-                <>
-                  <span className="text-ink-faint">→</span>
-                  <span className="text-accent font-medium">{nameOf(selectedExecutor)}</span>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedExecutor("")}
-                    className="text-ink-faint hover:text-ink"
-                    title="清除目标"
-                  >
-                    ×
-                  </button>
-                </>
+              {executorId ? (
+                executorMissing ? (
+                  <>
+                    <span className="text-danger font-medium" role="alert">
+                      目标成员已不在房间，请重新选择
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onExecutorChange(null)}
+                      className="text-ink-faint hover:text-ink underline"
+                      title="清除目标，改为广播"
+                    >
+                      清除目标
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-ink-faint">→</span>
+                    <span className="text-accent font-medium">{nameOf(executorId)}</span>
+                    <button
+                      type="button"
+                      onClick={() => onExecutorChange(null)}
+                      className="text-ink-faint hover:text-ink"
+                      title="清除目标"
+                    >
+                      ×
+                    </button>
+                  </>
+                )
               ) : (
                 <span className="text-ink-faint">发送给当前房间全部成员</span>
               )}
@@ -322,7 +349,7 @@ export function RoomChat({
               <button
                 type="button"
                 onClick={send}
-                disabled={!draft.text.trim() || sending}
+                disabled={!draft.text.trim() || sending || executorMissing}
                 className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-accent text-on-accent text-xs font-medium hover:bg-accent-deep disabled:opacity-40"
               >
                 {sending ? (
@@ -330,7 +357,7 @@ export function RoomChat({
                 ) : (
                   <Play size={14} />
                 )}
-                {selectedExecutor ? "召唤" : "广播"}
+                {executorId ? "召唤" : "广播"}
               </button>
             </div>
 

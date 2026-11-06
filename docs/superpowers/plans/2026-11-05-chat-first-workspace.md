@@ -225,6 +225,8 @@ assert.deepEqual(sentBody, { to_session: "peer-full-id", question: "检查构建
 
 提交建议：`feat(web): make room and peer conversations the default workspace`。
 
+复审补修（PR #304 人工复审）：定向 @ 目标随草稿按房间保存（A→B→A 不丢、成员失效时阻止发送并要求重新选择，绝不自动扩大为广播）；房间发送的成功处理移入 mutation 本体，按提交时携带的 targetKey+revision 清草稿，不依赖发送组件存活；lastRoom 记忆改为跟随实际选择的活引用，打开单聊不再回写启动时的旧房间。三条复现均并入 `workspace.test.ts` 正式回归。
+
 ### 任务 5：房间图谱与全局范围
 
 文件：`graph-scope.ts`、`GraphTab.tsx`、`WorkspaceTab.tsx`、`App.tsx`、`graph-scope.test.ts`、`workspace.test.ts`。
