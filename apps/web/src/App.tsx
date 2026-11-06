@@ -58,7 +58,7 @@ function initialDrawerWidth(): number {
 const TAB_LABELS: Record<TabId, string> = {
   chat: "聊天",
   graph: "图谱",
-  messages: "消息流",
+  messages: "活动记录",
   agents: "Agents",
   runtimes: "运行时",
   settings: "设置",
@@ -88,11 +88,15 @@ export default function App() {
   const [directedExecutors, setDirectedExecutors] = useState<Record<string, string>>({});
   const [wizardOpen, setWizardOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(preferenceRef.current.detailsOpen);
+  // A node picked in the workspace's global graph opens DETAILS ONLY —
+  // starting a conversation needs the explicit 与此会话对话 action.
+  const [graphInspectId, setGraphInspectId] = useState<string | null>(null);
 
   const graph = useGraph();
   const roomsQuery = useChatRooms();
   const rooms = useMemo(() => roomsQuery.data?.rooms ?? [], [roomsQuery.data]);
   const sessions = useMemo(() => graph.data?.nodes ?? [], [graph.data]);
+  const graphError = graph.isError ? (graph.error as Error).message : null;
 
   // Restore only from a SUCCESSFUL room list: an error response is not
   // "no rooms" and must never clear a selection. After the first restore,
@@ -135,15 +139,32 @@ export default function App() {
 
   const openRoom = useCallback((id: number) => {
     setTarget({ kind: "room", id });
+    setGraphInspectId(null);
     setTab("chat");
     setMobileNavOpen(false);
   }, []);
 
   const openSession = useCallback((id: string) => {
     setTarget({ kind: "session", id });
+    setGraphInspectId(null);
     setTab("chat");
     setMobileNavOpen(false);
   }, []);
+
+  const inspectedSession = graphInspectId
+    ? (graph.data?.nodes.find((n) => n.id === graphInspectId) ?? null)
+    : null;
+  const inspectSessionFromGraph = useCallback((sid: string) => {
+    setGraphInspectId(sid);
+    setDetailsOpen(true);
+  }, []);
+  const converseWithInspected = useCallback(
+    (sid: string) => {
+      setGraphInspectId(null);
+      openSession(sid);
+    },
+    [openSession],
+  );
 
   const handleRoomCreated = useCallback((room: ChatRoom) => {
     setTarget({ kind: "room", id: room.id });
@@ -377,6 +398,11 @@ export default function App() {
               onDraftSubmitted={handleDraftSubmitted}
               executorId={currentExecutor}
               onExecutorChange={(id) => handleExecutorChange(target, id)}
+              graph={graph.data}
+              graphLoading={graph.isLoading}
+              graphError={graphError}
+              onGraphNodeSelect={inspectSessionFromGraph}
+              onOpenGraphEdge={openGraphEdge}
             />,
           )}
           {surface(
@@ -384,6 +410,12 @@ export default function App() {
             visited.has("graph") ? (
               <Suspense fallback={<RoutePending />}>
                 <GraphTab
+                  graph={graph.data}
+                  loading={graph.isLoading}
+                  error={graphError}
+                  scope="global"
+                  scopeKey="global"
+                  active={tab === "graph"}
                   onSelectSession={handleSelectSession}
                   selectedSessionId={selectedSession?.id ?? null}
                   onSelectEdge={handleSelectEdge}
@@ -396,8 +428,10 @@ export default function App() {
             "messages",
             visited.has("messages") ? (
               <MessageTab
+                active={tab === "messages"}
                 onSelectMessage={handleSelectMessage}
                 selectedMessageId={selectedMessage?.id ?? null}
+                onOpenPeerConversation={openSession}
               />
             ) : null,
           )}
@@ -428,6 +462,9 @@ export default function App() {
               target={target}
               rooms={rooms}
               sessions={sessions}
+              inspectedSession={inspectedSession}
+              onConverseWith={converseWithInspected}
+              onClearInspection={() => setGraphInspectId(null)}
               onClose={() => setDetailsOpen(false)}
               onRoomDeleted={handleRoomDeleted}
               onOpenSession={openSession}

@@ -1,11 +1,18 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, lazy, Suspense } from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
-import { Loader2, Plus, RefreshCw, Users, MessageSquare, Network, Bot, Info } from "lucide-react";
-import type { ChatRoom, GraphNode } from "@conflux/shared";
+import { Loader2, Plus, RefreshCw, Users, MessageSquare, Network, Bot, Info, Globe } from "lucide-react";
+import type { ChatRoom, Graph, GraphNode } from "@conflux/shared";
 import type { ConversationTarget, Draft } from "../workspace-state";
+import { scopeGraphToRoom } from "../graph-scope";
 import type { TabId } from "./Sidebar";
 import { RoomChat } from "./RoomChat";
 import { PeerConversation } from "./PeerConversation";
+
+// Same lazy chunk the main graph tab uses — a chat-first cold start never
+// pulls the React Flow renderer.
+const GraphTab = lazy(() =>
+  import("./GraphTab").then((m) => ({ default: m.GraphTab })),
+);
 
 export interface WorkspaceTabProps {
   target: ConversationTarget;
@@ -27,6 +34,14 @@ export interface WorkspaceTabProps {
   /** Directed executor for the current room target (workspace-owned). */
   executorId: string | null;
   onExecutorChange: (id: string | null) => void;
+  /** shared graph data for the room/global graph views */
+  graph?: Graph;
+  graphLoading?: boolean;
+  graphError?: string | null;
+  /** workspace-graph node click opens details only (explicit action converses) */
+  onGraphNodeSelect: (sessionId: string) => void;
+  /** graph edge click keeps the existing edge channel view */
+  onOpenGraphEdge: (edge: { id: number; from: string; to: string }) => void;
 }
 
 /**
@@ -52,8 +67,24 @@ export function WorkspaceTab({
   onDraftSubmitted,
   executorId,
   onExecutorChange,
+  graph,
+  graphLoading,
+  graphError,
+  onGraphNodeSelect,
+  onOpenGraphEdge,
 }: WorkspaceTabProps) {
   const detailsButtonRef = useRef<HTMLButtonElement>(null);
+  // The graph is a per-workspace view of the SAME target: switching between
+  // chat and graph must not touch the target, drafts or members. Session
+  // targets have no room graph, so they always land back on chat.
+  const [view, setView] = useState<"chat" | "graph">("chat");
+  const [graphScope, setGraphScope] = useState<"room" | "global">("room");
+  useEffect(() => {
+    if (target?.kind !== "room") {
+      setView("chat");
+      setGraphScope("room");
+    }
+  }, [target?.kind]);
 
   // Esc closes the details drawer and hands focus back to its trigger
   useEffect(() => {
@@ -140,12 +171,45 @@ export function WorkspaceTab({
     const members = (room.members ?? [])
       .map((id) => sessions.find((s) => s.id === id))
       .filter((s): s is GraphNode => !!s);
+    // plain projection (no memo): the graph object already changes identity
+    // only on polls, and hooks can't live inside this conditional branch
+    const scopedGraph = graph ? scopeGraphToRoom(graph, room.members ?? []) : undefined;
     return (
       <div className="flex flex-col h-full min-h-0">
         <div className="room-chat-header flex items-center gap-2 px-4 py-3 border-b border-line flex-shrink-0">
           <Users size={14} className="text-accent flex-shrink-0" />
           <h2 className="text-ink font-medium text-sm truncate">{room.name}</h2>
           <span className="text-2xs text-ink-faint flex-shrink-0">{members.length} 成员</span>
+          {/* 聊天/图谱 are two views of the SAME room — the toggle never
+              touches the target, drafts or members */}
+          <div className="flex bg-surface border border-line rounded-lg overflow-hidden text-2xs flex-shrink-0 ml-1">
+            {(["chat", "graph"] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setView(v)}
+                aria-pressed={view === v}
+                className={`px-2.5 py-1 transition-colors ${
+                  view === v
+                    ? "bg-accent text-on-accent"
+                    : "text-ink-muted hover:bg-tile-hover hover:text-ink"
+                }`}
+              >
+                {v === "chat" ? "聊天" : "图谱"}
+              </button>
+            ))}
+          </div>
+          {view === "graph" && (
+            <button
+              type="button"
+              onClick={() => setGraphScope((s) => (s === "room" ? "global" : "room"))}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-2xs flex-shrink-0 text-ink-muted hover:bg-tile-hover hover:text-ink"
+              title={graphScope === "room" ? "切换为全局图谱" : "返回当前房间的成员图"}
+            >
+              <Globe size={12} />
+              {graphScope === "room" ? "查看全局图谱" : "返回当前房间"}
+            </button>
+          )}
           <button
             ref={detailsButtonRef}
             type="button"
@@ -163,17 +227,38 @@ export function WorkspaceTab({
           </button>
         </div>
         <div className="flex-1 min-h-0">
-          <RoomChat
-            room={room}
-            members={members}
-            active={active}
-            draft={draft}
-            onDraftChange={(text) => onDraftChange(target, text)}
-            onSubmitted={onDraftSubmitted}
-            onManageMembers={onToggleDetails}
-            executorId={executorId}
-            onExecutorChange={onExecutorChange}
-          />
+          {view === "graph" ? (
+            <Suspense fallback={<RoutePending />}>
+              <GraphTab
+                graph={graphScope === "room" ? scopedGraph : graph}
+                loading={graphLoading}
+                error={graphError}
+                scope={graphScope}
+                scopeKey={graphScope === "room" ? `room:${room.id}` : "global"}
+                active={active}
+                onSelectSession={(sid) => {
+                  if (sid) onGraphNodeSelect(sid);
+                }}
+                selectedSessionId={null}
+                onSelectEdge={(edge) => {
+                  if (edge) onOpenGraphEdge(edge);
+                }}
+                selectedEdge={null}
+              />
+            </Suspense>
+          ) : (
+            <RoomChat
+              room={room}
+              members={members}
+              active={active}
+              draft={draft}
+              onDraftChange={(text) => onDraftChange(target, text)}
+              onSubmitted={onDraftSubmitted}
+              onManageMembers={onToggleDetails}
+              executorId={executorId}
+              onExecutorChange={onExecutorChange}
+            />
+          )}
         </div>
       </div>
     );
@@ -236,5 +321,11 @@ export function WorkspaceTab({
         />
       </div>
     </div>
+  );
+}
+
+function RoutePending() {
+  return (
+    <div className="h-full flex items-center justify-center text-xs text-ink-faint">加载中…</div>
   );
 }
