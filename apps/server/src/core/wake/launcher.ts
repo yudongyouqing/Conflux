@@ -7,6 +7,7 @@ import { withMcpConfig, projectHasConfluxMcp } from "./commands.js";
 import { setSetting } from "../app-settings.js";
 import { psMatchClauses } from "../runtime-identity.js";
 import { logger } from "../../log.js";
+import { incrementWakeCount, decrementWakeCount } from "./counter.js";
 import type { DB } from "../db.js";
 
 /**
@@ -101,6 +102,19 @@ export function defaultServerEntry(): string {
 }
 
 export function launchWakeRun(req: LaunchRequest): LaunchResult {
+  // A wake aimed at a deleted/unmounted project directory must be a
+  // RECORDED refusal, never a spawn: node reports a bad spawn cwd as an
+  // async ENOENT on the shell itself (cmd.exe / sh), which no caller can
+  // map back to this wake. No fallback cwd either — quietly waking in
+  // another directory would read the wrong files and MCP mounts.
+  if (req.projectDir && !existsSync(req.projectDir)) {
+    const error = `project dir missing: ${req.projectDir}`;
+    logger.warn(
+      { sessionId: req.sessionId, projectDir: req.projectDir },
+      "wake refused: project dir missing",
+    );
+    return { ok: false, error };
+  }
   if (req.dryRun) return { ok: true, command: req.command };
 
   // Identity, two channels (either suffices):
@@ -136,11 +150,24 @@ export function launchWakeRun(req: LaunchRequest): LaunchResult {
     windowsHide: true,
   });
 
-  // Track active wake count for concurrent limit
-  // Dynamic import to avoid circular dependency (index.ts imports launcher.ts)
-  import("./index.js").then(({ incrementWakeCount, decrementWakeCount }) => {
-    incrementWakeCount();
-    child.on("exit", () => decrementWakeCount());
+  // Concurrency accounting for the wake limit. A spawn that FAILS after
+  // this point never fires "exit", so both paths release the slot exactly
+  // once; an async spawn failure is contained here — the wake dies, the
+  // daemon must not.
+  incrementWakeCount();
+  let slotReleased = false;
+  const releaseSlot = () => {
+    if (slotReleased) return;
+    slotReleased = true;
+    decrementWakeCount();
+  };
+  child.on("exit", releaseSlot);
+  child.on("error", (err) => {
+    logger.error(
+      { sessionId: req.sessionId, err: err instanceof Error ? err.message : String(err) },
+      "wake spawn failed — run aborted, daemon continues",
+    );
+    releaseSlot();
   });
 
   if (captureStdout && req.dataDir) {
