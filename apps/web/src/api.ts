@@ -113,11 +113,11 @@ export const api = {
       signal,
     ),
 
-  getEdgeMessages: (edgeId: number) =>
+  getEdgeMessages: (edgeId: number, signal?: AbortSignal) =>
     get<{
       edge: { id: number; from: string; to: string };
       messages: Message[];
-    }>(`/edges/${edgeId}/messages`),
+    }>(`/edges/${edgeId}/messages`, undefined, signal),
 
   edgeAsk: (edgeId: number, question: string) =>
     post<{ message: Message }>(`/edges/${edgeId}/ask`, { question }),

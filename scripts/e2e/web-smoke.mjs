@@ -152,7 +152,7 @@ async function run() {
     await page.getByRole("button", { name: "设置", exact: true }).click();
     await lightTheme.click();
 
-    await page.getByRole("button", { name: "消息流", exact: true }).click();
+    await page.getByRole("button", { name: "活动记录", exact: true }).click();
     await page.getByText("M1-B 冒烟清单在哪台机器跑？", { exact: true }).waitFor();
 
     const composer = page.locator("input").first();
@@ -177,8 +177,13 @@ async function run() {
       "queued",
       "disabled auto wake is queued",
     );
+    // keep-alive leaves the hidden activity feed mounted with its own copy —
+    // count only what the user actually sees (the active surface)
     assert.equal(
-      await page.getByText("E2E smoke message", { exact: true }).count(),
+      await page
+        .locator('.tab-surface[data-active="true"]')
+        .getByText("E2E smoke message", { exact: true })
+        .count(),
       1,
       "retry does not clone messages",
     );
@@ -239,8 +244,7 @@ async function run() {
       true,
       "mobile navigation should open",
     );
-    await page.getByRole("button", { name: "消息流", exact: true }).click();
-    await page.getByTitle("返回消息流").click();
+    await page.getByRole("button", { name: "活动记录", exact: true }).click();
     const search = page.getByPlaceholder("搜索消息内容...");
     await search.waitFor();
 

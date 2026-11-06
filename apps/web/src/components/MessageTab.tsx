@@ -1,44 +1,47 @@
-import { useMemo, useReducer, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMessages, useGraph, useSessions, useEdgeMessages, useEdgeAsk } from "../hooks";
 import { MentionComposer } from "./MentionComposer";
 import { MessageCard } from "./MessageCard";
 import { MarkdownText } from "./MarkdownText";
 import { StatusDot } from "./StatusDot";
-import { PeerConversation } from "./PeerConversation";
-import { draftsReducer, targetKey } from "../workspace-state";
 import { ArrowLeft, Send, Loader2 } from "lucide-react";
 import { WEB_CONSOLE_ID, type Message } from "@conflux/shared";
 
 interface MessageTabProps {
+  /** the activity view only polls (and runs its inbox side effect) while visible */
+  active: boolean;
   onSelectMessage: (msg: Message | null) => void;
   selectedMessageId: number | null;
+  /** a feed entry with a clear peer continues in the workspace conversation */
+  onOpenPeerConversation: (sessionId: string) => void;
 }
 
-/** Message feed with full-height thread view: clicking a message (or sending
- * one) swaps the whole tab to the conversation with that peer — bubbles at
- * full height plus a fixed-target composer — instead of the old cramped
- * max-h-48 box. A back button returns to the feed. */
-export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabProps) {
+/**
+ * Activity history (原「消息流」): the global feed with filters, retry and
+ * details. Entries between two EXTERNAL sessions open their channel (edge)
+ * view here; anything involving the web console jumps to the workspace's
+ * peer conversation instead — never a web-console-flavored copy of someone
+ * else's channel. All polling (and the inbox preflight inside useMessages)
+ * is gated on `active`.
+ */
+export function MessageTab({
+  active,
+  onSelectMessage,
+  selectedMessageId,
+  onOpenPeerConversation,
+}: MessageTabProps) {
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
-  // Open conversation: either a CHANNEL (edge — any A→B pair, the common case
-  // when clicking a feed card) or a plain web-console↔peer thread (composer
-  // sends). Channel mode shows the full exchange and speaks as the channel's
-  // initiator; peer mode is the legacy web-only view.
-  const [conv, setConv] = useState<
-    | { kind: "edge"; edgeId: number; from: string; to: string }
-    | { kind: "peer"; peer: string }
-    | null
-  >(null);
+  // Open conversation: a CHANNEL (edge — any A→B pair between external
+  // sessions). Peer conversations live in the workspace now.
+  const [conv, setConv] = useState<{ edgeId: number; from: string; to: string } | null>(null);
   const [draft, setDraft] = useState("");
-  const [peerDrafts, dispatchPeerDrafts] = useReducer(draftsReducer, {});
 
-  const { data, isLoading } = useMessages({ status: statusFilter });
+  const { data, isLoading } = useMessages({ status: statusFilter }, active);
   const graph = useGraph();
   const sessions = useSessions("active");
-  const peer = conv?.kind === "peer" ? conv.peer : null;
-  const channel = conv?.kind === "edge" ? conv : null;
-  const channelMsgs = useEdgeMessages(channel?.edgeId ?? null);
+  const channel = conv;
+  const channelMsgs = useEdgeMessages(channel?.edgeId ?? null, active);
   const edgeAsk = useEdgeAsk();
 
   const { nameMap, statusMap } = useMemo(() => {
@@ -65,35 +68,28 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
     [messages, search],
   );
 
-  const peerSession = sessions.data?.sessions.find((s) => s.id === peer);
-  const peerName = peer ? (peerSession?.name ?? nameMap.get(peer) ?? peer.slice(0, 8)) : null;
   const nameOf = (id: string) => nameMap.get(id) ?? id.slice(0, 8);
   // edge endpoint list arrives newest-first (EdgeFlowView contract); the
   // bubble stream wants chronological order
   const channelList = (channelMsgs.data?.messages ?? []).slice().reverse();
-  const fromSession = sessions.data?.sessions.find((s) => s.id === channel?.from);
+  const fromSession = sessions.data?.sessions?.find((s) => s.id === channel?.from);
 
   const sendDraft = () => {
     const question = draft.trim();
     if (!question || !channel || edgeAsk.isPending) return;
     edgeAsk.mutate({ edgeId: channel.edgeId, question }, { onSuccess: () => setDraft("") });
   };
-  const sending = edgeAsk.isPending;
-  const askError = edgeAsk.error;
 
-  const openThread = (id: string) => setConv({ kind: "peer", peer: id });
-  const closeThread = () => setConv(null);
-
-  // ---- full-height conversation view (replaces the feed) ----
-  if (conv !== null && channel) {
+  // ---- full-height channel view (replaces the feed) ----
+  if (channel) {
     return (
       <div className="flex flex-col h-full bg-paper">
         <div className="flex items-center justify-between p-3 bg-surface border-b border-line">
           <div className="flex items-center gap-2 text-xs text-ink-muted">
             <button
               className="inline-flex items-center gap-1 text-ink-faint hover:text-ink"
-              onClick={closeThread}
-              title="返回消息流"
+              onClick={() => setConv(null)}
+              title="返回活动记录"
             >
               <ArrowLeft size={13} /> 返回
             </button>
@@ -107,7 +103,12 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
         </div>
         <div className="flex-1 overflow-y-auto p-4">
           <div className="max-w-3xl mx-auto space-y-2">
-            {channelList.length === 0 && (
+            {channelMsgs.isLoading && channelList.length === 0 && (
+              <div className="flex justify-center py-8">
+                <Loader2 size={16} className="text-ink-faint animate-spin" />
+              </div>
+            )}
+            {channelList.length === 0 && !channelMsgs.isLoading && (
               <div className="text-xs text-ink-faint text-center py-6">暂无往来消息</div>
             )}
             {channelList.map((m) => {
@@ -161,48 +162,22 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
             />
             <button
               onClick={sendDraft}
-              disabled={!draft.trim() || sending}
+              disabled={!draft.trim() || edgeAsk.isPending}
               className="inline-flex items-center gap-1.5 text-sm text-on-accent bg-accent hover:bg-accent-deep rounded-lg px-3 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {sending ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />} 发送
+              {edgeAsk.isPending ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <Send size={13} />
+              )}
+              发送
             </button>
           </div>
-          {askError && (
-            <div className="text-xs text-danger mt-1">发送失败: {(askError as Error).message}</div>
+          {edgeAsk.isError && (
+            <div className="text-xs text-danger mt-1">
+              发送失败: {(edgeAsk.error as Error).message}
+            </div>
           )}
-        </div>
-      </div>
-    );
-  }
-
-  if (conv !== null && peer) {
-    // peer threads reuse the workspace's controlled conversation component
-    const key = targetKey({ kind: "session", id: peer });
-    const peerGraph = graph.data?.nodes.find((n) => n.id === peer);
-    return (
-      <div className="flex flex-col h-full bg-paper">
-        <div className="flex items-center justify-between p-3 bg-surface border-b border-line">
-          <div className="flex items-center gap-2 text-xs text-ink-muted">
-            <button
-              className="inline-flex items-center gap-1 text-ink-faint hover:text-ink"
-              onClick={closeThread}
-              title="返回消息流"
-            >
-              <ArrowLeft size={13} /> 返回
-            </button>
-            <span className="text-ink-faint">|</span>
-            <span className="font-medium">与 {peerName} 的对话</span>
-          </div>
-        </div>
-        <div className="flex-1 min-h-0">
-          <PeerConversation
-            peerId={peer}
-            peerNode={peerGraph}
-            active
-            draft={peerDrafts[key] ?? { text: "", revision: 0 }}
-            onDraftChange={(text) => dispatchPeerDrafts({ type: "edit", targetKey: key, text })}
-            onSubmitted={(k, revision) => dispatchPeerDrafts({ type: "submitted", targetKey: k, revision })}
-          />
         </div>
       </div>
     );
@@ -217,7 +192,7 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
       {/* ---- @ composer ---- */}
       <div className="p-3 bg-surface border-b border-line">
         <div className="max-w-3xl mx-auto">
-          <MentionComposer onSent={(t) => openThread(t.id)} />
+          <MentionComposer onSent={(t) => onOpenPeerConversation(t.id)} />
         </div>
       </div>
 
@@ -262,20 +237,24 @@ export function MessageTab({ onSelectMessage, selectedMessageId }: MessageTabPro
               toName={nameMap.get(msg.to_session)}
               toStatus={statusMap.get(msg.to_session)}
               onClick={() => {
-                // The full-height conversation view IS the detail view — the
-                // side DetailPanel must not light up next to it. Feed cards
-                // open the message's CHANNEL (any A→B pair) — the web-console
-                // peer thread would be empty for third-party exchanges.
+                // The full-height channel view IS the detail view — the
+                // side DetailPanel must not light up next to it. External
+                // A↔B channels keep their edge view here; anything with the
+                // web console as an endpoint continues in the workspace's
+                // peer conversation on the message's full session id.
                 onSelectMessage(null);
-                if (msg.edge_id != null) {
+                const externalChannel =
+                  msg.edge_id != null &&
+                  msg.from_session !== WEB_CONSOLE_ID &&
+                  msg.to_session !== WEB_CONSOLE_ID;
+                if (externalChannel) {
                   setConv({
-                    kind: "edge",
-                    edgeId: msg.edge_id,
+                    edgeId: msg.edge_id!,
                     from: msg.from_session,
                     to: msg.to_session,
                   });
                 } else {
-                  openThread(
+                  onOpenPeerConversation(
                     msg.from_session === WEB_CONSOLE_ID ? msg.to_session : msg.from_session,
                   );
                 }

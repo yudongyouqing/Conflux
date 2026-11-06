@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import {
   Network,
-  MessageSquare,
   MessagesSquare,
+  History,
   Bot,
   Boxes,
   Terminal,
@@ -94,7 +94,7 @@ export function Sidebar({
   const workViews = [
     { id: "chat" as const, icon: MessagesSquare, label: "聊天" },
     { id: "graph" as const, icon: Network, label: "图谱" },
-    { id: "messages" as const, icon: MessageSquare, label: "消息流" },
+    { id: "messages" as const, icon: History, label: "活动记录" },
     { id: "agents" as const, icon: Bot, label: "Agents" },
   ];
 

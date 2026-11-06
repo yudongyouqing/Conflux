@@ -85,11 +85,11 @@ export function usePeerMessages(peer: string | null, enabled = true) {
 }
 
 /** One conversation channel's (edge) exchange history. */
-export function useEdgeMessages(edgeId: number | null) {
+export function useEdgeMessages(edgeId: number | null, enabled = true) {
   return useQuery({
     queryKey: ["edge-messages", edgeId],
-    queryFn: () => api.getEdgeMessages(edgeId!),
-    enabled: edgeId !== null,
+    queryFn: ({ signal }) => api.getEdgeMessages(edgeId!, signal),
+    enabled: edgeId !== null && enabled,
     refetchInterval: 5000,
   });
 }

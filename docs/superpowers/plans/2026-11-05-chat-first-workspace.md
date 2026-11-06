@@ -231,9 +231,9 @@ assert.deepEqual(sentBody, { to_session: "peer-full-id", question: "检查构建
 
 文件：`graph-scope.ts`、`GraphTab.tsx`、`WorkspaceTab.tsx`、`App.tsx`、`graph-scope.test.ts`、`workspace.test.ts`。
 
-- [ ] 写纯函数失败测试：A/B 在房间内、C 在外；保留 A→B 与孤立成员 D，去掉 B→C，保持 channel id/方向，输入对象未改动。
-- [ ] 运行 `node --import tsx --test apps/web/test/graph-scope.test.ts` 确认缺少函数失败。
-- [ ] 实现范围过滤，并将房间成员 id 原样传入：
+- [x] 写纯函数失败测试：A/B 在房间内、C 在外；保留 A→B 与孤立成员 D，去掉 B→C，保持 channel id/方向，输入对象未改动。（graph-scope.test.ts 4/4）
+- [x] 运行聚焦测试确认缺少函数失败（apps/web 目录下运行）。
+- [x] 实现范围过滤，并将房间成员 id 原样传入：
 
 ```ts
 import type { Graph } from "@conflux/shared";
@@ -248,8 +248,8 @@ export function scopeGraphToRoom(graph: Graph, members: readonly string[]): Grap
 
 GraphTab 接受外部 Graph、范围 key、active/loading/error 和既有选择回调，不再内部调用 useGraph。房间范围用包含所有成员的构图路径；全局保留原 active/dirs/all 控件。数据范围变化先校验节点/边选择再复用现有构图函数。
 
-- [ ] 把 GraphTab import 改为 lazy；仅保留一个图谱渲染器，按 room:<id> / global 在工作界面内保存 viewport 与拖拽位置的 Map。切换范围先保存旧视口与位置，再恢复目标范围；不为每个房间常驻 React Flow 树。active=false 时不运行布局 effect、fitView 定时器和键盘事件；再次 active 时刷新一次。不新增全局 graph 数据请求。
-- [ ] 挂载测试断言初始聊天没有图谱、切换保持草稿、房间图无越界边、全局返回原目标；浏览器验证视口保留。全局图节点选择只开详情，显式按钮才进入对话。
+- [x] 把 GraphTab import 改为 lazy（主入口与工作界面共用同一 chunk）；仅保留一个图谱渲染器，按 room:<id> / global 在模块级 Map 保存 viewport 与节点位置。切换范围先保存旧视口与位置，再恢复目标范围；不为每个房间常驻 React Flow 树（active=false 时整个渲染器卸载，快照保留）。再次 active 时用最新数据重建一次。不新增全局 graph 数据请求（GraphTab 不再内部 useGraph，全部消费 App 的单一查询）。（JSDOM 需 css stub loader + ResizeObserver/rAF stub，见 workspace.test.ts）
+- [x] 挂载测试断言初始聊天没有图谱、切换保持草稿、房间图仅成员、全局返回原目标；浏览器验证视口保留（chat-first-smoke room-graph 步骤，zoom 后往返 transform 一致）。全局图节点选择只开详情（工作界面详情栏「查看：X」），显式「与此会话对话」才进入对话。（React Flow 在 JSDOM 不渲染边 DOM，边过滤语义由 graph-scope 纯函数测试覆盖）
 
 提交建议：`feat(web): add room-scoped graph beside conversations`。
 
@@ -257,11 +257,11 @@ GraphTab 接受外部 Graph、范围 key、active/loading/error 和既有选择�
 
 文件：`MessageTab.tsx`、`App.tsx`、`Sidebar.tsx`、`hooks.ts`、`workspace.test.ts`、`hooks.test.ts`。
 
-- [ ] 写失败测试：启动聊天时没有 /messages/inbox；进入活动记录才执行既有 inbox 逻辑；返回聊天停止活动轮询；外部 A→B channel 打开后两端和 channel id 不变。
-- [ ] 将消息流入口改为活动记录，保留筛选、详情与重试；带明确 peer 的「打开对话」回到工作界面，外部 channel 继续使用原边对话，不自动切换为 web-console 视角。
-- [ ] 保留各视图已访问状态与滚动位置，给活动/设置等低频组件明确 active 标志。隐藏 mutation 的结果可以完成写缓存，不能改变当前目标或自动弹回页面。
-- [ ] 使用浏览器 network/trace 核对首次聊天未加载 React Flow 渲染 chunk、隐藏图谱无重算、未访问活动页无 inbox。记录固定 fixture 的前后数据，不设置未经多设备验证的通用耗时门槛。
-- [ ] web 全套、build、lint、tokens 通过后形成 P2 PR。提交建议 `refactor(web): preserve activity history and pause hidden views`。
+- [x] 写失败测试：启动聊天时没有 /messages/inbox；进入活动记录才执行既有 inbox 逻辑；返回聊天停止活动轮询（invalidate 后不再发 inbox）；外部 A→B channel 打开后两端和 channel id 不变。（启动无 inbox 的断言在 P1 已有，P2 补齐其余三条）
+- [x] 将消息流入口改为活动记录（导航与返回标题同步改名），保留筛选、详情与重试；带明确 peer 的条目（含 web-console 端点的 edge 与无 edge 消息）「打开对话」回到工作界面单聊，外部 A↔B channel 继续使用原边对话视图并保留通道 id，不切换为 web-console 视角。
+- [x] 保留各视图已访问状态与滚动位置（keep-alive 机制沿用），活动视图获得明确 active 标志（useMessages/useEdgeMessages 按 active 门控，隐藏时连 inbox 预读都不执行）。隐藏 mutation 的结果可以完成写缓存，不能改变当前目标或自动弹回页面。
+- [x] 结构性断言：首次聊天未挂载 React Flow（workspace 测试 + 冒烟中切聊天后 .react-flow 计数为 0）；未访问活动页无 inbox（P1/P2 挂载测试）。完整 network/trace 数据（chunk 字节数、长任务）按计划留待 P4 任务 9 固定 fixture 记录。
+- [x] web 全套、build、lint、tokens 通过后形成 P2 PR。（实测：web 111/111、chat-first smoke 14/14、web-smoke 通过；提交拆为图谱与活动两个 commit）
 
 ### 任务 7：助手目录投影与关联边界
 
