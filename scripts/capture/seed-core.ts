@@ -73,3 +73,15 @@ if (process.argv.includes("--controls")) {
   const failed = createRuntimeInstance(db, preset);
   failRuntimeInstance(db, failed.id);
 }
+if (process.argv.includes("--chat-first")) {
+  // A bare session with NO runtime identity: the wake strategy refuses
+  // before any spawn, so chat-first room orchestration can be exercised
+  // without touching real CLI hosts (a seeded claude-runtime session
+  // would make the summon wake path spawn a real CLI).
+  registerSession(db, {
+    id: "cap-chat-first",
+    name: "验收会话",
+    description: "chat-first 冒烟假会话（无 runtime，不可唤醒）",
+    project_dir: home,
+  });
+}

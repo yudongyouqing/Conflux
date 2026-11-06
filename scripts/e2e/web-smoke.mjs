@@ -112,6 +112,8 @@ async function run() {
   try {
     await page.goto(`http://127.0.0.1:${WEB_PORT}`, { waitUntil: "domcontentloaded" });
     await page.getByText("Conflux", { exact: true }).first().waitFor();
+    // chat is the default surface now — walk to the graph explicitly
+    await page.getByRole("button", { name: "图谱", exact: true }).click();
     await page.locator(".react-flow__node").first().waitFor();
 
     await page.getByRole("button", { name: "设置", exact: true }).click();
