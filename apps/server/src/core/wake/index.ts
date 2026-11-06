@@ -57,25 +57,10 @@ export function agentPromptSuffix(db: DB, meta: Record<string, unknown> | null):
   return ` --append-system-prompt ${cmdQuote(agent.instructions)}`;
 }
 
-/** Global counter for active wake processes (spawned, not yet exited). */
-let activeWakeCount = 0;
-
-/** Increment active wake counter (called before spawn). */
-export function incrementWakeCount(): void {
-  activeWakeCount++;
-  logger.debug({ activeWakeCount }, "wake process started");
-}
-
-/** Decrement active wake counter (called on process exit). */
-export function decrementWakeCount(): void {
-  activeWakeCount = Math.max(0, activeWakeCount - 1);
-  logger.debug({ activeWakeCount }, "wake process ended");
-}
-
-/** Get current active wake count (for monitoring/UI). */
-export function getActiveWakeCount(): number {
-  return activeWakeCount;
-}
+/** Wake concurrency accounting lives in counter.ts — the launcher maintains
+ *  it with a static import (importing this module from there is circular). */
+export { incrementWakeCount, decrementWakeCount, getActiveWakeCount } from "./counter.js";
+import { getActiveWakeCount } from "./counter.js";
 
 export type WakeResult =
   | { woke: true; command?: string }
@@ -103,8 +88,11 @@ export function wakeSessionForMail(db: DB, sessionId: string, opts: WakeOptions 
   // member at once and burn through tokens. The counter tracks spawned-but-
   // not-yet-exited headless wakes; 0 disables the cap.
   const maxConcurrent = getWakeMaxConcurrent(db);
-  if (maxConcurrent > 0 && activeWakeCount >= maxConcurrent) {
-    return { woke: false, reason: `wake queue full (${activeWakeCount}/${maxConcurrent})` };
+  if (maxConcurrent > 0 && getActiveWakeCount() >= maxConcurrent) {
+    return {
+      woke: false,
+      reason: `wake queue full (${getActiveWakeCount()}/${maxConcurrent})`,
+    };
   }
 
   const session = getSession(db, sessionId);
