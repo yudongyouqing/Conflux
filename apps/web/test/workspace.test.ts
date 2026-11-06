@@ -944,11 +944,16 @@ test("activity polling runs only while the activity view is visible", async () =
 
   // back on chat: the inbox preflight must never fire again from the hidden view
   const inboxCount = () => state.calls.filter((c) => c.url === "/messages/inbox").length;
+  const sessionsCount = () => state.calls.filter((c) => c.url.startsWith("/sessions?")).length;
   const before = inboxCount();
+  const sessionsBefore = sessionsCount();
   await view.getByRole("button", { name: "聊天", exact: true }).click();
   await act(async () => {
     await view.client.invalidateQueries({ queryKey: ["messages"] });
+    await view.client.invalidateQueries({ queryKey: ["sessions", "active"] });
     await new Promise((r) => setTimeout(r, 50));
   });
   assert.equal(inboxCount(), before);
+  // the hidden activity page must not poll the session list either
+  assert.equal(sessionsCount(), sessionsBefore);
 });

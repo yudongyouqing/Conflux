@@ -103,8 +103,12 @@ export const api = {
       { "X-Session-Id": WEB_CONSOLE_ID },
     ),
 
-  getSessions: (status = "all") =>
-    get<{ sessions: SessionSummary[] }>(`/sessions?status=${encodeURIComponent(status)}`),
+  getSessions: (status = "all", signal?: AbortSignal) =>
+    get<{ sessions: SessionSummary[] }>(
+      `/sessions?status=${encodeURIComponent(status)}`,
+      undefined,
+      signal,
+    ),
 
   getPeerMessages: (peer: string, signal?: AbortSignal) =>
     get<{ messages: Message[] }>(

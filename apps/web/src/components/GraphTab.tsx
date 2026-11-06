@@ -20,13 +20,14 @@ import { GroupFrame, type GroupFrameData } from "./GroupFrame";
 import { CurvedPairEdge } from "./CurvedPairEdge";
 import {
   applyEdgeOffsets,
+  applyScopePositions,
   buildActiveView,
   buildAllView,
   buildDirsView,
-  mergeNodePositions,
   selectedEdgeEndpoints,
   styleEdges,
   graphBuildMetrics,
+  type ScopeSnapshot,
 } from "../graph-builders";
 
 const nodeTypes = { session: SessionNode, cluster: GroupFrame };
@@ -51,10 +52,6 @@ interface FlowInstance {
  * preserves every room's layout without keeping a hidden React Flow tree
  * alive per room.
  */
-interface ScopeSnapshot {
-  positions: Record<string, { x: number; y: number }>;
-  viewport?: Viewport;
-}
 const scopeSnapshots = new Map<string, ScopeSnapshot>();
 
 export interface GraphTabProps {
@@ -121,6 +118,9 @@ export function GraphTab({
   const nodesRef = useRef<Node[]>([]);
   nodesRef.current = nodes;
   const scopeKeyRef = useRef(scopeKey);
+  // the scope this component last BUILT for: entering a scope restores its
+  // snapshot once; same-scope refreshes keep freshly dragged positions
+  const lastBuiltScopeRef = useRef<string | null>(null);
 
   const snapshotCurrent = useCallback((key: string) => {
     if (!key) return;
@@ -192,20 +192,21 @@ export function GraphTab({
     const offset = applyEdgeOffsets(built.edges, manualOffsets.current, handleOffsetChange);
     const styled = styleEdges(offset, selectedEdge, selectedSessionId);
     const endpoints = selectedEdgeEndpoints(selectedEdge);
-    const snap = scopeSnapshots.get(scopeKey);
+    const scopeEntered = lastBuiltScopeRef.current !== scopeKey;
+    lastBuiltScopeRef.current = scopeKey;
 
-    setNodes((prev) => {
-      const merged = mergeNodePositions(prev, built.nodes as Node[], selectedSessionId).map(
-        (n) => {
-          const saved = snap?.positions[n.id];
-          return saved ? { ...n, position: saved } : n;
-        },
-      );
-      return merged.map((n) => ({
+    setNodes((prev) =>
+      applyScopePositions(
+        prev,
+        built.nodes as Node[],
+        scopeEntered,
+        scopeSnapshots.get(scopeKey),
+        selectedSessionId,
+      ).map((n) => ({
         ...n,
         data: { ...n.data, highlighted: !!endpoints?.has(n.id) },
-      }));
-    });
+      })),
+    );
     setEdges(styled);
     console.debug(
       "[conflux:perf] graph build",

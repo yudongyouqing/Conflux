@@ -39,7 +39,7 @@ export function MessageTab({
 
   const { data, isLoading } = useMessages({ status: statusFilter }, active);
   const graph = useGraph();
-  const sessions = useSessions("active");
+  const sessions = useSessions("active", active);
   const channel = conv;
   const channelMsgs = useEdgeMessages(channel?.edgeId ?? null, active);
   const edgeAsk = useEdgeAsk();

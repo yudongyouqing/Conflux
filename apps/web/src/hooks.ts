@@ -10,11 +10,12 @@ export function useGraph() {
 }
 
 /** Active sessions for the @-mention picker (and their busy/status). */
-export function useSessions(status: "active" | "all" = "active") {
+export function useSessions(status: "active" | "all" = "active", enabled = true) {
   return useQuery({
     queryKey: ["sessions", status],
-    queryFn: () => api.getSessions(status),
-    refetchInterval: 5000,
+    queryFn: ({ signal }) => api.getSessions(status, signal),
+    enabled,
+    refetchInterval: enabled ? 5000 : false,
   });
 }
 
