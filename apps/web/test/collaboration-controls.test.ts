@@ -18,14 +18,17 @@ Object.defineProperty(globalThis, "navigator", { configurable: true, value: dom.
 const { cleanup, render, fireEvent, waitFor } = await import("@testing-library/react");
 afterEach(() => {
   cleanup();
+  for (const client of liveClients.splice(0)) client.clear();
   mock.restoreAll();
 });
 after(() => dom.window.close());
 
+const liveClients: QueryClient[] = [];
 function setup(node: ReactNode) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: Infinity } },
   });
+  liveClients.push(client);
   return { ...render(createElement(QueryClientProvider, { client }, node)), client };
 }
 

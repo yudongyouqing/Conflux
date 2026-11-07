@@ -147,24 +147,37 @@ try {
   const details = page.locator(".workspace-details");
   if (!(await details.isVisible())) await detailsToggle.click();
   await details.getByRole("button", { name: "添加成员" }).click();
-  await details.getByRole("button", { name: "验收会话" }).click();
-  await details.getByText(/1 成员/).waitFor();
+  // both sessions share the DISPLAY name; the picker closes after each
+  // join, so re-open it for the twin (same name, different id)
+  await details.getByRole("button", { name: "验收会话" }).first().click();
+  await details.getByRole("button", { name: "添加成员" }).click();
+  await details.getByRole("button", { name: "验收会话" }).first().click();
+  await details.getByText(/2 成员/).waitFor();
   rooms = (await apiGet("/chat-rooms")).rooms;
-  assert.deepEqual(rooms[0].members, ["cap-chat-first"]);
-  ok("member added from details and confirmed against the API");
+  assert.deepEqual(rooms[0].members, ["cap-chat-first", "cap-chat-twin"]);
+  ok("members added from details and confirmed against the API");
 
   // ---- 4. broadcast + directed summon through the real endpoints --------
   const composer = page.locator(".room-composer");
   await composer.locator("input").fill("全员周报：P1 验收广播");
   await page.getByRole("button", { name: "广播" }).click();
-  await page.getByText("全员周报：P1 验收广播").waitFor();
+  // one broadcast row per member on the shared thread
+  await page.getByText("全员周报：P1 验收广播").first().waitFor();
   let thread = (await apiGet(`/chat-rooms/${rooms[0].id}/messages`)).messages;
   // the server wraps broadcast prompts with the self-select clause
   assert.equal(thread.some((m) => m.question.includes("全员周报：P1 验收广播")), true);
   ok("broadcast sent and persisted on the room thread");
 
   await composer.locator("input").fill("@验收会话");
-  await composer.getByRole("button", { name: /验收会话/ }).click();
+  // same display name twice: the picker must disambiguate by id hint
+  const dupRows = composer.getByRole("button", { name: /验收会话/ });
+  await dupRows.nth(1).waitFor({ timeout: 10_000 });
+  assert.equal(await dupRows.count(), 2);
+  const hintA = await dupRows.nth(0).innerText();
+  const hintB = await dupRows.nth(1).innerText();
+  assert.notEqual(hintA, hintB, "duplicate names need distinct id hints");
+  await page.screenshot({ path: join(ARTIFACTS, "mention-dup-1440.png"), fullPage: true });
+  await dupRows.nth(0).click();
   await composer.locator("input").fill("@验收会话 检查构建");
   await page.getByRole("button", { name: "召唤" }).click();
   await page.getByText("检查构建").first().waitFor();
@@ -192,7 +205,7 @@ try {
   await headerToggle("图谱").click();
   await page.locator(".react-flow__node").first().waitFor({ timeout: 15_000 });
   const roomNodeCount = await page.locator(".react-flow__node").count();
-  assert.equal(roomNodeCount, 1, "room graph shows exactly its member(s)");
+  assert.equal(roomNodeCount, 2, "room graph shows exactly its members");
   await page.screenshot({ path: join(ARTIFACTS, "room-graph-1440.png"), fullPage: true });
 
   // zoom, then leave and return: the viewport must be remembered
@@ -221,7 +234,7 @@ try {
     { timeout: 15_000 },
   );
   await page.getByRole("button", { name: "返回当前房间" }).click();
-  await page.waitForFunction(() => document.querySelectorAll(".react-flow__node").length === 1);
+  await page.waitForFunction(() => document.querySelectorAll(".react-flow__node").length === 2);
   assert.ok(page.getByRole("heading", { name: "P1 验收房" }));
   await headerToggle("聊天").click();
   ok("global graph round-trips back to the same room target");
@@ -290,11 +303,11 @@ try {
   if (!(await rail.isVisible())) {
     await page.getByRole("button", { name: "详情", exact: true }).click();
   }
-  await rail.getByRole("button", { name: "移出成员 验收会话" }).click();
+  await rail.getByRole("button", { name: "移出成员 验收会话" }).first().click();
   await rail.getByRole("button", { name: "确认移出" }).click();
   await page.waitForFunction(async () => {
     const res = await fetch(`/chat-rooms`);
-    return (await res.json()).rooms.find((r) => r.name === "P1 验收房")?.members.length === 0;
+    return (await res.json()).rooms.find((r) => r.name === "P1 验收房")?.members.length === 1;
   });
   ok("member removed via details and confirmed against the API");
 
@@ -307,6 +320,45 @@ try {
   ok("deleting the current room fell back to the remaining room");
 
   await page.screenshot({ path: join(ARTIFACTS, "final-1440.png"), fullPage: true });
+
+  // ---- 9. acceptance matrix: restore, themes, assistants, sizes -----------
+  // reload restores the last selected room (id + creation time memory)
+  await page.reload();
+  await page.getByRole("heading", { name: "第二房间" }).waitFor({ timeout: 15_000 });
+  ok("reload restores the last selected room");
+
+  // settings reachable; theme round-trip leaves the workspace intact
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await page.getByRole("button", { name: "终端深色", exact: true }).click();
+  await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+  await page.screenshot({ path: join(ARTIFACTS, "settings-dark-1440.png"), fullPage: true });
+  await page.getByRole("button", { name: "汇流蓝（默认）", exact: true }).click();
+  await page.waitForFunction(() => document.documentElement.dataset.theme === "light");
+
+  // unified assistants page stays reachable with its categories
+  await page.getByRole("button", { name: "助手", exact: true }).click();
+  await page.getByRole("button", { name: "创建编码助手", exact: true }).waitFor();
+  await page.getByRole("button", { name: "模型助手", exact: true }).click();
+  await page.getByRole("button", { name: "创建模型助手", exact: true }).waitFor();
+
+  // 1024×768: tablet width keeps the three-column layout usable
+  await page.getByRole("button", { name: "聊天", exact: true }).click();
+  await page.getByRole("heading", { name: "第二房间" }).waitFor();
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.screenshot({ path: join(ARTIFACTS, "chat-1024.png"), fullPage: true });
+  ok("settings, themes, assistants and tablet width all verified");
+
+  // room-list failure state: error + retry, never the empty guide
+  const errorPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await errorPage.route("**/chat-rooms", (route) => route.abort());
+  await errorPage.goto(`http://127.0.0.1:${WEB_PORT}/`);
+  await errorPage.getByRole("alert").waitFor({ timeout: 15_000 });
+  await errorPage.getByRole("button", { name: "重试" }).waitFor();
+  assert.equal(await errorPage.getByText("还没有聊天室").count(), 0);
+  await errorPage.screenshot({ path: join(ARTIFACTS, "error-1440.png"), fullPage: true });
+  await errorPage.close();
+  ok("a failing room list shows error + retry, never the guide");
+
   await browser.close();
 
   console.log(`\nchat-first smoke: ${passed.length} checks passed`);

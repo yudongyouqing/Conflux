@@ -18,6 +18,7 @@
     "rebuild": "npm run rebuild -w apps/desktop",
     "test:desktop": "node --test apps/desktop/test/*.test.cjs",
     "test:e2e:web": "npm run build -w packages/shared && node scripts/e2e/web-smoke.mjs",
+    "test:e2e:chat-first": "npm run build -w packages/shared && node scripts/e2e/chat-first-smoke.mjs",
     "perf:web": "npm run build && node scripts/e2e/browser-performance.mjs",
     "perf:server": "npm run build -w packages/shared && npm run build -w apps/server && node scripts/performance/server-database.cjs",
     "perf:contention": "npm run build -w packages/shared && npm run build -w apps/server && node scripts/performance/contention.cjs",
