@@ -126,11 +126,11 @@ export const api = {
   edgeAsk: (edgeId: number, question: string) =>
     post<{ message: Message }>(`/edges/${edgeId}/ask`, { question }),
 
-  getRuntimes: () =>
+  getRuntimes: (signal?: AbortSignal) =>
     get<{
       runtimes: Record<string, { label: string; executable: string; executableEnv: string }>;
       agents: RuntimeAgent[];
-    }>("/runtimes"),
+    }>("/runtimes", undefined, signal),
 
   createRuntimeAgent: (body: {
     name: string;
@@ -150,7 +150,8 @@ export const api = {
   startRuntimeAgent: (id: number) =>
     post<{ started: boolean; instance: RuntimeInstance }>(`/runtimes/${id}/start`, {}),
 
-  getRuntimeInstances: () => get<{ instances: RuntimeInstance[] }>("/runtime-instances"),
+  getRuntimeInstances: (signal?: AbortSignal) =>
+    get<{ instances: RuntimeInstance[] }>("/runtime-instances", undefined, signal),
 
   stopRuntimeInstance: (id: string) =>
     post<{ instance: RuntimeInstance }>(`/runtime-instances/${encodeURIComponent(id)}/stop`, {}),
@@ -196,7 +197,7 @@ export const api = {
     return get<{ entries: ContextEntry[] }>(`/context/query?${qs.toString()}`);
   },
 
-  getAgents: () => get<{ agents: Agent[] }>("/agents"),
+  getAgents: (signal?: AbortSignal) => get<{ agents: Agent[] }>("/agents", undefined, signal),
 
   createAgent: (body: {
     name: string;

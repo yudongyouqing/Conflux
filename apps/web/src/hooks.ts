@@ -109,11 +109,12 @@ export function useEdgeAsk() {
 }
 
 /** Two-way message flow between any two sessions (graph edge click). */
-export function useAgents() {
+export function useAgents(enabled = true) {
   return useQuery({
     queryKey: ["agents"],
-    queryFn: () => api.getAgents(),
-    refetchInterval: 10000,
+    queryFn: ({ signal }) => api.getAgents(signal),
+    enabled,
+    refetchInterval: enabled ? 10000 : false,
   });
 }
 
@@ -135,11 +136,12 @@ export function useDeleteAgent() {
 
 // ---- runtime agents (CLI presets: Claude Code / Codex) ----
 
-export function useRuntimes() {
+export function useRuntimes(enabled = true) {
   return useQuery({
     queryKey: ["runtimes"],
-    queryFn: () => api.getRuntimes(),
-    refetchInterval: 10000,
+    queryFn: ({ signal }) => api.getRuntimes(signal),
+    enabled,
+    refetchInterval: enabled ? 10000 : false,
   });
 }
 
@@ -171,11 +173,12 @@ export function useStartRuntimeAgent() {
   });
 }
 
-export function useRuntimeInstances() {
+export function useRuntimeInstances(enabled = true) {
   return useQuery({
     queryKey: ["runtime-instances"],
-    queryFn: api.getRuntimeInstances,
-    refetchInterval: 5000,
+    queryFn: ({ signal }) => api.getRuntimeInstances(signal),
+    enabled,
+    refetchInterval: enabled ? 5000 : false,
   });
 }
 
