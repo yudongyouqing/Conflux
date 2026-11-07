@@ -10,11 +10,12 @@ export function useGraph() {
 }
 
 /** Active sessions for the @-mention picker (and their busy/status). */
-export function useSessions(status: "active" | "all" = "active") {
+export function useSessions(status: "active" | "all" = "active", enabled = true) {
   return useQuery({
     queryKey: ["sessions", status],
-    queryFn: () => api.getSessions(status),
-    refetchInterval: 5000,
+    queryFn: ({ signal }) => api.getSessions(status, signal),
+    enabled,
+    refetchInterval: enabled ? 5000 : false,
   });
 }
 
@@ -85,11 +86,11 @@ export function usePeerMessages(peer: string | null, enabled = true) {
 }
 
 /** One conversation channel's (edge) exchange history. */
-export function useEdgeMessages(edgeId: number | null) {
+export function useEdgeMessages(edgeId: number | null, enabled = true) {
   return useQuery({
     queryKey: ["edge-messages", edgeId],
-    queryFn: () => api.getEdgeMessages(edgeId!),
-    enabled: edgeId !== null,
+    queryFn: ({ signal }) => api.getEdgeMessages(edgeId!, signal),
+    enabled: edgeId !== null && enabled,
     refetchInterval: 5000,
   });
 }

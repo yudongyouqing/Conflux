@@ -398,6 +398,38 @@ export function selectedEdgeEndpoints(selectedEdge: SelectedEdge): Set<string> |
  * Rebuilt nodes keep user-dragged positions and selection/highlight state;
  * brand-new nodes take their builder-assigned position.
  */
+/**
+ * Interactive state of one graph scope (saved when leaving it): where nodes
+ * were dragged to and the canvas viewport.
+ */
+export interface ScopeSnapshot {
+  positions: Record<string, { x: number; y: number }>;
+  viewport?: { x: number; y: number; zoom: number };
+}
+
+/**
+ * Position policy for a graph rebuild:
+ * - a SAME-scope refresh (data poll) keeps the freshly interacted-with
+ *   positions via mergeNodePositions — the stored snapshot is NOT replayed,
+ *   or every poll would undo the user's latest drag;
+ * - ENTERING a scope (switch, fresh mount) restores its snapshot on top of
+ *   the built layout, so a room keeps its arrangement across visits.
+ */
+export function applyScopePositions(
+  prev: readonly Node[],
+  built: readonly Node[],
+  scopeEntered: boolean,
+  snapshot: ScopeSnapshot | undefined,
+  selectedSessionId: string | null = null,
+): Node[] {
+  const merged = mergeNodePositions(prev as Node[], built as Node[], selectedSessionId);
+  if (!scopeEntered || !snapshot) return merged;
+  return merged.map((n) => {
+    const saved = snapshot.positions[n.id];
+    return saved ? { ...n, position: saved } : n;
+  });
+}
+
 export function mergeNodePositions(
   prev: Node[],
   next: Node[],

@@ -103,8 +103,12 @@ export const api = {
       { "X-Session-Id": WEB_CONSOLE_ID },
     ),
 
-  getSessions: (status = "all") =>
-    get<{ sessions: SessionSummary[] }>(`/sessions?status=${encodeURIComponent(status)}`),
+  getSessions: (status = "all", signal?: AbortSignal) =>
+    get<{ sessions: SessionSummary[] }>(
+      `/sessions?status=${encodeURIComponent(status)}`,
+      undefined,
+      signal,
+    ),
 
   getPeerMessages: (peer: string, signal?: AbortSignal) =>
     get<{ messages: Message[] }>(
@@ -113,11 +117,11 @@ export const api = {
       signal,
     ),
 
-  getEdgeMessages: (edgeId: number) =>
+  getEdgeMessages: (edgeId: number, signal?: AbortSignal) =>
     get<{
       edge: { id: number; from: string; to: string };
       messages: Message[];
-    }>(`/edges/${edgeId}/messages`),
+    }>(`/edges/${edgeId}/messages`, undefined, signal),
 
   edgeAsk: (edgeId: number, question: string) =>
     post<{ message: Message }>(`/edges/${edgeId}/ask`, { question }),

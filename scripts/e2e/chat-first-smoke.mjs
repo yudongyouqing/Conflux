@@ -185,6 +185,47 @@ try {
   await page.getByRole("heading", { name: "P1 验收房" }).waitFor();
   ok("room switching keeps the selection explicit");
 
+  // ---- 5b. the room graph beside the conversation --------------------------
+  // the header toggle shares its name with the sidebar nav button — scope it
+  const headerToggle = (name) =>
+    page.locator(".room-chat-header").getByRole("button", { name, exact: true });
+  await headerToggle("图谱").click();
+  await page.locator(".react-flow__node").first().waitFor({ timeout: 15_000 });
+  const roomNodeCount = await page.locator(".react-flow__node").count();
+  assert.equal(roomNodeCount, 1, "room graph shows exactly its member(s)");
+  await page.screenshot({ path: join(ARTIFACTS, "room-graph-1440.png"), fullPage: true });
+
+  // zoom, then leave and return: the viewport must be remembered
+  await page.locator(".react-flow__controls-zoomin").click();
+  await page.waitForTimeout(600);
+  const viewport = page.locator(".react-flow__viewport");
+  const zoomedTransform = await viewport.evaluate((el) => el.style.transform);
+  await headerToggle("聊天").click();
+  assert.equal(await page.locator(".react-flow").count(), 0, "hidden graph unmounts its renderer");
+  await headerToggle("图谱").click();
+  await page.locator(".react-flow__viewport").waitFor();
+  // the snapshot restore runs on a short timer after remount — wait for the
+  // transform to actually return to the zoomed value
+  await page.waitForFunction(
+    (expected) => document.querySelector(".react-flow__viewport")?.style.transform === expected,
+    zoomedTransform,
+    { timeout: 8000 },
+  );
+  ok("room graph renders members only and keeps its viewport across switches");
+
+  // global scope reaches every session and returns to the same room
+  await page.getByRole("button", { name: "查看全局图谱" }).click();
+  await page.waitForFunction(
+    () => document.querySelectorAll(".react-flow__node").length >= 5,
+    null,
+    { timeout: 15_000 },
+  );
+  await page.getByRole("button", { name: "返回当前房间" }).click();
+  await page.waitForFunction(() => document.querySelectorAll(".react-flow__node").length === 1);
+  assert.ok(page.getByRole("heading", { name: "P1 验收房" }));
+  await headerToggle("聊天").click();
+  ok("global graph round-trips back to the same room target");
+
   // ---- 6. peer conversation over web ask ----------------------------------
   await page.getByRole("button", { name: /voice-agent/ }).click();
   await page.getByRole("heading", { name: /与 voice-agent 的对话/ }).waitFor();
@@ -194,6 +235,19 @@ try {
   const peerThread = (await apiGet("/web/peer-messages?peer=cap-claude-voice")).messages;
   assert.equal(peerThread.some((m) => m.question === "P1 验收单聊"), true);
   ok("peer conversation used the web-ask path with the full id");
+
+  // ---- 6b. activity history: external channels stay edges, console
+  // entries continue in the workspace ----------------------------------------
+  await page.getByRole("button", { name: "活动记录", exact: true }).click();
+  await page.getByText("M1-B 冒烟清单在哪台机器跑？").first().waitFor();
+  await page.getByText("M1-B 冒烟清单在哪台机器跑？").first().click();
+  await page.getByText(/Conflux 与 winGhostty 的对话/).waitFor();
+  assert.ok(await page.getByPlaceholder(/通道 #/).isVisible(), "edge channel id preserved");
+  await page.getByTitle("返回活动记录").click();
+  await page.getByText("隔离测试：重试同一条消息").first().waitFor();
+  await page.getByText("隔离测试：重试同一条消息").first().click();
+  await page.getByRole("heading", { name: /与 Conflux 的对话/ }).waitFor();
+  ok("activity entries split correctly between edge view and workspace chat");
 
   // no fake room ids ever hit the API from the UI
   assert.equal(outbound.some((url) => url.includes("/chat-rooms/0/")), false);

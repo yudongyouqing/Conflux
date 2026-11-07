@@ -18,6 +18,11 @@ Object.defineProperty(globalThis, "navigator", { configurable: true, value: dom.
 
 const { cleanup, render, fireEvent, waitFor, act, within } = await import("@testing-library/react");
 
+// React Flow's CSS side-effect import cannot be parsed by Node; stub it
+// before any lazy graph import fires (see css-stub-loader.mjs).
+const { register } = await import("node:module");
+register(new URL("./css-stub-loader.mjs", import.meta.url));
+
 afterEach(() => {
   cleanup();
   mock.restoreAll();
@@ -58,6 +63,7 @@ function chatRoom(
 interface ApiState {
   rooms: ChatRoom[];
   roomsStatus?: number;
+  messages: Message[];
   graph: Graph;
   roomTasks: Array<Record<string, unknown>>;
   roomMessages: Array<Record<string, unknown>>;
@@ -138,9 +144,14 @@ function mockApi(state: ApiState) {
       };
       return Response.json({ message });
     }
+    if (url.startsWith("/sessions?"))
+      return Response.json({
+        sessions: state.graph.nodes.map((n) => ({ id: n.id, name: n.name, status: n.status })),
+      });
     if (url === "/graph?status=all") return Response.json(state.graph);
     if (url === "/healthz") return Response.json({ ok: true });
     if (url === "/messages/inbox") return Response.json({ messages: [] });
+    if (url.startsWith("/messages?")) return Response.json({ messages: state.messages });
     if (url.startsWith("/context/query")) return Response.json({ entries: [] });
     return Response.json({});
   });
@@ -149,6 +160,7 @@ function mockApi(state: ApiState) {
 function makeState(overrides: Partial<ApiState> = {}): ApiState {
   return {
     rooms: [],
+    messages: [],
     graph: { nodes: [], edges: [] },
     roomTasks: [],
     roomMessages: [],
@@ -685,4 +697,263 @@ test("drafts are isolated per target and survive switching rooms and conversatio
   fireEvent.click(view.getByRole("button", { name: /独立会话/ }));
   const backPeer = await view.findByPlaceholderText(/^向 独立会话 提问/);
   await waitFor(() => assert.equal((backPeer as HTMLInputElement).value, "单聊草稿"));
+});
+
+// ---- P2: room/global graph beside conversations ---------------------------
+
+// React Flow needs ResizeObserver, which JSDOM lacks — a no-op stub is
+// enough for the renderer to mount and expose its node/edge DOM.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+Object.assign(globalThis, { ResizeObserver: ResizeObserverStub });
+// jsdom without pretendToBeVisual has no animation frames; React Flow's
+// auto-pan cleanup needs both directions of the API
+if (!globalThis.requestAnimationFrame) {
+  globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) =>
+    setTimeout(() => cb(performance.now()), 0)) as typeof requestAnimationFrame;
+}
+if (!globalThis.cancelAnimationFrame) {
+  globalThis.cancelAnimationFrame = (() => {}) as typeof cancelAnimationFrame;
+}
+
+
+/** the workspace chat/graph toggle lives in the room header — the sidebar
+ *  carries identically named nav buttons, so scope to the header. */
+function headerButton(view: { container: HTMLElement }, name: string) {
+  const header = view.container.querySelector(".room-chat-header") as HTMLElement;
+  return within(header).getByRole("button", { name, exact: true });
+}
+
+const ROOM_AB = chatRoom(7, "房间 AB", ["peer-1", "peer-2"], {
+  created: "2026-11-05T02:00:00Z",
+  updated: "2026-11-05T02:00:00Z",
+});
+
+function graphOf(
+  nodes: GraphNode[],
+  edges: Array<{ id: number; from: string; to: string }>,
+): Graph {
+  return {
+    nodes,
+    edges: edges.map((e) => ({
+      id: e.id,
+      from: e.from,
+      to: e.to,
+      weight: 1,
+      last_interact_at: "2026-11-06T00:00:00Z",
+      last_message: null,
+    })),
+  };
+}
+
+test("cold start mounts no React Flow renderer on the chat workspace", async () => {
+  const state = makeState({ rooms: [ROOM_A] });
+  mockApi(state);
+  const view = mountApp();
+  await view.findByRole("heading", { name: "房间 A" });
+  assert.equal(view.container.querySelectorAll(".react-flow").length, 0);
+});
+
+test("the room graph shows members and internal edges only; drafts survive the switch", async () => {
+  rememberRoom({ id: 7, createdAt: "2026-11-05T02:00:00Z" });
+  const state = makeState({
+    rooms: [ROOM_AB, ROOM_B],
+    graph: graphOf(
+      [sessionNode("peer-1", "甲"), sessionNode("peer-2", "乙"), sessionNode("peer-3", "丙")],
+      [
+        { id: 11, from: "peer-1", to: "peer-2" },
+        { id: 12, from: "peer-2", to: "peer-3" },
+      ],
+    ),
+  });
+  mockApi(state);
+  const view = mountApp();
+  const input = await view.findByPlaceholderText(/^@某成员/);
+  fireEvent.change(input, { target: { value: "图谱切换时保留的草稿" } });
+
+  fireEvent.click(headerButton(view, "图谱"));
+  await waitFor(() =>
+    assert.equal(view.container.querySelectorAll(".react-flow__node").length, 2),
+  );
+  // (edge filtering semantics are covered by graph-scope.test.ts; React Flow
+  //  defers edge rendering until nodes measure, which JSDOM never does)
+  assert.equal(view.queryByPlaceholderText(/^@某成员/), null);
+
+  fireEvent.click(headerButton(view, "聊天"));
+  const back = await view.findByPlaceholderText(/^@某成员/);
+  await waitFor(() => assert.equal((back as HTMLInputElement).value, "图谱切换时保留的草稿"));
+});
+
+test("the room graph reaches the global scope and returns to the same room", async () => {
+  rememberRoom({ id: 7, createdAt: "2026-11-05T02:00:00Z" });
+  const state = makeState({
+    rooms: [ROOM_AB, ROOM_B],
+    graph: graphOf(
+      [sessionNode("peer-1", "甲"), sessionNode("peer-2", "乙"), sessionNode("peer-3", "丙")],
+      [{ id: 11, from: "peer-1", to: "peer-2" }],
+    ),
+  });
+  mockApi(state);
+  const view = mountApp();
+  await view.findByRole("heading", { name: "房间 AB" });
+
+  fireEvent.click(headerButton(view, "图谱"));
+  await waitFor(() =>
+    assert.equal(view.container.querySelectorAll(".react-flow__node").length, 2),
+  );
+
+  fireEvent.click(view.getByRole("button", { name: "查看全局图谱" }));
+  await waitFor(() =>
+    assert.equal(view.container.querySelectorAll(".react-flow__node").length, 3),
+  );
+  fireEvent.click(view.getByRole("button", { name: "返回当前房间" }));
+  await waitFor(() =>
+    assert.equal(view.container.querySelectorAll(".react-flow__node").length, 2),
+  );
+  assert.ok(view.getByRole("heading", { name: "房间 AB" }));
+});
+
+test("a global-graph node opens details only; the explicit action starts the conversation", async () => {
+  rememberRoom({ id: 7, createdAt: "2026-11-05T02:00:00Z" });
+  const state = makeState({
+    rooms: [ROOM_AB, ROOM_B],
+    graph: graphOf(
+      [sessionNode("peer-1", "甲"), sessionNode("peer-2", "乙"), sessionNode("solo-9", "外部会话")],
+      [{ id: 11, from: "peer-1", to: "peer-2" }],
+    ),
+  });
+  mockApi(state);
+  const view = mountApp();
+  await view.findByRole("heading", { name: "房间 AB" });
+
+  fireEvent.click(headerButton(view, "图谱"));
+  await waitFor(() =>
+    assert.equal(view.container.querySelectorAll(".react-flow__node").length, 2),
+  );
+  fireEvent.click(view.getByRole("button", { name: "查看全局图谱" }));
+  await waitFor(() =>
+    assert.equal(view.container.querySelectorAll(".react-flow__node").length, 3),
+  );
+
+  // selection is details-only — no automatic conversation switch
+  const solo = Array.from(view.container.querySelectorAll(".react-flow__node")).find((n) =>
+    n.textContent?.includes("外部会话"),
+  );
+  assert.ok(solo, "the external node is rendered");
+  fireEvent.click(solo!);
+  await waitFor(() => assert.ok(view.getByText("查看：外部会话")));
+  assert.ok(view.getByRole("button", { name: "与此会话对话" }));
+  assert.ok(view.getByRole("heading", { name: "房间 AB" }), "target unchanged by inspection");
+
+  fireEvent.click(view.getByRole("button", { name: "与此会话对话" }));
+  await view.findByRole("heading", { name: "与 外部会话 的对话" });
+});
+
+test("session targets have no room graph toggle", async () => {
+  const state = makeState({
+    rooms: [ROOM_A],
+    graph: { nodes: [sessionNode("solo-1", "独立会话")], edges: [] },
+  });
+  mockApi(state);
+  const view = mountApp();
+  fireEvent.click(await view.findByRole("button", { name: /独立会话/ }));
+  await view.findByRole("heading", { name: "与 独立会话 的对话" });
+  const header = view.container.querySelector(".room-chat-header") as HTMLElement;
+  assert.equal(within(header).queryByRole("button", { name: "聊天" }), null);
+  assert.equal(within(header).queryByRole("button", { name: "图谱" }), null);
+});
+
+// ---- P2: activity history ---------------------------------------------------
+
+test("external channels keep their edge view with both endpoints and the channel id", async () => {
+  const state = makeState({
+    graph: {
+      nodes: [sessionNode("peer-1", "甲"), sessionNode("peer-2", "乙")],
+      edges: graphOf([], [{ id: 42, from: "peer-1", to: "peer-2" }]).edges,
+    },
+    messages: [
+      {
+        id: 31,
+        edge_id: 42,
+        from_session: "peer-1",
+        to_session: "peer-2",
+        question: "外部通道消息",
+        reply: null,
+        status: "pending",
+        created_at: "2026-11-06T01:00:00Z",
+        replied_at: null,
+      },
+    ],
+  });
+  mockApi(state);
+  const view = mountApp();
+  await view.getByRole("button", { name: "活动记录" }).click();
+  await view.findByText("外部通道消息");
+
+  fireEvent.click(view.getByText("外部通道消息"));
+  await view.findByText(/甲 与 乙 的对话/);
+  assert.ok(view.getByPlaceholderText(/通道 #42/));
+});
+
+test("web-console feed entries jump into the workspace peer conversation", async () => {
+  const state = makeState({
+    graph: { nodes: [sessionNode("peer-1", "甲")], edges: [] },
+    messages: [
+      {
+        id: 32,
+        from_session: "web-console",
+        to_session: "peer-1",
+        question: "控制台发起的消息",
+        reply: null,
+        status: "replied",
+        created_at: "2026-11-06T01:00:00Z",
+        replied_at: null,
+      },
+    ],
+  });
+  mockApi(state);
+  const view = mountApp();
+  await view.getByRole("button", { name: "活动记录" }).click();
+  await view.findByText("控制台发起的消息");
+
+  fireEvent.click(view.getByText("控制台发起的消息"));
+  await view.findByRole("heading", { name: "与 甲 的对话" });
+  await waitFor(() =>
+    assert.equal(
+      view.container
+        .querySelector('.tab-surface[data-active="true"]')
+        ?.textContent?.includes("与 甲 的对话"),
+      true,
+    ),
+  );
+});
+
+test("activity polling runs only while the activity view is visible", async () => {
+  const state = makeState({ graph: { nodes: [], edges: [] } });
+  mockApi(state);
+  const view = mountApp();
+  await view.findByText(/Conflux/);
+
+  await view.getByRole("button", { name: "活动记录" }).click();
+  await waitFor(() =>
+    assert.equal(state.calls.some((c) => c.url === "/messages/inbox"), true),
+  );
+
+  // back on chat: the inbox preflight must never fire again from the hidden view
+  const inboxCount = () => state.calls.filter((c) => c.url === "/messages/inbox").length;
+  const sessionsCount = () => state.calls.filter((c) => c.url.startsWith("/sessions?")).length;
+  const before = inboxCount();
+  const sessionsBefore = sessionsCount();
+  await view.getByRole("button", { name: "聊天", exact: true }).click();
+  await act(async () => {
+    await view.client.invalidateQueries({ queryKey: ["messages"] });
+    await view.client.invalidateQueries({ queryKey: ["sessions", "active"] });
+    await new Promise((r) => setTimeout(r, 50));
+  });
+  assert.equal(inboxCount(), before);
+  // the hidden activity page must not poll the session list either
+  assert.equal(sessionsCount(), sessionsBefore);
 });

@@ -17,6 +17,11 @@ export interface WorkspaceDetailsProps {
   onOpenSession: (sessionId: string) => void;
   /** Open an edge channel on the graph view (DetailPanel 发起对话). */
   onOpenGraphEdge: (edge: { id: number; from: string; to: string }) => void;
+  /** A session node picked in the workspace graph — details only. */
+  inspectedSession?: GraphNode | null;
+  /** Explicit action that turns an inspection into a conversation. */
+  onConverseWith?: (sessionId: string) => void;
+  onClearInspection?: () => void;
 }
 
 /**
@@ -33,7 +38,45 @@ export function WorkspaceDetails({
   onRoomDeleted,
   onOpenSession,
   onOpenGraphEdge,
+  inspectedSession,
+  onConverseWith,
+  onClearInspection,
 }: WorkspaceDetailsProps) {
+  if (inspectedSession) {
+    return (
+      <div className="h-full overflow-y-auto">
+        <div className="sticky top-0 z-10 bg-surface border-b border-line px-4 py-3 flex items-center gap-2">
+          <span className="text-ink font-medium text-xs truncate">查看：{inspectedSession.name}</span>
+          <button
+            type="button"
+            onClick={onClearInspection ?? onClose}
+            className="ml-auto p-1.5 rounded-lg text-ink-faint hover:bg-tile-hover hover:text-ink flex-shrink-0"
+            aria-label="返回目标详情"
+          >
+            <X size={13} />
+          </button>
+        </div>
+        {/* selection is details-only: starting a conversation is explicit */}
+        <div className="p-3 border-b border-line">
+          <button
+            type="button"
+            onClick={() => onConverseWith?.(inspectedSession.id)}
+            className="w-full py-2 rounded-lg bg-accent text-on-accent text-xs font-medium hover:bg-accent-deep"
+          >
+            与此会话对话
+          </button>
+        </div>
+        <DetailPanel
+          session={inspectedSession}
+          message={null}
+          edge={null}
+          sessionNameLookup={(id) => sessions.find((s) => s.id === id)?.name}
+          sessionStatusLookup={(id) => sessions.find((s) => s.id === id)?.status}
+          onOpenEdge={onOpenGraphEdge}
+        />
+      </div>
+    );
+  }
   if (target?.kind === "room") {
     const room = rooms.find((r) => r.id === target.id);
     if (!room) {
@@ -238,6 +281,11 @@ function RoomDetails({
             })}
             {members.length === 0 && (
               <div className="text-2xs text-ink-faint px-2 py-2">房间还没有成员</div>
+            )}
+            {members.filter((mid) => !sessions.some((s) => s.id === mid)).length > 0 && (
+              <div className="text-2xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">
+                {members.filter((mid) => !sessions.some((s) => s.id === mid)).length} 位成员暂无法加载（会话未出现在图谱中）
+              </div>
             )}
           </div>
           {leave.isError && (
