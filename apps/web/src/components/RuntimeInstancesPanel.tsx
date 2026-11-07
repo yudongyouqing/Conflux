@@ -22,13 +22,17 @@ export interface RuntimeInstancesPanelProps {
   /** Controlled instance set (preset-filtered/orphans); omit to query all. */
   instances?: RuntimeInstance[];
   title?: string;
+  /** a hidden page must not poll; controlled sets never query anyway */
+  active?: boolean;
 }
 
 export function RuntimeInstancesPanel({
   instances: controlled,
   title = "运行实例",
+  active = true,
 }: RuntimeInstancesPanelProps = {}) {
-  const query = useRuntimeInstances();
+  // a controlled set renders as given — no self-query at all
+  const query = useRuntimeInstances(controlled === undefined && active);
   const list = controlled ?? query.data?.instances ?? [];
   const isLoading = controlled === undefined && query.isLoading;
   const error = controlled === undefined ? query.error : null;

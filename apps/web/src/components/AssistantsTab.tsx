@@ -46,9 +46,11 @@ export interface AssistantsTabProps {
  * start or stop CLI processes, and the PTY only streams while visible.
  */
 export function AssistantsTab({ active, onOpenSession }: AssistantsTabProps) {
-  const agentsQuery = useAgents();
-  const runtimesQuery = useRuntimes();
-  const instancesQuery = useRuntimeInstances();
+  // the page's own queries pause while another view is showing; the shared
+  // graph query stays with the App (single poll, identity for the sidebar)
+  const agentsQuery = useAgents(active);
+  const runtimesQuery = useRuntimes(active);
+  const instancesQuery = useRuntimeInstances(active);
   const graph = useGraph();
 
   const start = useStartRuntimeAgent();
@@ -190,6 +192,7 @@ export function AssistantsTab({ active, onOpenSession }: AssistantsTabProps) {
               <RuntimeInstancesPanel
                 instances={catalog.orphanInstances}
                 title="无关联配置的运行记录"
+                active={active}
               />
             )}
           </>

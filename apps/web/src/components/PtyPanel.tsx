@@ -33,17 +33,33 @@ const pty = (globalThis as any).confluxPty as {
   useEffect(() => {
     if (!pty || !agentId || !active) return;
     let unsub: (() => void) | undefined;
+    // init is async: the effect may clean up (hide/switch) while getBuffer
+    // or isAlive is still pending — without this guard the late continuation
+    // would subscribe to output AFTER the page is gone and never unsubscribe
+    let cancelled = false;
 
     const init = async () => {
       const buf = await pty.getBuffer(agentId);
+      if (cancelled) return;
       setBuffer(buf?.buffer ?? "");
-      setAlive(await pty.isAlive(agentId));
+      const alive = await pty.isAlive(agentId);
+      if (cancelled) return;
+      setAlive(alive);
       unsub = pty.onOutput(agentId, (chunk: string) => {
         setBuffer((prev) => (prev + chunk).slice(-50_000));
       });
+      // cancelled may have flipped between the check above and this sync
+      // subscription — release immediately in that case
+      if (cancelled) {
+        unsub();
+        unsub = undefined;
+      }
     };
     init();
-    return () => unsub?.();
+    return () => {
+      cancelled = true;
+      unsub?.();
+    };
   }, [agentId, pty, active]);
 
   useEffect(() => {

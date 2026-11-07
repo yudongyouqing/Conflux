@@ -176,7 +176,7 @@ test("identical display names across kinds and presets stay separate items", () 
 
 // ---- AssistantsTab mount behavior ------------------------------------------
 
-const { render, fireEvent, waitFor, within } = await import("@testing-library/react");
+const { render, fireEvent, waitFor, within, act } = await import("@testing-library/react");
 const React = await import("react");
 const { createElement } = React;
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
@@ -350,4 +350,215 @@ test("a coding preset shows every instance it owns, keyed by identity", async ()
   // only the instance with a REAL session id offers a conversation entry
   assert.ok(view.getByText("实例会话"));
   assert.equal(view.container.querySelectorAll("article").length, 2);
+});
+
+// ---- review regressions: PTY init race + hidden-page query gating ----------
+
+// jsdom lacks scrollIntoView (PtyPanel auto-scroll); a no-op is enough
+if (!dom.window.HTMLElement.prototype.scrollIntoView) {
+  dom.window.HTMLElement.prototype.scrollIntoView = () => {};
+}
+
+const { PtyPanel } = await import("../src/components/PtyPanel.tsx");
+const { RuntimeInstancesPanel } = await import("../src/components/RuntimeInstancesPanel.tsx");
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+}
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
+function withPtyFake(fake: {
+  getBuffer: (id: number) => Promise<{ buffer: string | null }>;
+  isAlive: (id: number) => Promise<boolean>;
+  onOutput: (id: number, cb: (chunk: string) => void) => () => void;
+}) {
+  const prior = (globalThis as Record<string, unknown>).confluxPty;
+  (globalThis as Record<string, unknown>).confluxPty = {
+    ...fake,
+    inject: async () => ({ ok: true }),
+  };
+  return () => {
+    if (prior === undefined) delete (globalThis as Record<string, unknown>).confluxPty;
+    else (globalThis as Record<string, unknown>).confluxPty = prior;
+  };
+}
+
+function mountPty(active: boolean) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = render(
+    createElement(
+      QueryClientProvider,
+      { client },
+      createElement(PtyPanel, { agentId: 3, agentName: "审查", active }),
+    ),
+  );
+  return { ...view, client };
+}
+
+test("hiding the PTY during getBuffer cancels init: no late subscription", async () => {
+  const ops: string[] = [];
+  const gate = deferred<{ buffer: string | null }>();
+  const restore = withPtyFake({
+    getBuffer: () => gate.promise,
+    isAlive: async () => true,
+    onOutput: () => {
+      ops.push("subscribe");
+      return () => ops.push("dispose");
+    },
+  });
+  try {
+    const view = mountPty(true);
+    // hide while getBuffer is still pending — cleanup runs before unsub exists
+    view.rerender(
+      createElement(
+        QueryClientProvider,
+        { client: view.client },
+        createElement(PtyPanel, { agentId: 3, agentName: "审查", active: false }),
+      ),
+    );
+    await act(async () => {
+      gate.resolve({ buffer: "stale" });
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    assert.deepEqual(ops, [], "a cancelled init must never subscribe to output");
+  } finally {
+    restore();
+  }
+});
+
+test("hiding the PTY between isAlive and onOutput cancels init too", async () => {
+  const ops: string[] = [];
+  const bufferGate = deferred<{ buffer: string | null }>();
+  const aliveGate = deferred<boolean>();
+  const restore = withPtyFake({
+    getBuffer: () => bufferGate.promise,
+    isAlive: () => aliveGate.promise,
+    onOutput: () => {
+      ops.push("subscribe");
+      return () => ops.push("dispose");
+    },
+  });
+  try {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = render(
+      createElement(
+        QueryClientProvider,
+        { client },
+        createElement(PtyPanel, { agentId: 3, agentName: "审查", active: true }),
+      ),
+    );
+    await act(async () => {
+      bufferGate.resolve({ buffer: "" });
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    // isAlive is pending now; hide the page, then let isAlive resolve
+    view.rerender(
+      createElement(
+        QueryClientProvider,
+        { client },
+        createElement(PtyPanel, { agentId: 3, agentName: "审查", active: false }),
+      ),
+    );
+    await act(async () => {
+      aliveGate.resolve(true);
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    assert.deepEqual(ops, [], "no subscription may appear after the effect was cleaned up");
+  } finally {
+    restore();
+  }
+});
+
+test("a hidden assistants page stops polling its own queries", async () => {
+  const state: AssistantsState = {
+    presets: [{ id: 7, name: "审查", runtime: "claude", workdir: null }],
+    agents: [],
+    instances: [],
+    nodes: [],
+    calls: [],
+  };
+  const view = mountAssistants(state);
+  await waitFor(() => assert.ok(view.getByText("审查")));
+
+  const count = (prefix: string) => state.calls.filter((c) => c.url === prefix).length;
+  const before = {
+    agents: count("/agents"),
+    runtimes: count("/runtimes"),
+    instances: count("/runtime-instances"),
+  };
+  assert.ok(before.runtimes > 0, "fixture sanity: queries ran while visible");
+
+  view.rerender(
+    createElement(
+      QueryClientProvider,
+      { client: view.client },
+      createElement(AssistantsTab, { active: false, onOpenSession: () => {} }),
+    ),
+  );
+  await act(async () => {
+    await view.client.invalidateQueries({ queryKey: ["agents"] });
+    await view.client.invalidateQueries({ queryKey: ["runtimes"] });
+    await view.client.invalidateQueries({ queryKey: ["runtime-instances"] });
+    await new Promise((r) => setTimeout(r, 50));
+  });
+  assert.equal(count("/agents"), before.agents, "hidden agents query stays silent");
+  assert.equal(count("/runtimes"), before.runtimes, "hidden runtimes query stays silent");
+  assert.equal(
+    count("/runtime-instances"),
+    before.instances,
+    "hidden instances query stays silent",
+  );
+});
+
+test("a controlled instances panel does not start its own query", async () => {
+  const calls: string[] = [];
+  mock.method(globalThis, "fetch", async (input: string | URL | Request) => {
+    calls.push(String(input));
+    return Response.json({ instances: [] });
+  });
+  const orphan = {
+    id: "run-orphan",
+    preset_id: 99,
+    preset_name: "已删预设",
+    runtime: "codex",
+    workdir: null,
+    session_id: null,
+    runtime_pid: null,
+    state: "ended",
+    created_at: "2026-11-07T00:00:00Z",
+    updated_at: "2026-11-07T00:00:00Z",
+    last_seen: null,
+    error: null,
+    ended_at: null,
+    resumed_from: null,
+    can_stop: false,
+    can_resume: false,
+    limitation: null,
+  };
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    createElement(
+      QueryClientProvider,
+      { client },
+      createElement(RuntimeInstancesPanel, {
+        instances: [orphan as never],
+        title: "无关联配置的运行记录",
+        active: true,
+      }),
+    ),
+  );
+  await waitFor(() => assert.ok(document.body.textContent?.includes("run-orphan")));
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(
+    calls.some((c) => c === "/runtime-instances"),
+    false,
+    "a controlled panel renders the given set without querying",
+  );
 });
