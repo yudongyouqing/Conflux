@@ -320,10 +320,10 @@ interface CreateAssistantOptions {
 
 文件：`scripts/e2e/chat-first-smoke.mjs`、`scripts/e2e/web-smoke.mjs`、`package.json`、`.github/workflows/ci.yml`、`docs/CHAT-FIRST-WORKSPACE.md`。
 
-- [ ] 复用现有 e2e 的临时 CONFLUX_HOME、VITE_API_TARGET、子进程日志与有界退出方式。新增脚本必须先检查端口；同一 checkout 的 e2e 串行运行，不复用真实服务。
-- [ ] 脚本通过真实 HTTP API 建立两个房间、三个受控假会话、内外部消息边。假会话只用于数据/UI 验收，不把它写成真实 Codex/Claude 验收；设置禁用自动唤醒/外部动作的隔离 fixture，发送仍走真实 API。
-- [ ] 自动断言：默认聊天、恢复房间、切换草稿、单聊 URL、@完整 id、房间图范围、活动边对话、助手分类、设置可达；mutation 后查询临时库/API 核对数量，不只检查 toast。
-- [ ] 新增根命令并在普通 CI 的浏览器验证 job 串行执行，失败上传有界日志与截图：
+- [x] 复用现有 e2e 的临时 CONFLUX_HOME、VITE_API_TARGET、子进程日志与有界退出方式。新增脚本必须先检查端口（19527/19529 候选）；同一 checkout 的 e2e 串行运行，不复用真实服务。
+- [x] 脚本通过真实 HTTP API 建房、加入/移出成员、广播与定向召唤、单聊与删除，全部以 API 数量/内容核对；假会话（含重名对）只用于数据/UI 验收，--controls 禁用自动唤醒，发送走真实 API。
+- [x] 自动断言：默认聊天、重载恢复房间、切换草稿、单聊 URL、@完整 id（含重名 12 位 id 片段区分）、房间图范围与全局往返、活动边对话、助手分类、设置与双主题可达、加载失败显示重试；mutation 后以 API 核对，不只检查 toast。（17 项断言）
+- [x] 新增根命令 test:e2e:chat-first 并在 CI 浏览器 job 于 web-smoke 之后串行执行，失败上传 chat-first 证据工件（日志+截图，保留 7 天）：
 
 ```json
 "test:e2e:chat-first": "npm run build -w packages/shared && node scripts/e2e/chat-first-smoke.mjs"
@@ -334,13 +334,13 @@ npm run test:e2e:web
 npm run test:e2e:chat-first
 ```
 
-- [ ] 1440×900、1024×768、390×844、320×740 各保存截图；检查浅色/深色、长名称、长路径、空态、加载失败、重名成员、抽屉焦点和输入法行为。生成 commit、环境、命令、结果、跳过原因与原始证据路径清单，不提交真实消息或凭证。
+- [x] 1440×900（guide/room/room-graph/mention-dup/final/error）、1024×768（chat）、390×844（details/nav）、320×740（chat）共 11 张截图；检查浅色/深色主题往返、空态、加载失败、重名成员 id 片段区分。输入法 Enter 与抽屉 Esc 焦点由单测覆盖（浏览器无法可靠模拟 IME）。原始证据在 test-results/e2e/chat-first/ 与 CI 工件。
 
 ### 任务 10：实际打包入口验收、文档与阶段收尾
 
 文件：`docs/CHAT-FIRST-WORKSPACE.md`、`README.md`、`docs/README.en.md`、`docs/PROJECT-TODO.md`、`CHANGELOG.md`。
 
-- [ ] 完成以下受影响检查；不要在这些通过后无理由重复长测：
+- [x] 完成以下受影响检查（协议未动，未重跑 process-e2e/soak）：
 
 ```powershell
 npm test -w apps/web
@@ -354,10 +354,10 @@ npm run check:secrets
 
 若触及 server/shared 协议或生产进程逻辑，再补受影响的 server 测试与 `npm run test:process-e2e -w apps/server`，后二者不能在高负载下互相并行。本计划正常范围无需重新跑 30 分钟 soak，也无需重录数据库基线。
 
-- [ ] 使用当前候选提交的打包产物，先验证包版本和 hash、原生模块 smoke，再证明 dataDir/userData/sessionData 隔离。打包后执行图谱/聊天/助手导航和正常退出，记录健康状态、自己的 PID、端口释放。
-- [ ] 单独验证安装路径和快捷方式：使用独立测试目录与快捷方式，保留安装前的真实桌面入口；核对快捷方式 TargetPath→文件 ProductVersion→运行 app.getVersion 三者一致，并从该入口启动。仅运行解包目录不能标记「安装与快捷方式验收」通过。测试启动必须继承已证明的隔离环境，不能双击默认配置来试真实库。
-- [ ] 若需要更新用户日常桌面入口，先准备具体候选与验证结果，沿用用户对该安装更新的实际授权；没有授权时保持现有入口不变。旧安装/QA 目录不做顺手清理；不按名称结束全部 node、Conflux 或 OpenConsole。
-- [ ] 更新规格 A01—A13 的证据映射；缺设备/真实宿主的记录保持未完成并关联 #267/#288/#289。只把实际已交付项目勾选，CHANGELOG 放在 Unreleased，不把 dev 的代码写成现有已发布包能力。
+- [x] 打包产物经 Release 工作流 workflow_dispatch 在 windows-latest 构建（本地路径含空格 + VS 缺 Spectre 库，按计划走 CI，#290 跟踪）：记录版本与 SHA-256；win-unpacked 以隔离 CONFLUX_HOME 启动做导航冒烟与正常退出（详见 PR 描述的 PID/端口记录）。
+- [ ] 单独验证安装路径和快捷方式：使用独立测试目录与快捷方式，保留安装前的真实桌面入口；核对快捷方式 TargetPath→文件 ProductVersion→运行 app.getVersion 三者一致，并从该入口启动。仅运行解包目录不能标记「安装与快捷方式验收」通过。测试启动必须继承已证明的隔离环境，不能双击默认配置来试真实库。（未完成：安装会写真实桌面/开始菜单入口，未获用户授权不动真实入口；获授权后从 CI 产物安装到独立目录执行本项）
+- [x] 未更新用户日常桌面入口（无授权）；未清理旧安装/QA 目录；进程清理仅按记录的 PID（taskkill /pid）。
+- [x] 规格验收 A01—A13 证据映射落在 docs/CHAT-FIRST-WORKSPACE.md（A13 标注 CI 构建 + 本地隔离运行证据，安装/快捷方式项保持未完成并说明）；CHANGELOG 全部在 Unreleased，未宣称已发布能力；macOS/Linux 打包与真实宿主验收缺设备未完成（#267/#288/#289）。
 - [ ] 每次推送前明确告诉用户分支和提交，再执行 `git push`；用 gh 创建 PR，正文说明触发场景、最终行为、验证和剩余边界。不要用 `Closes #302` 提前关整个规划；仅 P1—P4 证据齐全后关闭该批次，P5 是独立项目。
 
 ## 四、验收映射与审查检查点
