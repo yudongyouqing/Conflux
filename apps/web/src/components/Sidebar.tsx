@@ -5,7 +5,6 @@ import {
   History,
   Bot,
   Boxes,
-  Terminal,
   Settings,
   ChevronDown,
   ChevronRight,
@@ -15,7 +14,7 @@ import type { ChatRoom, GraphNode } from "@conflux/shared";
 import { sessionStatusAppearance } from "./StatusDot";
 import { ChatRoomList } from "./ChatRoomList";
 
-export type TabId = "chat" | "graph" | "messages" | "agents" | "runtimes" | "settings";
+export type TabId = "chat" | "graph" | "messages" | "assistants" | "settings";
 
 interface SidebarProps {
   activeTab: TabId;
@@ -95,7 +94,7 @@ export function Sidebar({
     { id: "chat" as const, icon: MessagesSquare, label: "聊天" },
     { id: "graph" as const, icon: Network, label: "图谱" },
     { id: "messages" as const, icon: History, label: "活动记录" },
-    { id: "agents" as const, icon: Bot, label: "Agents" },
+    { id: "assistants" as const, icon: Bot, label: "助手" },
   ];
 
   return (
@@ -239,7 +238,6 @@ export function Sidebar({
           <span className="text-2xs text-ink-muted flex-1 truncate">{online ? "在线" : "离线"}</span>
           {(
             [
-              { id: "runtimes" as const, icon: Terminal, label: "运行时" },
               { id: "settings" as const, icon: Settings, label: "设置" },
             ] as const
           ).map(({ id, icon: Icon, label }) => {

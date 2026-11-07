@@ -149,7 +149,7 @@ export function WorkspaceTab({
           </button>
           <button
             type="button"
-            onClick={() => onOpenTab("runtimes")}
+            onClick={() => onOpenTab("assistants")}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-line text-ink-muted text-xs hover:bg-tile-hover"
           >
             <Bot size={13} /> 配置编码助手

@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement, type ReactNode } from "react";
 import type { Message } from "@conflux/shared";
 import { MessageCard } from "../src/components/MessageCard.tsx";
-import { RuntimesTab } from "../src/components/RuntimesTab.tsx";
+import { AssistantsTab } from "../src/components/AssistantsTab.tsx";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost" });
 Object.assign(globalThis, {
@@ -172,6 +172,10 @@ test("fresh delivery updates replace an earlier local retry result", async () =>
   assert.match(view.container.textContent ?? "", /唤醒失败/);
 });
 
+/** The unified page mounts coding cards collapsed; tests expand the fixture
+ *  preset to reach its instance rows. */
+const runtimePreset = { id: 7, name: "Reviewer", runtime: "codex", workdir: "C:/repo" };
+
 const instance = {
   id: "run-7",
   preset_id: 7,
@@ -194,12 +198,16 @@ const instance = {
 
 test("runtime instances show verified capability and keep unsafe stop disabled", async () => {
   mock.method(globalThis, "fetch", async (input: string | URL | Request) => {
-    if (String(input) === "/runtime-instances") return Response.json({ instances: [instance] });
-    return Response.json({ agents: [], runtimes: {} });
+    const url = String(input);
+    if (url === "/runtime-instances") return Response.json({ instances: [instance] });
+    if (url === "/runtimes") return Response.json({ runtimes: {}, agents: [runtimePreset] });
+    if (url === "/graph?status=all") return Response.json({ nodes: [], edges: [] });
+    return Response.json({ agents: [] });
   });
-  const view = setup(createElement(RuntimesTab));
+  const view = setup(createElement(AssistantsTab, { active: true, onOpenSession: () => {} }));
   await waitFor(() => assert.ok(view.queryByText("Reviewer")));
-  assert.match(view.container.textContent ?? "", /运行实例/);
+  fireEvent.click(view.getByText("Reviewer"));
+  assert.doesNotMatch(view.container.textContent ?? "", /在线预设/);
   assert.match(view.container.textContent ?? "", /321/);
   assert.match(view.container.textContent ?? "", /session-7/);
   assert.match(view.container.textContent ?? "", /Process identity cannot be verified/);
@@ -216,14 +224,18 @@ test("resuming an ended instance uses its resume endpoint and refreshes the list
     requests.push(`${init?.method ?? "GET"} ${url}`);
     if (url === "/runtime-instances")
       return Response.json({ instances: [{ ...instance, state: "ended", can_resume: true }] });
+    if (url === "/runtimes") return Response.json({ runtimes: {}, agents: [runtimePreset] });
+    if (url === "/graph?status=all") return Response.json({ nodes: [], edges: [] });
     if (url.endsWith("/resume"))
       return Response.json({
         started: true,
         instance: { ...instance, id: "run-8", resumed_from: "run-7" },
       });
-    return Response.json({ agents: [], runtimes: {} });
+    return Response.json({ agents: [] });
   });
-  const view = setup(createElement(RuntimesTab));
+  const view = setup(createElement(AssistantsTab, { active: true, onOpenSession: () => {} }));
+  await waitFor(() => assert.ok(view.queryByText("Reviewer")));
+  fireEvent.click(view.getByText("Reviewer"));
   await waitFor(() => assert.ok(view.queryByRole("button", { name: "恢复为新实例" })));
   fireEvent.click(view.getByRole("button", { name: "恢复为新实例" }));
   await waitFor(() => assert.ok(requests.includes("POST /runtime-instances/run-7/resume")));
@@ -238,13 +250,17 @@ test("verified stop reports an operation error and clears its loading state", as
     const url = String(input);
     if (url === "/runtime-instances")
       return Response.json({ instances: [{ ...instance, can_stop: true, limitation: null }] });
+    if (url === "/runtimes") return Response.json({ runtimes: {}, agents: [runtimePreset] });
+    if (url === "/graph?status=all") return Response.json({ nodes: [], edges: [] });
     if (url.endsWith("/stop"))
       return new Promise<Response>((resolve) => {
         finish = resolve;
       });
-    return Response.json({ agents: [], runtimes: {} });
+    return Response.json({ agents: [] });
   });
-  const view = setup(createElement(RuntimesTab));
+  const view = setup(createElement(AssistantsTab, { active: true, onOpenSession: () => {} }));
+  await waitFor(() => assert.ok(view.queryByText("Reviewer")));
+  fireEvent.click(view.getByText("Reviewer"));
   await waitFor(() => assert.ok(view.queryByRole("button", { name: "停止实例" })));
   fireEvent.click(view.getByRole("button", { name: "停止实例" }));
   await waitFor(() =>
@@ -263,19 +279,23 @@ test("verified stop reports an operation error and clears its loading state", as
 
 test("failed instance shows launch error and refuses an unavailable resume", async () => {
   mock.method(globalThis, "fetch", async (input: string | URL | Request) => {
-    if (String(input) === "/runtime-instances")
+    const url = String(input);
+    if (url === "/runtime-instances")
       return Response.json({
         instances: [
           { ...instance, state: "failed", error: "CLI executable missing", runtime_pid: null },
         ],
       });
-    return Response.json({ agents: [], runtimes: {} });
+    if (url === "/runtimes") return Response.json({ runtimes: {}, agents: [] });
+    if (url === "/graph?status=all") return Response.json({ nodes: [], edges: [] });
+    return Response.json({ agents: [] });
   });
-  const view = setup(createElement(RuntimesTab));
+  // preset deleted → the failed instance lands in the orphan section
+  const view = setup(createElement(AssistantsTab, { active: true, onOpenSession: () => {} }));
   await waitFor(() => assert.ok(view.queryByText("CLI executable missing")));
   assert.equal(
     (view.getByRole("button", { name: "恢复为新实例" }) as HTMLButtonElement).disabled,
     true,
   );
-  assert.match(view.container.textContent ?? "", /未绑定/);
+  assert.match(view.container.textContent ?? "", /无关联配置的运行记录/);
 });

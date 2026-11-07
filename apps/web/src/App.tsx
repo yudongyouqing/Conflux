@@ -12,7 +12,6 @@ import {
 } from "react";
 import { Sidebar, type TabId } from "./components/Sidebar";
 import { MessageTab } from "./components/MessageTab";
-import { AgentTab } from "./components/AgentTab";
 import { WorkspaceTab } from "./components/WorkspaceTab";
 import { WorkspaceDetails } from "./components/WorkspaceDetails";
 import { DetailPanel } from "./components/DetailPanel";
@@ -38,8 +37,8 @@ import type { Message, GraphNode, ChatRoom } from "@conflux/shared";
 const GraphTab = lazy(() =>
   import("./components/GraphTab").then((m) => ({ default: m.GraphTab })),
 );
-const RuntimesTab = lazy(() =>
-  import("./components/RuntimesTab").then((m) => ({ default: m.RuntimesTab })),
+const AssistantsTab = lazy(() =>
+  import("./components/AssistantsTab").then((m) => ({ default: m.AssistantsTab })),
 );
 const SettingsTab = lazy(() =>
   import("./components/SettingsTab").then((m) => ({ default: m.SettingsTab })),
@@ -59,8 +58,7 @@ const TAB_LABELS: Record<TabId, string> = {
   chat: "聊天",
   graph: "图谱",
   messages: "活动记录",
-  agents: "Agents",
-  runtimes: "运行时",
+  assistants: "助手",
   settings: "设置",
 };
 
@@ -435,12 +433,11 @@ export default function App() {
               />
             ) : null,
           )}
-          {surface("agents", visited.has("agents") ? <AgentTab /> : null)}
           {surface(
-            "runtimes",
-            visited.has("runtimes") ? (
+            "assistants",
+            visited.has("assistants") ? (
               <Suspense fallback={<RoutePending />}>
-                <RuntimesTab />
+                <AssistantsTab active={tab === "assistants"} onOpenSession={openSession} />
               </Suspense>
             ) : null,
           )}

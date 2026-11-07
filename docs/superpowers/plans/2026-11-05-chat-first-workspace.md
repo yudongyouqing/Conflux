@@ -267,9 +267,9 @@ GraphTab 接受外部 Graph、范围 key、active/loading/error 和既有选择�
 
 文件：`assistant-catalog.ts`、`assistants.test.ts`。
 
-- [ ] 写失败测试：模型/编码同 id 同名、不同 preset 同名、同 preset 多实例、会话无 preset、实例无 preset、session_id 未绑定、预设 live 与真实实例状态冲突。
-- [ ] 运行 `node --import tsx --test apps/web/test/assistants.test.ts`，确认缺失投影函数失败。
-- [ ] 定义最小前端投影接口，保持原始对象不含新业务规则：
+- [x] 写失败测试：模型/编码同 id 同名、不同 preset 同名、同 preset 多实例、会话无 preset、实例无 preset、session_id 未绑定、预设 live 与真实实例状态冲突。（assistants.test.ts 纯函数 6 条：实例绑定优先/agent_id 补充/按 session id 去重/孤儿分区/live 不采信）
+- [x] 运行聚焦测试确认缺失投影函数失败（apps/web 目录下运行）。
+- [x] 定义最小前端投影接口，保持原始对象不含新业务规则（assistant-catalog.ts：CodingAssistantItem/AssistantCatalog/buildAssistantCatalog，原始对象透传，无派生摘要混入密钥字段）：
 
 ```ts
 interface CodingAssistantItem {
@@ -287,15 +287,15 @@ interface AssistantCatalog {
 
 导出 `buildAssistantCatalog(agents, presets, instances, nodes)`：只按 `preset_id`、节点 `agent_id` 和实例 `session_id` 精确关联；不按名称、标题、目录或时间接近猜关联。已有实例 session_id 的匹配优先，节点 metadata 派生关联作为补充，最终按 session id 去重。
 
-- [ ] 聚焦测试验证同名不同对象不串、全部实例保留、未绑定实例没有虚构会话；API 密钥、extra_env 不进入摘要、搜索字段或持久化投影。
-- [ ] 通过后提交 `refactor(web): project assistant presets and runtime instances by identity`。
+- [x] 聚焦测试验证同名不同对象不串、全部实例保留、未绑定实例没有虚构会话；API 密钥、extra_env 不进入摘要、搜索字段或持久化投影。（投影不产生任何含密钥的派生文本，原始对象透传给既有渲染路径）
+- [x] 通过后提交 `refactor(web): project assistant presets and runtime instances by identity`。（与任务 8 合并为同一行为的两个 commit）
 
 ### 任务 8：统一助手页面与分类创建
 
 文件：`AssistantsTab.tsx`、`AgentTab.tsx`、`RuntimesTab.tsx`、`RuntimeInstancesPanel.tsx`、`CreateAgentWizard.tsx`、`App.tsx`、`Sidebar.tsx`、`assistants.test.ts`、`collaboration-controls.test.ts`。
 
-- [ ] 写挂载失败测试：一个助手入口、当前分类直接创建、创建后定位新对象、模型助手独立聊天、编码助手多个实例、孤儿实例可见、权限禁用与 limitation 原样显示。
-- [ ] 分类创建契约使用判别联合，避免两个不同接口返回的 id 混用：
+- [x] 写挂载失败测试：一个助手入口、当前分类直接创建、创建后定位新对象、模型助手独立聊天、编码助手多个实例、孤儿实例可见、权限禁用与 limitation 原样显示。（assistants.test.ts 挂载 4 条 + collaboration-controls 4 条守卫迁移到统一页）
+- [x] 分类创建契约使用判别联合，避免两个不同接口返回的 id 混用（CreatedAssistant 判别联合；wizard 内部 WizardKind agent/runtime 在一处适配映射，未实现第二套表单）：
 
 ```ts
 type CreatedAssistant =
@@ -309,10 +309,10 @@ interface CreateAssistantOptions {
 
 对外文案使用编码/模型；内部现有 WizardKind agent/runtime 可在一个适配位置转换。创建成功回传结果，不同时实现第二套创建表单。
 
-- [ ] 助手页复用现有列表、ChatPanel、PtyPanel、RuntimeInstanceRow。实例 panel 支持传入受控实例集合，旧独立调用默认行为保留到所有引用迁移完成。确认没有多个列表同时发起相同轮询。
-- [ ] 删除「在线/离线预设」分栏，展示实例状态及独立会话状态；启动按钮调用原接口，starting 实例先出现，真实 session_id 到达后才启用打开会话。停止/恢复只服从 can_stop/can_resume，按钮禁用时仍可阅读 limitation。
-- [ ] 类型切换/导航切换不执行 start/stop/resume，不关闭真实 CLI；PTY 隐藏时取消浏览器订阅、显示时重连。模型列表不提供入房按钮，外部会话仍能从聊天侧栏访问。
-- [ ] 迁移完成再移除原主导航 Agents/运行时重复入口，保持设置可达。web 全套、build、lint、tokens 和浏览器交互通过后创建 P3 PR，行为变更保持待审。
+- [x] 助手页复用 ChatPanel、PtyPanel、RuntimeInstanceRow；RuntimeInstancesPanel 支持受控实例集合（孤儿分区使用），全部引用随 AgentTab/RuntimesTab 删除完成迁移，未留双入口双轮询。
+- [x] 删除「在线/离线预设」分栏（编码卡展示身份来源的实例/会话统计与全部实例行）；启动调用原 /runtimes/:id/start，会话入口只来自真实 session_id（无绑定的 starting/ended 实例无入口）。停止/恢复沿用 can_stop/can_resume，limitation 原样展示。
+- [x] 类型切换/导航切换不执行 start/stop/resume（纯 UI 状态）；PTY 隐藏时（active=false）不订阅输出、恢复显示时重连，不启停进程。模型列表标明「独立对话」且无入房按钮；外部会话仍从聊天侧栏访问。
+- [x] 迁移完成已移除主导航 Agents/运行时重复入口（TabId 收敛为 chat/graph/messages/assistants/settings，底栏仅保留设置）。web 全套 124/124、build/lint/tokens、web-smoke（助手流重写）与 chat-first 冒烟 14/14 通过。
 
 提交建议：`feat(web): unify coding and model assistant management`。
 

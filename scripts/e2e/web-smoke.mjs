@@ -189,8 +189,11 @@ async function run() {
     );
     await page.screenshot({ path: join(ARTIFACTS, "message-retry-desktop.png"), fullPage: true });
 
-    await page.getByRole("button", { name: "运行时", exact: true }).click();
-    await page.getByRole("heading", { name: "运行实例", exact: true }).waitFor();
+    // unified assistants page: coding category default, orphan instances kept
+    await page.getByRole("button", { name: "助手", exact: true }).click();
+    await page.getByRole("button", { name: "创建编码助手", exact: true }).waitFor();
+    // the fixture preset owns both instances — expand its coding card
+    await page.getByText("协作控制验收").click();
     await page
       .getByText("尚未绑定可验证的运行时进程，无法安全停止", { exact: true })
       .first()
@@ -200,7 +203,7 @@ async function run() {
     for (const button of await stopButtons.all())
       assert.equal(await button.isDisabled(), true, "unverified fixture cannot stop any process");
     await page.screenshot({
-      path: join(ARTIFACTS, "runtime-instances-desktop.png"),
+      path: join(ARTIFACTS, "assistants-coding-desktop.png"),
       fullPage: true,
     });
     await page.setViewportSize({ width: 390, height: 844 });
@@ -209,17 +212,17 @@ async function run() {
     );
     assert.ok(
       await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
-      "runtime instances fit narrow viewport",
+      "assistants page fits narrow viewport",
     );
     await page.screenshot({
-      path: join(ARTIFACTS, "runtime-instances-narrow.png"),
+      path: join(ARTIFACTS, "assistants-coding-narrow.png"),
       fullPage: true,
     });
     await page.setViewportSize({ width: 1440, height: 900 });
 
-    await page.getByRole("button", { name: "Agents", exact: true }).click();
-    await page.getByRole("button", { name: "创建智能体", exact: true }).click();
-    await page.getByRole("button", { name: /模型智能体/ }).click();
+    // model assistants: category switch, direct-to-category creation
+    await page.getByRole("button", { name: "模型助手", exact: true }).click();
+    await page.getByRole("button", { name: "创建模型助手", exact: true }).click();
     const agentName = `e2e-agent-${Date.now()}`;
     await page.getByPlaceholder("名称 *").fill(agentName);
     await page.getByPlaceholder("模型 * (如 claude-sonnet-4-5)").fill("e2e-model");

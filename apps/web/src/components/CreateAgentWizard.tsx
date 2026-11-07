@@ -31,13 +31,32 @@ const runtimeGlyph = (id: string): ComponentType<{ size?: number; className?: st
 
 type WizardKind = "agent" | "runtime" | null;
 
-export function CreateAgentWizard({ open, onClose }: { open: boolean; onClose: () => void }) {
+/** Typed creation result: the two id namespaces are distinct — a coding
+ * preset id and a model agent id must never be interchangeable. */
+export type CreatedAssistant = { kind: "coding"; id: number } | { kind: "model"; id: number };
+
+export interface CreateAgentWizardProps {
+  open: boolean;
+  onClose: () => void;
+  /** Category the page opened the wizard from (skips the type chooser). */
+  initialKind?: "coding" | "model";
+  /** Receives the created object so the caller can locate it by identity. */
+  onCreated?: (created: CreatedAssistant) => void;
+}
+
+/** Single adapter between the page's user-facing kinds and the wizard's
+ *  internal machine kinds. */
+function wizardKindOf(kind: "coding" | "model"): WizardKind {
+  return kind === "coding" ? "runtime" : "agent";
+}
+
+export function CreateAgentWizard({ open, onClose, initialKind, onCreated }: CreateAgentWizardProps) {
   const [kind, setKind] = useState<WizardKind>(null);
 
-  // re-open always starts from the type chooser, forms reset
+  // re-open always starts from the caller's category (or the chooser), reset
   useEffect(() => {
-    if (open) setKind(null);
-  }, [open]);
+    if (open) setKind(initialKind ? wizardKindOf(initialKind) : null);
+  }, [open, initialKind]);
 
   if (!open) return null;
 
@@ -47,6 +66,9 @@ export function CreateAgentWizard({ open, onClose }: { open: boolean; onClose: (
       onClick={onClose}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="创建智能体"
         className="bg-surface border border-line rounded-2xl shadow-overlay w-full max-w-lg max-h-[88vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
@@ -64,12 +86,18 @@ export function CreateAgentWizard({ open, onClose }: { open: boolean; onClose: (
         ) : kind === "agent" ? (
           <>
             <StepBack onBack={() => setKind(null)} label="模型智能体" />
-            <AgentCreateForm onClose={onClose} />
+            <AgentCreateForm
+              onClose={onClose}
+              onCreated={(id) => onCreated?.({ kind: "model", id })}
+            />
           </>
         ) : (
           <>
             <StepBack onBack={() => setKind(null)} label="CLI 运行时" />
-            <RuntimeCreateForm onClose={onClose} />
+            <RuntimeCreateForm
+              onClose={onClose}
+              onCreated={(id) => onCreated?.({ kind: "coding", id })}
+            />
           </>
         )}
       </div>
@@ -132,7 +160,13 @@ function TypeChooser({ onPick }: { onPick: (k: "agent" | "runtime") => void }) {
 
 const PROVIDERS = ["anthropic", "openai", "google", "mistral", "local"];
 
-function AgentCreateForm({ onClose }: { onClose: () => void }) {
+function AgentCreateForm({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: (id: number) => void;
+}) {
   const createMut = useCreateAgent();
   const [form, setForm] = useState({
     name: "",
@@ -154,7 +188,12 @@ function AgentCreateForm({ onClose }: { onClose: () => void }) {
         },
         description: form.description || undefined,
       },
-      { onSuccess: onClose },
+      {
+        onSuccess: (data) => {
+          onCreated(data.agent.id);
+          onClose();
+        },
+      },
     );
   };
 
@@ -293,7 +332,13 @@ function useKnownProjectDirs(): string[] {
   }, [sessions.data]);
 }
 
-function RuntimeCreateForm({ onClose }: { onClose: () => void }) {
+function RuntimeCreateForm({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: (id: number) => void;
+}) {
   const create = useCreateRuntimeAgent();
   const runtimes = useRuntimes();
   const [form, setForm] = useState(EMPTY_RUNTIME_FORM);
@@ -334,7 +379,12 @@ function RuntimeCreateForm({ onClose }: { onClose: () => void }) {
         instructions: form.instructions || undefined,
         interval_min: form.interval_min.trim() ? Number(form.interval_min) : undefined,
       },
-      { onSuccess: onClose },
+      {
+        onSuccess: (data) => {
+          onCreated(data.agent.id);
+          onClose();
+        },
+      },
     );
   };
 

@@ -7,7 +7,17 @@ import { Terminal, Send } from "lucide-react";
  * what's happening" + a manual inject box. The wake system injects
  * automatically; this lets the human do it too.
  */
-export function PtyPanel({ agentId, agentName }: { agentId: number; agentName: string }) {
+export function PtyPanel({
+  agentId,
+  agentName,
+  active = true,
+}: {
+  agentId: number;
+  agentName: string;
+  /** Hidden pages unsubscribe: no background output streaming, and the
+   *  terminal process itself is never started or stopped by navigation. */
+  active?: boolean;
+}) {
   const [buffer, setBuffer] = useState("");
   const [alive, setAlive] = useState(false);
   const [injectText, setInjectText] = useState("");
@@ -21,7 +31,7 @@ const pty = (globalThis as any).confluxPty as {
 } | undefined;
 
   useEffect(() => {
-    if (!pty || !agentId) return;
+    if (!pty || !agentId || !active) return;
     let unsub: (() => void) | undefined;
 
     const init = async () => {
@@ -34,7 +44,7 @@ const pty = (globalThis as any).confluxPty as {
     };
     init();
     return () => unsub?.();
-  }, [agentId, pty]);
+  }, [agentId, pty, active]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
