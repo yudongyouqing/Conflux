@@ -84,4 +84,12 @@ if (process.argv.includes("--chat-first")) {
     description: "chat-first 冒烟假会话（无 runtime，不可唤醒）",
     project_dir: home,
   });
+  // same DISPLAY name, different id: the @-mention picker must tell them
+  // apart by id hint, never by position
+  registerSession(db, {
+    id: "cap-chat-twin",
+    name: "验收会话",
+    description: "重名冒烟假会话（无 runtime，不可唤醒）",
+    project_dir: home,
+  });
 }

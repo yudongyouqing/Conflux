@@ -105,6 +105,17 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e:web
+      # serial after web-smoke: both drive real servers on adjacent ports
+      - run: npm run test:e2e:chat-first
+      - name: Upload browser evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chat-first-evidence
+          path: |
+            test-results/e2e/chat-first
+            test-results/e2e
+          retention-days: 7
 
   build:
     runs-on: ubuntu-latest
@@ -117,5 +128,5 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run lint
-      - run: node --test scripts/release-config.test.cjs scripts/packaged-module-smoke.test.cjs
+      - run: node --test scripts/release-config.test.cjs scripts/packaged-module-smoke.test.cjs scripts/e2e/chat-first-smoke.test.mjs
       - run: npm run check:tokens

@@ -25,6 +25,7 @@ register(new URL("./css-stub-loader.mjs", import.meta.url));
 
 afterEach(() => {
   cleanup();
+  for (const client of liveClients.splice(0)) client.clear();
   mock.restoreAll();
   dom.window.localStorage.clear();
 });
@@ -170,8 +171,10 @@ function makeState(overrides: Partial<ApiState> = {}): ApiState {
   };
 }
 
+const liveClients: QueryClient[] = [];
 function mountApp() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+  liveClients.push(client);
   const view = render(createElement(QueryClientProvider, { client }, createElement(App)));
   return { ...view, client };
 }

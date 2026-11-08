@@ -52,6 +52,7 @@ Claude Code (voice-agent) ──asks──▶ Codex (winGhostty)
    ▲ publishes a note → searchable by any session via search_sessions
 ```
 
+- **Chat-first workspace**: the app opens straight into chat — room broadcasts / `@` directed tasks, recent-session DMs, per-target drafts; see [docs/CHAT-FIRST-WORKSPACE.md](./CHAT-FIRST-WORKSPACE.md)
 - **Session graph**: nodes are sessions (liveness + busy state), edges are directed conversation channels
 - **Async messaging**: ask another session, offline targets are headlessly woken, `/resume` lineage carries over
 - **Capability search**: a session's self-description (name/description/skills) is its index — `search_sessions` returns only live sessions you're allowed to ask

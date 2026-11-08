@@ -14,8 +14,12 @@ Object.assign(globalThis, {
 });
 Object.defineProperty(globalThis, "navigator", { configurable: true, value: dom.window.navigator });
 const { cleanup } = await import("@testing-library/react");
+// created QueryClients land here; afterEach clears them so polling timers
+// die with the tests instead of holding the process open
+const liveClients: Array<{ clear(): void }> = [];
 afterEach(() => {
   cleanup();
+  for (const client of liveClients.splice(0)) client.clear();
   mock.restoreAll();
   dom.window.localStorage.clear();
 });
@@ -216,6 +220,7 @@ function mountAssistants(state: AssistantsState) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: Infinity } },
   });
+  liveClients.push(client);
   const view = render(
     createElement(
       QueryClientProvider,
@@ -392,6 +397,7 @@ function withPtyFake(fake: {
 
 function mountPty(active: boolean) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  liveClients.push(client);
   const view = render(
     createElement(
       QueryClientProvider,

@@ -26,15 +26,19 @@ const { cleanup, renderHook, waitFor } = await import("@testing-library/react");
 
 afterEach(() => {
   cleanup();
+  // release polling timers so a focused run exits with its tests
+  for (const client of liveClients.splice(0)) client.clear();
   mock.restoreAll();
 });
 
 after(() => dom.window.close());
 
+const liveClients: QueryClient[] = [];
 function setupHook<T>(callback: () => T) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: Infinity } },
   });
+  liveClients.push(queryClient);
   const wrapper = ({ children }: { children: ReactNode }) =>
     createElement(QueryClientProvider, { client: queryClient }, children);
   const rendered = renderHook(callback, { wrapper });

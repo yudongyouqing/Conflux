@@ -268,7 +268,7 @@ export function RoomChat({
               >
                 <StatusDot status={m.status} busy={m.busy} />
                 <span className="font-medium">{m.name}</span>
-                <span className="text-ink-faint text-2xs ml-auto">{m.id.slice(0, 8)}</span>
+                <span className="text-ink-faint text-2xs ml-auto">{m.id.slice(0, 12)}</span>
               </button>
             ))}
           </div>
