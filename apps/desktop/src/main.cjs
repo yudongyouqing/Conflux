@@ -472,5 +472,12 @@ if (!hasSingleInstanceLock) {
   });
 
   // Closing the last window hides it; the tray remains the explicit exit path.
-  app.on("window-all-closed", () => {});
+  // The env opt-in below is an E2E affordance (same spirit as
+  // CONFLUX_DISABLE_AUTO_UPDATE): packaged-app tests drive the real
+  // BrowserWindow close via CDP and need the app to run its full
+  // before-quit teardown (services stopped, port released) without a
+  // human clicking the tray menu.
+  app.on("window-all-closed", () => {
+    if (process.env.CONFLUX_QUIT_ON_LAST_WINDOW_CLOSED === "1") app.quit();
+  });
 }

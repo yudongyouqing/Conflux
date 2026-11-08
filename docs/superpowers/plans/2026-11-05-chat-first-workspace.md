@@ -354,7 +354,7 @@ npm run check:secrets
 
 若触及 server/shared 协议或生产进程逻辑，再补受影响的 server 测试与 `npm run test:process-e2e -w apps/server`，后二者不能在高负载下互相并行。本计划正常范围无需重新跑 30 分钟 soak，也无需重录数据库基线。
 
-- [x] 打包产物经 Release 工作流 workflow_dispatch 在 windows-latest 构建（本地路径含空格 + VS 缺 Spectre 库，按计划走 CI，#290 跟踪）：记录版本与 SHA-256；win-unpacked 以隔离 CONFLUX_HOME 启动做导航冒烟与正常退出（详见 PR 描述的 PID/端口记录）。
+- [x] 打包产物经 Release 工作流 workflow_dispatch 在 windows-latest 构建（本地路径含空格 + VS 缺 Spectre 库，按计划走 CI，#290 跟踪）：记录版本与 SHA-256；win-unpacked 隔离运行做导航冒烟（复审补强：启动前 9527/9333 预检 + --user-data-dir 隔离与真实 userData 指纹比对 + 9527 监听者按进程树归属本次启动；正常退出经 CONFLUX_QUIT_ON_LAST_WINDOW_CLOSED 测试开关走真实 before-quit 拆链并验证 PID/端口释放，强杀仅作判失败的兜底）。
 - [ ] 单独验证安装路径和快捷方式：使用独立测试目录与快捷方式，保留安装前的真实桌面入口；核对快捷方式 TargetPath→文件 ProductVersion→运行 app.getVersion 三者一致，并从该入口启动。仅运行解包目录不能标记「安装与快捷方式验收」通过。测试启动必须继承已证明的隔离环境，不能双击默认配置来试真实库。（未完成：安装会写真实桌面/开始菜单入口，未获用户授权不动真实入口；获授权后从 CI 产物安装到独立目录执行本项）
 - [x] 未更新用户日常桌面入口（无授权）；未清理旧安装/QA 目录；进程清理仅按记录的 PID（taskkill /pid）。
 - [x] 规格验收 A01—A13 证据映射落在 docs/CHAT-FIRST-WORKSPACE.md（A13 标注 CI 构建 + 本地隔离运行证据，安装/快捷方式项保持未完成并说明）；CHANGELOG 全部在 Unreleased，未宣称已发布能力；macOS/Linux 打包与真实宿主验收缺设备未完成（#267/#288/#289）。

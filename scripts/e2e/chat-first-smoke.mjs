@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 import { chromium } from "playwright";
@@ -41,6 +41,27 @@ async function pickPort(candidates, label) {
   throw new Error(`${label}: no free port among ${candidates.join(", ")}`);
 }
 
+/**
+ * Browser lifecycle seam: the browser closes on EVERY path — steps throwing,
+ * steps finishing, anything in between. Exported for the cleanup regression
+ * (chat-first-smoke.test.mjs); the smoke body itself runs through main().
+ */
+export async function withBrowser(launchBrowser, steps) {
+  const browser = await launchBrowser();
+  try {
+    return await steps(browser);
+  } finally {
+    await browser.close().catch(() => {});
+  }
+}
+
+const isMainModule = () => {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  return import.meta.url === pathToFileURL(entry).href;
+};
+
+async function main() {
 const SERVER_PORT = await pickPort(PORT_CANDIDATES, "server");
 const WEB_PORT = await pickPort(WEB_PORT_CANDIDATES, "vite");
 const API = `http://127.0.0.1:${SERVER_PORT}`;
@@ -116,7 +137,7 @@ try {
     stdio: "inherit",
   });
 
-  const browser = await chromium.launch();
+  await withBrowser(async () => chromium.launch(), async (browser) => {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const outbound = [];
   page.on("request", (request) => outbound.push(request.url()));
@@ -358,8 +379,7 @@ try {
   await errorPage.screenshot({ path: join(ARTIFACTS, "error-1440.png"), fullPage: true });
   await errorPage.close();
   ok("a failing room list shows error + retry, never the guide");
-
-  await browser.close();
+  }); // withBrowser — closes the browser on success AND failure
 
   console.log(`\nchat-first smoke: ${passed.length} checks passed`);
   console.log(`artifacts: ${ARTIFACTS}`);
@@ -377,4 +397,9 @@ try {
   } else {
     console.error(`kept isolated home for inspection: ${home}`);
   }
+}
+}
+
+if (isMainModule()) {
+  await main();
 }

@@ -24,7 +24,7 @@
     "perf:contention": "npm run build -w packages/shared && npm run build -w apps/server && node scripts/performance/contention.cjs",
     "perf:soak": "npm run build -w packages/shared && npm run build -w apps/server && node scripts/performance/soak.cjs",
     "test:perf:server": "npm run build -w packages/shared && npm run build -w apps/server && node --test scripts/performance/*.test.cjs",
-    "ci:test": "npm test -w apps/server && npm run test:desktop && node --test scripts/release-config.test.cjs && npm run check:tokens && npm run test:process-e2e -w apps/server",
+    "ci:test": "npm test -w apps/server && npm run test:desktop && node --test scripts/release-config.test.cjs scripts/e2e/chat-first-smoke.test.mjs && npm run check:tokens && npm run test:process-e2e -w apps/server",
     "ci:build": "npm run build",
     "verify:desktop-package": "node apps/desktop/test/package-smoke.cjs",
     "check:secrets": "node scripts/check-secrets.cjs",

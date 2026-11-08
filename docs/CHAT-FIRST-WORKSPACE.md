@@ -54,15 +54,21 @@ Conflux 打开即进入聊天工作界面：左侧是聊天室与最近会话，
 | A10 can_stop/can_resume=false 禁用并说明 | `collaboration-controls.test.ts` 4 条守卫 |
 | A11 活动记录与外部边对话保留 | `workspace.test.ts` 活动分流、web-smoke |
 | A12 四宽度布局与键盘可用 | 冒烟截图 1440/1024/390/320；Esc 焦点单测 |
-| A13 打包入口、版本一致、退出释放 | Release 工作流手动构建产物 + 本地隔离运行记录（见下） |
+| A13 打包入口、版本一致、退出释放 | **部分**：Release 工作流产物 + 版本/hash 核对 + 隔离运行与退出释放（packaged-desktop-check）；安装/快捷方式与多平台实机未完成（见下） |
 
 截图与运行记录：`test-results/e2e/chat-first/`（本地隔离运行）与 CI 工件 `conflux-Windows-*`。
 
 ### 桌面打包验收记录（Windows）
 
 - 产物：Release 工作流（workflow_dispatch，非 tag 不发布）构建的 NSIS 安装器 + win-unpacked；版本与 hash 记录见 PR 描述。
-- 本地运行：win-unpacked 以隔离 `CONFLUX_HOME` 启动，服务端与数据均落在隔离目录；正常退出后 9527 与进程释放。
-- 本机限制：源码路径含空格 + VS BuildTools 缺 Spectre 库，原生重建按计划走 CI（#290 跟踪）；安装路径与快捷方式验收涉及真实桌面入口，未获授权保持未完成（关联 #267/#288/#289）。
+- 本地运行（packaged-desktop-check.mjs）：启动前预检 9527/9333 占用；隔离 `CONFLUX_HOME` + `--user-data-dir` 双临时目录；9527 监听者按进程树归属到本次启动的 PID；真实 Electron userData 目录前后指纹比对必须一致。导航（聊天默认→图谱→助手）经 CDP 实测。
+- 正常退出：产品的显式退出路径仅托盘菜单（`window-all-closed` 为 no-op），外部原本无法优雅触发。为此新增测试开关 `CONFLUX_QUIT_ON_LAST_WINDOW_CLOSED=1`（与 `CONFLUX_DISABLE_AUTO_UPDATE` 同类的 E2E 专用 env）：验收脚本经 CDP Browser.close 触发完整 before-quit 拆链并验证 PID/端口释放；强杀只作失败兜底，一旦使用该项判失败、脚本非零退出。
+- 未完成项：安装路径/快捷方式三一致验收（写真实桌面入口，未获授权）；macOS/Linux 实机与真实宿主（#267/#288/#289）。
+- 本机限制：源码路径含空格 + VS BuildTools 缺 Spectre 库，原生重建按计划走 CI（#290 跟踪）。
+
+### 事故记录（2026-11-08，如实保留）
+
+任务执行期间误以 `--version` 探测打包 exe，直接启动了未隔离实例约 9 分钟（其内嵌 server 打开真实 `~/.muiltchat`），随后按 PID 树终止。**影响评估为未知**：主库 mtime 未变、WAL 大小未增长都不能证明零逻辑写入（SQLite 打开/关闭本身会触碰 WAL）；期间无 UI 交互。教训：打包 Electron exe 禁用 `--version` 探测；版本核验走 exe 版本资源或 CDP。
 
 ## 常见问题
 
