@@ -61,7 +61,7 @@ Conflux 打开即进入聊天工作界面：左侧是聊天室与最近会话，
 ### 桌面打包验收记录（Windows）
 
 - 产物：Release 工作流（workflow_dispatch，非 tag 不发布）构建的 NSIS 安装器 + win-unpacked；版本与 hash 记录见 PR 描述。
-- 本地运行（packaged-desktop-check.mjs）：启动前预检 9527/9333 占用；隔离 `CONFLUX_HOME` + `--user-data-dir` 双临时目录；9527 监听者按进程树归属到本次启动的 PID；真实 Electron userData 目录前后指纹比对必须一致。导航（聊天默认→图谱→助手）经 CDP 实测。
+- 本地运行（packaged-desktop-check.mjs）：启动前预检 9527/9333 占用；隔离 `CONFLUX_HOME` + `--user-data-dir` 双临时目录；9527 监听者按进程树归属到本次启动的 PID——**隔离结论以实际生效路径与实例归属为准**；真实 userData 目录的文件数量与总大小前后一致作为辅助信号（非逐字节比对）。导航（聊天默认→图谱→助手）经 CDP 实测。
 - 正常退出：产品的显式退出路径仅托盘菜单（`window-all-closed` 为 no-op），外部原本无法优雅触发。为此新增测试开关 `CONFLUX_QUIT_ON_LAST_WINDOW_CLOSED=1`（与 `CONFLUX_DISABLE_AUTO_UPDATE` 同类的 E2E 专用 env）：验收脚本经 CDP Browser.close 触发完整 before-quit 拆链并验证 PID/端口释放；强杀只作失败兜底，一旦使用该项判失败、脚本非零退出。
 - 未完成项：安装路径/快捷方式三一致验收（写真实桌面入口，未获授权）；macOS/Linux 实机与真实宿主（#267/#288/#289）。
 - 本机限制：源码路径含空格 + VS BuildTools 缺 Spectre 库，原生重建按计划走 CI（#290 跟踪）。

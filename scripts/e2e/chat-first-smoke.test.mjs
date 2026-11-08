@@ -61,3 +61,40 @@ test("withBrowser propagates launch failures without calling close", async () =>
   );
   assert.deepEqual(log, ["launch"]);
 });
+
+function failingCloseBrowser(log) {
+  return {
+    close: async () => {
+      log.push("close-failed");
+      throw new Error("close exploded");
+    },
+  };
+}
+
+test("a failing browser.close fails the run after successful steps", async () => {
+  // a swallowed close error here would report a green run with a live browser
+  const log = [];
+  await assert.rejects(
+    withBrowser(
+      async () => failingCloseBrowser(log),
+      async () => log.push("steps"),
+    ),
+    /close exploded/,
+  );
+  assert.deepEqual(log, ["steps", "close-failed"]);
+});
+
+test("a failing browser.close never masks the original step error", async () => {
+  const log = [];
+  await assert.rejects(
+    withBrowser(
+      async () => failingCloseBrowser(log),
+      async () => {
+        log.push("steps");
+        throw new Error("business failure");
+      },
+    ),
+    /business failure/,
+  );
+  assert.deepEqual(log, ["steps", "close-failed"]);
+});

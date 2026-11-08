@@ -48,10 +48,28 @@ async function pickPort(candidates, label) {
  */
 export async function withBrowser(launchBrowser, steps) {
   const browser = await launchBrowser();
+  let stepsError;
+  let stepsThrew = false;
   try {
     return await steps(browser);
+  } catch (error) {
+    stepsThrew = true;
+    stepsError = error;
+    throw error;
   } finally {
-    await browser.close().catch(() => {});
+    try {
+      await browser.close();
+    } catch (closeError) {
+      if (!stepsThrew) {
+        // steps succeeded — a failed cleanup IS the run's failure; a
+        // swallowed close here would report a green run with a live browser
+        throw closeError;
+      }
+      // steps already failed: keep the original business error as the
+      // rejection, but never lose the cleanup failure silently
+      console.error("chat-first: browser close failed after step failure:", closeError);
+      void stepsError;
+    }
   }
 }
 

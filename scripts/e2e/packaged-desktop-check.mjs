@@ -7,8 +7,10 @@
  *  - ports 9527 (production API) and 9333 (CDP) are free BEFORE launch;
  *  - CONFLUX_HOME points at a fresh temp dir AND the app gets
  *    --user-data-dir at its own fresh temp dir (Electron userData/sessionData);
- *  - the real Electron userData tree is snapshotted before/after and must
- *    be byte-identical (anything the switch fails to redirect shows up here);
+ *  - the real Electron userData tree's file count and total size are
+ *    compared before/after (a coarse signal — same-length rewrites would
+ *    pass; isolation itself rests on the effective paths and instance
+ *    attribution above);
  *  - the healthy 9527 listener is attributed to THIS launch by walking the
  *    process tree up to the recorded app pid (a fresh dir alone does not
  *    prove which instance answered).
@@ -66,8 +68,8 @@ async function waitFor(fn, { timeoutMs = 30_000, label = "condition" }) {
   throw new Error(`timed out waiting for ${label}`);
 }
 
-/** Recursive fingerprint (count + total bytes) of the REAL Electron
- *  userData tree — the isolation oracle for --user-data-dir. */
+/** Count + total bytes of the REAL Electron userData tree — a coarse
+ *  unchanged-signal, not a byte-level oracle. */
 function snapshotUserData() {
   if (!existsSync(REAL_USER_DATA)) return "absent";
   const out = ps(
@@ -124,7 +126,7 @@ const userDataDir = mkdtempSync(join(tmpdir(), "conflux-packaged-userdata-"));
 const userDataBefore = snapshotUserData();
 console.log("isolated CONFLUX_HOME:", home);
 console.log("isolated --user-data-dir:", userDataDir);
-console.log("real userData fingerprint (before):", userDataBefore);
+console.log("real userData count:size (before):", userDataBefore);
 
 // ---- launch ----------------------------------------------------------------
 
@@ -235,9 +237,9 @@ const userDataAfter = snapshotUserData();
 assert.equal(
   userDataAfter,
   userDataBefore,
-  "the real Electron userData tree changed during the run — isolation failed",
+  "real userData count/size changed during the run (coarse signal — investigate)",
 );
-console.log("✓ real userData tree untouched (fingerprint identical)");
+console.log("✓ real userData count/size unchanged (coarse signal; isolation rests on paths + attribution)");
 
 console.log(`exit: ${exitPath} (${exitCheckPassed ? "graceful, verified" : "FAILED, forced"})`);
 console.log("ALL PACKAGED CHECKS " + (exitCheckPassed ? "PASSED" : "FAILED (exit)"));

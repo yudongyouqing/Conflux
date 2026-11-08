@@ -128,5 +128,5 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run lint
-      - run: node --test scripts/release-config.test.cjs scripts/packaged-module-smoke.test.cjs
+      - run: node --test scripts/release-config.test.cjs scripts/packaged-module-smoke.test.cjs scripts/e2e/chat-first-smoke.test.mjs
       - run: npm run check:tokens
