@@ -129,9 +129,12 @@ console.log("real userData fingerprint (before):", userDataBefore);
 // ---- launch ----------------------------------------------------------------
 
 // PowerShell 5.1 Start-Process has no -Environment; isolation flows through
-// the session environment. --version would LAUNCH the app — never use it.
+// the session environment. CONFLUX_QUIT_ON_LAST_WINDOW_CLOSED is the E2E
+// exit affordance: CDP Browser.close then reaches the real before-quit
+// teardown instead of dying in the tray. --version would LAUNCH the app.
 const launched = ps(
-  `$env:CONFLUX_HOME='${home}'; $p = Start-Process -FilePath '${exe}' ` +
+  `$env:CONFLUX_HOME='${home}'; $env:CONFLUX_QUIT_ON_LAST_WINDOW_CLOSED='1'; ` +
+    `$p = Start-Process -FilePath '${exe}' ` +
     `-ArgumentList '--remote-debugging-port=${DEBUG_PORT}','--user-data-dir=${userDataDir}' ` +
     `-PassThru; $p.Id`,
 ).trim();
@@ -190,11 +193,14 @@ try {
   assert.match(fileVersion, /^0\.3\.1(\.0)?$/, "running version matches the package");
 
   // ---- explicit quit path, then wait -------------------------------------
-  // CDP Browser.close is the automatable quit invocation (equivalent to
-  // closing every window); the tray-only design means we VERIFY rather than
-  // assume it exits.
-  exitPath = "cdp-browser-close";
-  await browser.close();
+  // Closing every PAGE target (Target.closeTarget) closes the real
+  // BrowserWindows; with the E2E env set, the last window closing runs the
+  // app's actual before-quit teardown. CDP Browser.close alone does NOT
+  // close Electron windows — verified empirically on this very build.
+  exitPath = "cdp-window-close";
+  const pages = browser.contexts().flatMap((ctx) => ctx.pages());
+  await Promise.all(pages.map((pg) => pg.close()));
+  await browser.close().catch(() => {});
   browser = undefined;
   exitCheckPassed = await waitFor(
     async () => !pidAlive(appPid) && !(await portOpen(PROD_PORT)),
