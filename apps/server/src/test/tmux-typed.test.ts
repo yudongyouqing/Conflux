@@ -256,7 +256,7 @@ test("projectHasConfluxMcp: detects a Conflux mount under either key", () => {
   assert.equal(projectHasConfluxMcp(null), false, "no project dir");
 });
 
-test("wake: project that mounts Conflux itself resumes WITHOUT the extra --mcp-config", () => {
+test("wake: an existing project mount is OVERRIDDEN by the pinned db mount", () => {
   const db = freshDb();
   const projDir = tempProjectDir(`{"mcpServers":{"conflux":{"command":"conflux","args":["mcp"]}}}`);
   registerSession(db, { id: "asker", name: "提问方" });
@@ -272,7 +272,9 @@ test("wake: project that mounts Conflux itself resumes WITHOUT the extra --mcp-c
   assert.equal(res.woke, true);
   assert.equal(rec.launches.length, 1);
   assert.ok(rec.launches[0].command.includes("--resume"), "still resumes the real conversation");
-  assert.ok(!rec.launches[0].command.includes("--mcp-config"), "no extra mount — tools array unchanged, prefix intact");
+  // policy: a project mount's presence proves nothing about its database —
+  // the same-named pinned mount overrides it (tools array shape unchanged)
+  assert.ok(rec.launches[0].command.includes("--mcp-config"), "pinned mount overrides the project's own");
 });
 
 test("wake: runtime-agent session resumes with its --append-system-prompt", () => {

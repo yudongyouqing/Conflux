@@ -309,7 +309,9 @@ export function startRuntimeAgent(
   if (platform === "darwin") env.CONFLUX_TMUX_SESSION = tmuxName;
   if (opts.resumeSessionId) env.CONFLUX_RESUME_SESSION_ID = opts.resumeSessionId;
   if (agent.runtime === "codex") args.push(...buildCodexManagedMcpArgs(env, db));
-  else if (!projectHasConfluxMcp(agent.workdir))
+  else
+    // a project mount's presence proves nothing about its database —
+    // always override with this server's pinned mount
     args.push(
       "--mcp-config",
       ensureWakeMcpConfig(dirname(db.name), undefined, managedMcpLaunch(db)),

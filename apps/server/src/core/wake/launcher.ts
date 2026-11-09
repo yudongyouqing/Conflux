@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { cleanTerminalEnv } from "../terminal.js";
 import { resolveConfig } from "../../config.js";
-import { withMcpConfig, projectHasConfluxMcp } from "./commands.js";
+import { withMcpConfig } from "./commands.js";
 import { setSetting } from "../app-settings.js";
 import { psMatchClauses } from "../runtime-identity.js";
 import { logger } from "../../log.js";
@@ -115,6 +115,27 @@ export function pinnedMcpLaunch(dataDir: string): {
 }
 
 /**
+ * Codex config overrides pinning the mounted conflux server to one data
+ * dir. Codex scrubs MCP child environments, so env pinning cannot work
+ * there — codex wakes must carry the library in their -c config
+ * overrides or the executor lands on whatever database the host config
+ * happens to name.
+ */
+export function codexPinnedMcpArgs(dataDir: string): string[] {
+  const literal = (value: string) => (value.includes("'") ? `'''${value}'''` : `'${value}'`);
+  const launch = pinnedMcpLaunch(dataDir);
+  return [
+    "-c",
+    `mcp_servers.conflux.command=${literal(launch.command)}`,
+    "-c",
+    `mcp_servers.conflux.args=[${launch.args.map(literal).join(",")}]`,
+    ...(process.versions.electron
+      ? ["-c", "mcp_servers.conflux.env.ELECTRON_RUN_AS_NODE='1'"]
+      : []),
+  ];
+}
+
+/**
  * The server entry that can host the MCP server: resolved from THIS module's
  * location (src via tsx → index.ts, compiled dist → index.js). Never from
  * process.argv — that breaks whenever the wake is launched from a script
@@ -147,15 +168,14 @@ export function launchWakeRun(req: LaunchRequest): LaunchResult {
   // deriving from config again here is exactly how the split-database
   // regressions happened (room tasks invisible to their own executors).
   const dataDir = req.dataDir ?? dirname(req.db.name);
+  // Pin policy: EVERY launch this server controls carries an explicit
+  // same-database mount. A project .mcp.json that names conflux proves
+  // nothing about WHICH database it targets — presence alone must never
+  // bypass pinning (a same-named CLI mount overrides it without changing
+  // the tools array shape, so the cached-prefix cost stays bounded).
   const command = req.pinCodex
-    ? req.command
-    : withMcpConfig(
-        req.command,
-        // pinned to the orchestrator's home AND dir-pinned inside the mount
-        projectHasConfluxMcp(req.projectDir)
-          ? null
-          : ensureWakeMcpConfig(dataDir, undefined, pinnedMcpLaunch(dataDir)),
-      );
+    ? `${req.command} ${codexPinnedMcpArgs(dataDir).join(" ")}`
+    : withMcpConfig(req.command, ensureWakeMcpConfig(dataDir, undefined, pinnedMcpLaunch(dataDir)));
   // dry-run previews the REAL command (mount config included); it writes
   // the idempotent wake-mcp.json but spawns nothing
   if (req.dryRun) return { ok: true, command };
