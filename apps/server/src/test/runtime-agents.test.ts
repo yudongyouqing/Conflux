@@ -239,7 +239,9 @@ test("wakeSessionForMail: guards, dedup and command shape", () => {
     // claude has NO thread lock, so idle wake resumes the real conversation
     // (full context, reply in actual history) whenever a transcript exists
     assert.ok(idle.command?.includes("--resume wake-alive"), "resumes the real conversation");
-    assert.ok(idle.command?.trimEnd().endsWith("-p"), "headless prompt via stdin");
+    // the dry-run previews the REAL command: -p for stdin, plus the
+    // db-pinned --mcp-config mount appended after it
+    assert.ok(idle.command?.includes("-p"), "headless prompt via stdin");
   }
 
   // offline claude session → dry-run returns the full wake command.
@@ -277,7 +279,7 @@ test("wakeSessionForMail: guards, dedup and command shape", () => {
   assert.equal(w.woke, true);
   if (w.woke) {
     assert.ok(w.command?.includes("--resume wake-dead"), "resumes the conversation");
-    assert.ok(w.command?.trimEnd().endsWith("-p"), "headless prompt via stdin");
+    assert.ok(w.command?.includes("-p"), "headless prompt via stdin");
   }
 
   // global opt-out

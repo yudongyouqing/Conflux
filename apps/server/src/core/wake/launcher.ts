@@ -1,6 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, writeFileSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { cleanTerminalEnv } from "../terminal.js";
 import { resolveConfig } from "../../config.js";
 import { withMcpConfig, projectHasConfluxMcp } from "./commands.js";
@@ -88,6 +89,32 @@ export function ensureWakeMcpConfig(
 }
 
 /**
+ * MCP mount launch pinned to one data dir via --data-dir: the mounted
+ * conflux server resolves THAT database no matter what environment the
+ * host CLI passes (or scrubs) — the executor lands on the orchestrator's
+ * library even when a resumed session carries user-level MCP config.
+ * Single source of truth; runtime-agents' managed mounts delegate here.
+ */
+export function pinnedMcpLaunch(dataDir: string): {
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+} {
+  const entry = defaultServerEntry();
+  return {
+    command: process.execPath,
+    args: [
+      ...(entry.endsWith(".ts") ? ["--import", pathToFileURL(require.resolve("tsx")).href] : []),
+      entry,
+      "--data-dir",
+      dataDir,
+      "mcp",
+    ],
+    ...(process.versions.electron ? { env: { ELECTRON_RUN_AS_NODE: "1" } } : {}),
+  };
+}
+
+/**
  * The server entry that can host the MCP server: resolved from THIS module's
  * location (src via tsx → index.ts, compiled dist → index.js). Never from
  * process.argv — that breaks whenever the wake is launched from a script
@@ -115,7 +142,23 @@ export function launchWakeRun(req: LaunchRequest): LaunchResult {
     );
     return { ok: false, error };
   }
-  if (req.dryRun) return { ok: true, command: req.command };
+  // The data dir ALWAYS comes from the caller's db handle unless explicitly
+  // overridden: a server on a custom home wakes executors onto THAT home —
+  // deriving from config again here is exactly how the split-database
+  // regressions happened (room tasks invisible to their own executors).
+  const dataDir = req.dataDir ?? dirname(req.db.name);
+  const command = req.pinCodex
+    ? req.command
+    : withMcpConfig(
+        req.command,
+        // pinned to the orchestrator's home AND dir-pinned inside the mount
+        projectHasConfluxMcp(req.projectDir)
+          ? null
+          : ensureWakeMcpConfig(dataDir, undefined, pinnedMcpLaunch(dataDir)),
+      );
+  // dry-run previews the REAL command (mount config included); it writes
+  // the idempotent wake-mcp.json but spawns nothing
+  if (req.dryRun) return { ok: true, command };
 
   // Identity, two channels (either suffices):
   //  1. env CONFLUX_ASSUME_SESSION — claude passes a full env to MCP
@@ -124,18 +167,12 @@ export function launchWakeRun(req: LaunchRequest): LaunchResult {
   //     looking up `codex-current:<pid>`. Spawn first, pin immediately
   //     (the npm/tsx MCP chain takes seconds to boot — the pin always lands
   //     before the first tryAdopt), and the wake run acts as the target.
-  const env = wakeRunEnv(req);
+  const env = wakeRunEnv({ ...req, dataDir });
   env.CONFLUX_ASSUME_SESSION = req.sessionId;
   // claude wakes (pinCodex === false) get an explicit MCP mount so the
   // headless run can always reach check_inbox/reply_ask — but only
   // when the project doesn't already mount Conflux itself: an extra mount
   // changes the tools array and invalidates the whole cached prefix
-  const command = req.pinCodex
-    ? req.command
-    : withMcpConfig(
-        req.command,
-        projectHasConfluxMcp(req.projectDir) ? null : ensureWakeMcpConfig(),
-      );
   const shell = wakeShell();
   // stdout piped for wake-log capture (#102 streaming); falls back to
   // "ignore" when the data dir is unknown (shouldn't happen — resolveConfig

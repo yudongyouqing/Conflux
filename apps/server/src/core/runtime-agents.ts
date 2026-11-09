@@ -1,7 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
-import { pathToFileURL } from "node:url";
 
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
@@ -11,7 +10,7 @@ import type { RuntimeAgent, RuntimeId, RuntimeInstance } from "@conflux/shared";
 import { cleanTerminalEnv, posixQuote, openInTerminal } from "./terminal.js";
 import { RUNTIME_IDS, RUNTIME_REGISTRY, runtimeDescriptor } from "./runtime-registry.js";
 import { HEADLESS_ALLOWED_TOOLS, projectHasConfluxMcp } from "./wake/commands.js";
-import { defaultServerEntry, ensureWakeMcpConfig } from "./wake/launcher.js";
+import { ensureWakeMcpConfig, pinnedMcpLaunch } from "./wake/launcher.js";
 import { getTerminalSettings } from "./app-settings.js";
 import {
   createRuntimeInstance,
@@ -407,18 +406,7 @@ export function managedMcpLaunch(db: DB): {
   args: string[];
   env?: Record<string, string>;
 } {
-  const entry = defaultServerEntry();
-  return {
-    command: process.execPath,
-    args: [
-      ...(entry.endsWith(".ts") ? ["--import", pathToFileURL(require.resolve("tsx")).href] : []),
-      entry,
-      "--data-dir",
-      dirname(db.name),
-      "mcp",
-    ],
-    ...(process.versions.electron ? { env: { ELECTRON_RUN_AS_NODE: "1" } } : {}),
-  };
+  return pinnedMcpLaunch(dirname(db.name));
 }
 
 /** Expand argv after cmd's metacharacter parsing; dynamic values never become shell syntax. */

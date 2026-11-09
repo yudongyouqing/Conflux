@@ -17,7 +17,6 @@ import { planClaudeWake } from "./claude.js";
 import { planCodexWake } from "./codex.js";
 import { launchWakeRun } from "./launcher.js";
 import { realTmuxIO, type TmuxIO } from "./tmux-inject.js";
-import { resolveConfig } from "../../config.js";
 import { getRuntimeAgent } from "../runtime-agents.js";
 import { cmdQuote } from "../terminal.js";
 
@@ -187,7 +186,8 @@ export function wakeSessionForMail(db: DB, sessionId: string, opts: WakeOptions 
   const launch = launchWakeRun({
     db,
     sessionId,
-    dataDir: resolveConfig("global").dataDir,
+    // dataDir intentionally omitted: launchWakeRun derives it from the db
+    // handle, so a server on a custom home wakes onto that home
     projectDir: session.project_dir,
     command: plan.command + (runtime === "codex" ? "" : agentPromptSuffix(db, meta)),
     prompt: plan.prompt ?? AUTO_WAKE_PROMPT,
