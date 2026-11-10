@@ -2,7 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, writeFileSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { cleanTerminalEnv } from "../terminal.js";
+import { cleanTerminalEnv, posixQuote } from "../terminal.js";
 import { resolveConfig } from "../../config.js";
 import { withMcpConfig } from "./commands.js";
 import { setSetting } from "../app-settings.js";
@@ -136,6 +136,25 @@ export function codexPinnedMcpArgs(dataDir: string): string[] {
 }
 
 /**
+ * The codex overrides as ONE shell-safe string: every token is quoted for
+ * the target shell (double-quoting per the managed-launch rules on cmd,
+ * posixQuote for sh), so paths with spaces/parens/ampersands arrive as
+ * single argv tokens instead of splitting inside the command line. A bare
+ * join is exactly how the overrides broke apart on spaced paths.
+ */
+export function codexPinnedMcpSuffix(dataDir: string, platform: NodeJS.Platform = process.platform): string {
+  const tokens = codexPinnedMcpArgs(dataDir);
+  if (platform === "win32") {
+    // mirrors the managed-launch quoter: escape inner quotes and trailing
+    // backslashes; TOML literals contain no double quotes by construction
+    const quoteArg = (value: string) =>
+      `"${value.replace(/(\\*)"/g, "$1$1\\\"").replace(/(\\+)$/g, "$1$1")}"`;
+    return tokens.map(quoteArg).join(" ");
+  }
+  return tokens.map(posixQuote).join(" ");
+}
+
+/**
  * The server entry that can host the MCP server: resolved from THIS module's
  * location (src via tsx → index.ts, compiled dist → index.js). Never from
  * process.argv — that breaks whenever the wake is launched from a script
@@ -174,7 +193,7 @@ export function launchWakeRun(req: LaunchRequest): LaunchResult {
   // bypass pinning (a same-named CLI mount overrides it without changing
   // the tools array shape, so the cached-prefix cost stays bounded).
   const command = req.pinCodex
-    ? `${req.command} ${codexPinnedMcpArgs(dataDir).join(" ")}`
+    ? `${req.command} ${codexPinnedMcpSuffix(dataDir)}`
     : withMcpConfig(req.command, ensureWakeMcpConfig(dataDir, undefined, pinnedMcpLaunch(dataDir)));
   // dry-run previews the REAL command (mount config included); it writes
   // the idempotent wake-mcp.json but spawns nothing
