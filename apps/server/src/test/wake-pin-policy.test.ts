@@ -126,14 +126,12 @@ test("codex wake must provide an explicit library mount or refuse the wake", () 
       "codex command returned unchanged: no pinned mount survives env scrubbing",
     );
     if (result.ok) {
-      // win32 rides env placeholders (dry-run shows the refs; the literal
-      // integrity is proven by the shell round-trip regressions); posix
-      // inlines the quoted literals — either way the command changed and
-      // carries the pin mechanism, never a bare passthrough
-      const mechanism =
-        process.platform === "win32"
-          ? result.command.includes("!CONFLUX_WAKE_ARG_0!")
-          : result.command.includes("mcp_servers.conflux.args=");
-      assert.ok(mechanism, "codex mount mechanism missing from the command");
+      // dry-run previews the literal line on every platform — the pin is
+      // visible as the -c override; literal integrity (spaces, %, !) is
+      // proven by the shell round-trip regressions
+      assert.ok(
+        result.command.includes("mcp_servers.conflux.args="),
+        "codex mount missing from the literal command preview",
+      );
     }
   }));

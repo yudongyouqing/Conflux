@@ -8,6 +8,8 @@ import {
   codexPinnedMcpArgs,
   codexPinnedMcpSuffix,
   wakeShell,
+  wrapWakeCommandLine,
+  ensureQuotedExecutable,
 } from "../core/wake/launcher.js";
 import { cmdQuote } from "../core/terminal.js";
 
@@ -29,9 +31,10 @@ function roundTrip(dataDir: string): string[] {
       CFX_ARGV_REVIEW_MARKER: "WRONG_LIBRARY",
       CFX_ARGV_BANG: "WRONG_BANG",
     };
-    const suffix = codexPinnedMcpSuffix(dataDir, "win32", env);
+    // production form: the WHOLE line rides one env placeholder
+    const literalLine = `${cmdQuote(process.execPath)} ${cmdQuote(probe)} ${codexPinnedMcpSuffix(dataDir, "win32")}`;
     const shell = wakeShell("win32", { delayedExpansion: true });
-    const command = `${cmdQuote(process.execPath)} ${cmdQuote(probe)} ${suffix}`;
+    const command = wrapWakeCommandLine(ensureQuotedExecutable(literalLine), env);
     const output = execFileSync(shell.command, [...shell.args, command], {
       cwd: root,
       env,
