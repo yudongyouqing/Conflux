@@ -164,7 +164,13 @@ async function run() {
     );
     await composer.press("Enter");
     assert.equal((await askResponse).ok(), true, "web ask request failed");
-    await page.getByText("E2E smoke message", { exact: true }).waitFor();
+    // keep-alive leaves the hidden activity feed holding its own copy —
+    // wait on the VISIBLE conversation, not on a globally-unique text
+    await page
+      .locator('.tab-surface[data-active="true"]')
+      .getByText("E2E smoke message", { exact: true })
+      .first()
+      .waitFor();
     const retryResponse = page.waitForResponse(
       (response) =>
         /\/messages\/\d+\/retry$/.test(response.url()) && response.request().method() === "POST",

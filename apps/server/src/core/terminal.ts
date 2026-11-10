@@ -84,7 +84,10 @@ export interface LaunchSpec {
 import { runtimeDescriptor } from "./runtime-registry.js";
 
 export function cmdQuote(s: string): string {
-  return /[\s"]/.test(s) ? `"${s.replace(/"/g, "")}"` : s;
+  // '!' too: under delayed expansion (/v:on) a BARE bang sequence expands
+  // even without spaces, so executable paths from literal-named directories
+  // must be quoted to stay intact — quotes suppress the expansion.
+  return /[\s"!]/.test(s) ? `"${s.replace(/"/g, "")}"` : s;
 }
 
 /** POSIX sh single-quoting: everything unlisted stays literal inside '...'. */

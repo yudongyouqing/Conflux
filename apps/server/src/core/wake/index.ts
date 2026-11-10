@@ -1,4 +1,5 @@
 import { WEB_CONSOLE_ID } from "@conflux/shared";
+import { dirname } from "node:path";
 import type { DB } from "../db.js";
 import { logger } from "../../log.js";
 import {
@@ -11,13 +12,12 @@ import {
 import { getSession, mergeSessionMeta } from "../sessions.js";
 import { hasTranscript } from "../live.js";
 import { pushMailTyped } from "../mail-push.js";
-import { AUTO_WAKE_PROMPT, projectHasConfluxMcp, tmuxWakeCommand } from "./commands.js";
-import { ensureWakeMcpConfig } from "./launcher.js";
+import { AUTO_WAKE_PROMPT, tmuxWakeCommand } from "./commands.js";
+import { ensureWakeMcpConfig, pinnedMcpLaunch } from "./launcher.js";
 import { planClaudeWake } from "./claude.js";
 import { planCodexWake } from "./codex.js";
 import { launchWakeRun } from "./launcher.js";
 import { realTmuxIO, type TmuxIO } from "./tmux-inject.js";
-import { resolveConfig } from "../../config.js";
 import { getRuntimeAgent } from "../runtime-agents.js";
 import { cmdQuote } from "../terminal.js";
 
@@ -152,9 +152,12 @@ export function wakeSessionForMail(db: DB, sessionId: string, opts: WakeOptions 
     // Mount the wake MCP config only when the project doesn't already
     // carry Conflux itself — an extra mount changes the tools array and
     // invalidates the whole cached prefix. Explicit test injection wins.
+    // pinned from the db handle — the ambient/global resolution is exactly
+    // how executors landed on the wrong database; an explicit test path
+    // still wins so callers can inject their own pinned config
     const mcpConfig =
       opts.mcpConfigPath ??
-      (projectHasConfluxMcp(session.project_dir) ? null : ensureWakeMcpConfig());
+      ensureWakeMcpConfig(dirname(db.name), undefined, pinnedMcpLaunch(dirname(db.name)));
     const command = tmuxWakeCommand(sessionId, exe, mcpConfig) + agentPromptSuffix(db, meta);
     if (opts.dryRun) return { woke: true, command };
     if (io.launch({ name, command, cwd: session.project_dir })) {
@@ -187,7 +190,8 @@ export function wakeSessionForMail(db: DB, sessionId: string, opts: WakeOptions 
   const launch = launchWakeRun({
     db,
     sessionId,
-    dataDir: resolveConfig("global").dataDir,
+    // dataDir intentionally omitted: launchWakeRun derives it from the db
+    // handle, so a server on a custom home wakes onto that home
     projectDir: session.project_dir,
     command: plan.command + (runtime === "codex" ? "" : agentPromptSuffix(db, meta)),
     prompt: plan.prompt ?? AUTO_WAKE_PROMPT,

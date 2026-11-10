@@ -1,9 +1,10 @@
 import { execFile, spawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, writeFileSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { cleanTerminalEnv } from "../terminal.js";
+import { pathToFileURL } from "node:url";
+import { cleanTerminalEnv, posixQuote } from "../terminal.js";
 import { resolveConfig } from "../../config.js";
-import { withMcpConfig, projectHasConfluxMcp } from "./commands.js";
+import { withMcpConfig } from "./commands.js";
 import { setSetting } from "../app-settings.js";
 import { psMatchClauses } from "../runtime-identity.js";
 import { logger } from "../../log.js";
@@ -52,13 +53,24 @@ export function wakeRunEnv(req: { dataDir?: string }, baseEnv: NodeJS.ProcessEnv
  * cmd.exe; everywhere else it must be /bin/sh — `process.env.comspec ??
  * "cmd.exe"` unconditionally spawns a nonexistent cmd.exe on macOS/Linux
  * and the wake silently never starts (#105).
+ *
+ * `delayedExpansion` adds /v:on for commands that reference env
+ * placeholders (`!VAR!`): leaf env content survives delayed expansion
+ * VERBATIM, including literal %VAR% and !VAR! text — the only cmd-safe
+ * way to pass argv with arbitrary path characters.
  */
-export function wakeShell(platform: NodeJS.Platform = process.platform): {
+export function wakeShell(
+  platform: NodeJS.Platform = process.platform,
+  opts: { delayedExpansion?: boolean } = {},
+): {
   command: string;
   args: string[];
 } {
   if (platform === "win32") {
-    return { command: process.env.comspec ?? "cmd.exe", args: ["/d", "/s", "/c"] };
+    return {
+      command: process.env.comspec ?? "cmd.exe",
+      args: opts.delayedExpansion ? ["/d", "/v:on", "/s", "/c"] : ["/d", "/s", "/c"],
+    };
   }
   return { command: "/bin/sh", args: ["-c"] };
 }
@@ -85,6 +97,106 @@ export function ensureWakeMcpConfig(
     "utf8",
   );
   return path;
+}
+
+/**
+ * MCP mount launch pinned to one data dir via --data-dir: the mounted
+ * conflux server resolves THAT database no matter what environment the
+ * host CLI passes (or scrubs) — the executor lands on the orchestrator's
+ * library even when a resumed session carries user-level MCP config.
+ * Single source of truth; runtime-agents' managed mounts delegate here.
+ */
+export function pinnedMcpLaunch(dataDir: string): {
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+} {
+  const entry = defaultServerEntry();
+  return {
+    command: process.execPath,
+    args: [
+      ...(entry.endsWith(".ts") ? ["--import", pathToFileURL(require.resolve("tsx")).href] : []),
+      entry,
+      "--data-dir",
+      dataDir,
+      "mcp",
+    ],
+    ...(process.versions.electron ? { env: { ELECTRON_RUN_AS_NODE: "1" } } : {}),
+  };
+}
+
+/**
+ * Codex config overrides pinning the mounted conflux server to one data
+ * dir. Codex scrubs MCP child environments, so env pinning cannot work
+ * there — codex wakes must carry the library in their -c config
+ * overrides or the executor lands on whatever database the host config
+ * happens to name.
+ */
+export function codexPinnedMcpArgs(dataDir: string): string[] {
+  const literal = (value: string) => (value.includes("'") ? `'''${value}'''` : `'${value}'`);
+  const launch = pinnedMcpLaunch(dataDir);
+  return [
+    "-c",
+    `mcp_servers.conflux.command=${literal(launch.command)}`,
+    "-c",
+    `mcp_servers.conflux.args=[${launch.args.map(literal).join(",")}]`,
+    ...(process.versions.electron
+      ? ["-c", "mcp_servers.conflux.env.ELECTRON_RUN_AS_NODE='1'"]
+      : []),
+  ];
+}
+
+/** cmd-safe double-quoting per the managed-launch rules: inner quotes
+ *  escaped, trailing backslashes doubled. */
+export function winArgQuote(value: string): string {
+  return `"${value.replace(/(\\*)"/g, "$1$1\\\"").replace(/(\\+)$/g, "$1$1")}"`;
+}
+
+/**
+ * The codex overrides as a literal command segment: every token quoted
+ * for the target shell (winArgQuote on cmd, posixQuote for sh). On
+ * Windows this string rides inside the whole-line env placeholder (see
+ * wrapWakeCommandLine) — cmd expands %VAR% even inside double quotes, so
+ * quoting alone is never the delivery mechanism there.
+ */
+export function codexPinnedMcpSuffix(
+  dataDir: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const tokens = codexPinnedMcpArgs(dataDir);
+  return platform === "win32"
+    ? tokens.map(winArgQuote).join(" ")
+    : tokens.map(posixQuote).join(" ");
+}
+
+/**
+ * The executable MUST be a quoted first token under /v:on: a bare command
+ * word followed by quoted args containing special characters makes cmd
+ * fail with "filename syntax incorrect" (bisected empirically). Planners
+ * already cmdQuote the exe, but cmdQuote skips quoting when the path has
+ * no spaces/bangs — this guarantees the first token is quoted regardless.
+ * A space-containing path that reached here unquoted was already broken
+ * before delayed expansion; we do not guess token boundaries for it.
+ */
+export function ensureQuotedExecutable(line: string): string {
+  if (line.startsWith('"')) return line;
+  const firstSpace = line.indexOf(" ");
+  if (firstSpace === -1) return `"${line}"`;
+  return `"${line.slice(0, firstSpace)}" ${line.slice(firstSpace + 1)}`;
+}
+
+/**
+ * Deliver an ENTIRE wake command line through one env placeholder:
+ * env gets the literal line, cmd runs `!CONFLUX_WAKE_LINE!` with /v:on.
+ * Delayed expansion inserts the content verbatim — %VAR% and !VAR!
+ * literals anywhere in the line (executable path, args, pinned mounts)
+ * survive, because the only thing cmd expands is the placeholder itself.
+ * Verified empirically; this is the managed-launch mechanism applied to
+ * the whole line instead of only the MCP suffix.
+ */
+export function wrapWakeCommandLine(line: string, env: NodeJS.ProcessEnv): string {
+  env.CONFLUX_WAKE_LINE = line;
+  return "!CONFLUX_WAKE_LINE!";
 }
 
 /**
@@ -115,28 +227,39 @@ export function launchWakeRun(req: LaunchRequest): LaunchResult {
     );
     return { ok: false, error };
   }
-  if (req.dryRun) return { ok: true, command: req.command };
-
-  // Identity, two channels (either suffices):
-  //  1. env CONFLUX_ASSUME_SESSION — claude passes a full env to MCP
-  //     children; codex SCRUBS it (verified empirically), so for codex:
-  //  2. pid pin — the codex-spawned MCP adopts via its ancestor codex pid
-  //     looking up `codex-current:<pid>`. Spawn first, pin immediately
-  //     (the npm/tsx MCP chain takes seconds to boot — the pin always lands
-  //     before the first tryAdopt), and the wake run acts as the target.
-  const env = wakeRunEnv(req);
+  // The data dir ALWAYS comes from the caller's db handle unless explicitly
+  // overridden: a server on a custom home wakes executors onto THAT home —
+  // deriving from config again here is exactly how the split-database
+  // regressions happened (room tasks invisible to their own executors).
+  const dataDir = req.dataDir ?? dirname(req.db.name);
+  // env first: the codex suffix writes its placeholder variables here
+  // (leaf content survives cmd delayed expansion verbatim — the only
+  // %-expansion-proof way to pass argv on Windows)
+  const env = wakeRunEnv({ ...req, dataDir });
   env.CONFLUX_ASSUME_SESSION = req.sessionId;
-  // claude wakes (pinCodex === false) get an explicit MCP mount so the
-  // headless run can always reach check_inbox/reply_ask — but only
-  // when the project doesn't already mount Conflux itself: an extra mount
-  // changes the tools array and invalidates the whole cached prefix
-  const command = req.pinCodex
-    ? req.command
-    : withMcpConfig(
-        req.command,
-        projectHasConfluxMcp(req.projectDir) ? null : ensureWakeMcpConfig(),
-      );
-  const shell = wakeShell();
+  // Pin policy: EVERY launch this server controls carries an explicit
+  // same-database mount. A project .mcp.json that names conflux proves
+  // nothing about WHICH database it targets — presence alone must never
+  // bypass pinning (a same-named CLI mount overrides it without changing
+  // the tools array shape, so the cached-prefix cost stays bounded).
+  const literalLine = req.pinCodex
+    ? `${req.command} ${codexPinnedMcpSuffix(dataDir, process.platform)}`
+    : withMcpConfig(req.command, ensureWakeMcpConfig(dataDir, undefined, pinnedMcpLaunch(dataDir)));
+  // On Windows the WHOLE line — executable path, original args and mounts —
+  // rides one env placeholder under /v:on: cmd's %VAR% expansion would
+  // otherwise rewrite literal paths, and enabling /v:on for only part of
+  // the line would let !VAR! sequences in the executable path expand.
+  const command =
+    process.platform === "win32"
+      ? wrapWakeCommandLine(ensureQuotedExecutable(literalLine), env)
+      : literalLine;
+  // dry-run previews the literal line; it writes the idempotent
+  // wake-mcp.json but spawns nothing
+  if (req.dryRun) return { ok: true, command: literalLine };
+
+  const shell = wakeShell(process.platform, {
+    delayedExpansion: process.platform === "win32",
+  });
   // stdout piped for wake-log capture (#102 streaming); falls back to
   // "ignore" when the data dir is unknown (shouldn't happen — resolveConfig
   // is always available)
