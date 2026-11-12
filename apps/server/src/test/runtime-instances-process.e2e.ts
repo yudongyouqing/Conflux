@@ -302,7 +302,7 @@ test("unbound pid, foreign runtime and ownership mismatches refuse to stop", { t
 
   // Never bound: no verifiable runtime process.
   const orphan = createRuntimeInstance(db, claudeAgent);
-  assert.throws(() => stopRuntimeInstance(db, orphan.id), /尚未绑定可验证的运行时进程/);
+  await assert.rejects(() => stopRuntimeInstance(db, orphan.id), /尚未绑定可验证的运行时进程/);
 
   // A codex-shaped process cannot bind a claude instance even with a
   // session that claims the pid — the real inspector classifies the
@@ -341,7 +341,7 @@ test("unbound pid, foreign runtime and ownership mismatches refuse to stop", { t
     runtime_pid: pid2,
     metadata: { runtime_instance_id: owned.instanceId, agent_id: claudeAgent.id },
   });
-  assert.throws(() => stopRuntimeInstance(db, owned.instanceId), /归属不匹配/);
+  await assert.rejects(() => stopRuntimeInstance(db, owned.instanceId), /归属不匹配/);
 
   // What a PID reuse looks like: row and session both recorded this pid,
   // but the pid now names a different live process (different creation
@@ -362,7 +362,7 @@ test("unbound pid, foreign runtime and ownership mismatches refuse to stop", { t
     (v) => v.limitation === "原进程 PID 已被复用，拒绝停止",
     "pid-reuse state never classified",
   );
-  assert.throws(() => stopRuntimeInstance(db, other.instanceId), /PID 已被复用/);
+  await assert.rejects(() => stopRuntimeInstance(db, other.instanceId), /PID 已被复用/);
 });
 
 test("registration timeout and stale-while-alive are classified by real refresh", { timeout: 120000 }, async (t) => {
@@ -491,7 +491,7 @@ test("an ignored first SIGTERM keeps the stop requested and controllable", { tim
 
   // The first SIGTERM is ignored by the shim: the stop is requested but
   // not verified, and control stays available while the process lives.
-  const requested = stopRuntimeInstance(db, bound.instanceId);
+  const requested = await stopRuntimeInstance(db, bound.instanceId);
   assert.equal(requested.state, "running");
   assert.ok(requested.stop_requested_at);
   assert.match(requested.limitation ?? "", /等待进程退出/);

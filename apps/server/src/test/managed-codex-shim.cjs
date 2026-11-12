@@ -4,6 +4,9 @@
 // model. Behavior markers ride inside the turn input text:
 //
 //   "@approval"  pause mid-turn with a server approval request until answered
+//   "@burst"     respond + ALL notifications in ONE stdout write (race repro:
+//                the response resolves as a microtask while the same chunk's
+//                notifications dispatch synchronously first)
 //   "@crash"     exit(3) after acknowledging turn/start
 //   "@fail"      complete the turn with status "failed"
 //   "@hold"      stay inProgress until the client sends test/release
@@ -120,6 +123,26 @@ async function runTurn(id, params) {
   if (text.includes("@noack")) {
     // Crash window: the turn/start was received (handle() already logged
     // the frame) but never acknowledged — hold the request open forever.
+    return;
+  }
+  if (text.includes("@burst")) {
+    // Single stdout write: response + full lifecycle arrive in one chunk.
+    // The client's frame loop resolves the response as a microtask while
+    // processing the notifications synchronously FIRST — the submit-window
+    // buffering path must survive exactly this ordering.
+    recordHistory(turnId, "completed");
+    const frame = (obj) => JSON.stringify(obj);
+    process.stdout.write(
+      [
+        frame({ jsonrpc: "2.0", id, result: { turn: mkTurn(turnId, "inProgress") } }),
+        frame({ jsonrpc: "2.0", method: "turn/started", params: { threadId: THREAD_ID, turn: mkTurn(turnId, "inProgress") } }),
+        frame({ jsonrpc: "2.0", method: "item/started", params: { item: agentMessageItem(""), threadId: THREAD_ID, turnId, startedAtMs: Date.now() } }),
+        frame({ jsonrpc: "2.0", method: "item/agentMessage/delta", params: { threadId: THREAD_ID, turnId, itemId: "shim-item-msg", delta: "burst delta" } }),
+        frame({ jsonrpc: "2.0", method: "item/completed", params: { item: agentMessageItem("shim final answer"), threadId: THREAD_ID, turnId, completedAtMs: Date.now() } }),
+        frame({ jsonrpc: "2.0", method: "turn/completed", params: { threadId: THREAD_ID, turn: mkTurn(turnId, "completed") } }),
+        "",
+      ].join("\n"),
+    );
     return;
   }
   respond(id, { turn: mkTurn(turnId, "inProgress") });

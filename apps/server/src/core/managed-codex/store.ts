@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { DB } from "../db.js";
 import { nowIso } from "../db.js";
+import { replyAsk } from "../messages.js";
 import type { ManagedRunState, ManagedTaskInput } from "./types.js";
 
 /**
@@ -106,6 +107,19 @@ export function getManagedBinding(db: DB, instanceId: string): BindingRow | null
   const row = db
     .prepare(`SELECT * FROM managed_codex_bindings WHERE instance_id = ?`)
     .get(instanceId) as BindingRow | undefined;
+  return row ?? null;
+}
+
+/**
+ * Resolve a managed binding by its SESSION — the persistence-level routing
+ * key. The ask path uses this in whatever process it runs (HTTP server,
+ * MCP child, CLI one-shot): enqueueing is database-only, and the server
+ * holding the live executor drains the queue.
+ */
+export function getManagedBindingBySession(db: DB, sessionId: string): BindingRow | null {
+  const row = db
+    .prepare(`SELECT * FROM managed_codex_bindings WHERE session_id = ? ORDER BY updated_at DESC`)
+    .get(sessionId) as BindingRow | undefined;
   return row ?? null;
 }
 
@@ -239,6 +253,38 @@ export function updateManagedRun(
         runId,
       );
       return selectRun(db, runId);
+    })
+    .immediate();
+}
+
+/**
+ * Flip a run into a terminal state AND write the reply to the originating
+ * message as ONE transaction. Splitting the two writes left a permanent
+ * loss window: a reply failure after the terminal commit could never be
+ * retried (terminal runs are frozen and excluded from recovery), leaving
+ * run=completed with the asker's message forever pending. Here a reply
+ * failure rolls the terminal flip back too, so the next notification — or
+ * recovery — retries the whole handoff.
+ */
+export function finalizeRunAndReply(
+  db: DB,
+  input: {
+    runId: number;
+    ownerToken: string;
+    patch: ManagedRunPatch;
+    fromStates: ManagedRunState[];
+    replierSessionId: string;
+    replyText: string;
+  },
+): ManagedRunRow | null {
+  return db
+    .transaction((): ManagedRunRow | null => {
+      const moved = updateManagedRun(db, input.runId, input.ownerToken, input.patch, {
+        fromStates: input.fromStates,
+      });
+      if (!moved) return null;
+      replyAsk(db, moved.message_id, input.replierSessionId, input.replyText);
+      return moved;
     })
     .immediate();
 }

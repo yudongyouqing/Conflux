@@ -606,7 +606,7 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
       async ({ id }) => {
         const result = await withAudit(`${action}_runtime_instance`, { id }, async () =>
           action === "stop"
-            ? { instance: stopRuntimeInstance(db, id) }
+            ? { instance: await stopRuntimeInstance(db, id) }
             : await resumeRuntimeInstance(db, id),
         );
         return json(result.ok ? result.result : { error: result.error });

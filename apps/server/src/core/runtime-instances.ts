@@ -8,6 +8,7 @@ import { getSession, endSession } from "./sessions.js";
 import { getSetting } from "./app-settings.js";
 import { isRuntimeCommand } from "./runtime-identity.js";
 import { getRuntimeAgent, startRuntimeAgent, type StartRuntimeOptions } from "./runtime-agents.js";
+import { getManagedCodexManager } from "./managed-codex/manager.js";
 import { STALE_AFTER_MS } from "../config.js";
 
 export interface ProcessIdentity {
@@ -229,6 +230,32 @@ function resumableSession(db: DB, row: InstanceRow): string | null {
 }
 
 function toPublic(db: DB, row: InstanceRow, io: RuntimeProcessIO): RuntimeInstance {
+  // Managed executor instances: the holder (this server process) owns the
+  // child outright, so stop/resume capabilities key off the managed binding
+  // and the live manager rather than the external process-identity chain.
+  const managedBinding = db
+    .prepare(`SELECT thread_id FROM managed_codex_bindings WHERE instance_id = ?`)
+    .get(row.id) as { thread_id: string } | undefined;
+  if (managedBinding) {
+    const manager = getManagedCodexManager();
+    const held = manager?.getLiveInstanceIds().includes(row.id) === true;
+    const terminal = ["ended", "stale", "failed"].includes(row.state);
+    const presetExists = !!getRuntimeAgent(db, row.preset_id);
+    const { preset_snapshot: _s, process_token: _t, ...safe } = row;
+    let limitation: string | null = null;
+    if (!held && !terminal) {
+      limitation = "受管实例由 Conflux 服务进程持有，请通过服务端/Web 控制";
+    } else if (terminal && !presetExists) {
+      limitation = "原预设已删除，无法恢复；请从预设重新启动";
+    }
+    return {
+      ...safe,
+      can_stop: held,
+      can_resume: terminal && presetExists,
+      limitation,
+      last_seen: row.session_id ? getSession(db, row.session_id)?.last_heartbeat_at ?? null : null,
+    };
+  }
   const session = row.session_id ? getSession(db, row.session_id) : null;
   const identity = row.runtime_pid ? (io.inspect ?? inspectRuntimeProcess)(row.runtime_pid) : null;
   const relation =
@@ -350,11 +377,24 @@ export function getRuntimeInstance(
   return row ? toPublic(db, row, io) : null;
 }
 
-export function stopRuntimeInstance(
+export async function stopRuntimeInstance(
   db: DB,
   id: string,
   io: RuntimeProcessIO = {},
-): RuntimeInstance {
+): Promise<RuntimeInstance> {
+  // Managed instances are stopped by their holder (the server spawned the
+  // child; pid ownership is intrinsic, no external identity proof needed).
+  const managedRow = db
+    .prepare(`SELECT thread_id FROM managed_codex_bindings WHERE instance_id = ?`)
+    .get(id) as { thread_id: string } | undefined;
+  if (managedRow) {
+    const manager = getManagedCodexManager();
+    if (!manager || !manager.getLiveInstanceIds().includes(id)) {
+      conflict("受管实例由 Conflux 服务进程持有，请通过服务端/Web 停止");
+    }
+    await manager.stopManagedInstance(id);
+    return toPublic(db, rowFor(db, id), io);
+  }
   const row = rowFor(db, id);
   const current = toPublic(db, row, io);
   if (!current.can_stop || !row.runtime_pid) {
@@ -421,6 +461,23 @@ export async function resumeRuntimeInstance(
   id: string,
   opts: StartRuntimeOptions & RuntimeProcessIO = {},
 ): Promise<{ started: true; instance: RuntimeInstance }> {
+  // Managed instances resume by rejoining their SAVED thread on a fresh
+  // app-server child — the terminal resume path (session identity, process
+  // tokens) does not apply to a Conflux-held process.
+  const managedRow = db
+    .prepare(`SELECT thread_id FROM managed_codex_bindings WHERE instance_id = ?`)
+    .get(id) as { thread_id: string } | undefined;
+  if (managedRow) {
+    const manager = getManagedCodexManager();
+    if (!manager) {
+      conflict("受管实例由 Conflux 服务进程持有，请通过服务端/Web 恢复");
+    }
+    const row = rowFor(db, id);
+    const preset = getRuntimeAgent(db, row.preset_id)!;
+    if (!preset) conflict("原预设已删除，无法恢复；请从预设重新启动");
+    const { instance } = await manager.resumeInstance(id, preset);
+    return { started: true, instance };
+  }
   refreshInstances(db, opts, id);
   const verifiedRow = rowFor(db, id);
   const verified = toPublic(db, verifiedRow, opts);

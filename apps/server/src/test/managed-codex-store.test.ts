@@ -8,6 +8,7 @@ import { openDb, stopWalCheckpoint, type DB } from "../core/db.js";
 import {
   claimNextQueuedRun,
   enqueueManagedTask,
+  finalizeRunAndReply,
   replaceManagedBindingOwner,
   updateManagedRun,
   upsertManagedBinding,
@@ -311,6 +312,59 @@ test("listing the queue for an instance stays in local submission order", () => 
     assert.equal(first?.id, rows[0].id, "oldest queued run is claimed first");
     const second = claimNextQueuedRun(db, { instanceId: "inst-1", ownerToken: owner });
     assert.equal(second?.id, rows[1].id);
+  } finally {
+    cleanup(db, dir);
+  }
+});
+
+test("finalizeRunAndReply is atomic: a reply failure rolls the terminal flip back", () => {
+  const { db, dir } = seed();
+  try {
+    const owner = binding(db);
+    const messageId = insertMessage(db, "atomic reply");
+    const run = enqueueManagedTask(db, task(messageId));
+    claimNextQueuedRun(db, { instanceId: "inst-1", ownerToken: owner });
+    updateManagedRun(db, run.id, owner, { state: "running" }, { fromStates: ["submitting"] });
+
+    // A wrong replier makes replyAsk throw — the WHOLE transaction must roll
+    // back, leaving the run retryable instead of stranded as completed.
+    assert.throws(
+      () =>
+        finalizeRunAndReply(db, {
+          runId: run.id,
+          ownerToken: owner,
+          patch: { state: "completed", finalText: "result" },
+          fromStates: ["running"],
+          replierSessionId: "not-the-addressee",
+          replyText: "result",
+        }),
+      /not the addressee/,
+    );
+    const afterFail = db
+      .prepare(`SELECT state FROM managed_codex_runs WHERE id = ?`)
+      .get(run.id) as { state: string };
+    assert.equal(afterFail.state, "running", "terminal flip rolled back with the reply");
+    assert.equal(
+      (db.prepare(`SELECT status FROM messages WHERE id = ?`).get(messageId) as { status: string })
+        .status,
+      "pending",
+    );
+
+    // The retry with the correct replier lands both writes together.
+    const moved = finalizeRunAndReply(db, {
+      runId: run.id,
+      ownerToken: owner,
+      patch: { state: "completed", finalText: "result" },
+      fromStates: ["running"],
+      replierSessionId: "managed-1",
+      replyText: "result",
+    });
+    assert.equal(moved?.state, "completed");
+    assert.equal(
+      (db.prepare(`SELECT reply FROM messages WHERE id = ?`).get(messageId) as { reply: string })
+        .reply,
+      "result",
+    );
   } finally {
     cleanup(db, dir);
   }

@@ -57,7 +57,7 @@ export function registerRuntimeRoutes(
         try {
           const result =
             action === "stop"
-              ? { instance: stopRuntimeInstance(db, req.params.id, io) }
+              ? { instance: await stopRuntimeInstance(db, req.params.id, io) }
               : await resumeRuntimeInstance(db, req.params.id, io);
           logAudit(db, {
             interface: "http",

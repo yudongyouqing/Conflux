@@ -5,7 +5,13 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { openDb, stopWalCheckpoint, type DB } from "../core/db.js";
 import { createRuntimeAgent } from "../core/runtime-agents.js";
-import { completeAsk, prepareAsk } from "../core/ask.js";
+import { askAndMaybeWake, completeAsk, prepareAsk } from "../core/ask.js";
+import {
+  getRuntimeInstance,
+  listRuntimeInstances,
+  resumeRuntimeInstance,
+  stopRuntimeInstance,
+} from "../core/runtime-instances.js";
 import { registerSession } from "../core/sessions.js";
 import { getMessage } from "../core/messages.js";
 import type { RuntimeAgent } from "@conflux/shared";
@@ -343,4 +349,113 @@ test("shutdown marks the active run unknown and ends the instance", async () => 
   stopWalCheckpoint(fx.db);
   fx.db.close();
   rmSync(fx.dir, { recursive: true, force: true });
+});
+
+test("tasks enqueued from a manager-less process reach the queue and drain via polling", async () => {
+  const fx = await makeFixture();
+  try {
+    // Simulate the MCP/CLI process: this process holds NO live manager, but
+    // the persisted binding still routes the ask into the managed queue.
+    const bindingSession = fx.db
+      .prepare(`SELECT session_id FROM managed_codex_bindings WHERE instance_id = ?`)
+      .get(fx.instanceId) as { session_id: string };
+    setManagedCodexManager(null);
+    registerSession(fx.db, { id: "asker", name: "asker" });
+    const outcome = await askAndMaybeWake(fx.db, {
+      from_session: "asker",
+      to_session: bindingSession.session_id,
+      question: "cross-process task",
+    });
+    assert.equal(outcome.wake.woke, true);
+    const run = fx.db
+      .prepare(`SELECT state FROM managed_codex_runs WHERE message_id = ?`)
+      .get(outcome.message.id) as { state: string };
+    assert.equal(run.state, "queued", "a foreign process can only enqueue");
+
+    // The holder process picks the task up on its queue-polling tick.
+    setManagedCodexManager(fx.manager);
+    fx.manager.startQueuePolling(150);
+    await waitFor(
+      () =>
+        (
+          fx.db
+            .prepare(`SELECT state FROM managed_codex_runs WHERE message_id = ?`)
+            .get(outcome.message.id) as { state: string }
+        ).state === "completed"
+          ? true
+          : undefined,
+      15000,
+      "cross-process task completed by the holder",
+    );
+    assert.equal(getMessage(fx.db, outcome.message.id)!.reply, "shim final answer");
+    fx.manager.stopQueuePolling();
+  } finally {
+    await fx.dispose();
+  }
+});
+
+test("a response and its notifications in ONE stdout chunk still complete the run", async () => {
+  const fx = await makeFixture();
+  try {
+    const messageId = insertAsk(fx, "@burst single chunk");
+    await fx.manager.enqueue({
+      messageId,
+      instanceId: fx.instanceId,
+      text: "@burst single chunk",
+    });
+    // The shim writes the turn/start response AND the whole lifecycle in one
+    // stdout write; the frame loop dispatches the notifications before the
+    // response promise resolves. Without submit-window buffering this run
+    // stayed running forever with no reply.
+    await waitFor(
+      () => (runState(fx, messageId) === "completed" ? true : undefined),
+      15000,
+      "burst completion",
+    );
+    assert.equal(getMessage(fx.db, messageId)!.reply, "shim final answer");
+  } finally {
+    await fx.dispose();
+  }
+});
+
+test("official instance controls work for managed instances: list, stop, resume", async () => {
+  const fx = await makeFixture();
+  try {
+    setManagedCodexManager(fx.manager);
+    fx.manager.startQueuePolling(500);
+    // Listing shows the instance live and controllable (not stale).
+    const live = await waitFor(
+      () => {
+        const found = listRuntimeInstances(fx.db).find((i) => i.id === fx.instanceId);
+        return found && found.can_stop ? found : undefined;
+      },
+      15000,
+      "can_stop listing",
+    );
+    assert.equal(live!.state, "running");
+    assert.ok(live!.session_id, "instance row carries the managed session");
+
+    // The official stop path ends the holder's child.
+    await stopRuntimeInstance(fx.db, fx.instanceId);
+    const stopped = getRuntimeInstance(fx.db, fx.instanceId)!;
+    assert.equal(stopped.state, "ended");
+    assert.equal(stopped.can_resume, true, "a stopped managed instance is resumable");
+
+    // The official resume path rejoins the saved thread (managed route).
+    const resumed = await resumeRuntimeInstance(fx.db, fx.instanceId);
+    assert.notEqual(resumed.instance.id, fx.instanceId);
+    const binding = fx.db
+      .prepare(`SELECT thread_id FROM managed_codex_bindings WHERE instance_id = ?`)
+      .get(resumed.instance.id) as { thread_id: string };
+    assert.equal(binding.thread_id, "shim-thread-0001", "resumed onto the SAME thread");
+    await waitFor(
+      () => (getRuntimeInstance(fx.db, resumed.instance.id)?.state === "running" ? true : undefined),
+      15000,
+      "resumed running",
+    );
+    await stopRuntimeInstance(fx.db, resumed.instance.id);
+    fx.manager.stopQueuePolling();
+  } finally {
+    await fx.dispose();
+  }
 });

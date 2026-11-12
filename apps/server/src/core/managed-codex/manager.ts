@@ -4,9 +4,8 @@ import type { DB } from "../db.js";
 import { nowIso } from "../db.js";
 import { logger } from "../../log.js";
 import type { RuntimeAgent, RuntimeInstance } from "@conflux/shared";
-import { registerSession } from "../sessions.js";
+import { heartbeat, registerSession } from "../sessions.js";
 import { cleanTerminalEnv } from "../terminal.js";
-import { replyAsk } from "../messages.js";
 import {
   createRuntimeInstance,
   failRuntimeInstance,
@@ -22,6 +21,7 @@ import {
   appendManagedEvent,
   claimNextQueuedRun,
   enqueueManagedTask,
+  finalizeRunAndReply,
   getManagedBinding,
   markRunUnknown,
   updateManagedRun,
@@ -77,6 +77,22 @@ interface LiveInstance {
   /** True while a turn/start request is in flight but not yet answered —
    *  guards the "one turn at a time" rule across the submit window. */
   submitting: boolean;
+  /** The run claimed for the in-flight turn/start (deferred-routing key). */
+  submittingRunId: number | null;
+  /**
+   * Frames that arrived on the wire BEFORE the turn/start response was
+   * processed. The RPC frame loop resolves the response as a microtask, so
+   * notifications in the SAME stdout chunk are dispatched first — with
+   * activeTurn still unset they would be dropped (approvals declined,
+   * completions ignored). They are buffered until the submit lands and are
+   * replayed in arrival order.
+   */
+  deferred: Array<{
+    kind: "notification" | "serverRequest";
+    id?: number | string;
+    method: string;
+    params: unknown;
+  }>;
   /** Completed agentMessage texts, in completion order, for the active turn. */
   agentTexts: string[];
   /** Approval ids answerable on THIS connection generation, mapped to the
@@ -156,6 +172,22 @@ export class ManagedCodexManager {
     // The notification router must exist at spawn time, but the LiveInstance
     // it forwards to only exists after initialize/thread/start succeed.
     const router: { live: LiveInstance | null } = { live: null };
+    const dispatch = (frame: {
+      kind: "notification" | "serverRequest";
+      id?: number | string;
+      method: string;
+      params: unknown;
+    }) => {
+      const live = router.live;
+      if (!live) return;
+      // Submit-window frames cannot be handled yet (activeTurn unset) —
+      // buffer them; the submit path replays in order once it lands.
+      if (live.submittingRunId !== null && !live.activeTurn) {
+        live.deferred.push(frame);
+        return;
+      }
+      this.dispatchFrame(live, frame);
+    };
 
     let proc: AppServerProcess;
     try {
@@ -165,12 +197,9 @@ export class ManagedCodexManager {
         cwd: launch.cwd,
         env: launch.env,
         handlers: {
-          onNotification: (method, params) => {
-            if (router.live) this.handleNotification(router.live, method, params);
-          },
-          onServerRequest: (id, method, params) => {
-            if (router.live) this.handleServerRequest(router.live, id, method, params);
-          },
+          onNotification: (method, params) => dispatch({ kind: "notification", method, params }),
+          onServerRequest: (id, method, params) =>
+            dispatch({ kind: "serverRequest", id, method, params }),
         },
         rpcOptions: this.opts.rpcOptions ?? { requestTimeoutMs: 30_000 },
       });
@@ -190,6 +219,8 @@ export class ManagedCodexManager {
       proc,
       activeTurn: null,
       submitting: false,
+      submittingRunId: null,
+      deferred: [],
       agentTexts: [],
       liveApprovals: new Map(),
     };
@@ -230,11 +261,15 @@ export class ManagedCodexManager {
       });
       router.live = live;
       this.instances.set(instanceId, live);
+      // The instance row carries the binding surface the control APIs read
+      // (session identity for liveness; the pid for diagnostics). Process
+      // identity verification is intrinsic here — this process spawned the
+      // child — so no external token is recorded.
       this.db
         .prepare(
-          `UPDATE runtime_instances SET state = 'running', runtime_pid = ?, updated_at = ? WHERE id = ?`,
+          `UPDATE runtime_instances SET state = 'running', session_id = ?, runtime_pid = ?, updated_at = ? WHERE id = ?`,
         )
-        .run(proc.child.pid ?? null, nowIso(), instanceId);
+        .run(sessionId, proc.child.pid ?? null, nowIso(), instanceId);
       // Child death outside shutdown: expire this generation's approvals,
       // mark the in-flight run unknown, and end the instance row.
       void live.proc.exited.then(() => {
@@ -290,6 +325,70 @@ export class ManagedCodexManager {
       turnId: live.activeTurn.turnId,
     });
     return { accepted: true };
+  }
+
+  /**
+   * Periodic queue drain + session heartbeat. Tasks can be ENQUEUED by any
+   * process (HTTP, MCP child, CLI one-shot) via the persisted binding —
+   * only the process holding the live executor can run them, so it polls.
+   * The same tick heartbeats each managed session, keeping instance
+   * liveness (which keys off session heartbeats) at running.
+   */
+  startQueuePolling(intervalMs = 2000): void {
+    if (this.queueTimer) return;
+    const tick = () => {
+      for (const live of [...this.instances.values()]) {
+        try {
+          heartbeat(this.db, live.sessionId);
+        } catch {
+          // transient lock — next tick retries
+        }
+        void this.pump(live.instanceId).catch(() => {});
+      }
+    };
+    this.queueTimer = setInterval(tick, intervalMs);
+    this.queueTimer.unref?.();
+  }
+
+  stopQueuePolling(): void {
+    if (this.queueTimer) {
+      clearInterval(this.queueTimer);
+      this.queueTimer = null;
+    }
+  }
+
+  private queueTimer: NodeJS.Timeout | null = null;
+
+  /** Fire-and-forget queue kick after an enqueue from another code path. */
+  kick(instanceId: string): void {
+    void this.pump(instanceId).catch(() => {});
+  }
+
+  /**
+   * Gracefully stop ONE managed instance through the official stop surface:
+   * the child is ours (no external process-identity proof needed), the
+   * in-flight run goes unknown for review, pending approvals expire, and
+   * the binding survives for recovery.
+   */
+  async stopManagedInstance(instanceId: string): Promise<void> {
+    const live = this.instances.get(instanceId);
+    if (!live) {
+      throw Object.assign(
+        new Error("managed instance is not held by this server process"),
+        { statusCode: 409 },
+      );
+    }
+    this.instances.delete(instanceId);
+    if (live.activeTurn) {
+      markRunUnknown(this.db, live.activeTurn.runId, "instance stopped mid-turn");
+      expirePendingApprovals(this.db, [live.activeTurn.runId]);
+      live.activeTurn = null;
+    }
+    live.proc.kill();
+    await live.proc.exited;
+    this.db
+      .prepare(`UPDATE runtime_instances SET state = 'ended', ended_at = ?, updated_at = ? WHERE id = ?`)
+      .run(nowIso(), nowIso(), instanceId);
   }
 
   /** Stop everything this manager owns (server shutdown path). */
@@ -358,18 +457,29 @@ export class ManagedCodexManager {
       ? this.opts.resolveLaunch(agent)
       : defaultLaunch(this.db, agent);
     const router: { live: LiveInstance | null } = { live: null };
+    const dispatch = (frame: {
+      kind: "notification" | "serverRequest";
+      id?: number | string;
+      method: string;
+      params: unknown;
+    }) => {
+      const live = router.live;
+      if (!live) return;
+      if (live.submittingRunId !== null && !live.activeTurn) {
+        live.deferred.push(frame);
+        return;
+      }
+      this.dispatchFrame(live, frame);
+    };
     const proc = spawnAppServer({
       executable: launch.executable,
       args: launch.args,
       cwd: launch.cwd,
       env: launch.env,
       handlers: {
-        onNotification: (method, params) => {
-          if (router.live) this.handleNotification(router.live, method, params);
-        },
-        onServerRequest: (id, method, params) => {
-          if (router.live) this.handleServerRequest(router.live, id, method, params);
-        },
+        onNotification: (method, params) => dispatch({ kind: "notification", method, params }),
+        onServerRequest: (id, method, params) =>
+          dispatch({ kind: "serverRequest", id, method, params }),
       },
       rpcOptions: this.opts.rpcOptions ?? { requestTimeoutMs: 30_000 },
     });
@@ -385,6 +495,8 @@ export class ManagedCodexManager {
       proc,
       activeTurn: null,
       submitting: false,
+      submittingRunId: null,
+      deferred: [],
       agentTexts: [],
       liveApprovals: new Map(),
     };
@@ -470,29 +582,29 @@ export class ManagedCodexManager {
               .filter((i) => i.type === "agentMessage" && typeof i.text === "string")
               .map((i) => i.text as string),
           );
-          const moved = updateManagedRun(
-            this.db,
-            run.id,
+          const moved = finalizeRunAndReply(this.db, {
+            runId: run.id,
             ownerToken,
-            { state: "completed", finalText: finalText ?? undefined },
-            { fromStates: ["submitting", "running", "waiting_approval", "unknown"] },
-          );
+            patch: { state: "completed", finalText: finalText ?? undefined },
+            fromStates: ["submitting", "running", "waiting_approval", "unknown"],
+            replierSessionId: sessionId,
+            replyText: replyTextFor("completed", finalText, null),
+          });
           if (moved) {
-            this.writeReply(run, "completed", moved.final_text, null, sessionId);
             reconciliation.push(`run ${run.id}: completed per history`);
           }
         } else if (historical.status === "failed" || historical.status === "interrupted") {
           const state = historical.status;
           const errorCode = historical.error?.message?.slice(0, 500) ?? null;
-          const moved = updateManagedRun(
-            this.db,
-            run.id,
+          const moved = finalizeRunAndReply(this.db, {
+            runId: run.id,
             ownerToken,
-            { state, errorCode: errorCode ?? undefined },
-            { fromStates: ["submitting", "running", "waiting_approval", "unknown"] },
-          );
+            patch: { state, errorCode: errorCode ?? undefined },
+            fromStates: ["submitting", "running", "waiting_approval", "unknown"],
+            replierSessionId: sessionId,
+            replyText: replyTextFor(state, null, errorCode),
+          });
           if (moved) {
-            this.writeReply(run, state, null, moved.error_code, sessionId);
             reconciliation.push(`run ${run.id}: ${state} per history`);
           }
         } else {
@@ -510,9 +622,9 @@ export class ManagedCodexManager {
       });
       this.db
         .prepare(
-          `UPDATE runtime_instances SET state = 'running', runtime_pid = ?, updated_at = ? WHERE id = ?`,
+          `UPDATE runtime_instances SET state = 'running', session_id = ?, runtime_pid = ?, updated_at = ? WHERE id = ?`,
         )
-        .run(proc.child.pid ?? null, nowIso(), newInstanceId);
+        .run(sessionId, proc.child.pid ?? null, nowIso(), newInstanceId);
       this.db
         .prepare(`UPDATE runtime_instances SET state = 'ended', ended_at = ?, updated_at = ? WHERE id = ?`)
         .run(nowIso(), nowIso(), instanceId);
@@ -571,6 +683,7 @@ export class ManagedCodexManager {
     if (!claimed) return;
     live.agentTexts = [];
     live.submitting = true;
+    live.submittingRunId = claimed.id;
     try {
       const turn = (await live.proc.conn.request("turn/start", {
         threadId: live.threadId,
@@ -586,17 +699,23 @@ export class ManagedCodexManager {
         { state: "running", threadId: live.threadId, turnId },
         { fromStates: ["submitting"] },
       );
+      live.submitting = false;
+      live.submittingRunId = null;
       if (!moved) {
         // Another generation owns this run now — do not drive it further.
         markRunUnknown(this.db, claimed.id, "run ownership changed during submit");
-        live.submitting = false;
+        live.deferred = [];
         return;
       }
       live.activeTurn = { runId: claimed.id, turnId };
-      live.submitting = false;
       logger.info({ instanceId, runId: claimed.id, turnId }, "managed turn started");
+      // Frames that raced the response in the same stdout chunk are now
+      // routable — replay them before anything else.
+      this.flushDeferred(live);
     } catch (err) {
       live.submitting = false;
+      live.submittingRunId = null;
+      live.deferred = [];
       const message = err instanceof Error ? err.message : String(err);
       // A remote JSON-RPC error is a definitive answer (bad params, busy
       // thread): the turn did NOT start — fail the run and keep draining.
@@ -627,6 +746,33 @@ export class ManagedCodexManager {
   }
 
   // ---- notification handling ----
+
+  /** Route one already-unbuffered frame to its handler. */
+  private dispatchFrame(
+    live: LiveInstance,
+    frame: {
+      kind: "notification" | "serverRequest";
+      id?: number | string;
+      method: string;
+      params: unknown;
+    },
+  ): void {
+    if (frame.kind === "notification") {
+      this.handleNotification(live, frame.method, frame.params);
+    } else {
+      this.handleServerRequest(live, frame.id!, frame.method, frame.params);
+    }
+  }
+
+  /** Replay the submit-window buffer in arrival order. Processing a frame
+   *  may queue more work (completion → pump); the swap keeps this loop
+   *  finite even if handling appends to the buffer. */
+  private flushDeferred(live: LiveInstance): void {
+    for (let guard = 0; guard < 1000 && live.deferred.length > 0; guard++) {
+      const batch = live.deferred.splice(0, live.deferred.length);
+      for (const frame of batch) this.dispatchFrame(live, frame);
+    }
+  }
 
   /**
    * Server-initiated requests: the two item-based approval kinds pause the
@@ -848,46 +994,35 @@ export class ManagedCodexManager {
       errorCode = `unexpected terminal status: ${String(status)}`;
     }
 
-    const moved = updateManagedRun(
-      this.db,
-      active.runId,
-      live.ownerToken,
-      { state, finalText: finalText ?? undefined, errorCode: errorCode ?? undefined },
-      { fromStates: [...fromStates] },
-    );
-    if (moved) {
-      // Exactly-once reply: only the writer that flipped the terminal state
-      // answers the originating message.
-      this.writeReply(moved, state, finalText, errorCode, live.sessionId);
+    // Terminal flip AND the reply land in ONE transaction: a reply failure
+    // rolls the flip back, so the next notification (or recovery) retries
+    // the whole handoff instead of stranding a completed run whose asker
+    // never gets an answer.
+    const moved = finalizeRunAndReply(this.db, {
+      runId: active.runId,
+      ownerToken: live.ownerToken,
+      patch: { state, finalText: finalText ?? undefined, errorCode: errorCode ?? undefined },
+      fromStates: [...fromStates],
+      replierSessionId: live.sessionId,
+      replyText: replyTextFor(state, finalText, errorCode),
+    });
+    if (!moved) {
+      logger.warn({ runId: active.runId, state }, "managed terminal transition refused");
     }
     // Drain the queue for the next task.
     void this.pump(live.instanceId).catch(() => {});
   }
+}
 
-  /** Answer the message behind a run with its terminal outcome (idempotent
-   *  callers guard it — the store flip decides who may write). */
-  private writeReply(
-    run: Pick<ManagedRunRow, "id" | "message_id">,
-    state: "completed" | "failed" | "interrupted",
-    finalText: string | null,
-    errorCode: string | null,
-    sessionId: string,
-  ): void {
-    const reply =
-      state === "completed"
-        ? (finalText ?? "(受管任务完成，无最终文本)")
-        : state === "interrupted"
-          ? `任务被中断${errorCode ? `：${errorCode}` : ""}`
-          : `任务失败：${errorCode ?? "未知错误"}`;
-    try {
-      replyAsk(this.db, run.message_id, sessionId, reply);
-    } catch (err) {
-      logger.warn(
-        { runId: run.id, err: err instanceof Error ? err.message : String(err) },
-        "managed run reply write-back failed",
-      );
-    }
-  }
+/** The answer text a terminal run writes back to its originating message. */
+function replyTextFor(
+  state: "completed" | "failed" | "interrupted",
+  finalText: string | null,
+  errorCode: string | null,
+): string {
+  if (state === "completed") return finalText ?? "(受管任务完成，无最终文本)";
+  if (state === "interrupted") return `任务被中断${errorCode ? `：${errorCode}` : ""}`;
+  return `任务失败：${errorCode ?? "未知错误"}`;
 }
 
 /** Resolve the default app-server launch from settings/env, terminal-safe. */
@@ -917,12 +1052,4 @@ export function setManagedCodexManager(manager: ManagedCodexManager | null): voi
 
 export function getManagedCodexManager(): ManagedCodexManager | null {
   return activeManager;
-}
-
-/** Does this session belong to a live managed instance in this process?
- *  Offline managed sessions keep the ordinary mailbox semantics — only a
- *  live executor is dispatched to. */
-export function isManagedTarget(sessionId: string): boolean {
-  const manager = getManagedCodexManager();
-  return manager?.isManagedSession(sessionId) === true;
 }

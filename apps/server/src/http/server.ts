@@ -231,11 +231,15 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   // The managed Codex executor lives for the lifetime of this server: one
   // manager instance owns every app-server child, and shutdown (below)
   // reconciles them — in-flight runs go unknown for explicit review, never
-  // silently re-run.
+  // silently re-run. The queue poll drains tasks enqueued by OTHER
+  // processes (MCP children, CLI one-shots) against this server's live
+  // executors, and heartbeats their sessions.
   const managedManager = new ManagedCodexManager(db);
   setManagedCodexManager(managedManager);
+  managedManager.startQueuePolling();
   registerManagedCodexRoutes(app, ctx);
   app.addHook("onClose", async () => {
+    managedManager.stopQueuePolling();
     await managedManager.shutdown();
   });
 

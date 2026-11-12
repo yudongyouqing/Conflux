@@ -60,7 +60,11 @@ export function resolveLaunchPlan(
     return { command: resolved, args };
   }
 
-  // POSIX: scripts usually carry a shebang; hand them to spawn as-is.
+  // POSIX: JS entries go through node too — checked-out files carry no
+  // execute bit (CI's EACCES), and a shebang would still race umasks.
+  if (lower.endsWith(".js") || lower.endsWith(".cjs") || lower.endsWith(".mjs")) {
+    return { command: process.execPath, args: [trimmed, ...args] };
+  }
   return { command: trimmed, args };
 }
 

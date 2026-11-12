@@ -5,7 +5,8 @@ import { WEB_CONSOLE_ID } from "@conflux/shared";
 import { randomUUID } from "node:crypto";
 import { nowIso, retryOnBusy, isLockError } from "./db.js";
 import { logger } from "../log.js";
-import { getManagedCodexManager, isManagedTarget } from "./managed-codex/manager.js";
+import { getManagedCodexManager } from "./managed-codex/manager.js";
+import { enqueueManagedTask, getManagedBindingBySession } from "./managed-codex/store.js";
 
 /**
  * THE ask path: deliver a question and, when the addressee cannot see it
@@ -88,16 +89,18 @@ export async function completeAsk(
 
   // Managed executor targets dispatch to the Conflux-held app-server
   // instead of a terminal wake — no send-keys, no summary stand-in. The
-  // enqueue itself is database-first (idempotent per message), so a retried
-  // delivery can never start a second turn.
-  if (isManagedTarget(message.to_session)) {
-    const manager = getManagedCodexManager()!;
-    const binding = manager.bindingForSession(message.to_session)!;
-    await manager.enqueue({
+  // routing key is the PERSISTED binding, so this works from ANY process:
+  // an MCP child or CLI one-shot only enqueues (database-only, idempotent
+  // per message); the server holding the live executor drains the queue on
+  // its polling tick.
+  const managedBinding = getManagedBindingBySession(db, message.to_session);
+  if (managedBinding) {
+    enqueueManagedTask(db, {
       messageId: message.id,
-      instanceId: binding.instanceId,
+      instanceId: managedBinding.instance_id,
       text: message.question,
     });
+    getManagedCodexManager()?.kick(managedBinding.instance_id);
     await retryOnBusy(db, () =>
       db
         .prepare(
@@ -108,7 +111,7 @@ export async function completeAsk(
     );
     return {
       message: getMessage(db, message.id) ?? message,
-      wake: { woke: true, command: `managed-codex:${binding.instanceId}` },
+      wake: { woke: true, command: `managed-codex:${managedBinding.instance_id}` },
     };
   }
 

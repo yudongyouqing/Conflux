@@ -760,7 +760,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
               try {
                 const outcome =
                   action === "stop"
-                    ? { instance: stopRuntimeInstance(db, id) }
+                    ? { instance: await stopRuntimeInstance(db, id) }
                     : await resumeRuntimeInstance(db, id);
                 logAudit(db, {
                   interface: "cli",
