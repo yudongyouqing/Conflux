@@ -7,18 +7,35 @@
 //   "@crash"     exit(3) after acknowledging turn/start
 //   "@fail"      complete the turn with status "failed"
 //   "@hold"      stay inProgress until the client sends test/release
+//   "@noack"     receive turn/start and never answer it (crash window)
+//   "@silent"    finish and record history WITHOUT emitting turn/completed
 //   "@slow"      delay the final turn/completed by 400ms
 //   "@invalid"   emit one malformed JSON line before completing the turn
 //
-// Every received frame is appended to the file in SHIM_LOG (one JSON per
-// line) so tests can assert exactly what the executor sent.
-const { appendFileSync } = require("node:fs");
+// Completed turns are appended to SHIM_HISTORY as durable rollout history;
+// thread/resume and thread/read serve it back, so a restarted executor can
+// reconcile what the previous process actually finished. Every received
+// frame is appended to SHIM_LOG (one JSON per line) for send-count asserts.
+const { appendFileSync, existsSync, readFileSync } = require("node:fs");
 const readline = require("node:readline");
 
 const logFile = process.env.SHIM_LOG;
+const historyFile = process.env.SHIM_HISTORY;
 const logFrame = (frame) => {
   if (!logFile) return;
   appendFileSync(logFile, JSON.stringify({ t: Date.now(), dir: "in", frame }) + "\n");
+};
+const historyTurns = () => {
+  if (!historyFile || !existsSync(historyFile)) return [];
+  return readFileSync(historyFile, "utf8")
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+};
+const recordHistory = (turnId, status, error = null, text = "shim final answer") => {
+  if (!historyFile) return;
+  appendFileSync(historyFile, JSON.stringify({ turnId, status, error, text }) + "\n");
 };
 
 const send = (frame) => {
@@ -57,7 +74,18 @@ const mkThread = () => ({
   agentRole: null,
   gitInfo: null,
   name: null,
-  turns: [],
+  // Durable rollout history: turns this THREAD completed in any shim process.
+  turns: historyTurns().map((h) => ({
+    id: h.turnId,
+    rootTurnId: null,
+    items: [agentMessageItem(h.text ?? "shim final answer")],
+    itemsView: "notLoaded",
+    status: h.status,
+    error: h.error,
+    startedAt: 1762896001,
+    completedAt: 1762896003,
+    durationMs: 2000,
+  })),
 });
 const mkTurn = (id, status, error = null) => ({
   id,
@@ -89,6 +117,11 @@ const agentMessageItem = (text) => ({
 async function runTurn(id, params) {
   const text = JSON.stringify(params?.input ?? []);
   const turnId = `shim-turn-${id}`;
+  if (text.includes("@noack")) {
+    // Crash window: the turn/start was received (handle() already logged
+    // the frame) but never acknowledged — hold the request open forever.
+    return;
+  }
   respond(id, { turn: mkTurn(turnId, "inProgress") });
   notify("turn/started", { threadId: THREAD_ID, turn: mkTurn(turnId, "inProgress") });
 
@@ -196,12 +229,18 @@ async function runTurn(id, params) {
     completedAtMs: Date.now(),
   });
   if (text.includes("@fail")) {
+    recordHistory(turnId, "failed", turnError("shim model failure fixture"));
     notify("turn/completed", {
       threadId: THREAD_ID,
       turn: mkTurn(turnId, "failed", turnError("shim model failure fixture")),
     });
     return;
   }
+  // The rollout history is the durable record — @silent completes the turn
+  // WITHOUT notifying, simulating "finished but the client died before the
+  // notification was processed".
+  recordHistory(turnId, "completed");
+  if (text.includes("@silent")) return;
   notify("turn/completed", { threadId: THREAD_ID, turn: mkTurn(turnId, "completed") });
 }
 
@@ -257,10 +296,12 @@ async function handle(frame) {
   } else if (method === "turn/start") {
     await runTurn(id, params);
   } else if (method === "turn/interrupt") {
-    respond(id, { turn: mkTurn(params?.turnId ?? "shim-turn-?", "interrupted") });
+    const interruptedId = params?.turnId ?? "shim-turn-?";
+    recordHistory(interruptedId, "interrupted", turnError("Turn interrupted"));
+    respond(id, { turn: mkTurn(interruptedId, "interrupted") });
     notify("turn/completed", {
       threadId: params?.threadId ?? THREAD_ID,
-      turn: mkTurn(params?.turnId ?? "shim-turn-?", "interrupted", turnError("Turn interrupted")),
+      turn: mkTurn(interruptedId, "interrupted", turnError("Turn interrupted")),
     });
   } else if (method === "error/unknown-method") {
     fail(id, -32601, "method not found: error/unknown-method");

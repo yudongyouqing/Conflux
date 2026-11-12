@@ -10,16 +10,19 @@ import { replyAsk } from "../messages.js";
 import {
   createRuntimeInstance,
   failRuntimeInstance,
+  inspectRuntimeProcess,
 } from "../runtime-instances.js";
 import { buildRuntimeEnv } from "../runtime-agents.js";
 import { runtimeDescriptor } from "../runtime-registry.js";
 import { getTerminalSettings } from "../app-settings.js";
 import { spawnAppServer, type AppServerProcess } from "./process.js";
+import { ManagedRpcConnection, RpcRemoteError } from "./rpc.js";
 import { normalizeNotification, mergeFinalText } from "./events.js";
 import {
   appendManagedEvent,
   claimNextQueuedRun,
   enqueueManagedTask,
+  getManagedBinding,
   markRunUnknown,
   updateManagedRun,
   upsertManagedBinding,
@@ -60,6 +63,8 @@ export interface ManagedLaunchConfig {
 export interface ManagedManagerOptions {
   /** Resolve the app-server launch; defaults to the codex settings/env path. */
   resolveLaunch?: (agent: RuntimeAgent) => ManagedLaunchConfig;
+  /** RPC limits for the spawned connections (tests shorten the timeout). */
+  rpcOptions?: ConstructorParameters<typeof ManagedRpcConnection>[2];
 }
 
 interface LiveInstance {
@@ -69,6 +74,9 @@ interface LiveInstance {
   threadId: string;
   proc: AppServerProcess;
   activeTurn: { runId: number; turnId: string } | null;
+  /** True while a turn/start request is in flight but not yet answered —
+   *  guards the "one turn at a time" rule across the submit window. */
+  submitting: boolean;
   /** Completed agentMessage texts, in completion order, for the active turn. */
   agentTexts: string[];
   /** Approval ids answerable on THIS connection generation, mapped to the
@@ -122,7 +130,7 @@ export class ManagedCodexManager {
             if (router.live) this.handleServerRequest(router.live, id, method, params);
           },
         },
-        rpcOptions: { requestTimeoutMs: 30_000 },
+        rpcOptions: this.opts.rpcOptions ?? { requestTimeoutMs: 30_000 },
       });
     } catch (err) {
       failRuntimeInstance(this.db, instance.id);
@@ -139,6 +147,7 @@ export class ManagedCodexManager {
       threadId: "",
       proc,
       activeTurn: null,
+      submitting: false,
       agentTexts: [],
       liveApprovals: new Map(),
     };
@@ -180,8 +189,10 @@ export class ManagedCodexManager {
       router.live = live;
       this.instances.set(instanceId, live);
       this.db
-        .prepare(`UPDATE runtime_instances SET state = 'running', updated_at = ? WHERE id = ?`)
-        .run(nowIso(), instanceId);
+        .prepare(
+          `UPDATE runtime_instances SET state = 'running', runtime_pid = ?, updated_at = ? WHERE id = ?`,
+        )
+        .run(proc.child.pid ?? null, nowIso(), instanceId);
       // Child death outside shutdown: expire this generation's approvals,
       // mark the in-flight run unknown, and end the instance row.
       void live.proc.exited.then(() => {
@@ -261,6 +272,219 @@ export class ManagedCodexManager {
   }
 
   /**
+   * Recover a dead managed instance onto a fresh app-server process,
+   * rejoining the SAVED thread and reconciling what the dead generation
+   * left behind. Nothing is replayed blindly:
+   *  - the old child must be verifiably gone (no concurrent writer),
+   *  - queued runs migrate to the new instance and continue,
+   *  - runs with an acknowledged turn are checked against the thread's
+   *    actual history and finalized only on matching evidence,
+   *  - the submitting-without-turn crash window goes `unknown` for HUMAN
+   *    review — it is never auto-resubmitted.
+   */
+  async resumeInstance(
+    instanceId: string,
+    agent: RuntimeAgent,
+  ): Promise<{ instance: RuntimeInstance; threadId: string; reconciliation: string[] }> {
+    if (agent.runtime !== "codex" || agent.execution_mode !== "managed") {
+      throw Object.assign(new Error("preset is not a managed codex executor"), { statusCode: 400 });
+    }
+    const binding = getManagedBinding(this.db, instanceId);
+    if (!binding) {
+      throw Object.assign(new Error("no managed binding for this instance"), { statusCode: 404 });
+    }
+    const oldRow = this.db
+      .prepare(`SELECT state, runtime_pid FROM runtime_instances WHERE id = ?`)
+      .get(instanceId) as { state: string; runtime_pid: number | null } | undefined;
+    if (!oldRow) {
+      throw Object.assign(new Error("runtime instance not found"), { statusCode: 404 });
+    }
+    // A still-alive previous child would make us the second writer of the
+    // same thread — refuse instead of racing it.
+    if (["starting", "running"].includes(oldRow.state) && oldRow.runtime_pid) {
+      const inspected = inspectRuntimeProcess(oldRow.runtime_pid);
+      if (inspected && inspected !== "exited") {
+        throw Object.assign(
+          new Error("previous app-server process is still running — stop it before resuming"),
+          { statusCode: 409 },
+        );
+      }
+    }
+
+    const instance = createRuntimeInstance(this.db, agent, instanceId);
+    const launch = this.opts.resolveLaunch
+      ? this.opts.resolveLaunch(agent)
+      : defaultLaunch(this.db, agent);
+    const router: { live: LiveInstance | null } = { live: null };
+    const proc = spawnAppServer({
+      executable: launch.executable,
+      args: launch.args,
+      cwd: launch.cwd,
+      env: launch.env,
+      handlers: {
+        onNotification: (method, params) => {
+          if (router.live) this.handleNotification(router.live, method, params);
+        },
+        onServerRequest: (id, method, params) => {
+          if (router.live) this.handleServerRequest(router.live, id, method, params);
+        },
+      },
+      rpcOptions: this.opts.rpcOptions ?? { requestTimeoutMs: 30_000 },
+    });
+
+    const newInstanceId = instance.id;
+    const ownerToken = randomUUID();
+    const sessionId = binding.session_id;
+    const live: LiveInstance = {
+      instanceId: newInstanceId,
+      sessionId,
+      ownerToken,
+      threadId: binding.thread_id,
+      proc,
+      activeTurn: null,
+      submitting: false,
+      agentTexts: [],
+      liveApprovals: new Map(),
+    };
+    const reconciliation: string[] = [];
+
+    try {
+      await proc.conn.request("initialize", {
+        clientInfo: { name: "conflux", title: "Conflux managed executor", version: "0.3.1" },
+        capabilities: null,
+      });
+      const resumed = (await proc.conn.request("thread/resume", {
+        threadId: binding.thread_id,
+      })) as {
+        thread?: {
+          id?: string;
+          turns?: Array<{
+            id: string;
+            status: string;
+            error?: { message?: string } | null;
+            items?: Array<{ type?: string; text?: string }>;
+          }>;
+        };
+      };
+      const threadId = resumed?.thread?.id ?? binding.thread_id;
+      if (resumed?.thread?.id && resumed.thread.id !== binding.thread_id) {
+        throw new Error(`thread/resume returned a different thread: ${resumed.thread.id}`);
+      }
+      const history = resumed?.thread?.turns ?? [];
+
+      // Ownership handover: binding moves to the new instance with a fresh
+      // token; unfinished runs migrate so the new generation may drive them.
+      this.db
+        .transaction(() => {
+          this.db
+            .prepare(`DELETE FROM managed_codex_bindings WHERE instance_id = ?`)
+            .run(instanceId);
+          upsertManagedBinding(this.db, {
+            instanceId: newInstanceId,
+            sessionId,
+            threadId,
+            ownerToken,
+          });
+          this.db
+            .prepare(
+              `UPDATE managed_codex_runs SET instance_id = ?, updated_at = ? WHERE instance_id = ?`,
+            )
+            .run(newInstanceId, nowIso(), instanceId);
+          const oldRuns = this.db
+            .prepare(
+              `SELECT id FROM managed_codex_runs WHERE instance_id = ? AND state IN ('submitting','running','waiting_approval')`,
+            )
+            .all(newInstanceId) as { id: number }[];
+          expirePendingApprovals(this.db, oldRuns.map((r) => r.id));
+        })
+        .immediate();
+
+      // `unknown` runs are exactly the crash-window records reconciliation
+      // exists for: with a turn id they are checked against history (a
+      // completed turn is finalized + answered); without one they stay
+      // unknown for human review — never resubmitted.
+      const unfinished = this.db
+        .prepare(
+          `SELECT * FROM managed_codex_runs WHERE instance_id = ? AND state IN ('submitting','running','waiting_approval','unknown')`,
+        )
+        .all(newInstanceId) as ManagedRunRow[];
+      for (const run of unfinished) {
+        if (!run.turn_id) {
+          // The turn/start may or may not have been sent — resend would risk
+          // double execution. Unknown = the user must verify the thread.
+          markRunUnknown(this.db, run.id, "crash window: turn confirmation never arrived");
+          reconciliation.push(`run ${run.id}: unknown (send window unverifiable)`);
+          continue;
+        }
+        const historical = history.find((t) => t.id === run.turn_id);
+        if (!historical) {
+          markRunUnknown(this.db, run.id, "turn not found in thread history");
+          reconciliation.push(`run ${run.id}: unknown (turn missing from history)`);
+          continue;
+        }
+        if (historical.status === "completed") {
+          const finalText = mergeFinalText(
+            (historical.items ?? [])
+              .filter((i) => i.type === "agentMessage" && typeof i.text === "string")
+              .map((i) => i.text as string),
+          );
+          const moved = updateManagedRun(
+            this.db,
+            run.id,
+            ownerToken,
+            { state: "completed", finalText: finalText ?? undefined },
+            { fromStates: ["submitting", "running", "waiting_approval", "unknown"] },
+          );
+          if (moved) {
+            this.writeReply(run, "completed", moved.final_text, null, sessionId);
+            reconciliation.push(`run ${run.id}: completed per history`);
+          }
+        } else if (historical.status === "failed" || historical.status === "interrupted") {
+          const state = historical.status;
+          const errorCode = historical.error?.message?.slice(0, 500) ?? null;
+          const moved = updateManagedRun(
+            this.db,
+            run.id,
+            ownerToken,
+            { state, errorCode: errorCode ?? undefined },
+            { fromStates: ["submitting", "running", "waiting_approval", "unknown"] },
+          );
+          if (moved) {
+            this.writeReply(run, state, null, moved.error_code, sessionId);
+            reconciliation.push(`run ${run.id}: ${state} per history`);
+          }
+        } else {
+          // still inProgress according to history — the thread thinks a turn
+          // is active; do not stack a new one on top.
+          markRunUnknown(this.db, run.id, "turn still in progress in thread history");
+          reconciliation.push(`run ${run.id}: unknown (turn active in history)`);
+        }
+      }
+
+      router.live = live;
+      this.instances.set(newInstanceId, live);
+      void live.proc.exited.then(() => {
+        if (this.instances.get(newInstanceId) === live) this.handleInstanceDeath(live);
+      });
+      this.db
+        .prepare(
+          `UPDATE runtime_instances SET state = 'running', runtime_pid = ?, updated_at = ? WHERE id = ?`,
+        )
+        .run(proc.child.pid ?? null, nowIso(), newInstanceId);
+      this.db
+        .prepare(`UPDATE runtime_instances SET state = 'ended', ended_at = ?, updated_at = ? WHERE id = ?`)
+        .run(nowIso(), nowIso(), instanceId);
+      logger.info({ from: instanceId, to: newInstanceId, threadId }, "managed codex instance resumed");
+      await this.pump(newInstanceId);
+      return { instance, threadId, reconciliation };
+    } catch (err) {
+      proc.kill();
+      failRuntimeInstance(this.db, newInstanceId);
+      throw err;
+    }
+  }
+
+  /**
    * Test-only: kill the child WITHOUT the graceful shutdown path, so the
    * exited-handler runs exactly like a real crash. The death hook owns the
    * reconciliation (unknown run, expired approvals, ended instance).
@@ -270,17 +494,41 @@ export class ManagedCodexManager {
     if (live) live.proc.child.kill("SIGKILL");
   }
 
+  /**
+   * Test-only: forget a live instance WITHOUT touching its child or the
+   * database — the "manager died, child survived" shape that resume must
+   * refuse. adoptForTest reverses it so shutdown can still reap the child.
+   */
+  private forgotten = new Map<string, LiveInstance>();
+
+  forgetForTest(instanceId: string): void {
+    const live = this.instances.get(instanceId);
+    if (live) {
+      this.instances.delete(instanceId);
+      this.forgotten.set(instanceId, live);
+    }
+  }
+
+  adoptForTest(instanceId: string): void {
+    const live = this.forgotten.get(instanceId);
+    if (live) {
+      this.forgotten.delete(instanceId);
+      if (!this.instances.has(instanceId)) this.instances.set(instanceId, live);
+    }
+  }
+
   // ---- scheduling ----
 
   private async pump(instanceId: string): Promise<void> {
     const live = this.instances.get(instanceId);
-    if (!live || live.activeTurn) return; // busy: queue keeps waiting
+    if (!live || live.activeTurn || live.submitting) return; // busy: queue waits
     const claimed = claimNextQueuedRun(this.db, {
       instanceId,
       ownerToken: live.ownerToken,
     });
     if (!claimed) return;
     live.agentTexts = [];
+    live.submitting = true;
     try {
       const turn = (await live.proc.conn.request("turn/start", {
         threadId: live.threadId,
@@ -299,28 +547,40 @@ export class ManagedCodexManager {
       if (!moved) {
         // Another generation owns this run now — do not drive it further.
         markRunUnknown(this.db, claimed.id, "run ownership changed during submit");
+        live.submitting = false;
         return;
       }
       live.activeTurn = { runId: claimed.id, turnId };
+      live.submitting = false;
       logger.info({ instanceId, runId: claimed.id, turnId }, "managed turn started");
     } catch (err) {
+      live.submitting = false;
       const message = err instanceof Error ? err.message : String(err);
-      updateManagedRun(
-        this.db,
-        claimed.id,
-        live.ownerToken,
-        { state: "failed", errorCode: message.slice(0, 500) },
-        { fromStates: ["submitting", "running"] },
-      );
+      // A remote JSON-RPC error is a definitive answer (bad params, busy
+      // thread): the turn did NOT start — fail the run and keep draining.
+      // Transport failures (timeout, closed stream, oversized frame) mean
+      // the send is UNVERIFIABLE: the turn may be running on the server
+      // side, so replaying would double-execute. Those go unknown.
+      const definitive = err instanceof RpcRemoteError;
+      if (definitive) {
+        updateManagedRun(
+          this.db,
+          claimed.id,
+          live.ownerToken,
+          { state: "failed", errorCode: message.slice(0, 500) },
+          { fromStates: ["submitting", "running"] },
+        );
+      } else {
+        markRunUnknown(this.db, claimed.id, `turn send unverifiable: ${message.slice(0, 400)}`);
+      }
       appendManagedEvent(this.db, {
         instanceId,
         runId: claimed.id,
         type: "error",
-        payload: { phase: "submit_failed", error: message.slice(0, 500) },
+        payload: { phase: definitive ? "submit_failed" : "send_unverifiable", error: message.slice(0, 500) },
       });
       logger.warn({ instanceId, runId: claimed.id, err: message }, "managed turn submit failed");
-      // The instance may still be healthy — keep draining the queue.
-      await this.pump(instanceId);
+      if (definitive) await this.pump(instanceId);
     }
   }
 
@@ -467,6 +727,12 @@ export class ManagedCodexManager {
 
   /** Child died outside an explicit shutdown: reconcile everything it owned. */
   private handleInstanceDeath(live: LiveInstance): void {
+    // Death callbacks can outlive the database (tests, server teardown) —
+    // reconciling into a closed handle would just crash the process.
+    if (!this.db.open) {
+      this.instances.delete(live.instanceId);
+      return;
+    }
     this.instances.delete(live.instanceId);
     const runIds = live.activeTurn ? [live.activeTurn.runId] : [];
     if (live.activeTurn) markRunUnknown(this.db, live.activeTurn.runId, "app-server exited mid-turn");
@@ -550,24 +816,35 @@ export class ManagedCodexManager {
     if (moved) {
       // Exactly-once reply: only the writer that flipped the terminal state
       // answers the originating message.
-      const run = moved;
-      const reply =
-        state === "completed"
-          ? (finalText ?? "(受管任务完成，无最终文本)")
-          : state === "interrupted"
-            ? `任务被中断${errorCode ? `：${errorCode}` : ""}`
-            : `任务失败：${errorCode ?? "未知错误"}`;
-      try {
-        replyAsk(this.db, run.message_id, live.sessionId, reply);
-      } catch (err) {
-        logger.warn(
-          { runId: run.id, err: err instanceof Error ? err.message : String(err) },
-          "managed run reply write-back failed",
-        );
-      }
+      this.writeReply(moved, state, finalText, errorCode, live.sessionId);
     }
     // Drain the queue for the next task.
     void this.pump(live.instanceId).catch(() => {});
+  }
+
+  /** Answer the message behind a run with its terminal outcome (idempotent
+   *  callers guard it — the store flip decides who may write). */
+  private writeReply(
+    run: Pick<ManagedRunRow, "id" | "message_id">,
+    state: "completed" | "failed" | "interrupted",
+    finalText: string | null,
+    errorCode: string | null,
+    sessionId: string,
+  ): void {
+    const reply =
+      state === "completed"
+        ? (finalText ?? "(受管任务完成，无最终文本)")
+        : state === "interrupted"
+          ? `任务被中断${errorCode ? `：${errorCode}` : ""}`
+          : `任务失败：${errorCode ?? "未知错误"}`;
+    try {
+      replyAsk(this.db, run.message_id, sessionId, reply);
+    } catch (err) {
+      logger.warn(
+        { runId: run.id, err: err instanceof Error ? err.message : String(err) },
+        "managed run reply write-back failed",
+      );
+    }
   }
 }
 
