@@ -20,7 +20,6 @@ import {
   appendManagedEvent,
   claimNextQueuedRun,
   enqueueManagedTask,
-  getManagedBinding,
   markRunUnknown,
   updateManagedRun,
   upsertManagedBinding,

@@ -13,22 +13,6 @@ import type { ManagedCodexEvent } from "./types.js";
 
 type EventBody = Pick<ManagedCodexEvent, "type" | "payload">;
 
-interface NotificationParams {
-  threadId?: string;
-  turnId?: string;
-}
-
-function idsOf(params: unknown): NotificationParams {
-  if (typeof params === "object" && params !== null) {
-    const p = params as Record<string, unknown>;
-    return {
-      threadId: typeof p.threadId === "string" ? p.threadId : undefined,
-      turnId: typeof p.turnId === "string" ? p.turnId : undefined,
-    };
-  }
-  return {};
-}
-
 /** Return the normalized event for a notification, or null to ignore. */
 export function normalizeNotification(method: string, params: unknown): EventBody | null {
   switch (method) {
