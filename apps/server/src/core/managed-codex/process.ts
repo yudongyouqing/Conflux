@@ -108,9 +108,11 @@ function scriptBehindCmdShim(shimPath: string): string | null {
   const dir = dirname(shimPath);
   // Shims reference the script either via %~dp0\... (direct expansion) or
   // SET dp0 + %dp0%\... (npm's variable form) — both resolve relative to
-  // the shim's own directory.
+  // the shim's own directory. The captured tail uses Windows separators;
+  // normalize them so the lookup also works when CONFLUX runs on POSIX
+  // (resolving a .cmd shim a Windows install left behind, and the tests).
   for (const match of content.matchAll(/(?:%~dp0|%dp0%)\\([^"'\r\n]+?\.(?:js|mjs|cjs))/g)) {
-    const candidate = resolve(dir, match[1]);
+    const candidate = resolve(dir, match[1].replace(/\\/g, "/"));
     if (existsSync(candidate)) return candidate;
   }
   for (const match of content.matchAll(/"([A-Za-z]:[^"'\r\n]+?\.(?:js|mjs|cjs))"/g)) {

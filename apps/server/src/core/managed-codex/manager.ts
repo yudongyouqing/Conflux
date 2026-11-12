@@ -441,7 +441,10 @@ export class ManagedCodexManager {
       throw Object.assign(new Error("runtime instance not found"), { statusCode: 404 });
     }
     // A still-alive previous child would make us the second writer of the
-    // same thread — refuse instead of racing it.
+    // same thread — refuse instead of racing it. Only rows that still CLAIM
+    // to be live get the external probe: a row this manager already ended
+    // has a witnessed exit, and probing a freshly-killed pid races the OS
+    // reaping it (a zombie still shows up in ps and would falsely refuse).
     if (["starting", "running"].includes(oldRow.state) && oldRow.runtime_pid) {
       const inspected = inspectRuntimeProcess(oldRow.runtime_pid);
       if (inspected && inspected !== "exited") {
