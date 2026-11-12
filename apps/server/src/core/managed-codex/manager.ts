@@ -105,6 +105,10 @@ export class ManagedCodexManager {
   private instances = new Map<string, LiveInstance>();
   /** Per-instance event subscribers (SSE streams); see subscribe(). */
   private subscribers = new Map<string, Set<(event: unknown) => void>>();
+  /** Instances whose child death THIS manager witnessed (own kill path or
+   *  the exit event) — resume skips the external liveness probe for them,
+   *  which races OS reaping and misreads a zombie as alive. */
+  private witnessedExits = new Set<string>();
 
   constructor(
     private db: DB,
@@ -379,6 +383,7 @@ export class ManagedCodexManager {
       );
     }
     this.instances.delete(instanceId);
+    this.witnessedExits.add(instanceId);
     if (live.activeTurn) {
       markRunUnknown(this.db, live.activeTurn.runId, "instance stopped mid-turn");
       expirePendingApprovals(this.db, [live.activeTurn.runId]);
@@ -445,7 +450,11 @@ export class ManagedCodexManager {
     // to be live get the external probe: a row this manager already ended
     // has a witnessed exit, and probing a freshly-killed pid races the OS
     // reaping it (a zombie still shows up in ps and would falsely refuse).
-    if (["starting", "running"].includes(oldRow.state) && oldRow.runtime_pid) {
+    if (
+      !this.witnessedExits.has(instanceId) &&
+      ["starting", "running"].includes(oldRow.state) &&
+      oldRow.runtime_pid
+    ) {
       const inspected = inspectRuntimeProcess(oldRow.runtime_pid);
       if (inspected && inspected !== "exited") {
         throw Object.assign(
@@ -631,6 +640,7 @@ export class ManagedCodexManager {
       this.db
         .prepare(`UPDATE runtime_instances SET state = 'ended', ended_at = ?, updated_at = ? WHERE id = ?`)
         .run(nowIso(), nowIso(), instanceId);
+      this.witnessedExits.delete(instanceId);
       logger.info({ from: instanceId, to: newInstanceId, threadId }, "managed codex instance resumed");
       await this.pump(newInstanceId);
       return { instance, threadId, reconciliation };
@@ -648,7 +658,10 @@ export class ManagedCodexManager {
    */
   crashForTest(instanceId: string): void {
     const live = this.instances.get(instanceId);
-    if (live) live.proc.child.kill("SIGKILL");
+    if (live) {
+      this.witnessedExits.add(instanceId);
+      live.proc.child.kill("SIGKILL");
+    }
   }
 
   /**
@@ -922,9 +935,11 @@ export class ManagedCodexManager {
     // reconciling into a closed handle would just crash the process.
     if (!this.db.open) {
       this.instances.delete(live.instanceId);
+      this.witnessedExits.add(live.instanceId);
       return;
     }
     this.instances.delete(live.instanceId);
+    this.witnessedExits.add(live.instanceId);
     const runIds = live.activeTurn ? [live.activeTurn.runId] : [];
     if (live.activeTurn) markRunUnknown(this.db, live.activeTurn.runId, "app-server exited mid-turn");
     expirePendingApprovals(this.db, runIds);
