@@ -25,6 +25,16 @@ import {
   upsertManagedBinding,
   type ManagedRunRow,
 } from "./store.js";
+import {
+  expirePendingApprovals,
+  getApproval,
+  listPendingApprovals,
+  recordApproval,
+  resolveApproval,
+  isApprovalDecision,
+  sanitizeApprovalPayload,
+  type ApprovalKind,
+} from "./approvals.js";
 import type { ManagedTaskInput } from "./types.js";
 
 /**
@@ -61,6 +71,10 @@ interface LiveInstance {
   activeTurn: { runId: number; turnId: string } | null;
   /** Completed agentMessage texts, in completion order, for the active turn. */
   agentTexts: string[];
+  /** Approval ids answerable on THIS connection generation, mapped to the
+   *  ORIGINAL JSON-RPC request id (number or string — they are different
+   *  protocol ids and must round-trip verbatim). */
+  liveApprovals: Map<number, number | string>;
 }
 
 export class ManagedCodexManager {
@@ -126,6 +140,7 @@ export class ManagedCodexManager {
       proc,
       activeTurn: null,
       agentTexts: [],
+      liveApprovals: new Map(),
     };
 
     try {
@@ -167,6 +182,11 @@ export class ManagedCodexManager {
       this.db
         .prepare(`UPDATE runtime_instances SET state = 'running', updated_at = ? WHERE id = ?`)
         .run(nowIso(), instanceId);
+      // Child death outside shutdown: expire this generation's approvals,
+      // mark the in-flight run unknown, and end the instance row.
+      void live.proc.exited.then(() => {
+        if (this.instances.get(instanceId) === live) this.handleInstanceDeath(live);
+      });
       logger.info({ instanceId, threadId }, "managed codex instance running");
       return { instance, threadId };
     } catch (err) {
@@ -222,8 +242,10 @@ export class ManagedCodexManager {
   /** Stop everything this manager owns (server shutdown path). */
   async shutdown(): Promise<void> {
     for (const live of [...this.instances.values()]) {
+      this.instances.delete(live.instanceId);
       if (live.activeTurn) {
         markRunUnknown(this.db, live.activeTurn.runId, "manager shutdown mid-turn");
+        expirePendingApprovals(this.db, [live.activeTurn.runId]);
         live.activeTurn = null;
       }
       live.proc.kill();
@@ -231,12 +253,21 @@ export class ManagedCodexManager {
       this.db
         .prepare(`UPDATE runtime_instances SET state = 'ended', ended_at = ?, updated_at = ? WHERE id = ?`)
         .run(nowIso(), nowIso(), live.instanceId);
-      this.instances.delete(live.instanceId);
     }
   }
 
   getLiveInstanceIds(): string[] {
     return [...this.instances.keys()];
+  }
+
+  /**
+   * Test-only: kill the child WITHOUT the graceful shutdown path, so the
+   * exited-handler runs exactly like a real crash. The death hook owns the
+   * reconciliation (unknown run, expired approvals, ended instance).
+   */
+  crashForTest(instanceId: string): void {
+    const live = this.instances.get(instanceId);
+    if (live) live.proc.child.kill("SIGKILL");
   }
 
   // ---- scheduling ----
@@ -295,16 +326,161 @@ export class ManagedCodexManager {
 
   // ---- notification handling ----
 
-  /** Server-initiated requests land here in Task 5 (approvals); unknown
-   *  methods fail explicitly — nothing is ever auto-approved. */
+  /**
+   * Server-initiated requests: the two item-based approval kinds pause the
+   * active run for a human decision. Everything else (legacy approval
+   * methods, permission prompts, unknown future surface) is DECLINED
+   * explicitly — nothing is ever auto-approved or left hanging.
+   */
   private handleServerRequest(
     live: LiveInstance,
     id: number | string,
     method: string,
-    _params: unknown,
+    params: unknown,
   ): void {
-    logger.warn({ instanceId: live.instanceId, method, id }, "unhandled app-server request declined");
-    live.proc.conn.respond(id, { error: `conflux does not handle ${method}` });
+    const kind: ApprovalKind | null =
+      method === "item/commandExecution/requestApproval"
+        ? "commandExecution"
+        : method === "item/fileChange/requestApproval"
+          ? "fileChange"
+          : null;
+    if (!kind) {
+      logger.warn({ instanceId: live.instanceId, method, id }, "unhandled app-server request declined");
+      live.proc.conn.respond(id, { error: `conflux does not handle ${method}` });
+      return;
+    }
+    const p = (params ?? {}) as Record<string, unknown>;
+    if (typeof p.threadId === "string" && p.threadId !== live.threadId) {
+      live.proc.conn.respond(id, { error: "thread mismatch" });
+      return;
+    }
+    const active = live.activeTurn;
+    if (!active || (typeof p.turnId === "string" && p.turnId !== active.turnId)) {
+      live.proc.conn.respond(id, { error: "no matching active turn" });
+      return;
+    }
+    const row = recordApproval(this.db, {
+      runId: active.runId,
+      rpcRequestId: JSON.stringify(id),
+      kind,
+      payload: sanitizeApprovalPayload(kind, p),
+    });
+    live.liveApprovals.set(row.id, id);
+    updateManagedRun(
+      this.db,
+      active.runId,
+      live.ownerToken,
+      { state: "waiting_approval" },
+      { fromStates: ["running"] },
+    );
+    appendManagedEvent(this.db, {
+      instanceId: live.instanceId,
+      runId: active.runId,
+      type: "approval",
+      payload: { phase: "requested", approvalId: row.id, kind, ...JSON.parse(row.payload) },
+    });
+    logger.info({ instanceId: live.instanceId, runId: active.runId, approvalId: row.id, kind }, "approval requested");
+  }
+
+  /**
+   * Apply a user's decision to a pending approval. The store flip is the
+   * single source of "who answered"; only its winner forwards the decision
+   * on the live connection, and only if this generation still owns it.
+   */
+  async resolveApproval(
+    instanceId: string,
+    approvalId: number,
+    decision: unknown,
+  ): Promise<{ ok: true } | { ok: false; status: number; reason: string }> {
+    if (!isApprovalDecision(decision)) {
+      return { ok: false, status: 400, reason: "decision must be accept | decline | cancel" };
+    }
+    const live = this.instances.get(instanceId);
+    if (!live) return { ok: false, status: 409, reason: "managed instance is not live" };
+    // 404 for rows that never existed; 409 for rows that exist but are not
+    // answerable anymore (resolved, expired, other generation) — checked
+    // BEFORE the store flip so a refused decision never consumes the row.
+    const existing = getApproval(this.db, approvalId);
+    if (!existing) return { ok: false, status: 404, reason: "approval not found" };
+    if (existing.state !== "pending") {
+      return { ok: false, status: 409, reason: `approval already ${existing.state}` };
+    }
+    const originalId = live.liveApprovals.get(approvalId);
+    if (originalId === undefined) {
+      return { ok: false, status: 409, reason: "approval is not answerable on this connection" };
+    }
+    const outcome = resolveApproval(this.db, { approvalId, decision });
+    if (!outcome.ok) return outcome;
+    const row = outcome.row;
+    live.liveApprovals.delete(approvalId);
+    live.proc.conn.respond(originalId, { decision });
+    updateManagedRun(
+      this.db,
+      row.run_id,
+      live.ownerToken,
+      { state: "running" },
+      { fromStates: ["waiting_approval"] },
+    );
+    appendManagedEvent(this.db, {
+      instanceId,
+      runId: row.run_id,
+      type: "approval",
+      payload: { phase: "resolved", approvalId, decision },
+    });
+    logger.info({ instanceId, approvalId, decision }, "approval resolved by user");
+    return { ok: true };
+  }
+
+  /** Queue snapshot + pending approvals for the external status surface. */
+  instanceStatus(instanceId: string): {
+    threadId: string;
+    activeRun: { runId: number; turnId: string; state: string } | null;
+    queuedRunIds: number[];
+    pendingApprovals: Array<{ id: number; kind: string; payload: unknown }>;
+  } {
+    const live = this.instances.get(instanceId);
+    if (!live) throw Object.assign(new Error("managed instance not running"), { statusCode: 404 });
+    const queued = this.db
+      .prepare(`SELECT id FROM managed_codex_runs WHERE instance_id = ? AND state = 'queued' ORDER BY created_at, id`)
+      .all(instanceId) as { id: number }[];
+    const pending = listPendingApprovals(
+      this.db,
+      live.activeTurn ? [live.activeTurn.runId] : [],
+    ).filter((row) => live.liveApprovals.has(row.id));
+    return {
+      threadId: live.threadId,
+      activeRun: live.activeTurn
+        ? {
+            runId: live.activeTurn.runId,
+            turnId: live.activeTurn.turnId,
+            state: "running",
+          }
+        : null,
+      queuedRunIds: queued.map((q) => q.id),
+      pendingApprovals: pending.map((row) => ({
+        id: row.id,
+        kind: row.request_kind,
+        payload: JSON.parse(row.payload) as unknown,
+      })),
+    };
+  }
+
+  /** Child died outside an explicit shutdown: reconcile everything it owned. */
+  private handleInstanceDeath(live: LiveInstance): void {
+    this.instances.delete(live.instanceId);
+    const runIds = live.activeTurn ? [live.activeTurn.runId] : [];
+    if (live.activeTurn) markRunUnknown(this.db, live.activeTurn.runId, "app-server exited mid-turn");
+    expirePendingApprovals(this.db, runIds);
+    appendManagedEvent(this.db, {
+      instanceId: live.instanceId,
+      runId: live.activeTurn?.runId ?? null,
+      type: "status",
+      payload: { phase: "instance_died" },
+    });
+    this.db
+      .prepare(`UPDATE runtime_instances SET state = 'ended', ended_at = ?, updated_at = ? WHERE id = ?`)
+      .run(nowIso(), nowIso(), live.instanceId);
+    logger.warn({ instanceId: live.instanceId }, "managed codex instance died");
   }
 
   private handleNotification(live: LiveInstance, method: string, params: unknown): void {

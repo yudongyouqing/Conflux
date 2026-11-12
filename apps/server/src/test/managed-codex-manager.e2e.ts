@@ -16,7 +16,10 @@ import {
 } from "../core/managed-codex/manager.js";
 import type { ManagedRunState } from "../core/managed-codex/types.js";
 
-// End-to-end manager behavior against the controllable app-server shim:
+// End-to-end manager behavior against the controllable app-server shim
+// (real child processes — lives in the SERIAL *.e2e.ts suite; the parallel
+// unit-suite load starves the shim past its windows, like every other
+// process e2e in this repo):
 // start binds a REAL thread id before the instance counts as running, one
 // turn runs at a time with queueing behind it, terminal states write the
 // reply exactly once, failures and interrupts never masquerade as

@@ -37,6 +37,11 @@ import { registerSettingsRoutes } from "./routes/settings.js";
 import { registerSystemRoutes } from "./routes/system.js";
 import { registerWakeStreamRoutes } from "./routes/wake-stream.js";
 import { registerChatRoomRoutes } from "./routes/chat-rooms.js";
+import { registerManagedCodexRoutes } from "./routes/managed-codex.js";
+import {
+  ManagedCodexManager,
+  setManagedCodexManager,
+} from "../core/managed-codex/manager.js";
 
 export interface HttpServerOptions {
   host?: string;
@@ -222,6 +227,17 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   registerWakeStreamRoutes(app, ctx);
 
   registerChatRoomRoutes(app, ctx);
+
+  // The managed Codex executor lives for the lifetime of this server: one
+  // manager instance owns every app-server child, and shutdown (below)
+  // reconciles them — in-flight runs go unknown for explicit review, never
+  // silently re-run.
+  const managedManager = new ManagedCodexManager(db);
+  setManagedCodexManager(managedManager);
+  registerManagedCodexRoutes(app, ctx);
+  app.addHook("onClose", async () => {
+    await managedManager.shutdown();
+  });
 
   try {
     await app.listen({ host, port });
