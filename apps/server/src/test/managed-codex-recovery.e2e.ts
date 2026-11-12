@@ -407,3 +407,43 @@ test("concurrent stop and resume serialize: no second writer while the old child
     }
   }
 });
+
+test("an unverifiable exit never unblocks resume (wait timeout + probe failure)", async () => {
+  const fx = makeFixture();
+  try {
+    const manager = fx.manager();
+    setManagedCodexManager(manager);
+    const { instance } = await manager.start(fx.agent);
+
+    // Known child, still ALIVE, and the exit-wait budget runs out while the
+    // external probe returns null (tool unavailable / shape unknown). The
+    // old process exists but its death cannot be verified → 409, and NO
+    // second instance may be created (the pre-fix bug resumed anyway).
+    await assert.rejects(
+      manager.resumeInstance(instance.id, fx.agent, {
+        confirmExitBudgetMs: 300,
+        inspect: () => null,
+      }),
+      /could not be verified/,
+    );
+    assert.deepEqual(manager.getLiveInstanceIds(), [instance.id], "no second writer was created");
+    const instances = fx.db
+      .prepare(`SELECT COUNT(*) AS n FROM runtime_instances`)
+      .get() as { n: number };
+    assert.equal(instances.n, 1, "no resume instance row was created either");
+
+    // Unknown holder (restarted-manager shape): same refusal on null probe.
+    manager.forgetForTest(instance.id);
+    await assert.rejects(
+      manager.resumeInstance(instance.id, fx.agent, {
+        confirmExitBudgetMs: 300,
+        inspect: () => null,
+      }),
+      /could not be verified/,
+    );
+    manager.adoptForTest(instance.id);
+    await manager.shutdown();
+  } finally {
+    await fx.dispose();
+  }
+});

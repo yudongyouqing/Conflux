@@ -432,7 +432,7 @@ export class ManagedCodexManager {
   async resumeInstance(
     instanceId: string,
     agent: RuntimeAgent,
-    opts: { confirmExitBudgetMs?: number } = {},
+    opts: { confirmExitBudgetMs?: number; inspect?: typeof inspectRuntimeProcess } = {},
   ): Promise<{ instance: RuntimeInstance; threadId: string; reconciliation: string[] }> {
     const confirmExitBudgetMs = opts.confirmExitBudgetMs ?? 10_000;
     if (agent.runtime !== "codex" || agent.execution_mode !== "managed") {
@@ -453,7 +453,23 @@ export class ManagedCodexManager {
     // confirmation — a stop request in flight (or an external kill) must
     // actually be observed dead first, so concurrent stop/resume serializes
     // instead of racing. Unknown holders (rows from a previous server
-    // process, including stale ones) fall back to the external probe.
+    // process, including stale ones) rely on the external probe.
+    //
+    // UNVERIFIABLE IS NOT DEAD: a probe that returns null (tool failure,
+    // unknown command shape) or a missing pid proves nothing. Only the
+    // child's own exited confirmation or an explicit external "exited"
+    // verdict unblocks the resume; everything else is a 409.
+    const cannotVerify = () =>
+      Object.assign(
+        new Error("previous app-server exit could not be verified — stop it and retry"),
+        { statusCode: 409 },
+      );
+    const stillRunning = () =>
+      Object.assign(
+        new Error("previous app-server process is still running — stop it before resuming"),
+        { statusCode: 409 },
+      );
+    const probe = opts.inspect ?? inspectRuntimeProcess;
     const knownChild = this.children.get(instanceId);
     if (knownChild) {
       const confirmed = await Promise.race([
@@ -462,22 +478,26 @@ export class ManagedCodexManager {
           setTimeout(() => resolve(false), confirmExitBudgetMs).unref?.(),
         ),
       ]);
-      if (!confirmed && oldRow.runtime_pid) {
-        const inspected = inspectRuntimeProcess(oldRow.runtime_pid);
-        if (inspected && inspected !== "exited") {
-          throw Object.assign(
-            new Error("previous app-server process is still running — stop it before resuming"),
-            { statusCode: 409 },
-          );
+      if (!confirmed) {
+        if (!oldRow.runtime_pid) throw cannotVerify();
+        const inspected = probe(oldRow.runtime_pid);
+        if (inspected === "exited") {
+          // externally confirmed dead — proceed
+        } else if (inspected == null) {
+          throw cannotVerify();
+        } else {
+          throw stillRunning();
         }
       }
-    } else if (oldRow.runtime_pid && ["starting", "running", "stale"].includes(oldRow.state)) {
-      const inspected = inspectRuntimeProcess(oldRow.runtime_pid);
-      if (inspected && inspected !== "exited") {
-        throw Object.assign(
-          new Error("previous app-server process is still running — stop it before resuming"),
-          { statusCode: 409 },
-        );
+    } else if (["starting", "running", "stale"].includes(oldRow.state)) {
+      if (!oldRow.runtime_pid) throw cannotVerify();
+      const inspected = probe(oldRow.runtime_pid);
+      if (inspected === "exited") {
+        // externally confirmed dead — proceed
+      } else if (inspected == null) {
+        throw cannotVerify();
+      } else {
+        throw stillRunning();
       }
     }
 
