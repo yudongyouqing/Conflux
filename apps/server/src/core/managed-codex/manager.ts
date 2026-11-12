@@ -105,10 +105,11 @@ export class ManagedCodexManager {
   private instances = new Map<string, LiveInstance>();
   /** Per-instance event subscribers (SSE streams); see subscribe(). */
   private subscribers = new Map<string, Set<(event: unknown) => void>>();
-  /** Instances whose child death THIS manager witnessed (own kill path or
-   *  the exit event) — resume skips the external liveness probe for them,
-   *  which races OS reaping and misreads a zombie as alive. */
-  private witnessedExits = new Set<string>();
+  /** Every child this manager ever spawned, keyed by instance id. Resume
+   *  uses the child's OWN exit confirmation (proc.exited) as the death
+   *  witness — a kill request alone proves nothing while the process may
+   *  still linger, and an external ps probe misreads unreaped zombies. */
+  private children = new Map<string, AppServerProcess>();
 
   constructor(
     private db: DB,
@@ -265,6 +266,7 @@ export class ManagedCodexManager {
       });
       router.live = live;
       this.instances.set(instanceId, live);
+      this.children.set(instanceId, proc);
       // The instance row carries the binding surface the control APIs read
       // (session identity for liveness; the pid for diagnostics). Process
       // identity verification is intrinsic here — this process spawned the
@@ -383,7 +385,6 @@ export class ManagedCodexManager {
       );
     }
     this.instances.delete(instanceId);
-    this.witnessedExits.add(instanceId);
     if (live.activeTurn) {
       markRunUnknown(this.db, live.activeTurn.runId, "instance stopped mid-turn");
       expirePendingApprovals(this.db, [live.activeTurn.runId]);
@@ -431,7 +432,9 @@ export class ManagedCodexManager {
   async resumeInstance(
     instanceId: string,
     agent: RuntimeAgent,
+    opts: { confirmExitBudgetMs?: number } = {},
   ): Promise<{ instance: RuntimeInstance; threadId: string; reconciliation: string[] }> {
+    const confirmExitBudgetMs = opts.confirmExitBudgetMs ?? 10_000;
     if (agent.runtime !== "codex" || agent.execution_mode !== "managed") {
       throw Object.assign(new Error("preset is not a managed codex executor"), { statusCode: 400 });
     }
@@ -446,15 +449,29 @@ export class ManagedCodexManager {
       throw Object.assign(new Error("runtime instance not found"), { statusCode: 404 });
     }
     // A still-alive previous child would make us the second writer of the
-    // same thread — refuse instead of racing it. Only rows that still CLAIM
-    // to be live get the external probe: a row this manager already ended
-    // has a witnessed exit, and probing a freshly-killed pid races the OS
-    // reaping it (a zombie still shows up in ps and would falsely refuse).
-    if (
-      !this.witnessedExits.has(instanceId) &&
-      ["starting", "running"].includes(oldRow.state) &&
-      oldRow.runtime_pid
-    ) {
+    // same thread. For a child THIS manager spawned, wait for its own exit
+    // confirmation — a stop request in flight (or an external kill) must
+    // actually be observed dead first, so concurrent stop/resume serializes
+    // instead of racing. Unknown holders (rows from a previous server
+    // process, including stale ones) fall back to the external probe.
+    const knownChild = this.children.get(instanceId);
+    if (knownChild) {
+      const confirmed = await Promise.race([
+        knownChild.exited.then(() => true as const),
+        new Promise<false>((resolve) =>
+          setTimeout(() => resolve(false), confirmExitBudgetMs).unref?.(),
+        ),
+      ]);
+      if (!confirmed && oldRow.runtime_pid) {
+        const inspected = inspectRuntimeProcess(oldRow.runtime_pid);
+        if (inspected && inspected !== "exited") {
+          throw Object.assign(
+            new Error("previous app-server process is still running — stop it before resuming"),
+            { statusCode: 409 },
+          );
+        }
+      }
+    } else if (oldRow.runtime_pid && ["starting", "running", "stale"].includes(oldRow.state)) {
       const inspected = inspectRuntimeProcess(oldRow.runtime_pid);
       if (inspected && inspected !== "exited") {
         throw Object.assign(
@@ -629,6 +646,7 @@ export class ManagedCodexManager {
 
       router.live = live;
       this.instances.set(newInstanceId, live);
+      this.children.set(newInstanceId, proc);
       void live.proc.exited.then(() => {
         if (this.instances.get(newInstanceId) === live) this.handleInstanceDeath(live);
       });
@@ -640,7 +658,6 @@ export class ManagedCodexManager {
       this.db
         .prepare(`UPDATE runtime_instances SET state = 'ended', ended_at = ?, updated_at = ? WHERE id = ?`)
         .run(nowIso(), nowIso(), instanceId);
-      this.witnessedExits.delete(instanceId);
       logger.info({ from: instanceId, to: newInstanceId, threadId }, "managed codex instance resumed");
       await this.pump(newInstanceId);
       return { instance, threadId, reconciliation };
@@ -658,10 +675,7 @@ export class ManagedCodexManager {
    */
   crashForTest(instanceId: string): void {
     const live = this.instances.get(instanceId);
-    if (live) {
-      this.witnessedExits.add(instanceId);
-      live.proc.child.kill("SIGKILL");
-    }
+    if (live) live.proc.child.kill("SIGKILL");
   }
 
   /**
@@ -675,6 +689,9 @@ export class ManagedCodexManager {
     const live = this.instances.get(instanceId);
     if (live) {
       this.instances.delete(instanceId);
+      // A restarted manager does not know the old child either — resume
+      // then has to rely on the external probe.
+      this.children.delete(instanceId);
       this.forgotten.set(instanceId, live);
     }
   }
@@ -683,7 +700,10 @@ export class ManagedCodexManager {
     const live = this.forgotten.get(instanceId);
     if (live) {
       this.forgotten.delete(instanceId);
-      if (!this.instances.has(instanceId)) this.instances.set(instanceId, live);
+      if (!this.instances.has(instanceId)) {
+        this.instances.set(instanceId, live);
+        this.children.set(instanceId, live.proc);
+      }
     }
   }
 
@@ -763,7 +783,9 @@ export class ManagedCodexManager {
 
   // ---- notification handling ----
 
-  /** Route one already-unbuffered frame to its handler. */
+  /** Route one already-unbuffered frame to its handler. Handler failures
+   *  are logged and swallowed: they run inside the transport's stdout data
+   *  callback, and an escaping throw would tear down the process. */
   private dispatchFrame(
     live: LiveInstance,
     frame: {
@@ -773,10 +795,17 @@ export class ManagedCodexManager {
       params: unknown;
     },
   ): void {
-    if (frame.kind === "notification") {
-      this.handleNotification(live, frame.method, frame.params);
-    } else {
-      this.handleServerRequest(live, frame.id!, frame.method, frame.params);
+    try {
+      if (frame.kind === "notification") {
+        this.handleNotification(live, frame.method, frame.params);
+      } else {
+        this.handleServerRequest(live, frame.id!, frame.method, frame.params);
+      }
+    } catch (err) {
+      logger.error(
+        { instanceId: live.instanceId, method: frame.method, err: err instanceof Error ? err.message : String(err) },
+        "managed frame handler failed",
+      );
     }
   }
 
@@ -935,11 +964,9 @@ export class ManagedCodexManager {
     // reconciling into a closed handle would just crash the process.
     if (!this.db.open) {
       this.instances.delete(live.instanceId);
-      this.witnessedExits.add(live.instanceId);
       return;
     }
     this.instances.delete(live.instanceId);
-    this.witnessedExits.add(live.instanceId);
     const runIds = live.activeTurn ? [live.activeTurn.runId] : [];
     if (live.activeTurn) markRunUnknown(this.db, live.activeTurn.runId, "app-server exited mid-turn");
     expirePendingApprovals(this.db, runIds);
@@ -992,7 +1019,6 @@ export class ManagedCodexManager {
     // A completion for a turn we are not driving (or already finalized) is
     // recorded as an event only — never a second reply.
     if (!active || turnId !== active.turnId) return;
-    live.activeTurn = null;
 
     const fromStates = ["running", "waiting_approval"] as const;
     let finalText: string | null = null;
@@ -1013,20 +1039,31 @@ export class ManagedCodexManager {
     }
 
     // Terminal flip AND the reply land in ONE transaction: a reply failure
-    // rolls the flip back, so the next notification (or recovery) retries
-    // the whole handoff instead of stranding a completed run whose asker
-    // never gets an answer.
-    const moved = finalizeRunAndReply(this.db, {
-      runId: active.runId,
-      ownerToken: live.ownerToken,
-      patch: { state, finalText: finalText ?? undefined, errorCode: errorCode ?? undefined },
-      fromStates: [...fromStates],
-      replierSessionId: live.sessionId,
-      replyText: replyTextFor(state, finalText, errorCode),
-    });
+    // rolls the flip back. The in-memory turn stays ACTIVE until the commit
+    // succeeds — a failed handoff must leave the run retryable (a repeated
+    // completion or recovery reconciles it), never silently dropped.
+    let moved: ReturnType<typeof finalizeRunAndReply>;
+    try {
+      moved = finalizeRunAndReply(this.db, {
+        runId: active.runId,
+        ownerToken: live.ownerToken,
+        patch: { state, finalText: finalText ?? undefined, errorCode: errorCode ?? undefined },
+        fromStates: [...fromStates],
+        replierSessionId: live.sessionId,
+        replyText: replyTextFor(state, finalText, errorCode),
+      });
+    } catch (err) {
+      logger.error(
+        { runId: active.runId, state, err: err instanceof Error ? err.message : String(err) },
+        "managed finalize failed — run stays active for retry",
+      );
+      return;
+    }
     if (!moved) {
       logger.warn({ runId: active.runId, state }, "managed terminal transition refused");
+      return;
     }
+    live.activeTurn = null;
     // Drain the queue for the next task.
     void this.pump(live.instanceId).catch(() => {});
   }

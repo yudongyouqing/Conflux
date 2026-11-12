@@ -7,6 +7,8 @@
 //   "@burst"     respond + ALL notifications in ONE stdout write (race repro:
 //                the response resolves as a microtask while the same chunk's
 //                notifications dispatch synchronously first)
+//   "@retrycomplete" replay turn/completed at +300ms/+1s/+2.2s — retry repro
+//                for completions whose reply write-back failed and rolled back
 //   "@crash"     exit(3) after acknowledging turn/start
 //   "@fail"      complete the turn with status "failed"
 //   "@hold"      stay inProgress until the client sends test/release
@@ -265,10 +267,29 @@ async function runTurn(id, params) {
   recordHistory(turnId, "completed");
   if (text.includes("@silent")) return;
   notify("turn/completed", { threadId: THREAD_ID, turn: mkTurn(turnId, "completed") });
+  if (text.includes("@retrycomplete")) {
+    // Delayed replays — the retries that must land after earlier
+    // completions failed their reply write-back and rolled back.
+    for (const delay of [300, 1000, 2200]) {
+      setTimeout(
+        () => notify("turn/completed", { threadId: THREAD_ID, turn: mkTurn(turnId, "completed") }),
+        delay,
+      );
+    }
+  }
 }
 
 let pendingApproval = null;
 let heldTurn = null; // { resolve } — released by test/release
+
+// SHIM_LINGER=1 (POSIX): survive the first SIGTERM and exit 1500ms later —
+// the delayed-termination shape concurrent stop/resume must not turn into
+// two live writers. Opt-in via env so ordinary kills stay immediate.
+if (process.env.SHIM_LINGER === "1" && process.platform !== "win32") {
+  process.on("SIGTERM", () => {
+    setTimeout(() => process.exit(0), 1500);
+  });
+}
 
 async function handle(frame) {
   logFrame(frame);

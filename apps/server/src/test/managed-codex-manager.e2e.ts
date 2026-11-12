@@ -459,3 +459,60 @@ test("official instance controls work for managed instances: list, stop, resume"
     await fx.dispose();
   }
 });
+
+test("a failed reply write-back keeps the run retryable; a repeated completion lands", async () => {
+  const fx = await makeFixture();
+  try {
+    const messageId = insertAsk(fx, "@hold @retrycomplete broken handoff");
+    await fx.manager.enqueue({
+      messageId,
+      instanceId: fx.instanceId,
+      text: "@hold @retrycomplete broken handoff",
+    });
+    await waitFor(() => (runState(fx, messageId) === "running" ? true : undefined), 15000, "running");
+
+    // Break the handoff BEFORE the turn completes: the reply's addressee
+    // check fails, the transaction rolls back — the run must stay running
+    // and the in-memory turn must stay active for a retry.
+    registerSession(fx.db, { id: "someone-else", name: "someone-else" });
+    fx.db
+      .prepare(`UPDATE messages SET to_session = 'someone-else' WHERE id = ?`)
+      .run(messageId);
+    // Release the held turn; the completion (and its replays at +300ms/+1s)
+    // all fail the handoff.
+    await (
+      fx.manager as unknown as {
+        instances: Map<string, { proc: { conn: { request: (m: string, p?: unknown) => Promise<unknown> } } }>;
+      }
+    ).instances.get(fx.instanceId)!.proc.conn.request("test/release", {});
+    await waitFor(
+      () =>
+        (
+          fx.db
+            .prepare(`SELECT COUNT(*) AS n FROM managed_codex_events WHERE payload LIKE '%turn_completed%'`)
+            .get() as { n: number }
+        ).n >= 2
+          ? true
+          : undefined,
+      15000,
+      "failed completions observed",
+    );
+    await sleep(700); // let the +1s replay fail too
+    assert.equal(runState(fx, messageId), "running", "rolled-back finalize leaves the run retryable");
+    assert.equal(getMessage(fx.db, messageId)!.reply, null);
+
+    // Repair the addressee; the +2.2s replay must land the whole handoff
+    // (terminal flip + reply in one transaction).
+    fx.db
+      .prepare(`UPDATE messages SET to_session = ? WHERE id = ?`)
+      .run(fx.sessionId, messageId);
+    await waitFor(
+      () => (runState(fx, messageId) === "completed" ? true : undefined),
+      15000,
+      "retry completion after repair",
+    );
+    assert.equal(getMessage(fx.db, messageId)!.reply, "shim final answer");
+  } finally {
+    await fx.dispose();
+  }
+});

@@ -331,3 +331,79 @@ test("resume refuses while the previous app-server process still lives", async (
     await fx.dispose();
   }
 });
+
+test("concurrent stop and resume serialize: no second writer while the old child lingers", async () => {
+  const dir2 = mkdtempSync(join(tmpdir(), "managed-codex-linger-"));
+  const db = openDb({ dataDir: dir2, dbPath: join(dir2, "data.db"), scope: "global" });
+  const projectDir = join(dir2, "project");
+  mkdirSync(projectDir, { recursive: true });
+  const agent = createRuntimeAgent(db, {
+    name: "linger",
+    runtime: "codex",
+    workdir: projectDir,
+    execution_mode: "managed",
+  });
+  const manager = new ManagedCodexManager(db, {
+    resolveLaunch: () => ({
+      executable: shimPath,
+      args: [],
+      // SHIM_LINGER (POSIX): the child ignores the first SIGTERM and exits
+      // 1500ms later — exactly the delayed-termination window in which a
+      // naive resume would start a SECOND writer for the same thread.
+      env: {
+        ...process.env,
+        SHIM_LOG: join(dir2, "shim.log"),
+        SHIM_HISTORY: join(dir2, "hist.log"),
+        SHIM_CWD: projectDir,
+        SHIM_LINGER: "1",
+      },
+      cwd: projectDir,
+    }),
+    rpcOptions: { requestTimeoutMs: 1500 },
+  });
+  setManagedCodexManager(manager);
+  try {
+    const { instance } = await manager.start(agent);
+    const oldPid = (
+      db.prepare(`SELECT runtime_pid FROM runtime_instances WHERE id = ?`).get(instance.id) as {
+        runtime_pid: number;
+      }
+    ).runtime_pid;
+
+    // Fire the official stop and immediately the official resume, WITHOUT
+    // awaiting the stop: the old child is still alive (lingering).
+    const stopPromise = (async () => {
+      await manager.stopManagedInstance(instance.id);
+    })().catch(() => {});
+    const resumePromise = manager.resumeInstance(instance.id, agent, {
+      confirmExitBudgetMs: 15000,
+    });
+    await stopPromise;
+    const resumed = await resumePromise;
+
+    // The resume only proceeded once the OLD child had actually exited —
+    // never before, so at no point were two writers alive for the thread.
+    const oldRow = db
+      .prepare(`SELECT state, ended_at FROM runtime_instances WHERE id = ?`)
+      .get(instance.id) as { state: string; ended_at: string };
+    assert.equal(oldRow.state, "ended");
+    const newRow = db
+      .prepare(`SELECT state FROM runtime_instances WHERE id = ?`)
+      .get(resumed.instance.id) as { state: string };
+    assert.equal(newRow.state, "running");
+    void oldPid;
+    await manager.stopManagedInstance(resumed.instance.id).catch(async () => {
+      await manager.shutdown();
+    });
+  } finally {
+    await manager.shutdown();
+    setManagedCodexManager(null);
+    stopWalCheckpoint(db);
+    db.close();
+    try {
+      rmSync(dir2, { recursive: true, force: true });
+    } catch {
+      // lingering handles on Windows; temp dir is disposable
+    }
+  }
+});
