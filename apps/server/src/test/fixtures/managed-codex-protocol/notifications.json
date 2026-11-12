@@ -1,0 +1,137 @@
+{
+  "threadStarted": {
+    "jsonrpc": "2.0",
+    "method": "thread/started",
+    "params": { "thread": { "id": "0193222e-0000-7000-8000-000000000001" } }
+  },
+  "turnStarted": {
+    "jsonrpc": "2.0",
+    "method": "turn/started",
+    "params": {
+      "threadId": "0193222e-0000-7000-8000-000000000001",
+      "turn": {
+        "id": "0193222e-0000-7000-8000-000000000002",
+        "rootTurnId": null,
+        "items": [],
+        "itemsView": "notLoaded",
+        "status": "inProgress",
+        "error": null,
+        "startedAt": 1762896001,
+        "completedAt": null,
+        "durationMs": null
+      }
+    }
+  },
+  "itemStartedAgentMessage": {
+    "jsonrpc": "2.0",
+    "method": "item/started",
+    "params": {
+      "item": {
+        "type": "agentMessage",
+        "id": "item-fixture-agent-message",
+        "text": "",
+        "phase": null,
+        "memoryCitation": null,
+        "delivery": null,
+        "questions": null
+      },
+      "threadId": "0193222e-0000-7000-8000-000000000001",
+      "turnId": "0193222e-0000-7000-8000-000000000002",
+      "startedAtMs": 1762896001500
+    }
+  },
+  "agentMessageDelta": {
+    "jsonrpc": "2.0",
+    "method": "item/agentMessage/delta",
+    "params": {
+      "threadId": "0193222e-0000-7000-8000-000000000001",
+      "turnId": "0193222e-0000-7000-8000-000000000002",
+      "itemId": "item-fixture-agent-message",
+      "delta": "Working on the fixture task."
+    }
+  },
+  "itemStartedCommandExecution": {
+    "jsonrpc": "2.0",
+    "method": "item/started",
+    "params": {
+      "item": {
+        "type": "commandExecution",
+        "id": "item-fixture-command",
+        "pluginId": null,
+        "scriptPath": null,
+        "command": "node fixture-tool.cjs plan",
+        "cwd": "C:\\tmp\\fixture-project",
+        "processId": null,
+        "source": "agent",
+        "status": "inProgress",
+        "commandActions": [],
+        "aggregatedOutput": null,
+        "exitCode": null,
+        "durationMs": null
+      },
+      "threadId": "0193222e-0000-7000-8000-000000000001",
+      "turnId": "0193222e-0000-7000-8000-000000000002",
+      "startedAtMs": 1762896002000
+    }
+  },
+  "itemCompletedCommandExecution": {
+    "jsonrpc": "2.0",
+    "method": "item/completed",
+    "params": {
+      "item": {
+        "type": "commandExecution",
+        "id": "item-fixture-command",
+        "pluginId": null,
+        "scriptPath": null,
+        "command": "node fixture-tool.cjs plan",
+        "cwd": "C:\\tmp\\fixture-project",
+        "processId": null,
+        "source": "agent",
+        "status": "completed",
+        "commandActions": [],
+        "aggregatedOutput": "fixture plan output",
+        "exitCode": 0,
+        "durationMs": 120
+      },
+      "threadId": "0193222e-0000-7000-8000-000000000001",
+      "turnId": "0193222e-0000-7000-8000-000000000002",
+      "completedAtMs": 1762896002200
+    }
+  },
+  "itemCompletedAgentMessage": {
+    "jsonrpc": "2.0",
+    "method": "item/completed",
+    "params": {
+      "item": {
+        "type": "agentMessage",
+        "id": "item-fixture-agent-message",
+        "text": "Working on the fixture task. Fixture result is done.",
+        "phase": null,
+        "memoryCitation": null,
+        "delivery": null,
+        "questions": null
+      },
+      "threadId": "0193222e-0000-7000-8000-000000000001",
+      "turnId": "0193222e-0000-7000-8000-000000000002",
+      "completedAtMs": 1762896002500
+    }
+  },
+  "turnCompleted": {
+    "jsonrpc": "2.0",
+    "method": "turn/completed",
+    "params": {
+      "threadId": "0193222e-0000-7000-8000-000000000001",
+      "turn": {
+        "id": "0193222e-0000-7000-8000-000000000002",
+        "rootTurnId": null,
+        "items": [],
+        "itemsView": "notLoaded",
+        "status": "completed",
+        "error": null,
+        "startedAt": 1762896001,
+        "completedAt": 1762896003,
+        "durationMs": 2000
+      }
+    }
+  }
+}
