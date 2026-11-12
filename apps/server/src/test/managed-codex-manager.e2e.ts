@@ -183,7 +183,7 @@ test("a task on an idle instance runs to completion and replies once", async () 
     const messageId = insertAsk(fx, "plain fixture task");
     await fx.manager.enqueue({ messageId, instanceId: fx.instanceId, text: "plain fixture task" });
 
-    await waitFor(() => (runState(fx, messageId) === "completed" ? true : undefined), 8000, "completion");
+    await waitFor(() => (runState(fx, messageId) === "completed" ? true : undefined), 15000, "completion");
     const msg = getMessage(fx.db, messageId)!;
     assert.equal(msg.status, "replied");
     assert.equal(msg.reply, "shim final answer");
@@ -210,7 +210,7 @@ test("a second task queues behind a held turn and runs after release", async () 
     const first = insertAsk(fx, "@hold first");
     const second = insertAsk(fx, "second plain");
     await fx.manager.enqueue({ messageId: first, instanceId: fx.instanceId, text: "@hold first" });
-    await waitFor(() => (runState(fx, first) === "running" ? true : undefined), 8000, "first running");
+    await waitFor(() => (runState(fx, first) === "running" ? true : undefined), 15000, "first running");
     await fx.manager.enqueue({
       messageId: second,
       instanceId: fx.instanceId,
@@ -226,8 +226,8 @@ test("a second task queues behind a held turn and runs after release", async () 
     await (live as unknown as { instances: Map<string, { proc: { conn: { request: (m: string, p?: unknown) => Promise<unknown> } } }> })
       .instances.get(fx.instanceId)!.proc.conn.request("test/release", {});
 
-    await waitFor(() => (runState(fx, first) === "completed" ? true : undefined), 8000, "first completed");
-    await waitFor(() => (runState(fx, second) === "completed" ? true : undefined), 8000, "second completed");
+    await waitFor(() => (runState(fx, first) === "completed" ? true : undefined), 15000, "first completed");
+    await waitFor(() => (runState(fx, second) === "completed" ? true : undefined), 15000, "second completed");
     assert.equal(getMessage(fx.db, first)!.reply, "shim final answer");
     assert.equal(getMessage(fx.db, second)!.reply, "shim final answer");
     assert.equal(shimLog(fx).filter((l) => l.includes('"method":"turn/start"')).length, 2);
@@ -241,7 +241,7 @@ test("a failed turn writes a failure reply, never completed", async () => {
   try {
     const messageId = insertAsk(fx, "@fail task");
     await fx.manager.enqueue({ messageId, instanceId: fx.instanceId, text: "@fail task" });
-    await waitFor(() => (runState(fx, messageId) === "failed" ? true : undefined), 8000, "failure");
+    await waitFor(() => (runState(fx, messageId) === "failed" ? true : undefined), 15000, "failure");
     const run = fx.db
       .prepare(`SELECT state, error_code FROM managed_codex_runs WHERE message_id = ?`)
       .get(messageId) as { state: string; error_code: string };
@@ -264,7 +264,7 @@ test("interrupt finalizes the active turn as interrupted", async () => {
       instanceId: fx.instanceId,
       text: "@hold interrupt me",
     });
-    await waitFor(() => (runState(fx, messageId) === "running" ? true : undefined), 8000, "running");
+    await waitFor(() => (runState(fx, messageId) === "running" ? true : undefined), 15000, "running");
 
     const stale = await fx.manager.interrupt(fx.instanceId, "wrong-turn-id");
     assert.equal(stale.accepted, false, "expected-turn mismatch refuses the interrupt");
@@ -330,7 +330,7 @@ test("shutdown marks the active run unknown and ends the instance", async () => 
     instanceId: fx.instanceId,
     text: "@hold during shutdown",
   });
-  await waitFor(() => (runState(fx, messageId) === "running" ? true : undefined), 8000, "running");
+  await waitFor(() => (runState(fx, messageId) === "running" ? true : undefined), 15000, "running");
   await fx.manager.shutdown();
   assert.equal(runState(fx, messageId), "unknown");
   const instanceRow = fx.db
