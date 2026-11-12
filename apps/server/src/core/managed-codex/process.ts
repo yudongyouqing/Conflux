@@ -39,20 +39,54 @@ export function resolveLaunchPlan(
 
   if (platform === "win32") {
     if (lower.endsWith(".cmd") || lower.endsWith(".bat")) {
-      const script = scriptBehindCmdShim(trimmed);
-      if (script) return { command: process.execPath, args: [script, ...args] };
-      throw new Error(
-        `cannot resolve npm cmd shim to a node script: ${trimmed} — configure the codex executable directly`,
-      );
+      return cmdShimPlan(trimmed, args);
     }
     if (lower.endsWith(".js") || lower.endsWith(".cjs") || lower.endsWith(".mjs")) {
       return { command: process.execPath, args: [trimmed, ...args] };
     }
-    return { command: trimmed, args };
+    if (lower.endsWith(".exe")) {
+      return { command: trimmed, args };
+    }
+    // Bare command: Node's spawn does NOT search PATHEXT, so a bare "codex"
+    // would try to execute a nonexistent extensionless file. Resolve it the
+    // way cmd would, then classify the hit (cmd shim vs real exe).
+    const resolved = resolveOnPathWindows(trimmed);
+    if (!resolved) {
+      throw new Error(`executable not found on PATH: ${trimmed} — set the codex path in settings`);
+    }
+    if (resolved.toLowerCase().endsWith(".cmd") || resolved.toLowerCase().endsWith(".bat")) {
+      return cmdShimPlan(resolved, args);
+    }
+    return { command: resolved, args };
   }
 
   // POSIX: scripts usually carry a shebang; hand them to spawn as-is.
   return { command: trimmed, args };
+}
+
+function cmdShimPlan(shimPath: string, args: string[]): LaunchPlan {
+  const script = scriptBehindCmdShim(shimPath);
+  if (script) return { command: process.execPath, args: [script, ...args] };
+  throw new Error(
+    `cannot resolve npm cmd shim to a node script: ${shimPath} — configure the codex executable directly`,
+  );
+}
+
+/** PATHEXT-aware PATH lookup for a bare command name on Windows. cmd.exe
+ *  never executes extensionless files (an adjacent sh script with the same
+ *  name is for Git Bash, not for us), so only PATHEXT extensions count. */
+function resolveOnPathWindows(command: string): string | null {
+  const pathDirs = (process.env.PATH ?? "").split(";");
+  const exts = (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean);
+  const candidates = exts.map((ext) => `${command}${ext}`);
+  for (const dir of pathDirs) {
+    if (!dir) continue;
+    for (const candidate of candidates) {
+      const full = resolve(dir, candidate);
+      if (existsSync(full)) return full;
+    }
+  }
+  return null;
 }
 
 /**
@@ -68,8 +102,11 @@ function scriptBehindCmdShim(shimPath: string): string | null {
     return null;
   }
   const dir = dirname(shimPath);
-  for (const match of content.matchAll(/%~dp0\\?([^"'\r\n]+?\.(?:js|mjs|cjs))/g)) {
-    const candidate = resolve(dir, match[1].replace(/\\/g, "\\"));
+  // Shims reference the script either via %~dp0\... (direct expansion) or
+  // SET dp0 + %dp0%\... (npm's variable form) — both resolve relative to
+  // the shim's own directory.
+  for (const match of content.matchAll(/(?:%~dp0|%dp0%)\\([^"'\r\n]+?\.(?:js|mjs|cjs))/g)) {
+    const candidate = resolve(dir, match[1]);
     if (existsSync(candidate)) return candidate;
   }
   for (const match of content.matchAll(/"([A-Za-z]:[^"'\r\n]+?\.(?:js|mjs|cjs))"/g)) {
