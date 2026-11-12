@@ -238,7 +238,7 @@ npm run check:secrets
 - [x] 用临时 CONFLUX_HOME、独立 CODEX_HOME 和临时项目目录执行实际 CLI 验收（无模型冒烟：initialize 版本核对 + thread/start 真实 UUIDv7 通过；真实模型 turn 未运行，见下）；沿用已有合法登录机制，不从真实配置复制密钥到测试记录。运行真实模型前检查其权限/费用与当前授权边界；如凭据不可用，报告真实验收未完成，不通过 mock 宣称完成。
 - [ ] 真机矩阵：新建、第二条排队、工具审批拒绝/允许、中断、进程退出、服务重启恢复、外部线程被占用、两个并发消息；核对原 thread 与原 message ID、执行次数和残留进程。
 - [x] docs/MANAGED-CODEX.md 记录支持 CLI 版本、外部会话差异、unknown 处理方法和实测平台。Windows 优先实测；未测的 macOS/Linux 明确标注。
-- [ ] 按 repo 规则用 gh 创建 feat PR，链接功能 issue、计划、测试与截图。任何 push 前在对话宣布分支和 commits；feat/fix PR 保持开放供用户手动合并，禁止自动合并、发布或发起 dev→main。
+- [x] 按 repo 规则用 gh 创建 feat PR，链接功能 issue、计划、测试与截图。任何 push 前在对话宣布分支和 commits；feat/fix PR 保持开放供用户手动合并，禁止自动合并、发布或发起 dev→main。
 
 ## 5. GLM 回报格式
 
