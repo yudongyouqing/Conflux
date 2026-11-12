@@ -26,7 +26,12 @@ export function registerManagedCodexRoutes(app: FastifyInstance, ctx: ServerCont
       const manager = requireManager();
       const status = manager.instanceStatus(req.params.id);
       const binding = db
-        .prepare(`SELECT * FROM managed_codex_bindings WHERE instance_id = ?`)
+        // owner_token is the executor's internal ownership pin — it never
+        // leaves the server.
+        .prepare(
+          `SELECT instance_id, session_id, thread_id, active_turn_id
+           FROM managed_codex_bindings WHERE instance_id = ?`,
+        )
         .get(req.params.id) as
         | {
             instance_id: string;

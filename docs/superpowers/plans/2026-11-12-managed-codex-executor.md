@@ -128,20 +128,20 @@ export interface ManagedCodexEvent {
 
 ### 任务 1：准备隔离工作区，锁定协议
 
-- [ ] 用 gh 搜索已有 managed Codex / app-server 相关 issue；有匹配则复用，没有则创建一个范围与本计划一致的功能 issue。
-- [ ] `git fetch origin dev`，从最新 origin/dev 创建 `feat/<issue>-managed-codex`，worktree 位于 `.worktrees/feat/<issue>-managed-codex`。保留当前 checkout 与其他 worktree 的未提交内容。
-- [ ] 阅读工作区 AGENTS.md、CLAUDE.md 和现有协作控制测试；安装依赖并记录 server/web/build 基线结果。
-- [ ] 在隔离配置下记录实际 Codex CLI 版本，执行 `codex app-server generate-ts --out <temporary-protocol-dir>`，核对 initialize、thread/start/resume/read、turn/start/interrupt、通知和审批字段；开发期固定所支持的版本，遇到不兼容版本明确拒绝。
-- [ ] 保存协议测试 fixture，覆盖 JSON-RPC 响应、通知、审批请求和失败终态。fixture 仅含合成文本，不拷贝用户会话。
+- [x] 用 gh 搜索已有 managed Codex / app-server 相关 issue；有匹配则复用，没有则创建一个范围与本计划一致的功能 issue。
+- [x] `git fetch origin dev`，从最新 origin/dev 创建 `feat/<issue>-managed-codex`，worktree 位于 `.worktrees/feat/<issue>-managed-codex`。保留当前 checkout 与其他 worktree 的未提交内容。
+- [x] 阅读工作区 AGENTS.md、CLAUDE.md 和现有协作控制测试；安装依赖并记录 server/web/build 基线结果。
+- [x] 在隔离配置下记录实际 Codex CLI 版本，执行 `codex app-server generate-ts --out <temporary-protocol-dir>`，核对 initialize、thread/start/resume/read、turn/start/interrupt、通知和审批字段；开发期固定所支持的版本，遇到不兼容版本明确拒绝。
+- [x] 保存协议测试 fixture，覆盖 JSON-RPC 响应、通知、审批请求和失败终态。fixture 仅含合成文本，不拷贝用户会话。
 
 ### 任务 2：数据库与任务幂等
 
 **测试文件：** `apps/server/src/test/managed-codex-store.test.ts`。
 
-- [ ] 先写失败测试：升级保留旧消息/预设；默认 terminal；同一 message_id 重复 enqueue 返回同一 run；两个并发调度者只能一个从 queued 领取为 submitting；expired owner 不得完成新 owner 的任务。
-- [ ] 实现 types.ts、store.ts 与 db.ts 迁移；默认值兼容旧版本；为 message_id 创建唯一约束。
-- [ ] 为纯状态迁移实现按前态与 owner token 条件更新，失败返回 conflict，不重复执行外部副作用。
-- [ ] 用下列契约断言作为最小回归形状；setup 使用临时 DB，insertMessage 是测试 fixture 中实际插入 sender/recipient/message 的帮助函数：
+- [x] 先写失败测试：升级保留旧消息/预设；默认 terminal；同一 message_id 重复 enqueue 返回同一 run；两个并发调度者只能一个从 queued 领取为 submitting；expired owner 不得完成新 owner 的任务。
+- [x] 实现 types.ts、store.ts 与 db.ts 迁移；默认值兼容旧版本；为 message_id 创建唯一约束。
+- [x] 为纯状态迁移实现按前态与 owner token 条件更新，失败返回 conflict，不重复执行外部副作用。
+- [x] 用下列契约断言作为最小回归形状；setup 使用临时 DB，insertMessage 是测试 fixture 中实际插入 sender/recipient/message 的帮助函数：
 
 ```ts
 const first = enqueueManagedTask(db, input);
@@ -153,75 +153,75 @@ assert.equal(count.n, 1);
 
 `enqueueManagedTask(db, input: ManagedTaskInput)` 在 store.ts 中实现，返回持久化 run；不要直接调用 RPC。
 
-- [ ] 运行：`node --import tsx --test apps/server/src/test/managed-codex-store.test.ts`。预期：上述行为通过；再运行现有 migration/message-delivery 回归。
-- [ ] 提交：`feat(server): persist managed Codex tasks and bindings`。
+- [x] 运行：`node --import tsx --test apps/server/src/test/managed-codex-store.test.ts`。预期：上述行为通过；再运行现有 migration/message-delivery 回归。
+- [x] 提交：`feat(server): persist managed Codex tasks and bindings`。
 
 ### 任务 3：stdio JSON-RPC 与进程适配
 
 **测试文件：** `managed-codex-rpc.test.ts`、`managed-codex-process.e2e.ts`。
 
-- [ ] 先写失败测试：单行分成多个 chunk、多行同一 chunk、CRLF、响应乱序、未知通知、JSON 无效、请求超时、stdout 关闭、child 退出，所有 pending Promise 正确结束。
-- [ ] rpc.ts 提供 `request(method, params)`、`respond(id, result)`、`onNotification`、`onServerRequest`、`close()`；请求 id 按连接单调递增，连接重建更换 generation，旧回调不得作用于新连接。
-- [ ] 设置单帧大小上限 4 MiB、最多 128 个在途请求、普通请求超时 30 秒；超限返回明确错误。中断、审批、恢复等待均有可取消的有限超时。
-- [ ] process.ts 使用 executable + argv，prompt 通过 JSON stdin；复用 runtime-registry/settings/env 配置，不拼接 prompt 到 shell 命令。Windows 要区分实际 exe、node 脚本与 npm cmd shim：解析为可直接执行的 exe 或 node + script；不把 cmd shim 直接交给 shell:false。
-- [ ] 新子进程使用 `windowsHide: true`，继承明确的项目目录和 CONFLUX_HOME；日志只记录实例/请求标识、错误分类与受控诊断，不打印密钥、完整 env 或原始协议。
-- [ ] shim 用 `process.execPath` 启动，模拟 initialize、thread、turn、审批、异常退出，并记录收到的 RPC 供测试断言。
-- [ ] 先跑 RPC 单测，再串行跑 process E2E；预期退出后无 pending request、无残留 shim PID/端口/订阅。
-- [ ] 提交：`feat(server): add managed Codex stdio transport`。
+- [x] 先写失败测试：单行分成多个 chunk、多行同一 chunk、CRLF、响应乱序、未知通知、JSON 无效、请求超时、stdout 关闭、child 退出，所有 pending Promise 正确结束。
+- [x] rpc.ts 提供 `request(method, params)`、`respond(id, result)`、`onNotification`、`onServerRequest`、`close()`；请求 id 按连接单调递增，连接重建更换 generation，旧回调不得作用于新连接。
+- [x] 设置单帧大小上限 4 MiB、最多 128 个在途请求、普通请求超时 30 秒；超限返回明确错误。中断、审批、恢复等待均有可取消的有限超时。
+- [x] process.ts 使用 executable + argv，prompt 通过 JSON stdin；复用 runtime-registry/settings/env 配置，不拼接 prompt 到 shell 命令。Windows 要区分实际 exe、node 脚本与 npm cmd shim：解析为可直接执行的 exe 或 node + script；不把 cmd shim 直接交给 shell:false。
+- [x] 新子进程使用 `windowsHide: true`，继承明确的项目目录和 CONFLUX_HOME；日志只记录实例/请求标识、错误分类与受控诊断，不打印密钥、完整 env 或原始协议。
+- [x] shim 用 `process.execPath` 启动，模拟 initialize、thread、turn、审批、异常退出，并记录收到的 RPC 供测试断言。
+- [x] 先跑 RPC 单测，再串行跑 process E2E；预期退出后无 pending request、无残留 shim PID/端口/订阅。
+- [x] 提交：`feat(server): add managed Codex stdio transport`。
 
 ### 任务 4：受管实例、消息与执行闭环
 
 **测试文件：** `managed-codex-manager.test.ts`、现有 runtime/message-delivery 测试。
 
-- [ ] 先写失败测试：initialize 前不能创建 thread；thread ID 到达前保持 starting；同一实例每次只启动一个 turn；忙时第二个任务等待；重复通知不重复回写 reply；失败/中断不变 completed。
-- [ ] manager.ts 提供启动、enqueue、interrupt、resume、shutdown；首期一个受管实例一个根 thread，进程与绑定由 manager 实际持有。
-- [ ] runtime-agents.ts 对 managed+codex 分流到 manager；原 terminal 路径默认保持。实例绑定使用真实协议 thread ID 与实际进程身份；同一 thread 的并发 owner 明确冲突。
-- [ ] ask.ts 在消息准备事务提交后识别受管目标，按原 message ID enqueue；受管消息不调用 wake/codex.ts 或终端 send-keys，也不再启动摘要代理。
-- [ ] events.ts 根据 `turn/started`、`item/agentMessage/delta`、item 完成与 `turn/completed` 更新 run。最终文本按 item ID 归并，不能重复拼接 delta 与完整 item；只有 completed 终态自动调用现有 reply 核心完成原消息。
-- [ ] 将 Agent 来源作为明确的消息内容/元数据交给 Codex，不把它描述为用户授权；原始发送会话、实际执行 instance、thread、turn 均可追踪。
-- [ ] 现有 MCP 接入若也为该进程登记会话，必须按实例/thread 做确定绑定；有冲突则报告，不能用项目路径或最近活动猜测，也不能创建两个代表同一受管 thread 的会话。
-- [ ] 每个消息执行至少保存一次归一化终态事件；HTTP 响应、DB 重试不重复发 turn/start。
-- [ ] 运行 focused manager/store/runtime 测试；提交 `feat(server): drive managed Codex tasks from messages`。
+- [x] 先写失败测试：initialize 前不能创建 thread；thread ID 到达前保持 starting；同一实例每次只启动一个 turn；忙时第二个任务等待；重复通知不重复回写 reply；失败/中断不变 completed。
+- [x] manager.ts 提供启动、enqueue、interrupt、resume、shutdown；首期一个受管实例一个根 thread，进程与绑定由 manager 实际持有。
+- [x] runtime-agents.ts 对 managed+codex 分流到 manager；原 terminal 路径默认保持。实例绑定使用真实协议 thread ID 与实际进程身份；同一 thread 的并发 owner 明确冲突。
+- [x] ask.ts 在消息准备事务提交后识别受管目标，按原 message ID enqueue；受管消息不调用 wake/codex.ts 或终端 send-keys，也不再启动摘要代理。
+- [x] events.ts 根据 `turn/started`、`item/agentMessage/delta`、item 完成与 `turn/completed` 更新 run。最终文本按 item ID 归并，不能重复拼接 delta 与完整 item；只有 completed 终态自动调用现有 reply 核心完成原消息。
+- [x] 将 Agent 来源作为明确的消息内容/元数据交给 Codex，不把它描述为用户授权；原始发送会话、实际执行 instance、thread、turn 均可追踪。
+- [x] 现有 MCP 接入若也为该进程登记会话，必须按实例/thread 做确定绑定；有冲突则报告，不能用项目路径或最近活动猜测，也不能创建两个代表同一受管 thread 的会话。
+- [x] 每个消息执行至少保存一次归一化终态事件；HTTP 响应、DB 重试不重复发 turn/start。
+- [x] 运行 focused manager/store/runtime 测试；提交 `feat(server): drive managed Codex tasks from messages`。
 
 ### 任务 5：审批与中断
 
 **测试文件：** `managed-codex-approvals.test.ts`、`managed-codex-http.test.ts`。
 
-- [ ] 先写失败测试：审批只作用于对应 instance/thread/turn/request；重复回应、已完成 turn、旧连接 generation、过期审批均返回 409；Agent 会话不能代替用户批准。
-- [ ] 通过版本化 RPC schema 区分 commandExecution 与 fileChange 审批，首期 UI 只提供该请求实际允许的“本次允许 / 拒绝 / 取消”。未知服务端请求明确失败，不能默认批准或永远悬挂。
-- [ ] 审批内容持久化前脱敏；用户 HTTP 操作复用现有人工控制台身份边界，不接受 body 中伪造 actor。
-- [ ] `turn/interrupt` 请求成功只表示取消请求已接受；等官方 interrupted 终态后更新状态。停止进程沿用已核验 ownership/process identity，不把中断当杀进程。
-- [ ] 对外 API：`GET /runtime-instances/:id/managed` 返回 binding、当前 run、队列摘要与 pending approvals；`POST /runtime-instances/:id/managed/interrupt` 携带 expected_turn_id；`POST /runtime-instances/:id/managed/approvals/:approvalId` 携带校验后的 decision。
-- [ ] 用 Fastify inject 验证非法目标、外部实例、越权 actor、重复请求与协议错误分类。HTTP/CLI/MCP 内部都复用 core；不新增能绕过审批的 Agent 工具。
-- [ ] 提交 `feat(server): expose managed Codex approvals and interruption`。
+- [x] 先写失败测试：审批只作用于对应 instance/thread/turn/request；重复回应、已完成 turn、旧连接 generation、过期审批均返回 409；Agent 会话不能代替用户批准。
+- [x] 通过版本化 RPC schema 区分 commandExecution 与 fileChange 审批，首期 UI 只提供该请求实际允许的“本次允许 / 拒绝 / 取消”。未知服务端请求明确失败，不能默认批准或永远悬挂。
+- [x] 审批内容持久化前脱敏；用户 HTTP 操作复用现有人工控制台身份边界，不接受 body 中伪造 actor。
+- [x] `turn/interrupt` 请求成功只表示取消请求已接受；等官方 interrupted 终态后更新状态。停止进程沿用已核验 ownership/process identity，不把中断当杀进程。
+- [x] 对外 API：`GET /runtime-instances/:id/managed` 返回 binding、当前 run、队列摘要与 pending approvals；`POST /runtime-instances/:id/managed/interrupt` 携带 expected_turn_id；`POST /runtime-instances/:id/managed/approvals/:approvalId` 携带校验后的 decision。
+- [x] 用 Fastify inject 验证非法目标、外部实例、越权 actor、重复请求与协议错误分类。HTTP/CLI/MCP 内部都复用 core；不新增能绕过审批的 Agent 工具。
+- [x] 提交 `feat(server): expose managed Codex approvals and interruption`。
 
 ### 任务 6：掉线、重启与恢复核对
 
 **测试文件：** `managed-codex-recovery.test.ts`、process E2E。
 
-- [ ] 先写失败测试：queued 可继续；RPC 写入后响应前退出不得自动再发；submitting/running 在断线后进入 unknown；完成但 DB 回写前退出能核对终态后补回结果；审批随旧连接失效。
-- [ ] 服务端启动时读取未完成记录，检验旧进程/owner；无法确认旧 owner 已退出时保持受限状态，不创建并发 writer。
-- [ ] 用户恢复时用保存的 thread ID 调 `thread/resume`，用 `thread/read` 与保存 turn ID 核对历史。存在已确认完成的 turn 就补终态与原消息结果；不存在确定关联证据时保留 unknown，供用户核对，禁止把相似文本当成功证据。
-- [ ] submitting 且没有 turn ID 的窗口必须显式展示“执行状态待核对”，不能推断为未运行。首期采用保守人工处理，不声称自动 exactly-once。
-- [ ] 服务停止时关闭发送入口，过期本连接的 approvals，结束/回收自己的 child 并等待确认，清理 timers/listeners；不终止外部会话。
-- [ ] 测试只启动 shim，断点覆盖 send 前、send 后、接受后、完成后写库前四个窗口。每个用例核对 turn/start 收到次数与最终 DB 记录。
-- [ ] 提交 `fix(server): reconcile managed Codex runs after disconnects`。
+- [x] 先写失败测试：queued 可继续；RPC 写入后响应前退出不得自动再发；submitting/running 在断线后进入 unknown；完成但 DB 回写前退出能核对终态后补回结果；审批随旧连接失效。
+- [x] 服务端启动时读取未完成记录，检验旧进程/owner；无法确认旧 owner 已退出时保持受限状态，不创建并发 writer。
+- [x] 用户恢复时用保存的 thread ID 调 `thread/resume`，用 `thread/read` 与保存 turn ID 核对历史。存在已确认完成的 turn 就补终态与原消息结果；不存在确定关联证据时保留 unknown，供用户核对，禁止把相似文本当成功证据。
+- [x] submitting 且没有 turn ID 的窗口必须显式展示“执行状态待核对”，不能推断为未运行。首期采用保守人工处理，不声称自动 exactly-once。
+- [x] 服务停止时关闭发送入口，过期本连接的 approvals，结束/回收自己的 child 并等待确认，清理 timers/listeners；不终止外部会话。
+- [x] 测试只启动 shim，断点覆盖 send 前、send 后、接受后、完成后写库前四个窗口。每个用例核对 turn/start 收到次数与最终 DB 记录。
+- [x] 提交 `fix(server): reconcile managed Codex runs after disconnects`。
 
 ### 任务 7：最小网页闭环
 
 **测试文件：** `apps/web/test/managed-codex.test.ts`、现有 assistants/collaboration-controls/workspace 测试。
 
-- [ ] 增加 `GET /runtime-instances/:id/managed/events?after=<sequence>` SSE，返回归一化事件；重连从 last-event-id/after 续读，旧序号去重，连接取消时释放订阅。历史事件只查询需要展示的页，不能一次加载整个会话。
-- [ ] API 客户端保留实例/turn 关联；切换实例时 abort 旧请求与流，旧响应不得写入新面板。
-- [ ] AssistantsTab 为 Codex 预设增加 opt-in 模式选择；RuntimeInstancesPanel 链接受管面板；ManagedCodexPanel 展示真实 binding、执行状态、文本/工具进展、审批与中断。
-- [ ] 输入仍走现有问答入口，固定收件人；人工恢复与重试显示原任务状态，不能暗中复制一条消息。
-- [ ] 等待审批、执行失败、unknown、断线和 interrupted 各有文字提示。状态颜色使用 docs/DESIGN-TOKENS.md，按钮保持键盘可达；审批按钮提交期间禁用，过期响应后刷新状态。
-- [ ] 挂载测试覆盖双击、旧流到达、重连、审批过期和受管/外部实例切换。桌面与 390/320px 窄屏验证无横向溢出；界面测试 fixture 不声称真实模型通过。
-- [ ] 提交 `feat(web): add managed Codex execution panel`。
+- [x] 增加 `GET /runtime-instances/:id/managed/events?after=<sequence>` SSE，返回归一化事件；重连从 last-event-id/after 续读，旧序号去重，连接取消时释放订阅。历史事件只查询需要展示的页，不能一次加载整个会话。
+- [x] API 客户端保留实例/turn 关联；切换实例时 abort 旧请求与流，旧响应不得写入新面板。
+- [x] AssistantsTab 为 Codex 预设增加 opt-in 模式选择；RuntimeInstancesPanel 链接受管面板；ManagedCodexPanel 展示真实 binding、执行状态、文本/工具进展、审批与中断。
+- [x] 输入仍走现有问答入口，固定收件人；人工恢复与重试显示原任务状态，不能暗中复制一条消息。
+- [x] 等待审批、执行失败、unknown、断线和 interrupted 各有文字提示。状态颜色使用 docs/DESIGN-TOKENS.md，按钮保持键盘可达；审批按钮提交期间禁用，过期响应后刷新状态。
+- [x] 挂载测试覆盖双击、旧流到达、重连、审批过期和受管/外部实例切换。桌面与 390/320px 窄屏验证无横向溢出；界面测试 fixture 不声称真实模型通过。
+- [x] 提交 `feat(web): add managed Codex execution panel`。
 
 ### 任务 8：验证与交付
 
-- [ ] 运行 affected focused tests，再运行下列完整检查；记录命令、退出码和实际结果，不复制本计划的预期当成实测。
+- [x] 运行 affected focused tests，再运行下列完整检查；记录命令、退出码和实际结果，不复制本计划的预期当成实测。
 
 ```powershell
 npm test -w apps/server
@@ -234,10 +234,10 @@ npm run check:tokens
 npm run check:secrets
 ```
 
-- [ ] 更新 `test:process-e2e` 脚本，使新 process.e2e.ts 与现有真实进程测试串行执行，避免并发负载超过进程检查超时。
-- [ ] 用临时 CONFLUX_HOME、独立 CODEX_HOME 和临时项目目录执行实际 CLI 验收；沿用已有合法登录机制，不从真实配置复制密钥到测试记录。运行真实模型前检查其权限/费用与当前授权边界；如凭据不可用，报告真实验收未完成，不通过 mock 宣称完成。
+- [x] 更新 `test:process-e2e` 脚本，使新 process.e2e.ts 与现有真实进程测试串行执行，避免并发负载超过进程检查超时。（glob `*.e2e.ts` 已覆盖，无脚本改动；新受管套件以 .e2e.ts 命名进串行层）
+- [x] 用临时 CONFLUX_HOME、独立 CODEX_HOME 和临时项目目录执行实际 CLI 验收（无模型冒烟：initialize 版本核对 + thread/start 真实 UUIDv7 通过；真实模型 turn 未运行，见下）；沿用已有合法登录机制，不从真实配置复制密钥到测试记录。运行真实模型前检查其权限/费用与当前授权边界；如凭据不可用，报告真实验收未完成，不通过 mock 宣称完成。
 - [ ] 真机矩阵：新建、第二条排队、工具审批拒绝/允许、中断、进程退出、服务重启恢复、外部线程被占用、两个并发消息；核对原 thread 与原 message ID、执行次数和残留进程。
-- [ ] docs/MANAGED-CODEX.md 记录支持 CLI 版本、外部会话差异、unknown 处理方法和实测平台。Windows 优先实测；未测的 macOS/Linux 明确标注。
+- [x] docs/MANAGED-CODEX.md 记录支持 CLI 版本、外部会话差异、unknown 处理方法和实测平台。Windows 优先实测；未测的 macOS/Linux 明确标注。
 - [ ] 按 repo 规则用 gh 创建 feat PR，链接功能 issue、计划、测试与截图。任何 push 前在对话宣布分支和 commits；feat/fix PR 保持开放供用户手动合并，禁止自动合并、发布或发起 dev→main。
 
 ## 5. GLM 回报格式
