@@ -426,7 +426,7 @@ test("resume spawns a new real instance with original conversation identity; dup
 
   // Launch failure marks the freshly created instance failed without
   // touching the resumable original.
-  assert.throws(
+  await assert.rejects(
     () =>
       resumeRuntimeInstance(db, first.instanceId, {
         platform: "win32",
@@ -443,7 +443,7 @@ test("resume spawns a new real instance with original conversation identity; dup
   const newReportFile = join(shims.dir, "report-resumed.json");
   let resumedChild: ChildProcess | undefined;
 
-  const { instance: resumed } = resumeRuntimeInstance(db, first.instanceId, {
+  const { instance: resumed } = await resumeRuntimeInstance(db, first.instanceId, {
     platform: "win32",
     launch: (_settings, spec) => {
       resumedChild = shims.spawnRuntime("claude", newReportFile, { env: spec.env });
@@ -466,7 +466,10 @@ test("resume spawns a new real instance with original conversation identity; dup
     metadata: { runtime_instance_id: resumed.id, agent_id: agent.id },
   });
   await bindForReal(db, resumed.id, "sess-resumed", newReport.pid);
-  assert.throws(() => resumeRuntimeInstance(db, first.instanceId, { platform: "win32", launch: () => {} }), /重复恢复/);
+  await assert.rejects(
+    resumeRuntimeInstance(db, first.instanceId, { platform: "win32", launch: () => {} }),
+    /重复恢复/,
+  );
 
   // Stopping the resumed instance ends its session too.
   await stopForReal(db, resumed.id);

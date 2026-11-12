@@ -5,6 +5,7 @@ import { WEB_CONSOLE_ID } from "@conflux/shared";
 import { randomUUID } from "node:crypto";
 import { nowIso, retryOnBusy, isLockError } from "./db.js";
 import { logger } from "../log.js";
+import { getManagedCodexManager, isManagedTarget } from "./managed-codex/manager.js";
 
 /**
  * THE ask path: deliver a question and, when the addressee cannot see it
@@ -84,6 +85,33 @@ export async function completeAsk(
 ): Promise<AskOutcome> {
   const { message, claim } = prepared;
   if (!claim) return { message, wake: { woke: false, reason: "message already received" } };
+
+  // Managed executor targets dispatch to the Conflux-held app-server
+  // instead of a terminal wake — no send-keys, no summary stand-in. The
+  // enqueue itself is database-first (idempotent per message), so a retried
+  // delivery can never start a second turn.
+  if (isManagedTarget(message.to_session)) {
+    const manager = getManagedCodexManager()!;
+    const binding = manager.bindingForSession(message.to_session)!;
+    await manager.enqueue({
+      messageId: message.id,
+      instanceId: binding.instanceId,
+      text: message.question,
+    });
+    await retryOnBusy(db, () =>
+      db
+        .prepare(
+          `UPDATE message_deliveries SET state = 'woken', reason = NULL, claim_token = NULL,
+           claim_expires_at = NULL WHERE message_id = ? AND claim_token = ?`,
+        )
+        .run(message.id, claim.token),
+    );
+    return {
+      message: getMessage(db, message.id) ?? message,
+      wake: { woke: true, command: `managed-codex:${binding.instanceId}` },
+    };
+  }
+
   let wake: WakeResult;
   try {
     wake = await wakeFn(db, message.to_session);

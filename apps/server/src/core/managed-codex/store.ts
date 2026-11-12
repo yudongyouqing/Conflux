@@ -258,3 +258,50 @@ export function markRunUnknown(db: DB, runId: number, reason: string): ManagedRu
   ).run(reason.slice(0, 500), nowIso(), runId);
   return selectRun(db, runId);
 }
+
+export interface ManagedEventInsert {
+  instanceId: string;
+  runId?: number | null;
+  type: "text" | "tool" | "approval" | "status" | "error";
+  payload: Record<string, unknown>;
+}
+
+/** Persist one normalized event; returns its replay sequence number. */
+export function appendManagedEvent(db: DB, input: ManagedEventInsert): number {
+  const res = db
+    .prepare(
+      `INSERT INTO managed_codex_events (instance_id, run_id, type, payload, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    )
+    .run(input.instanceId, input.runId ?? null, input.type, JSON.stringify(input.payload), nowIso());
+  return Number(res.lastInsertRowid);
+}
+
+/** Replay events for an instance strictly after `after`, newest last. */
+export function listManagedEvents(
+  db: DB,
+  input: { instanceId: string; after?: number; limit?: number },
+): Array<{
+  sequence: number;
+  instance_id: string;
+  run_id: number | null;
+  type: string;
+  payload: string;
+  created_at: string;
+}> {
+  const limit = Math.min(Math.max(input.limit ?? 200, 1), 1000);
+  return db
+    .prepare(
+      `SELECT * FROM managed_codex_events
+       WHERE instance_id = ? AND sequence > ?
+       ORDER BY sequence ASC LIMIT ?`,
+    )
+    .all(input.instanceId, input.after ?? 0, limit) as Array<{
+    sequence: number;
+    instance_id: string;
+    run_id: number | null;
+    type: string;
+    payload: string;
+    created_at: string;
+  }>;
+}

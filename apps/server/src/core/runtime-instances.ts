@@ -416,11 +416,11 @@ export function stopRuntimeInstance(
   return toPublic(db, rowFor(db, id), io);
 }
 
-export function resumeRuntimeInstance(
+export async function resumeRuntimeInstance(
   db: DB,
   id: string,
   opts: StartRuntimeOptions & RuntimeProcessIO = {},
-): { started: true; instance: RuntimeInstance } {
+): Promise<{ started: true; instance: RuntimeInstance }> {
   refreshInstances(db, opts, id);
   const verifiedRow = rowFor(db, id);
   const verified = toPublic(db, verifiedRow, opts);
@@ -453,7 +453,7 @@ export function resumeRuntimeInstance(
     })
     .immediate();
   try {
-    return startRuntimeAgent(db, reservation.agent.id, {
+    return await startRuntimeAgent(db, reservation.agent.id, {
       ...opts,
       agent: reservation.agent,
       instance: reservation.next,

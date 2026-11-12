@@ -5,6 +5,8 @@
 //
 //   "@approval"  pause mid-turn with a server approval request until answered
 //   "@crash"     exit(3) after acknowledging turn/start
+//   "@fail"      complete the turn with status "failed"
+//   "@hold"      stay inProgress until the client sends test/release
 //   "@slow"      delay the final turn/completed by 400ms
 //   "@invalid"   emit one malformed JSON line before completing the turn
 //
@@ -181,6 +183,11 @@ async function runTurn(id, params) {
   }
 
   if (text.includes("@slow")) await new Promise((r) => setTimeout(r, 400));
+  if (text.includes("@hold")) {
+    await new Promise((resolve) => {
+      heldTurn = { resolve };
+    });
+  }
 
   notify("item/completed", {
     item: agentMessageItem("shim final answer"),
@@ -188,10 +195,18 @@ async function runTurn(id, params) {
     turnId,
     completedAtMs: Date.now(),
   });
+  if (text.includes("@fail")) {
+    notify("turn/completed", {
+      threadId: THREAD_ID,
+      turn: mkTurn(turnId, "failed", turnError("shim model failure fixture")),
+    });
+    return;
+  }
   notify("turn/completed", { threadId: THREAD_ID, turn: mkTurn(turnId, "completed") });
 }
 
 let pendingApproval = null;
+let heldTurn = null; // { resolve } — released by test/release
 
 async function handle(frame) {
   logFrame(frame);
@@ -203,6 +218,13 @@ async function handle(frame) {
       platformFamily: process.platform === "win32" ? "windows" : "unix",
       platformOs: process.platform === "win32" ? "windows" : process.platform,
     });
+  } else if (method === "test/release") {
+    respond(id, { released: true });
+    if (heldTurn) {
+      const release = heldTurn;
+      heldTurn = null;
+      release.resolve();
+    }
   } else if (method === "thread/start") {
     respond(id, {
       thread: mkThread(),

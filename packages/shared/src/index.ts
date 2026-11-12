@@ -111,6 +111,10 @@ export interface Agent {
 
 export type RuntimeId = "claude" | "codex";
 
+/** How a runtime preset executes: external terminal window vs a Conflux-held
+ *  app-server child (managed is codex-only for now). */
+export type RuntimeExecutionMode = "terminal" | "managed";
+
 /** How Conflux opens a new terminal window (AgentRecall-style choice). */
 export type TerminalChoice =
   | "wt"
@@ -162,6 +166,12 @@ export interface RuntimeAgent {
   interval_min: number | null;
   /** ISO timestamp of the last scheduled headless run. */
   last_scheduled_run: string | null;
+  /**
+   * Execution mode: "terminal" opens a window and injects prompts (default,
+   * and the only mode before this field existed); "managed" runs a
+   * Conflux-held app-server child. Managed is codex-only.
+   */
+  execution_mode: RuntimeExecutionMode;
   /** Derived: does any spawned session of this preset have a fresh heartbeat? */
   live?: boolean;
   /** Derived: newest heartbeat across this preset's sessions (ISO). */
