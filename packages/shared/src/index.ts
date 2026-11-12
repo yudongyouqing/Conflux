@@ -115,6 +115,56 @@ export type RuntimeId = "claude" | "codex";
  *  app-server child (managed is codex-only for now). */
 export type RuntimeExecutionMode = "terminal" | "managed";
 
+/** Lifecycle of one managed task execution (Conflux-side vocabulary). */
+export type ManagedRunState =
+  | "queued"
+  | "submitting"
+  | "running"
+  | "waiting_approval"
+  | "completed"
+  | "failed"
+  | "interrupted"
+  | "unknown";
+
+/** Normalized replayable event for the managed executor UI (SSE payload). */
+export interface ManagedEventPayload {
+  sequence: number;
+  run_id: number | null;
+  type: "text" | "tool" | "approval" | "status" | "error";
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+/** One pending or resolved approval as shown to the human. */
+export interface ManagedApprovalView {
+  id: number;
+  kind: string;
+  payload: Record<string, unknown>;
+}
+
+/** GET /runtime-instances/:id/managed response shape. */
+export interface ManagedStatusResponse {
+  binding:
+    | { instance_id: string; session_id: string; thread_id: string; active_turn_id: string | null }
+    | null;
+  current: {
+    threadId: string;
+    activeRun: { runId: number; turnId: string; state: string } | null;
+    queuedRunIds: number[];
+    pendingApprovals: ManagedApprovalView[];
+  };
+  runs: Array<{
+    id: number;
+    message_id: number;
+    state: ManagedRunState;
+    turn_id: string | null;
+    final_text: string | null;
+    error_code: string | null;
+    created_at: string;
+    updated_at: string;
+  }>;
+}
+
 /** How Conflux opens a new terminal window (AgentRecall-style choice). */
 export type TerminalChoice =
   | "wt"

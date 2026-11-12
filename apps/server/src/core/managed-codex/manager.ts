@@ -87,11 +87,53 @@ interface LiveInstance {
 
 export class ManagedCodexManager {
   private instances = new Map<string, LiveInstance>();
+  /** Per-instance event subscribers (SSE streams); see subscribe(). */
+  private subscribers = new Map<string, Set<(event: unknown) => void>>();
 
   constructor(
     private db: DB,
     private opts: ManagedManagerOptions = {},
   ) {}
+
+  /**
+   * Subscribe to live normalized events of an instance. Returns the
+   * unsubscribe function, or null when the instance is not live (the SSE
+   * route then serves history only).
+   */
+  subscribe(instanceId: string, onEvent: (event: unknown) => void): (() => void) | null {
+    if (!this.instances.has(instanceId)) return null;
+    let set = this.subscribers.get(instanceId);
+    if (!set) {
+      set = new Set();
+      this.subscribers.set(instanceId, set);
+    }
+    set.add(onEvent);
+    return () => {
+      set!.delete(onEvent);
+      if (set!.size === 0) this.subscribers.delete(instanceId);
+    };
+  }
+
+  /** Persist one event and fan it out to live subscribers. */
+  private recordEvent(input: Parameters<typeof appendManagedEvent>[1]): void {
+    const sequence = appendManagedEvent(this.db, input);
+    const set = this.subscribers.get(input.instanceId);
+    if (!set) return;
+    const frame = {
+      sequence,
+      run_id: input.runId ?? null,
+      type: input.type,
+      payload: input.payload,
+      created_at: new Date().toISOString(),
+    };
+    for (const notify of set) {
+      try {
+        notify(frame);
+      } catch {
+        // a broken stream must not break the executor
+      }
+    }
+  }
 
   /** Spawn app-server, initialize, and create the root thread. */
   async start(
@@ -573,7 +615,7 @@ export class ManagedCodexManager {
       } else {
         markRunUnknown(this.db, claimed.id, `turn send unverifiable: ${message.slice(0, 400)}`);
       }
-      appendManagedEvent(this.db, {
+      this.recordEvent({
         instanceId,
         runId: claimed.id,
         type: "error",
@@ -633,7 +675,7 @@ export class ManagedCodexManager {
       { state: "waiting_approval" },
       { fromStates: ["running"] },
     );
-    appendManagedEvent(this.db, {
+    this.recordEvent({
       instanceId: live.instanceId,
       runId: active.runId,
       type: "approval",
@@ -681,7 +723,7 @@ export class ManagedCodexManager {
       { state: "running" },
       { fromStates: ["waiting_approval"] },
     );
-    appendManagedEvent(this.db, {
+    this.recordEvent({
       instanceId,
       runId: row.run_id,
       type: "approval",
@@ -737,7 +779,7 @@ export class ManagedCodexManager {
     const runIds = live.activeTurn ? [live.activeTurn.runId] : [];
     if (live.activeTurn) markRunUnknown(this.db, live.activeTurn.runId, "app-server exited mid-turn");
     expirePendingApprovals(this.db, runIds);
-    appendManagedEvent(this.db, {
+    this.recordEvent({
       instanceId: live.instanceId,
       runId: live.activeTurn?.runId ?? null,
       type: "status",
@@ -754,7 +796,7 @@ export class ManagedCodexManager {
     if (!normalized) return;
     const ids = (params ?? {}) as { threadId?: string; turnId?: string; item?: unknown };
     const turnId = typeof ids.turnId === "string" ? ids.turnId : live.activeTurn?.turnId ?? null;
-    appendManagedEvent(this.db, {
+    this.recordEvent({
       instanceId: live.instanceId,
       runId: live.activeTurn?.runId ?? null,
       type: normalized.type,

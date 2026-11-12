@@ -27,6 +27,7 @@ import { CreateAgentWizard, type CreatedAssistant } from "./CreateAgentWizard";
 import { PtyPanel } from "./PtyPanel";
 import { RuntimeInstanceRow, RuntimeInstancesPanel } from "./RuntimeInstancesPanel";
 import { ChatPanel } from "./ChatPanel";
+import { ManagedCodexPanel } from "./ManagedCodexPanel";
 
 type Category = "coding" | "model";
 
@@ -63,6 +64,10 @@ export function AssistantsTab({ active, onOpenSession }: AssistantsTabProps) {
   const [ptyAgentId, setPtyAgentId] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [chatAgentId, setChatAgentId] = useState<number | null>(null);
+  const [managedTarget, setManagedTarget] = useState<{
+    instanceId: string;
+    name: string;
+  } | null>(null);
 
   const catalog = useMemo(
     () =>
@@ -103,6 +108,20 @@ export function AssistantsTab({ active, onOpenSession }: AssistantsTabProps) {
 
   if (chatAgent) {
     return <ChatPanel agent={chatAgent} onBack={() => setChatAgentId(null)} />;
+  }
+
+  // The managed executor panel takes over the page while open; its queries
+  // carry the instance id, and switching targets swaps the panel wholesale
+  // (previous instance's streams are dropped with the component).
+  if (managedTarget) {
+    return (
+      <ManagedCodexPanel
+        instanceId={managedTarget.instanceId}
+        instanceName={managedTarget.name}
+        active={active}
+        onBack={() => setManagedTarget(null)}
+      />
+    );
   }
 
   const isLoading = runtimesQuery.isLoading || agentsQuery.isLoading;
@@ -185,6 +204,9 @@ export function AssistantsTab({ active, onOpenSession }: AssistantsTabProps) {
                   onOpenSession={onOpenSession}
                   onOpenPty={(id) => setPtyAgentId((prev) => (prev === id ? null : id))}
                   ptyOpen={ptyAgentId === item.preset.id}
+                  onOpenManaged={(instanceId) =>
+                    setManagedTarget({ instanceId, name: item.preset.name })
+                  }
                 />
               ))}
             </div>
@@ -251,6 +273,7 @@ function CodingCard({
   onOpenSession,
   onOpenPty,
   ptyOpen,
+  onOpenManaged,
 }: {
   item: CodingAssistantItem;
   expanded: boolean;
@@ -262,8 +285,10 @@ function CodingCard({
   onOpenSession?: (sessionId: string) => void;
   onOpenPty: (id: number) => void;
   ptyOpen: boolean;
+  onOpenManaged: (instanceId: string) => void;
 }) {
   const { preset, instances, sessions } = item;
+  const managed = preset.execution_mode === "managed";
   // stats derive from the real instances — the preset's live flag never
   // decides what the user is told here
   const running = instances.filter((i) => i.state === "running" || i.state === "starting").length;
@@ -283,6 +308,11 @@ function CodingCard({
             <span className="text-2xs px-1.5 py-px rounded bg-tile text-ink-muted font-mono">
               {runtimeLabel(preset.runtime)}
             </span>
+            {managed && (
+              <span className="text-2xs px-1.5 py-px rounded bg-accent-soft text-accent border border-accent/30 font-medium flex-shrink-0">
+                Conflux 受管
+              </span>
+            )}
             {preset.model && (
               <span className="text-2xs text-ink-faint font-mono truncate">{preset.model}</span>
             )}
@@ -316,14 +346,14 @@ function CodingCard({
             onClick={() => launch(preset.id, preset.name)}
             disabled={start.isPending && start.variables === preset.id}
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-accent text-on-accent text-xs hover:bg-accent-deep disabled:opacity-50"
-            title="在新终端窗口启动"
+            title={managed ? "以 Conflux 受管模式启动 app-server" : "在新终端窗口启动"}
           >
             {start.isPending && start.variables === preset.id ? (
               <Loader2 size={12} className="animate-spin" />
             ) : (
               <Terminal size={12} />
             )}
-            启动
+            {managed ? "启动（受管）" : "启动"}
           </button>
           <button
             onClick={() => onOpenPty(preset.id)}
@@ -377,7 +407,18 @@ function CodingCard({
               </div>
             )}
             {instances.map((inst) => (
-              <RuntimeInstanceRow key={inst.id} instance={inst} />
+              <div key={inst.id} className="space-y-1.5">
+                {managed && inst.state !== "ended" && inst.state !== "failed" && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenManaged(inst.id)}
+                    className="w-full text-2xs px-2.5 py-1.5 rounded-lg border border-accent/40 text-accent bg-accent-soft hover:bg-accent hover:text-on-accent transition-colors"
+                  >
+                    打开受管执行面板
+                  </button>
+                )}
+                <RuntimeInstanceRow instance={inst} />
+              </div>
             ))}
           </div>
         </div>

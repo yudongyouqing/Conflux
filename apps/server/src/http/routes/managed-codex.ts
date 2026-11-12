@@ -47,22 +47,59 @@ export function registerManagedCodexRoutes(app: FastifyInstance, ctx: ServerCont
     }
   });
 
-  app.get<{ Params: { id: string }; Querystring: { after?: string } }>(
+  // SSE: replays history strictly after ?after=<sequence>, then streams live
+  // normalized events. The browser's EventSource auto-reconnects and repeats
+  // its last event id as `after`, so old sequences never re-render. Clients
+  // that prefer plain JSON (tests, CLI) get the same history snapshot.
+  app.get<{ Params: { id: string }; Querystring: { after?: string; stream?: string } }>(
     "/runtime-instances/:id/managed/events",
     {},
     async (req, reply) => {
-      try {
-        requireManager();
-        const after = Number(req.query.after ?? 0);
-        const events = listManagedEvents(db, {
-          instanceId: req.params.id,
-          after: Number.isFinite(after) && after > 0 ? after : 0,
-          limit: 200,
-        });
-        reply.send({ events });
-      } catch (err) {
-        return sendError(reply, err);
+      const manager = getManagedCodexManager();
+      if (!manager) {
+        return reply.code(503).send({ error: "managed executor unavailable" });
       }
+      const afterRaw = Number(req.query.after ?? 0);
+      const after = Number.isFinite(afterRaw) && afterRaw > 0 ? afterRaw : 0;
+      const history = listManagedEvents(db, { instanceId: req.params.id, after, limit: 200 });
+
+      if (req.query.stream !== "1") {
+        return reply.send({ events: history });
+      }
+
+      reply.raw.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      });
+      const writeEvent = (event: unknown) => {
+        const frame = event as { sequence: number };
+        reply.raw.write(`id: ${frame.sequence}\ndata: ${JSON.stringify(event)}\n\n`);
+      };
+      for (const row of history) {
+        writeEvent({
+          sequence: row.sequence,
+          run_id: row.run_id,
+          type: row.type,
+          payload: JSON.parse(row.payload) as Record<string, unknown>,
+          created_at: row.created_at,
+        });
+      }
+      // Subscribe if the instance is live; a dead instance keeps the stream
+      // open (history only) until the client reconnects elsewhere.
+      const unsubscribe = manager.subscribe(req.params.id, writeEvent) ?? undefined;
+      const heartbeat = setInterval(() => {
+        try {
+          reply.raw.write(": ping\n\n");
+        } catch {
+          // broken pipe — the close handler below unsubscribes
+        }
+      }, 15000);
+      req.raw.on("close", () => {
+        clearInterval(heartbeat);
+        unsubscribe?.();
+      });
+      await Promise.resolve(); // headers flushed; the stream stays open
     },
   );
 
