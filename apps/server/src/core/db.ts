@@ -141,7 +141,7 @@ function safePublicMessage(value: string, fallback: string): string {
   return message;
 }
 
-const SCHEMA_VERSION = 14; // Separate wake attempts and owned runtime executions.
+const SCHEMA_VERSION = 15; // Managed Codex executor: mode column + run/event/approval tables.
 
 // Keep checkpoint timers tied to their database handles. A process can open
 // more than one temporary database during tests and interface operations.
@@ -362,6 +362,65 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts);
 CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
 CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_log(caller_session);
+
+-- Managed Codex executor: one row binds a managed runtime instance to its
+-- app-server root thread. owner_token pins WHICH manager generation may
+-- drive the instance; run mutations from any other token are refused.
+CREATE TABLE IF NOT EXISTS managed_codex_bindings (
+  instance_id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  thread_id TEXT NOT NULL,
+  active_turn_id TEXT,
+  owner_token TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- One logical execution per message (message_id UNIQUE): retries, restarts
+-- and manual re-delivery of the same message must never double-submit.
+CREATE TABLE IF NOT EXISTS managed_codex_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  message_id INTEGER NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+  instance_id TEXT NOT NULL,
+  thread_id TEXT,
+  turn_id TEXT,
+  state TEXT NOT NULL DEFAULT 'queued',
+  request_id TEXT,
+  submit_text TEXT NOT NULL,
+  final_text TEXT,
+  error_code TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_managed_codex_runs_instance
+  ON managed_codex_runs(instance_id, state);
+
+-- Normalized replayable events; payloads exclude raw reasoning, credentials
+-- and full environments.
+CREATE TABLE IF NOT EXISTS managed_codex_events (
+  sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+  instance_id TEXT NOT NULL,
+  run_id INTEGER,
+  type TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_managed_codex_events_instance
+  ON managed_codex_events(instance_id, sequence);
+
+-- Pending/resolved approval requests keyed to the run they interrupted.
+-- State expires with the connection generation that received the request.
+CREATE TABLE IF NOT EXISTS managed_codex_approvals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id INTEGER NOT NULL REFERENCES managed_codex_runs(id) ON DELETE CASCADE,
+  rpc_request_id TEXT NOT NULL,
+  request_kind TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL,
+  resolved_at TEXT
+);
 `;
 
 /**
@@ -433,6 +492,13 @@ function migrate(db: DB): void {
     };
     ensureColumn("runtime_agents", "interval_min", "interval_min INTEGER");
     ensureColumn("runtime_agents", "last_scheduled_run", "last_scheduled_run TEXT");
+    // v15: managed Codex executor — presets opt in; everything predating the
+    // column keeps its original terminal behavior.
+    ensureColumn(
+      "runtime_agents",
+      "execution_mode",
+      "execution_mode TEXT NOT NULL DEFAULT 'terminal'",
+    );
     ensureColumn("sessions", "runtime", "runtime TEXT");
     ensureColumn("sessions", "identity_source", "identity_source TEXT");
     ensureColumn("sessions", "runtime_pid", "runtime_pid INTEGER");
