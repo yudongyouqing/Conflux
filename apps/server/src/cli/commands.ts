@@ -1100,17 +1100,22 @@ export function buildCli(_argv?: string | readonly string[]): Command {
         // malformed stdin — ignore quietly, hooks must never block a session
       }
       try {
-        const db = openDb(resolveConfig("global"));
-        handleHookEvent(db, event as HookEvent, payload as never);
-        // UserPromptSubmit / SessionStart stdout is injected into the
-        // conversation context — the only push channel into a live session.
-        // Silent unless there is unread mail, so hooks never spam.
-        if (event === "prompt" || event === "session-start") {
-          const sid = typeof payload.session_id === "string" ? payload.session_id : null;
-          if (sid) {
-            const notice = formatInboxNotice(db, sid);
-            if (notice) process.stdout.write(notice + "\n");
+        const o = this.optsWithGlobals();
+        const db = openDb(resolveConfig(normaliseScope(o.scope), o.dataDir));
+        try {
+          handleHookEvent(db, event as HookEvent, payload as never);
+          // UserPromptSubmit / SessionStart stdout is injected into the
+          // conversation context — the only push channel into a live session.
+          // Silent unless there is unread mail, so hooks never spam.
+          if (event === "prompt" || event === "session-start") {
+            const sid = typeof payload.session_id === "string" ? payload.session_id : null;
+            if (sid) {
+              const notice = formatInboxNotice(db, sid);
+              if (notice) process.stdout.write(notice + "\n");
+            }
           }
+        } finally {
+          db.close();
         }
       } catch (err) {
         logger.warn(
