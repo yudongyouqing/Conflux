@@ -5,6 +5,8 @@ import { WEB_CONSOLE_ID } from "@conflux/shared";
 import { randomUUID } from "node:crypto";
 import { nowIso, retryOnBusy, isLockError } from "./db.js";
 import { logger } from "../log.js";
+import { getManagedCodexManager } from "./managed-codex/manager.js";
+import { enqueueManagedTask, getManagedBindingBySession } from "./managed-codex/store.js";
 
 /**
  * THE ask path: deliver a question and, when the addressee cannot see it
@@ -84,6 +86,35 @@ export async function completeAsk(
 ): Promise<AskOutcome> {
   const { message, claim } = prepared;
   if (!claim) return { message, wake: { woke: false, reason: "message already received" } };
+
+  // Managed executor targets dispatch to the Conflux-held app-server
+  // instead of a terminal wake — no send-keys, no summary stand-in. The
+  // routing key is the PERSISTED binding, so this works from ANY process:
+  // an MCP child or CLI one-shot only enqueues (database-only, idempotent
+  // per message); the server holding the live executor drains the queue on
+  // its polling tick.
+  const managedBinding = getManagedBindingBySession(db, message.to_session);
+  if (managedBinding) {
+    enqueueManagedTask(db, {
+      messageId: message.id,
+      instanceId: managedBinding.instance_id,
+      text: message.question,
+    });
+    getManagedCodexManager()?.kick(managedBinding.instance_id);
+    await retryOnBusy(db, () =>
+      db
+        .prepare(
+          `UPDATE message_deliveries SET state = 'woken', reason = NULL, claim_token = NULL,
+           claim_expires_at = NULL WHERE message_id = ? AND claim_token = ?`,
+        )
+        .run(message.id, claim.token),
+    );
+    return {
+      message: getMessage(db, message.id) ?? message,
+      wake: { woke: true, command: `managed-codex:${managedBinding.instance_id}` },
+    };
+  }
+
   let wake: WakeResult;
   try {
     wake = await wakeFn(db, message.to_session);

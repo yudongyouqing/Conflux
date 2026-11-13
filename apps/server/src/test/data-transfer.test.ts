@@ -122,6 +122,7 @@ function bundleWithResources(): ConfluxDataBundle {
         instructions: "Inspect the inbox",
         interval_min: null,
         last_scheduled_run: null,
+        execution_mode: "terminal",
         created_at: timestamp,
         updated_at: timestamp,
         api_key_configured: true,

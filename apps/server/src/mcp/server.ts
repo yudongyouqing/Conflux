@@ -604,10 +604,10 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
         inputSchema: { id: z.string().uuid() },
       },
       async ({ id }) => {
-        const result = await withAudit(`${action}_runtime_instance`, { id }, () =>
+        const result = await withAudit(`${action}_runtime_instance`, { id }, async () =>
           action === "stop"
-            ? { instance: stopRuntimeInstance(db, id) }
-            : resumeRuntimeInstance(db, id),
+            ? { instance: await stopRuntimeInstance(db, id) }
+            : await resumeRuntimeInstance(db, id),
         );
         return json(result.ok ? result.result : { error: result.error });
       },

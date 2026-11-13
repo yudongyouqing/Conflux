@@ -5,6 +5,8 @@ import type {
   ContextEntry,
   Conversation,
   Graph,
+  ManagedEventPayload,
+  ManagedStatusResponse,
   Message,
   MessageStatus,
   ModelConfig,
@@ -143,6 +145,8 @@ export const api = {
     extra_env?: string;
     instructions?: string;
     interval_min?: number;
+    /** codex-only: run as a Conflux-held app-server instead of a terminal */
+    execution_mode?: "terminal" | "managed";
   }) => post<{ agent: RuntimeAgent }>("/runtimes", body),
 
   deleteRuntimeAgent: (id: number) => del<{ ok: boolean }>(`/runtimes/${id}`),
@@ -160,6 +164,39 @@ export const api = {
     post<{ started: boolean; instance: RuntimeInstance }>(
       `/runtime-instances/${encodeURIComponent(id)}/resume`,
       {},
+    ),
+
+  // ---- managed Codex executor ----
+
+  getManagedStatus: (instanceId: string, signal?: AbortSignal) =>
+    get<ManagedStatusResponse>(
+      `/runtime-instances/${encodeURIComponent(instanceId)}/managed`,
+      undefined,
+      signal,
+    ),
+
+  getManagedEvents: (instanceId: string, after = 0, signal?: AbortSignal) =>
+    get<{ events: ManagedEventPayload[] }>(
+      `/runtime-instances/${encodeURIComponent(instanceId)}/managed/events?after=${after}`,
+      undefined,
+      signal,
+    ),
+
+  interruptManagedTurn: (instanceId: string, expectedTurnId?: string | null) =>
+    post<{ accepted: boolean; reason?: string }>(
+      `/runtime-instances/${encodeURIComponent(instanceId)}/managed/interrupt`,
+      { expected_turn_id: expectedTurnId ?? undefined },
+    ),
+
+  resolveManagedApproval: (
+    instanceId: string,
+    approvalId: number,
+    decision: "accept" | "decline" | "cancel",
+  ) =>
+    post<{ ok: boolean }>(
+      `/runtime-instances/${encodeURIComponent(instanceId)}/managed/approvals/${approvalId}`,
+      { decision },
+      { "X-Session-Id": WEB_CONSOLE_ID },
     ),
 
   openSessionTerminal: (sessionId: string) =>

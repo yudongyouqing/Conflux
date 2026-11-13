@@ -1,0 +1,63 @@
+{
+  "turnCompletedFailed": {
+    "jsonrpc": "2.0",
+    "method": "turn/completed",
+    "params": {
+      "threadId": "0193222e-0000-7000-8000-000000000001",
+      "turn": {
+        "id": "0193222e-0000-7000-8000-000000000003",
+        "rootTurnId": null,
+        "items": [],
+        "itemsView": "noneLoaded",
+        "status": "failed",
+        "error": {
+          "message": "fixture model error: upstream unavailable",
+          "codexErrorInfo": null,
+          "additionalDetails": null,
+          "misalignment": null
+        },
+        "startedAt": 1762896010,
+        "completedAt": 1762896011,
+        "durationMs": 1000
+      }
+    }
+  },
+  "turnCompletedInterrupted": {
+    "jsonrpc": "2.0",
+    "method": "turn/completed",
+    "params": {
+      "threadId": "0193222e-0000-7000-8000-000000000001",
+      "turn": {
+        "id": "0193222e-0000-7000-8000-000000000004",
+        "rootTurnId": null,
+        "items": [],
+        "itemsView": "noneLoaded",
+        "status": "interrupted",
+        "error": {
+          "message": "Turn interrupted by user",
+          "codexErrorInfo": null,
+          "additionalDetails": null,
+          "misalignment": null
+        },
+        "startedAt": 1762896020,
+        "completedAt": 1762896025,
+        "durationMs": 5000
+      }
+    }
+  },
+  "errorNotification": {
+    "jsonrpc": "2.0",
+    "method": "error",
+    "params": {
+      "error": {
+        "message": "fixture transient stream error",
+        "codexErrorInfo": null,
+        "additionalDetails": null,
+        "misalignment": null
+      },
+      "willRetry": true,
+      "threadId": "0193222e-0000-7000-8000-000000000001",
+      "turnId": "0193222e-0000-7000-8000-000000000002"
+    }
+  }
+}

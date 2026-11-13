@@ -28,12 +28,12 @@ import {
   resumeRuntimeInstance,
 } from "../core/runtime-instances.js";
 
-test("managed launch persists a unique starting instance and tags the runtime environment", () => {
+test("managed launch persists a unique starting instance and tags the runtime environment", async () => {
   const { db, cleanup } = makeDb();
   try {
     const preset = createRuntimeAgent(db, { name: "test", runtime: "claude" });
     let instanceId: string | undefined;
-    const result = startRuntimeAgent(db, preset.id, {
+    const result = await startRuntimeAgent(db, preset.id, {
       platform: "win32",
       launch: (_settings, input) => {
         instanceId = input.env?.CONFLUX_RUNTIME_INSTANCE_ID;
@@ -49,7 +49,7 @@ test("managed launch persists a unique starting instance and tags the runtime en
   }
 });
 
-test("Codex launch explicitly configures its managed MCP identity without putting credentials in argv", () => {
+test("Codex launch explicitly configures its managed MCP identity without putting credentials in argv", async () => {
   const { db, cleanup } = makeDb();
   try {
     const preset = createRuntimeAgent(db, {
@@ -59,7 +59,7 @@ test("Codex launch explicitly configures its managed MCP identity without puttin
       extra_env: '{"PRIVATE_TOKEN":"extra-secret"}',
     });
     let command = "";
-    const started = startRuntimeAgent(db, preset.id, {
+    const started = await startRuntimeAgent(db, preset.id, {
       platform: "win32",
       launch: (_settings, input) => {
         command = Object.entries(input.env ?? {})
@@ -92,7 +92,7 @@ test("Codex launch explicitly configures its managed MCP identity without puttin
     });
     endSession(db, "codex-mcp");
     let resumeSeed: string | undefined;
-    resumeRuntimeInstance(db, started.instance.id, {
+    await resumeRuntimeInstance(db, started.instance.id, {
       inspect: () => "exited",
       platform: "win32",
       launch: (_settings, input) => {
@@ -155,7 +155,7 @@ test("a managed tmux target remains unique and accepts mail while its agent is b
   }
 });
 
-test("resume refuses deleted presets, changed credentials, and unverifiable live ownership", () => {
+test("resume refuses deleted presets, changed credentials, and unverifiable live ownership", async () => {
   const { db, cleanup } = makeDb();
   try {
     const preset = createRuntimeAgent(db, {
@@ -176,17 +176,17 @@ test("resume refuses deleted presets, changed credentials, and unverifiable live
     });
     endSession(db, "resume-owner");
     const launch = () => assert.fail("must not launch");
-    assert.throws(() => resumeRuntimeInstance(db, instance.id, { inspect: () => null, launch }), {
+    await assert.rejects(resumeRuntimeInstance(db, instance.id, { inspect: () => null, launch }), {
       statusCode: 409,
     });
     db.prepare("UPDATE runtime_agents SET api_key = 'changed' WHERE id = ?").run(preset.id);
-    assert.throws(
-      () => resumeRuntimeInstance(db, instance.id, { inspect: () => "exited", launch }),
+    await assert.rejects(
+      resumeRuntimeInstance(db, instance.id, { inspect: () => "exited", launch }),
       { statusCode: 409 },
     );
     db.prepare("DELETE FROM runtime_agents WHERE id = ?").run(preset.id);
-    assert.throws(
-      () => resumeRuntimeInstance(db, instance.id, { inspect: () => "exited", launch }),
+    await assert.rejects(
+      resumeRuntimeInstance(db, instance.id, { inspect: () => "exited", launch }),
       { statusCode: 409 },
     );
   } finally {
@@ -194,7 +194,7 @@ test("resume refuses deleted presets, changed credentials, and unverifiable live
   }
 });
 
-test("stop requires instance ownership, current session PID and unchanged process creation identity", () => {
+test("stop requires instance ownership, current session PID and unchanged process creation identity", async () => {
   const { db, cleanup } = makeDb();
   try {
     const preset = createRuntimeAgent(db, { name: "test", runtime: "claude" });
@@ -211,7 +211,7 @@ test("stop requires instance ownership, current session PID and unchanged proces
       alive ? { runtime: "claude" as const, token: "creation-1" } : ("exited" as const);
     assert.equal(bindRuntimeInstance(db, instance.id, "owned", 123, { inspect }), true);
     const killed: number[] = [];
-    assert.throws(
+    await assert.rejects(
       () =>
         stopRuntimeInstance(db, instance.id, {
           inspect: () => ({ runtime: "claude", token: "reused" }),
@@ -220,17 +220,17 @@ test("stop requires instance ownership, current session PID and unchanged proces
       { statusCode: 409 },
     );
     mergeSessionMeta(db, "owned", { runtime_instance_id: "unowned" });
-    assert.throws(
-      () => stopRuntimeInstance(db, instance.id, { inspect, terminate: (pid) => killed.push(pid) }),
+    await assert.rejects(
+      stopRuntimeInstance(db, instance.id, { inspect, terminate: (pid) => killed.push(pid) }),
       { statusCode: 409 },
     );
     assert.equal(killed.length, 0);
     mergeSessionMeta(db, "owned", { runtime_instance_id: instance.id });
-    const delayed = stopRuntimeInstance(db, instance.id, { inspect, terminate: () => undefined });
+    const delayed = await stopRuntimeInstance(db, instance.id, { inspect, terminate: () => undefined });
     assert.equal(delayed.state, "running");
     assert.equal(delayed.can_stop, true);
     assert.match(delayed.limitation!, /等待进程退出/);
-    const stopped = stopRuntimeInstance(db, instance.id, {
+    const stopped = await stopRuntimeInstance(db, instance.id, {
       inspect,
       terminate: (pid) => {
         killed.push(pid);
@@ -297,7 +297,7 @@ test("macOS token relations: same / replaced / changed are distinguished", () =>
   );
 });
 
-test("a live process with changed identity fields is not ended, stopped or resumed", () => {
+test("a live process with changed identity fields is not ended, stopped or resumed", async () => {
   const { db, cleanup } = makeDb();
   try {
     const preset = createRuntimeAgent(db, { name: "test", runtime: "claude" });
@@ -348,7 +348,7 @@ test("a live process with changed identity fields is not ended, stopped or resum
     assert.match(listed.limitation ?? "", /仍在运行但身份字段已变化/);
 
     // Stop is refused with the changed-but-alive reason, not a reuse claim.
-    assert.throws(
+    assert.rejects(
       () => stopRuntimeInstance(db, instance.id, { inspect: inspectChanged }),
       /仍在运行但身份字段已变化/,
     );
@@ -460,7 +460,7 @@ test("legacy-format tokens from earlier builds are never judged a replacement th
   assert.equal(classifyProcessToken("boot-id:12345", "boot-id:12346"), "replaced");
 });
 
-test("a live instance with a legacy stored token refuses stop and resume instead of ending", () => {
+test("a live instance with a legacy stored token refuses stop and resume instead of ending", async () => {
   const { db, cleanup } = makeDb();
   try {
     const preset = createRuntimeAgent(db, { name: "legacy", runtime: "claude" });
@@ -494,7 +494,7 @@ test("a live instance with a legacy stored token refuses stop and resume instead
     assert.equal(listed.can_stop, false);
     assert.equal(listed.can_resume, false);
     assert.match(listed.limitation ?? "", /无法验证进程身份/);
-    assert.throws(
+    assert.rejects(
       () => stopRuntimeInstance(db, instance.id, { inspect }),
       /无法验证进程身份/,
     );
@@ -523,7 +523,7 @@ test("macOS ps parsing: a record with any missing identity field is unverifiable
   );
 });
 
-test("a requested stop completes once the exit is verifiable, without re-terminating", () => {
+test("a requested stop completes once the exit is verifiable, without re-terminating", async () => {
   const { db, cleanup } = makeDb();
   try {
     const preset = createRuntimeAgent(db, { name: "test", runtime: "claude" });
@@ -541,7 +541,7 @@ test("a requested stop completes once the exit is verifiable, without re-termina
     assert.equal(bindRuntimeInstance(db, instance.id, "owned", 123, { inspect }), true);
     // First stop sends the signal; the immediate re-inspect loses the race
     // with the exit, so the stop stays requested but unverified.
-    const requested = stopRuntimeInstance(db, instance.id, {
+    const requested = await stopRuntimeInstance(db, instance.id, {
       inspect,
       terminate: () => {},
     });
@@ -550,7 +550,7 @@ test("a requested stop completes once the exit is verifiable, without re-termina
     // The process exits on its own afterwards; a later stop must complete
     // the stop instead of refusing with a bare conflict.
     alive = false;
-    const finished = stopRuntimeInstance(db, instance.id, {
+    const finished = await stopRuntimeInstance(db, instance.id, {
       inspect,
       terminate: () => assert.fail("must not re-terminate an exited process"),
     });
@@ -561,12 +561,12 @@ test("a requested stop completes once the exit is verifiable, without re-termina
   }
 });
 
-test("starting and discovered sessions cannot be stopped, and unverified PID cannot bind", () => {
+test("starting and discovered sessions cannot be stopped, and unverified PID cannot bind", async () => {
   const { db, cleanup } = makeDb();
   try {
     const preset = createRuntimeAgent(db, { name: "test", runtime: "codex" });
     const instance = createRuntimeInstance(db, preset);
-    assert.throws(
+    assert.rejects(
       () => stopRuntimeInstance(db, instance.id, { terminate: () => assert.fail("must not kill") }),
       { statusCode: 409 },
     );
@@ -588,7 +588,7 @@ test("starting and discovered sessions cannot be stopped, and unverified PID can
   }
 });
 
-test("resume snapshots the original preset, uses the original conversation and rejects duplicate resumes", () => {
+test("resume snapshots the original preset, uses the original conversation and rejects duplicate resumes", async () => {
   const { db, cleanup } = makeDb();
   try {
     const preset = createRuntimeAgent(db, {
@@ -626,14 +626,14 @@ test("resume snapshots the original preset, uses the original conversation and r
         key = input.env?.ANTHROPIC_AUTH_TOKEN;
       },
     };
-    const resumed = resumeRuntimeInstance(db, instance.id, options);
+    const resumed = await resumeRuntimeInstance(db, instance.id, options);
     assert.notEqual(resumed.instance.id, instance.id);
     assert.equal(resumed.instance.resumed_from, instance.id);
     assert.match(command, /--resume.*conversation/);
     assert.match(command, /original/);
     assert.match(command, /retain me/);
     assert.equal(key, "test-secret");
-    assert.throws(() => resumeRuntimeInstance(db, instance.id, options), { statusCode: 409 });
+    await assert.rejects(resumeRuntimeInstance(db, instance.id, options), { statusCode: 409 });
     assert.equal(
       JSON.stringify(listRuntimeInstances(db, { inspect: () => null })).includes("test-secret"),
       false,
@@ -643,7 +643,7 @@ test("resume snapshots the original preset, uses the original conversation and r
   }
 });
 
-test("stale and unregistered timed-out resumes retain their conversation reservation", () => {
+test("stale and unregistered timed-out resumes retain their conversation reservation", async () => {
   const { db, cleanup } = makeDb();
   try {
     const preset = createRuntimeAgent(db, { name: "lineage", runtime: "claude" });
@@ -660,7 +660,7 @@ test("stale and unregistered timed-out resumes retain their conversation reserva
     });
     const inspect = (pid: number) =>
       pid === 111 ? ("exited" as const) : { runtime: "claude" as const, token: "resumed" };
-    const resumed = resumeRuntimeInstance(db, original.id, {
+    const resumed = await resumeRuntimeInstance(db, original.id, {
       inspect,
       launch: () => undefined,
       platform: "win32",
@@ -670,13 +670,12 @@ test("stale and unregistered timed-out resumes retain their conversation reserva
     ).run(resumed.instance.id);
     listRuntimeInstances(db, { inspect });
     assert.equal(getRuntimeInstance(db, resumed.instance.id, { inspect })?.state, "failed");
-    assert.throws(
-      () =>
-        resumeRuntimeInstance(db, original.id, {
-          inspect,
-          launch: () => assert.fail("must not duplicate"),
-          platform: "win32",
-        }),
+    await assert.rejects(
+      resumeRuntimeInstance(db, original.id, {
+        inspect,
+        launch: () => assert.fail("must not duplicate"),
+        platform: "win32",
+      }),
       { statusCode: 409 },
     );
     registerSession(db, {
@@ -692,13 +691,12 @@ test("stale and unregistered timed-out resumes retain their conversation reserva
     ).run();
     listRuntimeInstances(db, { inspect });
     assert.equal(getRuntimeInstance(db, resumed.instance.id, { inspect })?.state, "stale");
-    assert.throws(
-      () =>
-        resumeRuntimeInstance(db, original.id, {
-          inspect,
-          launch: () => assert.fail("must not duplicate"),
-          platform: "win32",
-        }),
+    await assert.rejects(
+      resumeRuntimeInstance(db, original.id, {
+        inspect,
+        launch: () => assert.fail("must not duplicate"),
+        platform: "win32",
+      }),
       { statusCode: 409 },
     );
   } finally {

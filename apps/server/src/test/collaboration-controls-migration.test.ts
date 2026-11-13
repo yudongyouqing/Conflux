@@ -30,7 +30,7 @@ test("schema 13 upgrades preserve existing messages and presets without invented
     stopWalCheckpoint(db);
     db.close();
     db = openDb(config);
-    assert.equal(db.pragma("user_version", { simple: true }), 14);
+    assert.equal(db.pragma("user_version", { simple: true }), 15);
     assert.equal(getMessage(db, message.id)?.question, "preserve me");
     assert.equal(getMessage(db, message.id)?.delivery, undefined);
     assert.equal(getRuntimeAgent(db, preset.id)?.api_key, "existing-local-credential");

@@ -1,5 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import type { ManagedEventPayload } from "@conflux/shared";
 import { api } from "./api";
+
+export type ManagedEvent = ManagedEventPayload;
 
 export function useGraph() {
   return useQuery({
@@ -204,6 +207,77 @@ export function useStopRuntimeInstance() {
 
 export function useResumeRuntimeInstance() {
   return useRuntimeInstanceMutation(api.resumeRuntimeInstance);
+}
+
+// ---- managed Codex executor ----
+
+/** Live status of one managed instance (binding, current run, approvals). */
+export function useManagedStatus(instanceId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ["managed-status", instanceId],
+    queryFn: ({ signal }) => api.getManagedStatus(instanceId!, signal),
+    enabled: !!instanceId && enabled,
+    refetchInterval: enabled ? 4000 : false,
+  });
+}
+
+/** Incremental event replay: each poll fetches only sequences after the
+ *  cursor, so reconnects/switches never duplicate rendered events. */
+export function useManagedEvents(instanceId: string | null, enabled = true) {
+  return useQuery<ManagedEvent[], Error>({
+    queryKey: ["managed-events", instanceId],
+    enabled: !!instanceId && enabled,
+    refetchInterval: enabled ? 2000 : false,
+    queryFn: async ({ signal, client }) => {
+      const key = ["managed-events-cursor", instanceId] as const;
+      const cursor = (client.getQueryData(key) as number | undefined) ?? 0;
+      const res = await api.getManagedEvents(instanceId!, cursor, signal);
+      const maxSeq = res.events.reduce((m, e) => Math.max(m, e.sequence), cursor);
+      if (maxSeq !== cursor) client.setQueryData(key, maxSeq);
+      // Merge with whatever the cache already holds (same key), newest last.
+      const prev =
+        (client.getQueryData(["managed-events", instanceId]) as ManagedEvent[] | undefined) ?? [];
+      const seen = new Set(prev.map((e) => e.sequence));
+      const merged = [...prev, ...res.events.filter((e) => !seen.has(e.sequence))];
+      return merged.slice(-500);
+    },
+  });
+}
+
+export function useInterruptManagedTurn() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      instanceId,
+      expectedTurnId,
+    }: {
+      instanceId: string;
+      expectedTurnId?: string | null;
+    }) => api.interruptManagedTurn(instanceId, expectedTurnId),
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ["managed-status", vars.instanceId] });
+      qc.invalidateQueries({ queryKey: ["managed-events", vars.instanceId] });
+    },
+  });
+}
+
+export function useResolveManagedApproval() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      instanceId,
+      approvalId,
+      decision,
+    }: {
+      instanceId: string;
+      approvalId: number;
+      decision: "accept" | "decline" | "cancel";
+    }) => api.resolveManagedApproval(instanceId, approvalId, decision),
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ["managed-status", vars.instanceId] });
+      qc.invalidateQueries({ queryKey: ["managed-events", vars.instanceId] });
+    },
+  });
 }
 
 // ---- terminal settings + open-in-terminal ----

@@ -57,8 +57,8 @@ export function registerRuntimeRoutes(
         try {
           const result =
             action === "stop"
-              ? { instance: stopRuntimeInstance(db, req.params.id, io) }
-              : resumeRuntimeInstance(db, req.params.id, io);
+              ? { instance: await stopRuntimeInstance(db, req.params.id, io) }
+              : await resumeRuntimeInstance(db, req.params.id, io);
           logAudit(db, {
             interface: "http",
             action: `${action}_runtime_instance`,
@@ -147,10 +147,11 @@ export function registerRuntimeRoutes(
     }
   });
 
-  // POST /runtimes/:id/start — launch the preset in a new terminal window
+  // POST /runtimes/:id/start — launch the preset (terminal window, or the
+  // Conflux-held app-server for managed presets)
   app.post<{ Params: { id: string } }>("/runtimes/:id/start", {}, async (req, reply) => {
     try {
-      const result = startRuntimeAgent(db, Number(req.params.id), io);
+      const result = await startRuntimeAgent(db, Number(req.params.id), io);
       logAudit(db, {
         interface: "http",
         action: "start_runtime_agent",
