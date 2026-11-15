@@ -150,6 +150,7 @@ test("an approval pauses the run, records sanitized data, and resumes on accept"
     assert.equal("proposedExecpolicyAmendment" in payload, false);
 
     const status = fx.manager.instanceStatus(fx.instanceId);
+    assert.ok(status?.live, "a held approval implies the instance is live");
     assert.deepEqual(
       status.pendingApprovals.map((a) => a.id),
       [approval.id],
@@ -270,8 +271,12 @@ test("approvals die with their connection generation", async () => {
     assert.equal(runRow(fx, messageId)!.state, "unknown");
     const late = await fx.manager.resolveApproval(fx.instanceId, approval.id, "accept");
     assert.equal((late as { status: number }).status, 409);
-    // Instance row ended; status endpoint now 404s.
-    assert.throws(() => fx.manager.instanceStatus(fx.instanceId), /not running/);
+    // Instance row ended; the status surface still serves the persisted
+    // view — live control is gone, history remains for review.
+    const persisted = fx.manager.instanceStatus(fx.instanceId);
+    assert.equal(persisted?.live, false);
+    assert.equal(persisted?.activeRun, null);
+    assert.equal(persisted?.pendingApprovals.length, 0);
   } finally {
     await fx.dispose();
   }

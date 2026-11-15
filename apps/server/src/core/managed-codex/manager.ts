@@ -15,6 +15,7 @@ import { buildRuntimeEnv } from "../runtime-agents.js";
 import { runtimeDescriptor } from "../runtime-registry.js";
 import { getTerminalSettings } from "../app-settings.js";
 import { spawnAppServer, type AppServerProcess } from "./process.js";
+import { assertSupportedCodexVersion } from "./version.js";
 import { ManagedRpcConnection, RpcRemoteError } from "./rpc.js";
 import { normalizeNotification, mergeFinalText } from "./events.js";
 import {
@@ -235,11 +236,19 @@ export class ManagedCodexManager {
         clientInfo: { name: "conflux", title: "Conflux managed executor", version: "0.3.1" },
         capabilities: null,
       })) as { userAgent?: string };
+      // The wire protocol is certified against one codex minor — a drifted
+      // app-server fails fast here instead of corrupting a thread midway.
+      assertSupportedCodexVersion(init?.userAgent);
       logger.info({ instanceId, userAgent: init?.userAgent }, "managed codex app-server initialized");
 
+      // Preset instructions ride the protocol's developer-instructions slot
+      // (the analog of claude's --append-system-prompt); terminal codex has
+      // no CLI flag for this, managed mode must not lose it.
+      const instructions = developerInstructions(agent);
       const started = (await proc.conn.request("thread/start", {
         cwd: launch.cwd,
         ...(agent.model ? { model: agent.model } : {}),
+        ...(instructions ? { developerInstructions: instructions } : {}),
       })) as { thread?: { id?: string } };
       const threadId = started?.thread?.id;
       if (!threadId) throw new Error("thread/start returned no thread id");
@@ -552,12 +561,18 @@ export class ManagedCodexManager {
     const reconciliation: string[] = [];
 
     try {
-      await proc.conn.request("initialize", {
+      const init = (await proc.conn.request("initialize", {
         clientInfo: { name: "conflux", title: "Conflux managed executor", version: "0.3.1" },
         capabilities: null,
-      });
+      })) as { userAgent?: string };
+      assertSupportedCodexVersion(init?.userAgent);
+      // Re-attach the CURRENT preset instructions, like the terminal
+      // launcher re-appends them on every resume: editing the preset
+      // between crash and recovery takes effect on the resumed thread.
+      const instructions = developerInstructions(agent);
       const resumed = (await proc.conn.request("thread/resume", {
         threadId: binding.thread_id,
+        ...(instructions ? { developerInstructions: instructions } : {}),
       })) as {
         thread?: {
           id?: string;
@@ -944,15 +959,46 @@ export class ManagedCodexManager {
     return { ok: true };
   }
 
-  /** Queue snapshot + pending approvals for the external status surface. */
+  /**
+   * Status snapshot for the external surface. Live instances report the
+   * current turn and answerable approvals; instances this process does NOT
+   * hold (stopped, crashed, restarted elsewhere) still get their PERSISTED
+   * view — binding thread, queue contents, run history — because that is
+   * exactly when a user comes to check results. Live control (interrupt,
+   * approvals) is simply absent from the persisted view. Returns null for
+   * ids without a managed trace (binding row or run rows) — terminal-mode
+   * instance ids stay 404 instead of a degenerate empty view.
+   */
   instanceStatus(instanceId: string): {
+    live: boolean;
     threadId: string;
     activeRun: { runId: number; turnId: string; state: string } | null;
     queuedRunIds: number[];
     pendingApprovals: Array<{ id: number; kind: string; payload: unknown }>;
-  } {
+  } | null {
     const live = this.instances.get(instanceId);
-    if (!live) throw Object.assign(new Error("managed instance not running"), { statusCode: 404 });
+    if (!live) {
+      const binding = getManagedBinding(this.db, instanceId);
+      // Only MANAGED traces qualify — a runtime_instances row alone proves
+      // nothing (terminal presets create those too, and a failed managed
+      // start that never reached thread/start has nothing to serve either).
+      const hasRuns = this.db
+        .prepare(`SELECT 1 FROM managed_codex_runs WHERE instance_id = ? LIMIT 1`)
+        .get(instanceId);
+      if (!binding && !hasRuns) return null;
+      const queued = this.db
+        .prepare(`SELECT id FROM managed_codex_runs WHERE instance_id = ? AND state = 'queued' ORDER BY created_at, id`)
+        .all(instanceId) as { id: number }[];
+      return {
+        live: false,
+        threadId: binding?.thread_id ?? "",
+        activeRun: null,
+        queuedRunIds: queued.map((q) => q.id),
+        // Nothing is answerable without the live connection — lingering
+        // pending rows stay in the DB until resume expires them.
+        pendingApprovals: [],
+      };
+    }
     const queued = this.db
       .prepare(`SELECT id FROM managed_codex_runs WHERE instance_id = ? AND state = 'queued' ORDER BY created_at, id`)
       .all(instanceId) as { id: number }[];
@@ -961,6 +1007,7 @@ export class ManagedCodexManager {
       live.activeTurn ? [live.activeTurn.runId] : [],
     ).filter((row) => live.liveApprovals.has(row.id));
     return {
+      live: true,
       threadId: live.threadId,
       activeRun: live.activeTurn
         ? {
@@ -1087,6 +1134,11 @@ export class ManagedCodexManager {
     // Drain the queue for the next task.
     void this.pump(live.instanceId).catch(() => {});
   }
+}
+
+/** Trimmed preset instructions, or null when the preset carries none. */
+function developerInstructions(agent: RuntimeAgent): string | null {
+  return agent.instructions?.trim() ? agent.instructions.trim() : null;
 }
 
 /** The answer text a terminal run writes back to its originating message. */
