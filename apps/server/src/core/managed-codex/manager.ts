@@ -965,8 +965,9 @@ export class ManagedCodexManager {
    * hold (stopped, crashed, restarted elsewhere) still get their PERSISTED
    * view — binding thread, queue contents, run history — because that is
    * exactly when a user comes to check results. Live control (interrupt,
-   * approvals) is simply absent from the persisted view. Returns null only
-   * for ids that were never managed at all.
+   * approvals) is simply absent from the persisted view. Returns null for
+   * ids without a managed trace (binding row or run rows) — terminal-mode
+   * instance ids stay 404 instead of a degenerate empty view.
    */
   instanceStatus(instanceId: string): {
     live: boolean;
@@ -978,10 +979,13 @@ export class ManagedCodexManager {
     const live = this.instances.get(instanceId);
     if (!live) {
       const binding = getManagedBinding(this.db, instanceId);
-      const known =
-        this.db.prepare(`SELECT 1 FROM managed_codex_runs WHERE instance_id = ? LIMIT 1`).get(instanceId) ??
-        this.db.prepare(`SELECT 1 FROM runtime_instances WHERE id = ? LIMIT 1`).get(instanceId);
-      if (!binding && !known) return null;
+      // Only MANAGED traces qualify — a runtime_instances row alone proves
+      // nothing (terminal presets create those too, and a failed managed
+      // start that never reached thread/start has nothing to serve either).
+      const hasRuns = this.db
+        .prepare(`SELECT 1 FROM managed_codex_runs WHERE instance_id = ? LIMIT 1`)
+        .get(instanceId);
+      if (!binding && !hasRuns) return null;
       const queued = this.db
         .prepare(`SELECT id FROM managed_codex_runs WHERE instance_id = ? AND state = 'queued' ORDER BY created_at, id`)
         .all(instanceId) as { id: number }[];

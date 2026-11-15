@@ -105,6 +105,20 @@ test("managed status endpoint returns binding, runs and current execution; unkno
     const missing = await fx.app.inject({ method: "GET", url: "/runtime-instances/nope/managed" });
     assert.equal(missing.statusCode, 404);
 
+    // A TERMINAL-mode instance row alone must not qualify for the persisted
+    // view — only a managed trace (binding/runs) does.
+    fx.db
+      .prepare(
+        `INSERT INTO runtime_instances (id, preset_id, preset_name, runtime, preset_snapshot, state, created_at, updated_at)
+         VALUES ('terminal-inst-1', 1, 'terminal preset', 'claude', '{}', 'ended', ?, ?)`,
+      )
+      .run(new Date().toISOString(), new Date().toISOString());
+    const terminal = await fx.app.inject({
+      method: "GET",
+      url: "/runtime-instances/terminal-inst-1/managed",
+    });
+    assert.equal(terminal.statusCode, 404, "non-managed instance ids stay 404");
+
     const events = await fx.app.inject({
       method: "GET",
       url: `/runtime-instances/${fx.instanceId}/managed/events`,
