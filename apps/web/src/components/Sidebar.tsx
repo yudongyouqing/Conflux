@@ -32,21 +32,32 @@ interface SidebarProps {
   onCloseMobile?: () => void;
 }
 
-/** Calendar-day bucket for the heartbeat timestamp. */
-function timeGroup(ts: string | null | undefined, now = new Date()): string {
-  if (!ts) return "更早";
+/** The home list only surfaces sessions active in the last N days — the
+ * graph tab and the activity log keep the full history. */
+const RECENT_WINDOW_DAYS = 10;
+const OLDER_BUCKET_LABEL = `${RECENT_WINDOW_DAYS} 天内`;
+
+/** Calendar-day bucket for the heartbeat timestamp, following the sidebar
+ * convention of the major chat clients (今天 / 昨天 / 最近 7 天). Returns
+ * null outside the recency window — the home list does not render those.
+ * A missing/unparsable timestamp is NOT treated as old: registration always
+ * stamps a heartbeat, so only legacy rows lack one — hide nothing we cannot
+ * prove stale. */
+function timeGroup(ts: string | null | undefined, now = new Date()): string | null {
+  if (!ts) return "今天";
   const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return "更早";
+  if (Number.isNaN(d.getTime())) return "今天";
   const day = 86_400_000;
   const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const diff = Math.floor((startOf(now) - startOf(d)) / day);
   if (diff <= 0) return "今天";
   if (diff === 1) return "昨天";
-  if (diff < 7) return "本周";
-  return "更早";
+  if (diff < 7) return "最近 7 天";
+  if (diff < RECENT_WINDOW_DAYS) return OLDER_BUCKET_LABEL;
+  return null;
 }
 
-const GROUP_ORDER = ["今天", "昨天", "本周", "更早"];
+const GROUP_ORDER = ["今天", "昨天", "最近 7 天", OLDER_BUCKET_LABEL];
 const GROUP_PREVIEW = 10;
 
 export function Sidebar({
@@ -69,6 +80,9 @@ export function Sidebar({
     "darwin";
   const online = health.data?.ok === true;
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // Collapsed groups hide their items entirely (header keeps the count) —
+  // the chevron in the header toggles this; "显示更多" only ever reveals.
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   // real sessions only; the web console is a UI identity, not a peer
   const listable = useMemo(
@@ -83,12 +97,19 @@ export function Sidebar({
     const g = new Map<string, GraphNode[]>();
     for (const s of listable) {
       const key = timeGroup(s.last_heartbeat_at);
+      if (!key) continue; // outside the recency window — not a home-list item
       const arr = g.get(key) ?? [];
       arr.push(s);
       g.set(key, arr);
     }
     return g;
   }, [listable]);
+
+  const recentCount = useMemo(
+    () => [...groups.values()].reduce((n, arr) => n + arr.length, 0),
+    [groups],
+  );
+  const outsideWindow = listable.length - recentCount;
 
   const workViews = [
     { id: "chat" as const, icon: MessagesSquare, label: "聊天" },
@@ -155,25 +176,31 @@ export function Sidebar({
           />
 
           <div className="px-4 pb-1 pt-2 text-2xs font-medium text-ink-faint">
-            最近会话 · {listable.length}
+            最近会话 · {recentCount}
           </div>
           <div className="px-2">
             {GROUP_ORDER.filter((k) => groups.has(k)).map((group) => {
               const items = groups.get(group)!;
               const open = expanded[group] ?? false;
-              const shown = open ? items : items.slice(0, GROUP_PREVIEW);
+              const isCollapsed = collapsed[group] ?? false;
+              const shown = isCollapsed ? [] : open ? items : items.slice(0, GROUP_PREVIEW);
               const hidden = items.length - shown.length;
               return (
                 <div key={group} className="mb-2">
-                  <div className="flex items-center gap-1 px-2 py-1 text-2xs text-ink-faint">
-                    {open ? (
-                      <ChevronDown size={11} className="text-ink-faint" />
-                    ) : (
+                  <button
+                    type="button"
+                    aria-expanded={!isCollapsed}
+                    onClick={() => setCollapsed((prev) => ({ ...prev, [group]: !isCollapsed }))}
+                    className="flex w-full items-center gap-1 px-2 py-1 text-2xs text-ink-faint hover:text-ink transition-colors"
+                  >
+                    {isCollapsed ? (
                       <ChevronRight size={11} className="text-ink-faint" />
+                    ) : (
+                      <ChevronDown size={11} className="text-ink-faint" />
                     )}
                     {group}
                     <span className="text-ink-faint/70">{items.length}</span>
-                  </div>
+                  </button>
                   <div className="space-y-0.5">
                     {shown.map((s) => {
                       const selected = s.id === selectedSessionId;
@@ -207,7 +234,7 @@ export function Sidebar({
                         </button>
                       );
                     })}
-                    {hidden > 0 && (
+                    {!isCollapsed && hidden > 0 && (
                       <button
                         onClick={() => setExpanded((prev) => ({ ...prev, [group]: true }))}
                         className="w-full px-2 py-1 text-left text-2xs text-ink-faint hover:text-ink"
@@ -219,7 +246,12 @@ export function Sidebar({
                 </div>
               );
             })}
-            {listable.length === 0 && (
+            {outsideWindow > 0 && (
+              <div className="px-2 pt-1 pb-2 text-2xs text-ink-faint">
+                更早的 {outsideWindow} 个会话见「图谱」
+              </div>
+            )}
+            {recentCount === 0 && outsideWindow === 0 && (
               <div className="px-2 py-6 text-xs text-ink-faint text-center">
                 还没有会话
                 <br />
