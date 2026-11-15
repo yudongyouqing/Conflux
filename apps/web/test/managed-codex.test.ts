@@ -49,6 +49,7 @@ function statusFixture(over: Partial<ManagedStatusResponse> = {}): ManagedStatus
       active_turn_id: null,
     },
     current: {
+      live: true,
       threadId: "thread-aaa",
       activeRun: { runId: 1, turnId: "turn-1", state: "running" },
       queuedRunIds: [2],
@@ -144,6 +145,7 @@ test("an old instance's events never render in a new panel", async () => {
           active_turn_id: null,
         },
         current: {
+          live: true,
           threadId: "thread-bbb",
           activeRun: null,
           queuedRunIds: [],
@@ -192,6 +194,7 @@ test("approval failures surface and a retry path stays available", async () => {
     statusByInstance: {
       "inst-a": statusFixture({
         current: {
+          live: true,
           threadId: "thread-aaa",
           activeRun: { runId: 1, turnId: "turn-1", state: "waiting_approval" },
           queuedRunIds: [],
@@ -248,12 +251,40 @@ test("unknown runs show the human-review notice, not silent success", async () =
 test("interrupt disabled while idle; enabled with the active turn", async () => {
   const view = mountPanel({
     statusByInstance: {
-      "inst-a": statusFixture({ current: { threadId: "t", activeRun: null, queuedRunIds: [], pendingApprovals: [] } }),
+      "inst-a": statusFixture({ current: { live: true, threadId: "t", activeRun: null, queuedRunIds: [], pendingApprovals: [] } }),
     },
     eventsByInstance: {},
     calls: [],
   });
   await waitFor(() => assert.ok(view.getByText("空闲")));
+  assert.equal(view.getByRole("button", { name: /中断任务/ }).hasAttribute("disabled"), true);
+});
+
+test("a stopped instance shows the offline badge and keeps its history", async () => {
+  const view = mountPanel({
+    statusByInstance: {
+      "inst-a": statusFixture({
+        current: { live: false, threadId: "thread-aaa", activeRun: null, queuedRunIds: [], pendingApprovals: [] },
+        runs: [
+          {
+            id: 1,
+            message_id: 10,
+            state: "unknown",
+            turn_id: "turn-x",
+            final_text: null,
+            error_code: "instance stopped mid-turn",
+            created_at: "2026-11-12T00:00:00Z",
+            updated_at: "2026-11-12T00:00:00Z",
+          },
+        ],
+      }),
+    },
+    eventsByInstance: {},
+    calls: [],
+  });
+  await waitFor(() => assert.ok(view.getByText("已停止")));
+  assert.ok(view.getByText(/实例当前不在线/));
+  assert.ok(view.getByText(/存在执行状态待核对的记录/), "the persisted unknown run stays reviewable");
   assert.equal(view.getByRole("button", { name: /中断任务/ }).hasAttribute("disabled"), true);
 });
 

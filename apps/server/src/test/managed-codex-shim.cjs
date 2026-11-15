@@ -296,7 +296,9 @@ async function handle(frame) {
   const { id, method, params } = frame;
   if (method === "initialize") {
     respond(id, {
-      userAgent: "codex_shim/0.164.0-fixture",
+      // SHIM_USER_AGENT drives version-gate tests (unsupported values must
+      // be refused before any thread exists).
+      userAgent: process.env.SHIM_USER_AGENT ?? "codex_shim/0.164.0-fixture",
       codexHome: process.env.SHIM_CODEX_HOME ?? "C:\\tmp\\shim-codex-home",
       platformFamily: process.platform === "win32" ? "windows" : "unix",
       platformOs: process.platform === "win32" ? "windows" : process.platform,

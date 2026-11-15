@@ -115,12 +115,18 @@ export function ManagedCodexPanel({
             <div className="flex items-center gap-2 min-w-0">
               <span
                 className={`shrink-0 rounded-md px-2 py-0.5 text-2xs ${
-                  current?.activeRun
-                    ? (RUN_STYLE[current.activeRun.state] ?? RUN_STYLE.running)
-                    : RUN_STYLE.queued
+                  status && !current?.live
+                    ? RUN_STYLE.interrupted
+                    : current?.activeRun
+                      ? (RUN_STYLE[current.activeRun.state] ?? RUN_STYLE.running)
+                      : RUN_STYLE.queued
                 }`}
               >
-                {current?.activeRun ? (RUN_LABEL[current.activeRun.state] ?? "执行中") : "空闲"}
+                {status && !current?.live
+                  ? "已停止"
+                  : current?.activeRun
+                    ? (RUN_LABEL[current.activeRun.state] ?? "执行中")
+                    : "空闲"}
               </span>
               {current && current.queuedRunIds.length > 0 && (
                 <span className="text-2xs text-ink-muted">队列 {current.queuedRunIds.length} 项</span>
@@ -147,6 +153,11 @@ export function ManagedCodexPanel({
               中断任务
             </button>
           </div>
+          {status && !current?.live && (
+            <p role="status" className="text-2xs text-ink-muted">
+              实例当前不在线（已停止、崩溃或由其他进程持有）：以下为持久化记录，中断与审批不可用；恢复实例后队列会继续执行。
+            </p>
+          )}
           {interrupt.error && (
             <p role="alert" className="text-2xs text-danger">
               中断失败：{(interrupt.error as Error).message}

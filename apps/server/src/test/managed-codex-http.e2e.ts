@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { openDb, stopWalCheckpoint, type DB } from "../core/db.js";
 import { createRuntimeAgent } from "../core/runtime-agents.js";
+import { stopRuntimeInstance } from "../core/runtime-instances.js";
 import { registerSession } from "../core/sessions.js";
 import { WEB_CONSOLE_ID } from "@conflux/shared";
 import { createServerContext } from "../http/context.js";
@@ -93,10 +94,11 @@ test("managed status endpoint returns binding, runs and current execution; unkno
     assert.equal(ok.statusCode, 200);
     const body = ok.json() as {
       binding: { thread_id: string };
-      current: { threadId: string; activeRun: unknown; pendingApprovals: unknown[] };
+      current: { live: boolean; threadId: string; activeRun: unknown; pendingApprovals: unknown[] };
       runs: unknown[];
     };
     assert.equal(body.binding.thread_id, "shim-thread-0001");
+    assert.equal(body.current.live, true);
     assert.equal(body.current.threadId, "shim-thread-0001");
     assert.deepEqual(body.current.pendingApprovals, []);
 
@@ -223,6 +225,65 @@ test("approval decisions: console identity required, decisions validated, states
       8000,
       "completed after http approval",
     );
+  } finally {
+    await fx.dispose();
+  }
+});
+
+test("status keeps serving the persisted view after the instance stops", async () => {
+  const fx = await makeHttpFixture();
+  try {
+    // The exact journey from the field report: a task is mid-flight when the
+    // instance stops — the run lands in `unknown` for human review, and the
+    // panel must still be able to READ it afterwards.
+    registerSession(fx.db, { id: "asker", name: "asker" });
+    fx.db
+      .prepare(
+        `INSERT INTO messages (from_session, to_session, question, status, created_at)
+         VALUES ('asker', ?, '@hold stopped mid-turn', 'pending', ?)`,
+      )
+      .run(fx.sessionId, new Date().toISOString());
+    const messageId = Number(
+      (
+        fx.db.prepare(`SELECT id FROM messages WHERE question = ?`).get("@hold stopped mid-turn") as {
+          id: number;
+        }
+      ).id,
+    );
+    await fx.manager.enqueue({
+      messageId,
+      instanceId: fx.instanceId,
+      text: "@hold stopped mid-turn",
+    });
+    await waitFor(
+      () =>
+        (
+          fx.db.prepare(`SELECT state FROM managed_codex_runs WHERE message_id = ?`).get(messageId) as {
+            state: string;
+          }
+        ).state === "running"
+          ? true
+          : undefined,
+      8000,
+      "running",
+    );
+    await stopRuntimeInstance(fx.db, fx.instanceId);
+
+    const res = await fx.app.inject({ method: "GET", url: `/runtime-instances/${fx.instanceId}/managed` });
+    assert.equal(res.statusCode, 200, "stopped instances serve their persisted state");
+    const body = res.json() as {
+      binding: { thread_id: string };
+      current: { live: boolean; threadId: string; activeRun: unknown; pendingApprovals: unknown[] };
+      runs: Array<{ state: string }>;
+    };
+    assert.equal(body.current.live, false);
+    assert.equal(body.current.activeRun, null, "no live control for a stopped instance");
+    assert.deepEqual(body.current.pendingApprovals, []);
+    assert.equal(body.binding.thread_id, "shim-thread-0001", "binding survives the stop");
+    assert.ok(body.runs.some((r) => r.state === "unknown"), "the mid-flight run is still reviewable");
+
+    const missing = await fx.app.inject({ method: "GET", url: "/runtime-instances/nope/managed" });
+    assert.equal(missing.statusCode, 404, "ids that were never managed still 404");
   } finally {
     await fx.dispose();
   }
