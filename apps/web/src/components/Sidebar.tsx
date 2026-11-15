@@ -80,6 +80,9 @@ export function Sidebar({
     "darwin";
   const online = health.data?.ok === true;
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // Collapsed groups hide their items entirely (header keeps the count) —
+  // the chevron in the header toggles this; "显示更多" only ever reveals.
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   // real sessions only; the web console is a UI identity, not a peer
   const listable = useMemo(
@@ -179,19 +182,25 @@ export function Sidebar({
             {GROUP_ORDER.filter((k) => groups.has(k)).map((group) => {
               const items = groups.get(group)!;
               const open = expanded[group] ?? false;
-              const shown = open ? items : items.slice(0, GROUP_PREVIEW);
+              const isCollapsed = collapsed[group] ?? false;
+              const shown = isCollapsed ? [] : open ? items : items.slice(0, GROUP_PREVIEW);
               const hidden = items.length - shown.length;
               return (
                 <div key={group} className="mb-2">
-                  <div className="flex items-center gap-1 px-2 py-1 text-2xs text-ink-faint">
-                    {open ? (
-                      <ChevronDown size={11} className="text-ink-faint" />
-                    ) : (
+                  <button
+                    type="button"
+                    aria-expanded={!isCollapsed}
+                    onClick={() => setCollapsed((prev) => ({ ...prev, [group]: !isCollapsed }))}
+                    className="flex w-full items-center gap-1 px-2 py-1 text-2xs text-ink-faint hover:text-ink transition-colors"
+                  >
+                    {isCollapsed ? (
                       <ChevronRight size={11} className="text-ink-faint" />
+                    ) : (
+                      <ChevronDown size={11} className="text-ink-faint" />
                     )}
                     {group}
                     <span className="text-ink-faint/70">{items.length}</span>
-                  </div>
+                  </button>
                   <div className="space-y-0.5">
                     {shown.map((s) => {
                       const selected = s.id === selectedSessionId;
@@ -225,7 +234,7 @@ export function Sidebar({
                         </button>
                       );
                     })}
-                    {hidden > 0 && (
+                    {!isCollapsed && hidden > 0 && (
                       <button
                         onClick={() => setExpanded((prev) => ({ ...prev, [group]: true }))}
                         className="w-full px-2 py-1 text-left text-2xs text-ink-faint hover:text-ink"

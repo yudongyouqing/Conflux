@@ -94,6 +94,16 @@ try {
     const file = join(OUT, `sidebar-${label}.png`);
     await page.screenshot({ path: file });
     console.log("shot", file);
+
+    // collapse acceptance: the group header must fold its sessions away
+    if (label === "desktop") {
+      await page.locator("aside").getByRole("button", { name: /今天/ }).first().click();
+      await page.getByText("今日会话A").waitFor({ state: "detached" });
+      await sleep(300);
+      const collapsed = join(OUT, "sidebar-desktop-collapsed.png");
+      await page.screenshot({ path: collapsed });
+      console.log("shot", collapsed);
+    }
   }
   await browser.close();
   writeFileSync(

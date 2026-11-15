@@ -100,10 +100,26 @@ test("all sessions stale -> hint only, no empty-state contradiction", async () =
 test("boundary days land in the right bucket", async () => {
   const view = mountSidebar([node("d2", 2), node("d6", 6), node("d7", 7), node("d9", 9), node("d10", 10)]);
   const groupOf = (id: string) =>
-    view.getByText(`会话-${id}`).closest("div.mb-2")?.querySelector("div.flex")?.textContent;
+    view.getByText(`会话-${id}`).closest("div.mb-2")?.querySelector("button")?.textContent;
   assert.match(groupOf("d2") ?? "", /最近 7 天/);
   assert.match(groupOf("d6") ?? "", /最近 7 天/);
   assert.match(groupOf("d7") ?? "", /10 天内/);
   assert.match(groupOf("d9") ?? "", /10 天内/);
   assert.equal(view.queryByText("会话-d10"), null, "exactly 10 days old is outside the window");
+});
+
+test("group headers collapse and re-expand their sessions", async () => {
+  const { fireEvent } = await import("@testing-library/react");
+  const view = mountSidebar([node("a", 0), node("b", 0), node("c", 1)]);
+  const todayHeader = view.getByRole("button", { name: /今天/ });
+  assert.equal(todayHeader.getAttribute("aria-expanded"), "true");
+  fireEvent.click(todayHeader);
+  // Compare booleans — asserting on the node itself would deep-inspect the
+  // jsdom tree on failure and blow the heap.
+  assert.equal(view.queryByText("会话-a") === null, true, "collapsed group hides its sessions");
+  assert.equal(view.queryByText("会话-b") === null, true);
+  assert.ok(view.getByRole("button", { name: /今天\s*2/ }), "header keeps the count while collapsed");
+  assert.ok(view.getByText("会话-c"), "other groups stay visible");
+  fireEvent.click(todayHeader);
+  assert.ok(view.getByText("会话-a"), "second click re-expands");
 });
