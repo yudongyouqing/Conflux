@@ -56,7 +56,7 @@ interface Fixture {
   dispose: () => Promise<void>;
 }
 
-async function makeFixture(): Promise<Fixture> {
+async function makeFixture(opts: { instructions?: string } = {}): Promise<Fixture> {
   const dir = mkdtempSync(join(tmpdir(), "managed-codex-manager-"));
   const db = openDb({ dataDir: dir, dbPath: join(dir, "data.db"), scope: "global" });
   const projectDir = join(dir, "project");
@@ -66,6 +66,7 @@ async function makeFixture(): Promise<Fixture> {
     runtime: "codex",
     workdir: projectDir,
     execution_mode: "managed",
+    ...(opts.instructions ? { instructions: opts.instructions } : {}),
   });
   const logPath = join(dir, "shim-rpc.log");
   const manager = new ManagedCodexManager(db, {
@@ -122,12 +123,16 @@ function runState(fx: Fixture, messageId: number): ManagedRunState | undefined {
   )?.state;
 }
 
-function shimLog(fx: Fixture): string[] {
+function readShimLog(logPath: string): string[] {
   try {
-    return readFileSync(fx.logPath, "utf8").trim().split("\n").filter(Boolean);
+    return readFileSync(logPath, "utf8").trim().split("\n").filter(Boolean);
   } catch {
     return [];
   }
+}
+
+function shimLog(fx: Fixture): string[] {
+  return readShimLog(fx.logPath);
 }
 
 test("start binds a real thread id and flips the instance to running", async () => {
@@ -149,8 +154,75 @@ test("start binds a real thread id and flips the instance to running", async () 
     assert.equal(session.runtime, "codex");
     const meta = JSON.parse(session.metadata) as { runtime_instance_id: string };
     assert.equal(meta.runtime_instance_id, fx.instanceId);
+    // A preset WITHOUT instructions must not send an empty override either.
+    const startFrame = shimLog(fx).find((l) => l.includes('"method":"thread/start"'));
+    assert.ok(startFrame, "thread/start was sent");
+    assert.equal(startFrame!.includes("developerInstructions"), false);
   } finally {
     await fx.dispose();
+  }
+});
+
+test("preset instructions ride thread/start as developerInstructions", async () => {
+  const fx = await makeFixture({ instructions: "只处理部署相关问题，其余转交" });
+  try {
+    const startFrame = shimLog(fx).find((l) => l.includes('"method":"thread/start"'));
+    assert.ok(startFrame, "thread/start was sent");
+    const frame = JSON.parse(startFrame!) as { frame: { params?: { developerInstructions?: string } } };
+    assert.equal(frame.frame.params?.developerInstructions, "只处理部署相关问题，其余转交");
+  } finally {
+    await fx.dispose();
+  }
+});
+
+test("resume re-attaches the CURRENT preset instructions", async () => {
+  const fx = await makeFixture({ instructions: "initial instructions" });
+  try {
+    await fx.manager.stopManagedInstance(fx.instanceId);
+    fx.db
+      .prepare(`UPDATE runtime_agents SET instructions = ? WHERE id = ?`)
+      .run("updated instructions", fx.agent.id);
+    // The official resume path re-reads the preset, so the new text must
+    // reach thread/resume — mirroring the terminal launcher re-appending
+    // system prompts on every resume.
+    const resumed = await resumeRuntimeInstance(fx.db, fx.instanceId);
+    const resumeFrame = shimLog(fx).reverse().find((l) => l.includes('"method":"thread/resume"'));
+    assert.ok(resumeFrame, "thread/resume was sent");
+    const frame = JSON.parse(resumeFrame!) as { frame: { params?: { developerInstructions?: string } } };
+    assert.equal(frame.frame.params?.developerInstructions, "updated instructions");
+    await stopRuntimeInstance(fx.db, resumed.instance.id);
+  } finally {
+    await fx.dispose();
+  }
+});
+
+test("an unsupported app-server version is refused before any thread exists", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "managed-codex-badver-"));
+  const db = openDb({ dataDir: dir, dbPath: join(dir, "data.db"), scope: "global" });
+  try {
+    const agent = createRuntimeAgent(db, {
+      name: "badver",
+      runtime: "codex",
+      execution_mode: "managed",
+    });
+    const logPath = join(dir, "shim.log");
+    const manager = new ManagedCodexManager(db, {
+      resolveLaunch: () => ({
+        executable: shimPath,
+        args: [],
+        env: { ...process.env, SHIM_LOG: logPath, SHIM_USER_AGENT: "codex_shim/99.99.99-fixture" },
+        cwd: dir,
+      }),
+    });
+    await assert.rejects(manager.start(agent), /not supported by the managed executor/);
+    const rows = db.prepare(`SELECT state FROM runtime_instances`).all() as { state: string }[];
+    assert.equal(rows[0]?.state, "failed", "refused start marks the instance failed");
+    // The gate fires in the initialize handshake — thread/start never went out.
+    assert.equal(readShimLog(logPath).some((l) => l.includes('"method":"thread/start"')), false);
+  } finally {
+    stopWalCheckpoint(db);
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

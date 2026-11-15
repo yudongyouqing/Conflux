@@ -148,6 +148,10 @@ export interface ManagedStatusResponse {
     | { instance_id: string; session_id: string; thread_id: string; active_turn_id: string | null }
     | null;
   current: {
+    /** False when this server process does not hold the instance (stopped,
+     *  crashed, restarted elsewhere): history and queue are still served,
+     *  live control (interrupt/approvals) is not. */
+    live: boolean;
     threadId: string;
     activeRun: { runId: number; turnId: string; state: string } | null;
     queuedRunIds: number[];

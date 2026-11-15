@@ -24,7 +24,13 @@ export function registerManagedCodexRoutes(app: FastifyInstance, ctx: ServerCont
   app.get<{ Params: { id: string } }>("/runtime-instances/:id/managed", {}, async (req, reply) => {
     try {
       const manager = requireManager();
+      // Persisted view for instances this process does not hold (stopped,
+      // crashed, restarted): the panel must still show history and queue —
+      // only live control is absent. Null = never was a managed instance.
       const status = manager.instanceStatus(req.params.id);
+      if (!status) {
+        throw Object.assign(new Error("managed instance not found"), { statusCode: 404 });
+      }
       const binding = db
         // owner_token is the executor's internal ownership pin — it never
         // leaves the server.

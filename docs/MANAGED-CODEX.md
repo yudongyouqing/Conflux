@@ -7,8 +7,10 @@ Conflux 可以不打开终端窗口，而是由服务端直接持有一个 Codex
 
 ## 支持的 CLI 版本
 
-- **codex-cli 0.164.0**（首期实测版本；协议按该版本锁定）。
-  初始化握手时会读取服务端 `userAgent` 中的版本号，不兼容版本会被拒绝。
+- **codex-cli 0.164.x**（首期实测版本；协议按该 minor 锁定，patch 号不限）。
+  初始化握手时会从服务端 `userAgent` 提取版本号：无法解析或不在 0.164
+  minor 内会在创建任何 thread 之前被拒绝（实例记为 failed，错误信息含
+  实际版本与受支持版本）。启动与恢复两条路径都经过同一道闸门。
 - 实测平台：**Windows 11**（主开发机）。macOS / Linux 未实测，进程解析
   （PATH 查找、shim 展开）按 POSIX 直通逻辑实现，使用前请先冒烟验证。
 - 可执行文件解析：支持真实 exe、`node <script>` 直接调用、以及 npm 的
@@ -26,6 +28,11 @@ Conflux 可以不打开终端窗口，而是由服务端直接持有一个 Codex
 
 外部接入的会话**不会**因为被选中或收到消息而自动转为受管；一个 thread
 也不能同时被两个宿主持有——恢复时若检测到旧进程仍存活会明确拒绝。
+
+预设的**系统指令**（instructions）经 `thread/start` 的
+`developerInstructions` 协议字段下发（终端模式下 codex CLI 没有对应的
+追加参数，受管模式不会丢弃该配置）；恢复时按当时的预设内容重新附加，
+编辑预设后恢复即生效。
 
 ## 使用
 
@@ -59,7 +66,7 @@ Conflux 可以不打开终端窗口，而是由服务端直接持有一个 Codex
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/runtime-instances/:id/managed` | binding、当前 run、队列、待审批 |
+| GET | `/runtime-instances/:id/managed` | binding、当前 run、队列、待审批；实例不在本进程持有时（停止/崩溃/重启后）仍返回持久化视图（`current.live=false`），仅实时控制缺席 |
 | GET | `/runtime-instances/:id/managed/events?after=N&stream=1` | 事件回放 / SSE |
 | POST | `/runtime-instances/:id/managed/interrupt` | `{ expected_turn_id? }` |
 | POST | `/runtime-instances/:id/managed/approvals/:approvalId` | `{ decision: accept\|decline\|cancel }`，仅 web console 身份 |
