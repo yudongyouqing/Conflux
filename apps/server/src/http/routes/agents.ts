@@ -312,7 +312,7 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: ServerContext): v
   app.post<{
     Body: { provider?: string; base_url?: string; api_key?: string; model?: string };
   }>("/agents/test-provider", {}, async (req, reply) => {
-    const { provider = "anthropic", base_url, api_key, model } = req.body;
+    const { provider = "anthropic", api_key, model } = req.body;
     try {
       if (!api_key) return sendHttpError(reply, 400, "API key is required for a connectivity test");
       const testModel = model || (provider === "openai" ? "gpt-4o-mini" : "claude-sonnet-4-20250514");
