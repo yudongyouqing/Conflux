@@ -12,6 +12,9 @@
 //   B. approval DECLINE -> task completes without the forbidden side effect
 //   C. interrupt a long turn -> interrupted terminal state, then a follow-up
 //      task completes on the same instance (executor survives interrupts)
+//   D. stop -> resume -> binding keeps the ORIGINAL thread id and the
+//      rejoined thread serves a follow-up turn (structural half of this
+//      check needs no model calls and is recorded even under quota skips)
 //
 // Usage: node scripts/acceptance/managed-codex-real-model.mjs
 import { spawn } from "node:child_process";
@@ -110,7 +113,9 @@ try {
       "running",
     "instance running",
   );
-  const session = (await api("GET", `/runtime-instances/${instanceId}/managed`)).binding.session_id;
+  const binding0 = (await api("GET", `/runtime-instances/${instanceId}/managed`)).binding;
+  const session = binding0.session_id;
+  const threadIdAtStart = binding0.thread_id;
   const userAgent = (readFileSync(join(runDir, "server.log"), "utf8").match(/"userAgent":"([^"]+)"/) ?? [])[1];
   report.userAgent = userAgent ?? null;
   console.log("instance", instanceId, "session", session, "userAgent", userAgent);
@@ -125,13 +130,14 @@ try {
     );
   // Drive one run to a terminal state, answering every approval the model
   // requests along the way with the SAME decision (a real turn may ask more
-  // than once: write a file, then run a command, ...).
-  const driveToTerminal = async (messageId, decision, what) => {
+  // than once: write a file, then run a command, ...). The instance id is a
+  // parameter: scenario D drives a RESUMED instance under a new id.
+  const driveToTerminalOn = async (instId, messageId, decision, what) => {
     const deadline = Date.now() + 300000;
     let firstKind = null;
     let answered = 0;
     for (;;) {
-      const s = await api("GET", `/runtime-instances/${instanceId}/managed`);
+      const s = await api("GET", `/runtime-instances/${instId}/managed`);
       const run = s.runs.find((r) => r.message_id === messageId);
       if (run && ["completed", "failed", "interrupted", "unknown"].includes(run.state)) {
         return { run, firstKind, answered };
@@ -142,7 +148,7 @@ try {
         answered += 1;
         await api(
           "POST",
-          `/runtime-instances/${instanceId}/managed/approvals/${pending[0].id}`,
+          `/runtime-instances/${instId}/managed/approvals/${pending[0].id}`,
           { decision },
           { "X-Session-Id": "web-console" },
         );
@@ -152,6 +158,8 @@ try {
       await sleep(1500);
     }
   };
+  const driveToTerminal = (messageId, decision, what) =>
+    driveToTerminalOn(instanceId, messageId, decision, what);
 
   // ---- A: external ask -> allow approval -> executed + prefixed reply ----
   await api("POST", "/sessions/register", { name: "外部验收会话", session_id: "external-asker" });
@@ -162,7 +170,7 @@ try {
   const replyA = (
     await api("GET", "/messages/replies", undefined, { "X-Session-Id": "external-asker" })
   ).replies.find((m) => m.id === msgA)?.reply;
-  const verdict = existsSync(join(project, "verdict.txt"))
+  const verdictContent = existsSync(join(project, "verdict.txt"))
     ? readFileSync(join(project, "verdict.txt"), "utf8").trim()
     : null;
   if (quotaBlocked(driveA.run?.error_code, driveA.run?.final_text, replyA)) {
@@ -172,10 +180,10 @@ try {
     });
   } else {
     summary("A external ask + accept + instructions passthrough",
-      driveA.run.state === "completed" && verdict === "ACCEPTED" && typeof replyA === "string" && replyA.includes(PREFIX), {
+      driveA.run.state === "completed" && verdictContent === "ACCEPTED" && typeof replyA === "string" && replyA.includes(PREFIX), {
       approvalKind: driveA.firstKind ?? "none",
       approvalsAnswered: driveA.answered,
-      verdictFile: verdict,
+      verdictFile: verdictContent,
       reply: replyA?.slice(0, 160) ?? null,
     });
   }
@@ -250,6 +258,45 @@ try {
       interruptAccepted: interrupt.accepted,
       followUpReply: replyC2?.slice(0, 160) ?? null,
     });
+  }
+
+  // ---- D: stop, then resume rejoins the SAME thread ----
+  // Structural continuity (binding thread id unchanged across stop/resume)
+  // needs no model calls; the follow-up task proves the rejoined thread
+  // still serves turns. On quota the structural half is still recorded.
+  await api("POST", `/runtime-instances/${instanceId}/stop`, {});
+  const resumedD = await api("POST", `/runtime-instances/${instanceId}/resume`, {});
+  const instanceD = resumedD.instance.id;
+  await waitFor(
+    async () =>
+      (await api("GET", "/runtime-instances")).instances.find((i) => i.id === instanceD)?.state ===
+      "running",
+    "D resumed instance running",
+  );
+  const bindingD = (await api("GET", `/runtime-instances/${instanceD}/managed`)).binding;
+  const sameThread = bindingD.thread_id === threadIdAtStart && instanceD !== instanceId;
+  const msgD = await ask("web-console", "只回答两个字母：OK");
+  const driveD = await driveToTerminalOn(instanceD, msgD, "accept", "D");
+  if (quotaBlocked(driveD.run?.error_code, driveD.run?.final_text)) {
+    summary("D stop/resume preserves the thread", true, {
+      skipped: "quota",
+      threadPreserved: sameThread,
+      threadBefore: threadIdAtStart,
+      threadAfter: bindingD.thread_id,
+      reply: driveD.run?.error_code?.slice(0, 160) ?? null,
+    });
+  } else {
+    const replyD = driveD.run?.final_text ?? null;
+    summary(
+      "D stop/resume preserves the thread",
+      sameThread && driveD.run.state === "completed" && typeof replyD === "string" && /OK/i.test(replyD),
+      {
+        threadPreserved: sameThread,
+        threadBefore: threadIdAtStart,
+        threadAfter: bindingD.thread_id,
+        reply: replyD?.slice(0, 160) ?? null,
+      },
+    );
   }
 
   report.finishedAt = new Date().toISOString();
