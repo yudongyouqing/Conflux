@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  ALLOW_MINOR_ENV,
   assertSupportedCodexVersion,
   parseCodexCliVersion,
   SUPPORTED_CODEX_CLI_MINOR,
@@ -46,4 +47,47 @@ test("rejects other minors with a named, actionable error", () => {
 test("rejects userAgents without a parsable version", () => {
   assert.throws(() => assertSupportedCodexVersion("garbage"), /cannot determine codex version/);
   assert.throws(() => assertSupportedCodexVersion(undefined), /cannot determine codex version/);
+});
+
+// ---- escape hatch (CONFLUX_MANAGED_CODEX_ALLOW_MINOR) ----
+// Read at CALL time so an upgraded codex can be unblocked without a server
+// restart cycle beyond the env change; an invalid value must NOT weaken the
+// gate silently.
+
+test("override minor accepts that codex minor", () => {
+  const prev = process.env[ALLOW_MINOR_ENV];
+  process.env[ALLOW_MINOR_ENV] = "99.99";
+  try {
+    assert.doesNotThrow(() => assertSupportedCodexVersion("codex_cli_rs/99.99.1 (Windows 11)"));
+    assert.throws(() => assertSupportedCodexVersion("codex_cli_rs/0.164.0 (Windows 11)"));
+  } finally {
+    if (prev === undefined) delete process.env[ALLOW_MINOR_ENV];
+    else process.env[ALLOW_MINOR_ENV] = prev;
+  }
+});
+
+test("override 'any' disables the gate entirely", () => {
+  const prev = process.env[ALLOW_MINOR_ENV];
+  process.env[ALLOW_MINOR_ENV] = "any";
+  try {
+    assert.doesNotThrow(() => assertSupportedCodexVersion("codex_cli_rs/42.0.7 (Ubuntu 24.04)"));
+  } finally {
+    if (prev === undefined) delete process.env[ALLOW_MINOR_ENV];
+    else process.env[ALLOW_MINOR_ENV] = prev;
+  }
+});
+
+test("invalid override falls back to the certified minor, not to open", () => {
+  const prev = process.env[ALLOW_MINOR_ENV];
+  process.env[ALLOW_MINOR_ENV] = "not-a-minor";
+  try {
+    assert.throws(
+      () => assertSupportedCodexVersion("codex_cli_rs/99.99.0 (Windows 11)"),
+      /not supported/,
+    );
+    assert.doesNotThrow(() => assertSupportedCodexVersion("codex_cli_rs/0.164.3 (Windows 11)"));
+  } finally {
+    if (prev === undefined) delete process.env[ALLOW_MINOR_ENV];
+    else process.env[ALLOW_MINOR_ENV] = prev;
+  }
 });
