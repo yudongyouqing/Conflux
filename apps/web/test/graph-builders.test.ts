@@ -4,6 +4,7 @@ import type { GraphEdge, GraphNode } from "@conflux/shared";
 import {
   ARCHIVE_KEY,
   applyEdgeOffsets,
+  applyScopePositions,
   buildActiveView,
   buildDirsView,
   mergeNodePositions,
@@ -196,4 +197,36 @@ test("layoutGraph picks the direction that better fills the canvas (chain graph)
   // a pure chain must NOT render as a narrow vertical snake on the
   // default (landscape-biased) request: width should dominate
   assert.ok(w > h, `expected landscape layout, got ${Math.round(w)}x${Math.round(h)}`);
+});
+
+// ---- scope snapshot policy ---------------------------------------------------
+
+test("a same-scope refresh keeps freshly dragged positions over stale snapshots", () => {
+  // the user dragged the node to 333,444 while the scope was active; the
+  // next poll rebuild must NOT replay the snapshot saved when they last
+  // left this scope (40,40)
+  const prev = [{ ...toSessionNode({ id: "a", name: "a", status: "active", type: "session", context_count: 0, pending_inbox: 0 }), position: { x: 333, y: 444 } } as Node];
+  const built = [toSessionNode({ id: "a", name: "a", status: "active", type: "session", context_count: 0, pending_inbox: 0 })];
+  const snapshot = { positions: { a: { x: 40, y: 40 } } };
+
+  const kept = applyScopePositions(prev, built, false, snapshot);
+  assert.deepEqual(kept[0].position, { x: 333, y: 444 });
+});
+
+test("entering (or first mounting) a scope restores its snapshot positions", () => {
+  const built = [
+    toSessionNode({ id: "a", name: "a", status: "active", type: "session", context_count: 0, pending_inbox: 0 }),
+    toSessionNode({ id: "b", name: "b", status: "active", type: "session", context_count: 0, pending_inbox: 0 }),
+  ];
+  const snapshot = { positions: { a: { x: 40, y: 40 } } };
+
+  const restored = applyScopePositions([], built, true, snapshot);
+  assert.deepEqual(restored[0].position, { x: 40, y: 40 }, "snapshot position restored");
+  assert.equal(restored[1].position, built[1].position, "members without a snapshot keep the layout");
+});
+
+test("entering a scope without a snapshot keeps the freshly built layout", () => {
+  const built = [toSessionNode({ id: "a", name: "a", status: "active", type: "session", context_count: 0, pending_inbox: 0 })];
+  const out = applyScopePositions([], built, true, undefined);
+  assert.deepEqual(out[0].position, built[0].position);
 });

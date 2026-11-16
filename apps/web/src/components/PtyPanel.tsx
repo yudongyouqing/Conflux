@@ -7,7 +7,17 @@ import { Terminal, Send } from "lucide-react";
  * what's happening" + a manual inject box. The wake system injects
  * automatically; this lets the human do it too.
  */
-export function PtyPanel({ agentId, agentName }: { agentId: number; agentName: string }) {
+export function PtyPanel({
+  agentId,
+  agentName,
+  active = true,
+}: {
+  agentId: number;
+  agentName: string;
+  /** Hidden pages unsubscribe: no background output streaming, and the
+   *  terminal process itself is never started or stopped by navigation. */
+  active?: boolean;
+}) {
   const [buffer, setBuffer] = useState("");
   const [alive, setAlive] = useState(false);
   const [injectText, setInjectText] = useState("");
@@ -21,20 +31,36 @@ const pty = (globalThis as any).confluxPty as {
 } | undefined;
 
   useEffect(() => {
-    if (!pty || !agentId) return;
+    if (!pty || !agentId || !active) return;
     let unsub: (() => void) | undefined;
+    // init is async: the effect may clean up (hide/switch) while getBuffer
+    // or isAlive is still pending — without this guard the late continuation
+    // would subscribe to output AFTER the page is gone and never unsubscribe
+    let cancelled = false;
 
     const init = async () => {
       const buf = await pty.getBuffer(agentId);
+      if (cancelled) return;
       setBuffer(buf?.buffer ?? "");
-      setAlive(await pty.isAlive(agentId));
+      const alive = await pty.isAlive(agentId);
+      if (cancelled) return;
+      setAlive(alive);
       unsub = pty.onOutput(agentId, (chunk: string) => {
         setBuffer((prev) => (prev + chunk).slice(-50_000));
       });
+      // cancelled may have flipped between the check above and this sync
+      // subscription — release immediately in that case
+      if (cancelled) {
+        unsub();
+        unsub = undefined;
+      }
     };
     init();
-    return () => unsub?.();
-  }, [agentId, pty]);
+    return () => {
+      cancelled = true;
+      unsub?.();
+    };
+  }, [agentId, pty, active]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });

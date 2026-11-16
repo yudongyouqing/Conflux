@@ -1,9 +1,12 @@
 import type {
   Agent,
+  ChatRoom,
   ConfluxDataBundle,
   ContextEntry,
   Conversation,
   Graph,
+  ManagedEventPayload,
+  ManagedStatusResponse,
   Message,
   MessageStatus,
   ModelConfig,
@@ -16,8 +19,15 @@ import type {
 } from "@conflux/shared";
 import { WEB_CONSOLE_ID } from "@conflux/shared";
 
-async function get<T>(path: string, headers?: Record<string, string>): Promise<T> {
-  const res = await fetch(path, headers ? { headers } : undefined);
+async function get<T>(
+  path: string,
+  headers?: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<T> {
+  const init: RequestInit = {};
+  if (headers) init.headers = headers;
+  if (signal) init.signal = signal;
+  const res = await fetch(path, headers || signal ? init : undefined);
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
@@ -63,26 +73,30 @@ async function put<T>(path: string, body: unknown): Promise<T> {
 export const api = {
   health: () => get<{ ok: boolean }>("/healthz"),
 
-  getGraph: (status = "all") => get<Graph>(`/graph?status=${encodeURIComponent(status)}`),
+  getGraph: (status = "all", signal?: AbortSignal) =>
+    get<Graph>(`/graph?status=${encodeURIComponent(status)}`, undefined, signal),
 
-  getMessages: (params?: {
-    from?: string;
-    to?: string;
-    status?: MessageStatus | "all";
-    since?: string;
-    limit?: number;
-  }) => {
+  getMessages: (
+    params?: {
+      from?: string;
+      to?: string;
+      status?: MessageStatus | "all";
+      since?: string;
+      limit?: number;
+    },
+    signal?: AbortSignal,
+  ) => {
     const qs = new URLSearchParams();
     if (params?.from) qs.set("from", params.from);
     if (params?.to) qs.set("to", params.to);
     if (params?.status) qs.set("status", params.status);
     if (params?.since) qs.set("since", params.since);
     if (params?.limit) qs.set("limit", String(params.limit));
-    return get<{ messages: Message[] }>(`/messages?${qs.toString()}`);
+    return get<{ messages: Message[] }>(`/messages?${qs.toString()}`, undefined, signal);
   },
 
-  checkInbox: () =>
-    get<{ messages: Message[] }>("/messages/inbox", { "X-Session-Id": WEB_CONSOLE_ID }),
+  checkInbox: (signal?: AbortSignal) =>
+    get<{ messages: Message[] }>("/messages/inbox", { "X-Session-Id": WEB_CONSOLE_ID }, signal),
 
   retryMessage: (id: number) =>
     post<{ message: Message; wake: { woke: boolean; reason?: string } }>(
@@ -91,26 +105,34 @@ export const api = {
       { "X-Session-Id": WEB_CONSOLE_ID },
     ),
 
-  getSessions: (status = "all") =>
-    get<{ sessions: SessionSummary[] }>(`/sessions?status=${encodeURIComponent(status)}`),
+  getSessions: (status = "all", signal?: AbortSignal) =>
+    get<{ sessions: SessionSummary[] }>(
+      `/sessions?status=${encodeURIComponent(status)}`,
+      undefined,
+      signal,
+    ),
 
-  getPeerMessages: (peer: string) =>
-    get<{ messages: Message[] }>(`/web/peer-messages?peer=${encodeURIComponent(peer)}`),
+  getPeerMessages: (peer: string, signal?: AbortSignal) =>
+    get<{ messages: Message[] }>(
+      `/web/peer-messages?peer=${encodeURIComponent(peer)}`,
+      undefined,
+      signal,
+    ),
 
-  getEdgeMessages: (edgeId: number) =>
+  getEdgeMessages: (edgeId: number, signal?: AbortSignal) =>
     get<{
       edge: { id: number; from: string; to: string };
       messages: Message[];
-    }>(`/edges/${edgeId}/messages`),
+    }>(`/edges/${edgeId}/messages`, undefined, signal),
 
   edgeAsk: (edgeId: number, question: string) =>
     post<{ message: Message }>(`/edges/${edgeId}/ask`, { question }),
 
-  getRuntimes: () =>
+  getRuntimes: (signal?: AbortSignal) =>
     get<{
       runtimes: Record<string, { label: string; executable: string; executableEnv: string }>;
       agents: RuntimeAgent[];
-    }>("/runtimes"),
+    }>("/runtimes", undefined, signal),
 
   createRuntimeAgent: (body: {
     name: string;
@@ -123,6 +145,8 @@ export const api = {
     extra_env?: string;
     instructions?: string;
     interval_min?: number;
+    /** codex-only: run as a Conflux-held app-server instead of a terminal */
+    execution_mode?: "terminal" | "managed";
   }) => post<{ agent: RuntimeAgent }>("/runtimes", body),
 
   deleteRuntimeAgent: (id: number) => del<{ ok: boolean }>(`/runtimes/${id}`),
@@ -130,7 +154,8 @@ export const api = {
   startRuntimeAgent: (id: number) =>
     post<{ started: boolean; instance: RuntimeInstance }>(`/runtimes/${id}/start`, {}),
 
-  getRuntimeInstances: () => get<{ instances: RuntimeInstance[] }>("/runtime-instances"),
+  getRuntimeInstances: (signal?: AbortSignal) =>
+    get<{ instances: RuntimeInstance[] }>("/runtime-instances", undefined, signal),
 
   stopRuntimeInstance: (id: string) =>
     post<{ instance: RuntimeInstance }>(`/runtime-instances/${encodeURIComponent(id)}/stop`, {}),
@@ -139,6 +164,39 @@ export const api = {
     post<{ started: boolean; instance: RuntimeInstance }>(
       `/runtime-instances/${encodeURIComponent(id)}/resume`,
       {},
+    ),
+
+  // ---- managed Codex executor ----
+
+  getManagedStatus: (instanceId: string, signal?: AbortSignal) =>
+    get<ManagedStatusResponse>(
+      `/runtime-instances/${encodeURIComponent(instanceId)}/managed`,
+      undefined,
+      signal,
+    ),
+
+  getManagedEvents: (instanceId: string, after = 0, signal?: AbortSignal) =>
+    get<{ events: ManagedEventPayload[] }>(
+      `/runtime-instances/${encodeURIComponent(instanceId)}/managed/events?after=${after}`,
+      undefined,
+      signal,
+    ),
+
+  interruptManagedTurn: (instanceId: string, expectedTurnId?: string | null) =>
+    post<{ accepted: boolean; reason?: string }>(
+      `/runtime-instances/${encodeURIComponent(instanceId)}/managed/interrupt`,
+      { expected_turn_id: expectedTurnId ?? undefined },
+    ),
+
+  resolveManagedApproval: (
+    instanceId: string,
+    approvalId: number,
+    decision: "accept" | "decline" | "cancel",
+  ) =>
+    post<{ ok: boolean }>(
+      `/runtime-instances/${encodeURIComponent(instanceId)}/managed/approvals/${approvalId}`,
+      { decision },
+      { "X-Session-Id": WEB_CONSOLE_ID },
     ),
 
   openSessionTerminal: (sessionId: string) =>
@@ -176,7 +234,7 @@ export const api = {
     return get<{ entries: ContextEntry[] }>(`/context/query?${qs.toString()}`);
   },
 
-  getAgents: () => get<{ agents: Agent[] }>("/agents"),
+  getAgents: (signal?: AbortSignal) => get<{ agents: Agent[] }>("/agents", undefined, signal),
 
   createAgent: (body: {
     name: string;
@@ -283,29 +341,16 @@ export const api = {
 
   // ---- Chat Rooms (#137) ----
   chatRooms: {
-    list: () => get<{ rooms: import("@conflux/shared").ChatRoom[] }>("/chat-rooms"),
+    list: (signal?: AbortSignal) => get<{ rooms: ChatRoom[] }>("/chat-rooms", undefined, signal),
     create: (body: { name: string; description?: string; members: string[] }) =>
-      post<{ room: import("@conflux/shared").ChatRoom }>("/chat-rooms", body),
+      post<{ room: ChatRoom }>("/chat-rooms", body),
     delete: (id: number) => del<{ ok: boolean }>(`/chat-rooms/${id}`),
     join: (roomId: number, sessionId: string) =>
       post<{ ok: boolean }>(`/chat-rooms/${roomId}/join`, { session_id: sessionId }),
     leave: (sessionId: string) =>
       post<{ ok: boolean }>("/chat-rooms/leave", { session_id: sessionId }),
-    orchestrate: (roomId: number) =>
-      get<{
-        tasks: Array<{
-          id: number;
-          room_id: number;
-          initiator_session_id: string;
-          executor_session_id: string;
-          prompt: string;
-          status: "pending" | "running" | "done" | "failed";
-          result: string | null;
-          created_at: string;
-          completed_at: string | null;
-        }>;
-        status: Array<{ executor_session_id: string; status: string; n: number }>;
-      }>(`/chat-rooms/${roomId}/orchestrate`),
+    orchestrate: (roomId: number, signal?: AbortSignal) =>
+      get<RoomOrchestration>(`/chat-rooms/${roomId}/orchestrate`, undefined, signal),
     summon: (roomId: number, executorSessionId: string, prompt: string, senderIdentity?: string) =>
       post<{ task_id: number; injected: boolean; method: string }>(`/chat-rooms/${roomId}/summon`, {
         executor_session_id: executorSessionId,
@@ -317,20 +362,43 @@ export const api = {
         `/chat-rooms/${roomId}/broadcast`,
         { prompt, sender_session_id: senderIdentity ?? "web-console" },
       ),
-    messages: (roomId: number) =>
-      get<{
-        messages: Array<{
-          id: number;
-          room_id: number;
-          from_session: string;
-          to_session: string;
-          from_name: string;
-          to_name: string;
-          question: string;
-          reply: string | null;
-          status: string;
-          created_at: string;
-        }>;
-      }>(`/chat-rooms/${roomId}/messages`),
+    messages: (roomId: number, signal?: AbortSignal) =>
+      get<{ messages: RoomThreadMessage[] }>(
+        `/chat-rooms/${roomId}/messages`,
+        undefined,
+        signal,
+      ),
   },
 };
+
+/** A room orchestration task: one prompt → one result, polled as a whole. */
+export interface RoomTask {
+  id: number;
+  room_id: number;
+  initiator_session_id: string;
+  executor_session_id: string;
+  prompt: string;
+  status: "pending" | "running" | "done" | "failed";
+  result: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface RoomOrchestration {
+  tasks: RoomTask[];
+  status: Array<{ executor_session_id: string; status: string; n: number }>;
+}
+
+/** One exchange on a room's shared broadcast thread. */
+export interface RoomThreadMessage {
+  id: number;
+  room_id: number;
+  from_session: string;
+  to_session: string;
+  from_name: string;
+  to_name: string;
+  question: string;
+  reply: string | null;
+  status: string;
+  created_at: string;
+}

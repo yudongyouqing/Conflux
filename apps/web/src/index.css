@@ -294,3 +294,45 @@ html[data-theme="dark"] .font-medium { font-weight: 600; }
     padding-inline: 12px;
   }
 }
+
+/* ---- Chat-first workspace details rail ----------------------------------
+   >=1280px it is a stable third column (default 320px, collapsible);
+   below that it becomes an overlay drawer over the main area. The nav
+   drawer and this drawer are mutually exclusive on narrow screens
+   (enforced in JS). ------------------------------------------------------ */
+.workspace-details {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+@media (min-width: 1280px) {
+  .workspace-details {
+    position: relative;
+    width: 320px;
+    flex-shrink: 0;
+  }
+}
+
+@media (max-width: 1279.98px) {
+  .workspace-details {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    width: min(400px, 92vw);
+    border-left: 1px solid rgb(var(--tk-line));
+    box-shadow: -12px 0 30px rgb(24 34 52 / 0.14);
+  }
+}
+
+/* Visible keyboard focus for the workspace controls (buttons/selects get
+   the shared accent ring; inputs already use focus:border-accent). */
+.workspace-details button:focus-visible,
+.room-composer-row button:focus-visible,
+.room-chat-header button:focus-visible {
+  outline: 2px solid rgb(var(--tk-accent) / 0.55);
+  outline-offset: 1px;
+}

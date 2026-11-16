@@ -112,6 +112,8 @@ async function run() {
   try {
     await page.goto(`http://127.0.0.1:${WEB_PORT}`, { waitUntil: "domcontentloaded" });
     await page.getByText("Conflux", { exact: true }).first().waitFor();
+    // chat is the default surface now — walk to the graph explicitly
+    await page.getByRole("button", { name: "图谱", exact: true }).click();
     await page.locator(".react-flow__node").first().waitFor();
 
     await page.getByRole("button", { name: "设置", exact: true }).click();
@@ -150,7 +152,7 @@ async function run() {
     await page.getByRole("button", { name: "设置", exact: true }).click();
     await lightTheme.click();
 
-    await page.getByRole("button", { name: "消息流", exact: true }).click();
+    await page.getByRole("button", { name: "活动记录", exact: true }).click();
     await page.getByText("M1-B 冒烟清单在哪台机器跑？", { exact: true }).waitFor();
 
     const composer = page.locator("input").first();
@@ -162,7 +164,13 @@ async function run() {
     );
     await composer.press("Enter");
     assert.equal((await askResponse).ok(), true, "web ask request failed");
-    await page.getByText("E2E smoke message", { exact: true }).waitFor();
+    // keep-alive leaves the hidden activity feed holding its own copy —
+    // wait on the VISIBLE conversation, not on a globally-unique text
+    await page
+      .locator('.tab-surface[data-active="true"]')
+      .getByText("E2E smoke message", { exact: true })
+      .first()
+      .waitFor();
     const retryResponse = page.waitForResponse(
       (response) =>
         /\/messages\/\d+\/retry$/.test(response.url()) && response.request().method() === "POST",
@@ -175,15 +183,23 @@ async function run() {
       "queued",
       "disabled auto wake is queued",
     );
+    // keep-alive leaves the hidden activity feed mounted with its own copy —
+    // count only what the user actually sees (the active surface)
     assert.equal(
-      await page.getByText("E2E smoke message", { exact: true }).count(),
+      await page
+        .locator('.tab-surface[data-active="true"]')
+        .getByText("E2E smoke message", { exact: true })
+        .count(),
       1,
       "retry does not clone messages",
     );
     await page.screenshot({ path: join(ARTIFACTS, "message-retry-desktop.png"), fullPage: true });
 
-    await page.getByRole("button", { name: "运行时", exact: true }).click();
-    await page.getByRole("heading", { name: "运行实例", exact: true }).waitFor();
+    // unified assistants page: coding category default, orphan instances kept
+    await page.getByRole("button", { name: "助手", exact: true }).click();
+    await page.getByRole("button", { name: "创建编码助手", exact: true }).waitFor();
+    // the fixture preset owns both instances — expand its coding card
+    await page.getByText("协作控制验收").click();
     await page
       .getByText("尚未绑定可验证的运行时进程，无法安全停止", { exact: true })
       .first()
@@ -193,7 +209,7 @@ async function run() {
     for (const button of await stopButtons.all())
       assert.equal(await button.isDisabled(), true, "unverified fixture cannot stop any process");
     await page.screenshot({
-      path: join(ARTIFACTS, "runtime-instances-desktop.png"),
+      path: join(ARTIFACTS, "assistants-coding-desktop.png"),
       fullPage: true,
     });
     await page.setViewportSize({ width: 390, height: 844 });
@@ -202,17 +218,17 @@ async function run() {
     );
     assert.ok(
       await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
-      "runtime instances fit narrow viewport",
+      "assistants page fits narrow viewport",
     );
     await page.screenshot({
-      path: join(ARTIFACTS, "runtime-instances-narrow.png"),
+      path: join(ARTIFACTS, "assistants-coding-narrow.png"),
       fullPage: true,
     });
     await page.setViewportSize({ width: 1440, height: 900 });
 
-    await page.getByRole("button", { name: "Agents", exact: true }).click();
-    await page.getByRole("button", { name: "创建智能体", exact: true }).click();
-    await page.getByRole("button", { name: /模型智能体/ }).click();
+    // model assistants: category switch, direct-to-category creation
+    await page.getByRole("button", { name: "模型助手", exact: true }).click();
+    await page.getByRole("button", { name: "创建模型助手", exact: true }).click();
     const agentName = `e2e-agent-${Date.now()}`;
     await page.getByPlaceholder("名称 *").fill(agentName);
     await page.getByPlaceholder("模型 * (如 claude-sonnet-4-5)").fill("e2e-model");
@@ -237,8 +253,7 @@ async function run() {
       true,
       "mobile navigation should open",
     );
-    await page.getByRole("button", { name: "消息流", exact: true }).click();
-    await page.getByTitle("返回消息流").click();
+    await page.getByRole("button", { name: "活动记录", exact: true }).click();
     const search = page.getByPlaceholder("搜索消息内容...");
     await search.waitFor();
 

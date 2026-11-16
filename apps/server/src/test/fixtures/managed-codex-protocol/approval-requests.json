@@ -1,0 +1,101 @@
+{
+  "commandExecutionRequestApproval": {
+    "jsonrpc": "2.0",
+    "id": 41,
+    "method": "item/commandExecution/requestApproval",
+    "params": {
+      "kind": "command",
+      "threadId": "0193222e-0000-7000-8000-000000000001",
+      "turnId": "0193222e-0000-7000-8000-000000000002",
+      "itemId": "item-fixture-command",
+      "startedAtMs": 1762896002100,
+      "approvalId": null,
+      "environmentId": null,
+      "reason": "network access required for fixture registry",
+      "networkApprovalContext": null,
+      "command": "npm install fixture-pkg",
+      "cwd": "C:\\tmp\\fixture-project",
+      "commandActions": [],
+      "proposedExecpolicyAmendment": null,
+      "proposedNetworkPolicyAmendments": null
+    }
+  },
+  "commandExecutionApprovalAccept": {
+    "jsonrpc": "2.0",
+    "id": 41,
+    "result": { "decision": "accept" }
+  },
+  "commandExecutionApprovalDecline": {
+    "jsonrpc": "2.0",
+    "id": 41,
+    "result": { "decision": "decline" }
+  },
+  "commandExecutionApprovalCancel": {
+    "jsonrpc": "2.0",
+    "id": 41,
+    "result": { "decision": "cancel" }
+  },
+  "fileChangeRequestApproval": {
+    "jsonrpc": "2.0",
+    "id": 42,
+    "method": "item/fileChange/requestApproval",
+    "params": {
+      "threadId": "0193222e-0000-7000-8000-000000000001",
+      "turnId": "0193222e-0000-7000-8000-000000000002",
+      "itemId": "item-fixture-file-change",
+      "startedAtMs": 1762896002300,
+      "reason": "write outside workspace root",
+      "grantRoot": "C:\\tmp\\fixture-shared"
+    }
+  },
+  "fileChangeApprovalAccept": {
+    "jsonrpc": "2.0",
+    "id": 42,
+    "result": { "decision": "accept" }
+  },
+  "fileChangeApprovalDecline": {
+    "jsonrpc": "2.0",
+    "id": 42,
+    "result": { "decision": "decline" }
+  },
+  "legacyExecCommandApproval": {
+    "jsonrpc": "2.0",
+    "id": 43,
+    "method": "execCommandApproval",
+    "params": {
+      "conversationId": "0193222e-0000-7000-8000-000000000001",
+      "callId": "call-fixture-1",
+      "approvalId": "approval-fixture-1",
+      "command": ["node", "fixture-tool.cjs", "run"],
+      "cwd": "C:\\tmp\\fixture-project",
+      "reason": null,
+      "parsedCmd": []
+    }
+  },
+  "legacyApplyPatchApproval": {
+    "jsonrpc": "2.0",
+    "id": 44,
+    "method": "applyPatchApproval",
+    "params": {
+      "conversationId": "0193222e-0000-7000-8000-000000000001",
+      "callId": "call-fixture-2",
+      "fileChanges": {
+        "C:\\tmp\\fixture-project\\src\\fixture.ts": {
+          "type": "update",
+          "unified_diff": "--- a/src/fixture.ts\n+++ b/src/fixture.ts\n@@ -1 +1 @@\n-fixture old\n+fixture new\n",
+          "move_path": null
+        }
+      },
+      "reason": null,
+      "grantRoot": null
+    }
+  },
+  "serverRequestResolved": {
+    "jsonrpc": "2.0",
+    "method": "serverRequest/resolved",
+    "params": {
+      "threadId": "0193222e-0000-7000-8000-000000000001",
+      "requestId": 41
+    }
+  }
+}

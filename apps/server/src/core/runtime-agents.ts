@@ -1,7 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
-import { pathToFileURL } from "node:url";
 
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
@@ -11,13 +10,14 @@ import type { RuntimeAgent, RuntimeId, RuntimeInstance } from "@conflux/shared";
 import { cleanTerminalEnv, posixQuote, openInTerminal } from "./terminal.js";
 import { RUNTIME_IDS, RUNTIME_REGISTRY, runtimeDescriptor } from "./runtime-registry.js";
 import { HEADLESS_ALLOWED_TOOLS, projectHasConfluxMcp } from "./wake/commands.js";
-import { defaultServerEntry, ensureWakeMcpConfig } from "./wake/launcher.js";
+import { ensureWakeMcpConfig, pinnedMcpLaunch } from "./wake/launcher.js";
 import { getTerminalSettings } from "./app-settings.js";
 import {
   createRuntimeInstance,
   failRuntimeInstance,
   refreshRuntimeInstances,
 } from "./runtime-instances.js";
+import { getManagedCodexManager } from "./managed-codex/manager.js";
 
 // moved to terminal.ts; re-exported for existing importers
 export { cleanTerminalEnv } from "./terminal.js";
@@ -52,12 +52,17 @@ interface RuntimeAgentRow {
   instructions: string | null;
   interval_min: number | null;
   last_scheduled_run: string | null;
+  execution_mode: string;
   created_at: string;
   updated_at: string;
 }
 
 function toAgent(row: RuntimeAgentRow): RuntimeAgent {
-  return { ...row, runtime: row.runtime as RuntimeId };
+  return {
+    ...row,
+    runtime: row.runtime as RuntimeId,
+    execution_mode: row.execution_mode === "managed" ? "managed" : "terminal",
+  };
 }
 
 export function createRuntimeAgent(
@@ -72,11 +77,19 @@ export function createRuntimeAgent(
     extra_env?: string | null;
     instructions?: string | null;
     interval_min?: number | null;
+    execution_mode?: "terminal" | "managed";
   },
 ): RuntimeAgent {
   if (!input.name?.trim()) throw new Error("name is required");
   if (!isRuntimeId(input.runtime)) {
     throw new Error(`unknown runtime: ${input.runtime} (expected claude | codex)`);
+  }
+  const execution_mode = input.execution_mode ?? "terminal";
+  if (execution_mode === "managed" && input.runtime !== "codex") {
+    throw Object.assign(
+      new Error("managed execution supports codex only in this milestone"),
+      { statusCode: 400 },
+    );
   }
   if (input.extra_env) {
     try {
@@ -98,8 +111,8 @@ export function createRuntimeAgent(
   const now = nowIso();
   const res = db
     .prepare(
-      `INSERT INTO runtime_agents (name, runtime, workdir, model, base_url, api_key, extra_env, instructions, interval_min, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO runtime_agents (name, runtime, workdir, model, base_url, api_key, extra_env, instructions, interval_min, execution_mode, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.name.trim(),
@@ -111,6 +124,7 @@ export function createRuntimeAgent(
       input.extra_env?.trim() || null,
       input.instructions?.trim() || null,
       interval,
+      execution_mode,
       now,
       now,
     );
@@ -271,13 +285,31 @@ export interface StartRuntimeOptions {
   resumeSessionId?: string;
 }
 
-export function startRuntimeAgent(
+export async function startRuntimeAgent(
   db: DB,
   id: number,
   opts: StartRuntimeOptions = {},
-): { started: true; instance: RuntimeInstance } {
+): Promise<{ started: true; instance: RuntimeInstance }> {
   const agent = opts.agent ?? getRuntimeAgent(db, id);
   if (!agent) throw new Error(`runtime agent not found: ${id}`);
+
+  // Managed presets never touch a terminal: the server holds the app-server
+  // child and drives it over stdio. Terminal resume has no managed meaning
+  // in this milestone (recovery reconciles by thread id instead).
+  if (agent.execution_mode === "managed") {
+    if (opts.resumeSessionId) {
+      throw Object.assign(
+        new Error("managed instances resume via the managed recovery path, not the terminal launcher"),
+        { statusCode: 400 },
+      );
+    }
+    const manager = getManagedCodexManager();
+    if (!manager) {
+      throw new Error("managed executor unavailable — start the Conflux server first");
+    }
+    const { instance } = await manager.start(agent, opts.instance ? { instance: opts.instance } : {});
+    return { started: true, instance };
+  }
 
   const platform = opts.platform ?? process.platform;
   if (platform !== "win32" && platform !== "darwin") {
@@ -310,7 +342,9 @@ export function startRuntimeAgent(
   if (platform === "darwin") env.CONFLUX_TMUX_SESSION = tmuxName;
   if (opts.resumeSessionId) env.CONFLUX_RESUME_SESSION_ID = opts.resumeSessionId;
   if (agent.runtime === "codex") args.push(...buildCodexManagedMcpArgs(env, db));
-  else if (!projectHasConfluxMcp(agent.workdir))
+  else
+    // a project mount's presence proves nothing about its database —
+    // always override with this server's pinned mount
     args.push(
       "--mcp-config",
       ensureWakeMcpConfig(dirname(db.name), undefined, managedMcpLaunch(db)),
@@ -407,18 +441,7 @@ export function managedMcpLaunch(db: DB): {
   args: string[];
   env?: Record<string, string>;
 } {
-  const entry = defaultServerEntry();
-  return {
-    command: process.execPath,
-    args: [
-      ...(entry.endsWith(".ts") ? ["--import", pathToFileURL(require.resolve("tsx")).href] : []),
-      entry,
-      "--data-dir",
-      dirname(db.name),
-      "mcp",
-    ],
-    ...(process.versions.electron ? { env: { ELECTRON_RUN_AS_NODE: "1" } } : {}),
-  };
+  return pinnedMcpLaunch(dirname(db.name));
 }
 
 /** Expand argv after cmd's metacharacter parsing; dynamic values never become shell syntax. */

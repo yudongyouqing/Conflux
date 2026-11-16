@@ -134,8 +134,12 @@ test("sidebar and graph nodes expose the same labeled session states", () => {
         activeTab: "graph",
         onTabChange: () => {},
         sessions,
+        rooms: [],
+        selectedRoomId: null,
         selectedSessionId: null,
+        onSelectRoom: () => {},
         onSelectSession: () => {},
+        onCreateRoom: () => {},
       }),
     ),
   );

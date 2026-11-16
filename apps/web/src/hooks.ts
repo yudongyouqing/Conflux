@@ -1,5 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import type { ManagedEventPayload } from "@conflux/shared";
 import { api } from "./api";
+
+export type ManagedEvent = ManagedEventPayload;
 
 export function useGraph() {
   return useQuery({
@@ -10,29 +13,36 @@ export function useGraph() {
 }
 
 /** Active sessions for the @-mention picker (and their busy/status). */
-export function useSessions(status: "active" | "all" = "active") {
+export function useSessions(status: "active" | "all" = "active", enabled = true) {
   return useQuery({
     queryKey: ["sessions", status],
-    queryFn: () => api.getSessions(status),
-    refetchInterval: 5000,
+    queryFn: ({ signal }) => api.getSessions(status, signal),
+    enabled,
+    refetchInterval: enabled ? 5000 : false,
   });
 }
 
-export function useMessages(filters?: { status?: string; limit?: number }) {
+export function useMessages(filters?: { status?: string; limit?: number }, enabled = true) {
   return useQuery({
     queryKey: ["messages", filters],
-    queryFn: async () => {
-      // Auto-mark pending messages addressed to web-console as seen
+    queryFn: async ({ signal }) => {
+      // Auto-mark pending messages addressed to web-console as seen. The
+      // preflight is part of the queryFn so a hidden activity page (enabled
+      // false) never fires read side effects from the background.
       try {
-        await api.checkInbox();
+        await api.checkInbox(signal);
       } catch {
         // web-console might not be registered yet; ignore and proceed
       }
-      return api.getMessages({
-        status: (filters?.status as never) ?? "all",
-        limit: filters?.limit ?? 100,
-      });
+      return api.getMessages(
+        {
+          status: (filters?.status as never) ?? "all",
+          limit: filters?.limit ?? 100,
+        },
+        signal,
+      );
     },
+    enabled,
     refetchInterval: 3000,
   });
 }
@@ -69,21 +79,21 @@ export function useSessionContext(sessionId: string | null) {
 }
 
 /** Two-way message flow between the web console and one session (Drawer view). */
-export function usePeerMessages(peer: string | null) {
+export function usePeerMessages(peer: string | null, enabled = true) {
   return useQuery({
     queryKey: ["peer-messages", peer],
-    queryFn: () => api.getPeerMessages(peer!),
-    enabled: !!peer,
+    queryFn: ({ signal }) => api.getPeerMessages(peer!, signal),
+    enabled: !!peer && enabled,
     refetchInterval: 5000,
   });
 }
 
 /** One conversation channel's (edge) exchange history. */
-export function useEdgeMessages(edgeId: number | null) {
+export function useEdgeMessages(edgeId: number | null, enabled = true) {
   return useQuery({
     queryKey: ["edge-messages", edgeId],
-    queryFn: () => api.getEdgeMessages(edgeId!),
-    enabled: edgeId !== null,
+    queryFn: ({ signal }) => api.getEdgeMessages(edgeId!, signal),
+    enabled: edgeId !== null && enabled,
     refetchInterval: 5000,
   });
 }
@@ -102,11 +112,12 @@ export function useEdgeAsk() {
 }
 
 /** Two-way message flow between any two sessions (graph edge click). */
-export function useAgents() {
+export function useAgents(enabled = true) {
   return useQuery({
     queryKey: ["agents"],
-    queryFn: () => api.getAgents(),
-    refetchInterval: 10000,
+    queryFn: ({ signal }) => api.getAgents(signal),
+    enabled,
+    refetchInterval: enabled ? 10000 : false,
   });
 }
 
@@ -128,11 +139,12 @@ export function useDeleteAgent() {
 
 // ---- runtime agents (CLI presets: Claude Code / Codex) ----
 
-export function useRuntimes() {
+export function useRuntimes(enabled = true) {
   return useQuery({
     queryKey: ["runtimes"],
-    queryFn: () => api.getRuntimes(),
-    refetchInterval: 10000,
+    queryFn: ({ signal }) => api.getRuntimes(signal),
+    enabled,
+    refetchInterval: enabled ? 10000 : false,
   });
 }
 
@@ -164,11 +176,12 @@ export function useStartRuntimeAgent() {
   });
 }
 
-export function useRuntimeInstances() {
+export function useRuntimeInstances(enabled = true) {
   return useQuery({
     queryKey: ["runtime-instances"],
-    queryFn: api.getRuntimeInstances,
-    refetchInterval: 5000,
+    queryFn: ({ signal }) => api.getRuntimeInstances(signal),
+    enabled,
+    refetchInterval: enabled ? 5000 : false,
   });
 }
 
@@ -194,6 +207,84 @@ export function useStopRuntimeInstance() {
 
 export function useResumeRuntimeInstance() {
   return useRuntimeInstanceMutation(api.resumeRuntimeInstance);
+}
+
+// ---- managed Codex executor ----
+
+/** Live status of one managed instance (binding, current run, approvals).
+ *  Refresh is EVENT-DRIVEN: the events query invalidates this key the
+ *  moment new sequences arrive, so this interval is only a slow fallback. */
+export function useManagedStatus(instanceId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ["managed-status", instanceId],
+    queryFn: ({ signal }) => api.getManagedStatus(instanceId!, signal),
+    enabled: !!instanceId && enabled,
+    refetchInterval: enabled ? 15000 : false,
+  });
+}
+
+/** Incremental event replay: each poll fetches only sequences after the
+ *  cursor, so reconnects/switches never duplicate rendered events. */
+export function useManagedEvents(instanceId: string | null, enabled = true) {
+  return useQuery<ManagedEvent[], Error>({
+    queryKey: ["managed-events", instanceId],
+    enabled: !!instanceId && enabled,
+    refetchInterval: enabled ? 2000 : false,
+    queryFn: async ({ signal, client }) => {
+      const key = ["managed-events-cursor", instanceId] as const;
+      const cursor = (client.getQueryData(key) as number | undefined) ?? 0;
+      const res = await api.getManagedEvents(instanceId!, cursor, signal);
+      const maxSeq = res.events.reduce((m, e) => Math.max(m, e.sequence), cursor);
+      if (maxSeq !== cursor) {
+        client.setQueryData(key, maxSeq);
+        // Fresh sequences = state changed (approval, terminal turn, death);
+        // status must not wait out its slow fallback interval.
+        void client.invalidateQueries({ queryKey: ["managed-status", instanceId] });
+      }
+      // Merge with whatever the cache already holds (same key), newest last.
+      const prev =
+        (client.getQueryData(["managed-events", instanceId]) as ManagedEvent[] | undefined) ?? [];
+      const seen = new Set(prev.map((e) => e.sequence));
+      const merged = [...prev, ...res.events.filter((e) => !seen.has(e.sequence))];
+      return merged.slice(-500);
+    },
+  });
+}
+
+export function useInterruptManagedTurn() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      instanceId,
+      expectedTurnId,
+    }: {
+      instanceId: string;
+      expectedTurnId?: string | null;
+    }) => api.interruptManagedTurn(instanceId, expectedTurnId),
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ["managed-status", vars.instanceId] });
+      qc.invalidateQueries({ queryKey: ["managed-events", vars.instanceId] });
+    },
+  });
+}
+
+export function useResolveManagedApproval() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      instanceId,
+      approvalId,
+      decision,
+    }: {
+      instanceId: string;
+      approvalId: number;
+      decision: "accept" | "decline" | "cancel";
+    }) => api.resolveManagedApproval(instanceId, approvalId, decision),
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ["managed-status", vars.instanceId] });
+      qc.invalidateQueries({ queryKey: ["managed-events", vars.instanceId] });
+    },
+  });
 }
 
 // ---- terminal settings + open-in-terminal ----

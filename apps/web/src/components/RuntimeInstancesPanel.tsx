@@ -18,30 +18,46 @@ const STATE_LABEL = {
 };
 const timeOf = (value: string | null) => (value ? new Date(value).toLocaleString() : "暂无");
 
-export function RuntimeInstancesPanel() {
-  const instances = useRuntimeInstances();
+export interface RuntimeInstancesPanelProps {
+  /** Controlled instance set (preset-filtered/orphans); omit to query all. */
+  instances?: RuntimeInstance[];
+  title?: string;
+  /** a hidden page must not poll; controlled sets never query anyway */
+  active?: boolean;
+}
+
+export function RuntimeInstancesPanel({
+  instances: controlled,
+  title = "运行实例",
+  active = true,
+}: RuntimeInstancesPanelProps = {}) {
+  // a controlled set renders as given — no self-query at all
+  const query = useRuntimeInstances(controlled === undefined && active);
+  const list = controlled ?? query.data?.instances ?? [];
+  const isLoading = controlled === undefined && query.isLoading;
+  const error = controlled === undefined ? query.error : null;
   return (
     <section className="border-t border-line pt-5" aria-labelledby="runtime-instances-title">
       <div className="flex items-center justify-between gap-3">
         <h3 id="runtime-instances-title" className="text-sm font-semibold text-ink">
-          运行实例
+          {title}
         </h3>
         <span className="text-2xs text-ink-faint">每 5 秒刷新</span>
       </div>
       <p className="text-xs text-ink-muted mt-1 mb-3">
         每次启动独立记录；恢复会创建新实例，保留原实例历史。
       </p>
-      {instances.isLoading && <p className="text-xs text-ink-faint py-3">加载实例…</p>}
-      {instances.error && (
+      {isLoading && <p className="text-xs text-ink-faint py-3">加载实例…</p>}
+      {error && (
         <p role="alert" className="text-xs text-danger py-3">
-          实例加载失败：{instances.error.message}
+          实例加载失败：{error.message}
         </p>
       )}
-      {!instances.isLoading && !instances.error && instances.data?.instances.length === 0 && (
+      {!isLoading && !error && list.length === 0 && (
         <p className="text-xs text-ink-faint py-4">暂无运行实例，启动上方预设后会显示在这里。</p>
       )}
       <div className="space-y-3">
-        {instances.data?.instances.map((instance) => (
+        {list.map((instance) => (
           <RuntimeInstanceRow key={instance.id} instance={instance} />
         ))}
       </div>
@@ -49,7 +65,9 @@ export function RuntimeInstancesPanel() {
   );
 }
 
-function RuntimeInstanceRow({ instance }: { instance: RuntimeInstance }) {
+/** One managed instance with its full control row — reused by the unified
+ *  assistants page inside per-preset sections. */
+export function RuntimeInstanceRow({ instance }: { instance: RuntimeInstance }) {
   const stop = useStopRuntimeInstance();
   const resume = useResumeRuntimeInstance();
   const busy = stop.isPending || resume.isPending;

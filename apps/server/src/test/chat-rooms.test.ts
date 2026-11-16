@@ -6,7 +6,6 @@ import { registerSession } from "../core/sessions.js";
 import {
   createChatRoom,
   listChatRooms,
-  getChatRoom,
   deleteChatRoom,
   roomMembers,
 } from "../core/chat-rooms.js";

@@ -121,7 +121,7 @@ export function getGraph(
     } catch {
       // malformed metadata — leave unannotated
     }
-    const { metadata, ...rest } = n;
+    const { metadata: _metadata, ...rest } = n;
     const name = agentId !== null && !ownName ? (presetNames.get(agentId) ?? n.name) : n.name;
     return {
       ...rest,

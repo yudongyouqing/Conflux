@@ -1,0 +1,77 @@
+{
+  "initializeResponse": {
+    "userAgent": "codex_cli_rs/0.164.0 (Windows 11.0.26300; x86_64) unknown (unknown)",
+    "codexHome": "C:\\codex-home-fixture",
+    "platformFamily": "windows",
+    "platformOs": "windows"
+  },
+  "threadStartResponse": {
+    "thread": {
+      "id": "0193222e-0000-7000-8000-000000000001",
+      "sessionId": "0193222e-0000-7000-8000-0000000000aa",
+      "forkedFromId": null,
+      "parentThreadId": null,
+      "preview": "fixture preview task",
+      "ephemeral": false,
+      "section": null,
+      "sectionEnteredAt": null,
+      "projectId": null,
+      "historyMode": "paginated",
+      "modelProvider": "openai",
+      "model": "gpt-5.2-codex",
+      "reasoningEffort": "medium",
+      "createdAt": 1762896000,
+      "updatedAt": 1762896000,
+      "recencyAt": 1762896000,
+      "status": { "type": "idle" },
+      "path": "C:\\codex-home-fixture\\sessions\\2026\\11\\12\\rollout-fixture.jsonl",
+      "cwd": "C:\\tmp\\fixture-project",
+      "cliVersion": "0.164.0",
+      "originator": "conflux",
+      "source": { "custom": "conflux" },
+      "threadSource": null,
+      "agentNickname": null,
+      "agentRole": null,
+      "gitInfo": null,
+      "name": null,
+      "turns": []
+    },
+    "model": "gpt-5.2-codex",
+    "modelProvider": "openai",
+    "serviceTier": null,
+    "disabledPluginIds": [],
+    "cwd": "C:\\tmp\\fixture-project",
+    "instructionSources": [],
+    "approvalPolicy": "untrusted",
+    "approvalsReviewer": "user",
+    "sandbox": {
+      "type": "workspaceWrite",
+      "writableRoots": ["C:\\tmp\\fixture-project"],
+      "networkAccess": false,
+      "excludeTmpdirEnvVar": false,
+      "excludeSlashTmp": false
+    },
+    "reasoningEffort": "medium"
+  },
+  "turnStartResponse": {
+    "turn": {
+      "id": "0193222e-0000-7000-8000-000000000002",
+      "rootTurnId": null,
+      "items": [],
+      "itemsView": "notLoaded",
+      "status": "inProgress",
+      "error": null,
+      "startedAt": 1762896001,
+      "completedAt": null,
+      "durationMs": null
+    }
+  },
+  "jsonRpcErrorFrame": {
+    "jsonrpc": "2.0",
+    "id": 7,
+    "error": {
+      "code": -32602,
+      "message": "Invalid params for turn/interrupt: unknown turn"
+    }
+  }
+}

@@ -756,12 +756,12 @@ export function buildCli(_argv?: string | readonly string[]): Command {
         const result = await runOp(
           program,
           () =>
-            withDb(openDbFrom(o), (db) => {
+            withDb(openDbFrom(o), async (db) => {
               try {
                 const outcome =
                   action === "stop"
-                    ? { instance: stopRuntimeInstance(db, id) }
-                    : resumeRuntimeInstance(db, id);
+                    ? { instance: await stopRuntimeInstance(db, id) }
+                    : await resumeRuntimeInstance(db, id);
                 logAudit(db, {
                   interface: "cli",
                   action: `${action}_runtime_instance`,

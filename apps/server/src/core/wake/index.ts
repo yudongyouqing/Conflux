@@ -1,4 +1,5 @@
 import { WEB_CONSOLE_ID } from "@conflux/shared";
+import { dirname } from "node:path";
 import type { DB } from "../db.js";
 import { logger } from "../../log.js";
 import {
@@ -11,13 +12,12 @@ import {
 import { getSession, mergeSessionMeta } from "../sessions.js";
 import { hasTranscript } from "../live.js";
 import { pushMailTyped } from "../mail-push.js";
-import { AUTO_WAKE_PROMPT, projectHasConfluxMcp, tmuxWakeCommand } from "./commands.js";
-import { ensureWakeMcpConfig } from "./launcher.js";
+import { AUTO_WAKE_PROMPT, tmuxWakeCommand } from "./commands.js";
+import { ensureWakeMcpConfig, pinnedMcpLaunch } from "./launcher.js";
 import { planClaudeWake } from "./claude.js";
 import { planCodexWake } from "./codex.js";
 import { launchWakeRun } from "./launcher.js";
 import { realTmuxIO, type TmuxIO } from "./tmux-inject.js";
-import { resolveConfig } from "../../config.js";
 import { getRuntimeAgent } from "../runtime-agents.js";
 import { cmdQuote } from "../terminal.js";
 
@@ -57,25 +57,10 @@ export function agentPromptSuffix(db: DB, meta: Record<string, unknown> | null):
   return ` --append-system-prompt ${cmdQuote(agent.instructions)}`;
 }
 
-/** Global counter for active wake processes (spawned, not yet exited). */
-let activeWakeCount = 0;
-
-/** Increment active wake counter (called before spawn). */
-export function incrementWakeCount(): void {
-  activeWakeCount++;
-  logger.debug({ activeWakeCount }, "wake process started");
-}
-
-/** Decrement active wake counter (called on process exit). */
-export function decrementWakeCount(): void {
-  activeWakeCount = Math.max(0, activeWakeCount - 1);
-  logger.debug({ activeWakeCount }, "wake process ended");
-}
-
-/** Get current active wake count (for monitoring/UI). */
-export function getActiveWakeCount(): number {
-  return activeWakeCount;
-}
+/** Wake concurrency accounting lives in counter.ts — the launcher maintains
+ *  it with a static import (importing this module from there is circular). */
+export { incrementWakeCount, decrementWakeCount, getActiveWakeCount } from "./counter.js";
+import { getActiveWakeCount } from "./counter.js";
 
 export type WakeResult =
   | { woke: true; command?: string }
@@ -103,8 +88,11 @@ export function wakeSessionForMail(db: DB, sessionId: string, opts: WakeOptions 
   // member at once and burn through tokens. The counter tracks spawned-but-
   // not-yet-exited headless wakes; 0 disables the cap.
   const maxConcurrent = getWakeMaxConcurrent(db);
-  if (maxConcurrent > 0 && activeWakeCount >= maxConcurrent) {
-    return { woke: false, reason: `wake queue full (${activeWakeCount}/${maxConcurrent})` };
+  if (maxConcurrent > 0 && getActiveWakeCount() >= maxConcurrent) {
+    return {
+      woke: false,
+      reason: `wake queue full (${getActiveWakeCount()}/${maxConcurrent})`,
+    };
   }
 
   const session = getSession(db, sessionId);
@@ -164,9 +152,12 @@ export function wakeSessionForMail(db: DB, sessionId: string, opts: WakeOptions 
     // Mount the wake MCP config only when the project doesn't already
     // carry Conflux itself — an extra mount changes the tools array and
     // invalidates the whole cached prefix. Explicit test injection wins.
+    // pinned from the db handle — the ambient/global resolution is exactly
+    // how executors landed on the wrong database; an explicit test path
+    // still wins so callers can inject their own pinned config
     const mcpConfig =
       opts.mcpConfigPath ??
-      (projectHasConfluxMcp(session.project_dir) ? null : ensureWakeMcpConfig());
+      ensureWakeMcpConfig(dirname(db.name), undefined, pinnedMcpLaunch(dirname(db.name)));
     const command = tmuxWakeCommand(sessionId, exe, mcpConfig) + agentPromptSuffix(db, meta);
     if (opts.dryRun) return { woke: true, command };
     if (io.launch({ name, command, cwd: session.project_dir })) {
@@ -199,7 +190,8 @@ export function wakeSessionForMail(db: DB, sessionId: string, opts: WakeOptions 
   const launch = launchWakeRun({
     db,
     sessionId,
-    dataDir: resolveConfig("global").dataDir,
+    // dataDir intentionally omitted: launchWakeRun derives it from the db
+    // handle, so a server on a custom home wakes onto that home
     projectDir: session.project_dir,
     command: plan.command + (runtime === "codex" ? "" : agentPromptSuffix(db, meta)),
     prompt: plan.prompt ?? AUTO_WAKE_PROMPT,

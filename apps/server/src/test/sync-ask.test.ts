@@ -60,7 +60,7 @@ test("askAndReplySync times out gracefully — message still delivered", async (
     question: "没人回的同步问句",
     timeoutMs: 150,
     pollMs: 50,
-    sleep: (ms: number) => Promise.resolve(),
+    sleep: () => Promise.resolve(),
   });
   assert.equal(result.status, "timeout");
   assert.equal(result.reply, null);

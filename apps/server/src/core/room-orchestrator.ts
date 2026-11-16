@@ -135,12 +135,12 @@ export function completeSummon(
   task: RoomTask,
 ): { task: RoomTask; injected: boolean; method: string } {
   // Try live injection first, fall back to headless wake
-  const injected = injectIntoProcess(db, input.executor_session_id, input.prompt, task.id, task.task_token);
+  const injected = injectIntoProcess(db, input.executor_session_id, input.prompt, task.id, task.task_token, input.room_id);
   let method = injected ? "tmux" : "";
 
   if (!injected) {
     // Fallback: headless wake the agent to process the task
-    const woke = headlessWakeForTask(db, input.executor_session_id, input.prompt, task.id, task.task_token);
+    const woke = headlessWakeForTask(db, input.executor_session_id, input.prompt, task.id, task.task_token, input.room_id);
     method = woke ? "headless" : "failed";
   }
 
@@ -363,6 +363,24 @@ export function listRoomMessages(db: DB, roomId: number) {
 // ---- internals ---------------------------------------------------------------
 
 /**
+ * The prompt every room-task delivery channel shares. room_id lets the
+ * executor room_read its context once its MCP lands on the orchestrator's
+ * database; the token is one-shot write authorization for the task row.
+ */
+export function wrapRoomTaskPrompt(
+  roomId: number,
+  taskId: number,
+  taskToken: string,
+  prompt: string,
+): string {
+  return (
+    `${badge({ label: "聊天室任务", ref: `task #${taskId}` })} ${prompt}\n` +
+    `(这是一个聊天室任务，room_id=${roomId}。处理完后用 Conflux 的 room_write 工具写入结果，` +
+    `task_id=${taskId}，task_token="${taskToken}")`
+  );
+}
+
+/**
  * Fallback: headless wake the executor to process a room task (#152).
  * Uses the existing wake infrastructure (planClaudeWake → launchWakeRun)
  * with a prompt that tells the agent to process and room_write the result.
@@ -373,6 +391,7 @@ function headlessWakeForTask(
   prompt: string,
   taskId: number,
   taskToken: string,
+  roomId: number,
 ): boolean {
   const session = getSession(db, sessionId);
   if (!session) return false;
@@ -391,7 +410,7 @@ function headlessWakeForTask(
   });
   if ("refuse" in plan) return false;
 
-  const wrapped = `${badge({ label: "聊天室任务", ref: `task #${taskId}` })} ${prompt}\n(这是一个聊天室任务。处理完后用 Conflux 的 room_write 工具写入结果，task_id=${taskId}，task_token="${taskToken}")`;
+  const wrapped = wrapRoomTaskPrompt(roomId, taskId, taskToken, prompt);
   // Agent sessions must resume with their --append-system-prompt or
   // the system block changes and the whole cached prefix is lost
   let meta: Record<string, unknown> | null = null;
@@ -418,6 +437,7 @@ function injectIntoProcess(
   prompt: string,
   taskId: number,
   taskToken: string,
+  roomId: number,
 ): boolean {
   const session = getSession(db, sessionId);
   if (!session) return false;
@@ -428,9 +448,7 @@ function injectIntoProcess(
   // distinguishable from human typing (#162)
   const agentId = Number(meta.agent_id);
   if (Number.isFinite(agentId) && agentId > 0) {
-    const wrapped = `${badge({ label: "聊天室任务", ref: `task #${taskId}` })} ${flattenOneLine(
-      prompt,
-    )}（完成后用 Conflux 的 room_write 写入结果，task_id=${taskId}，task_token="${taskToken}"）`;
+    const wrapped = flattenOneLine(wrapRoomTaskPrompt(roomId, taskId, taskToken, prompt));
     if (tmuxInject(String(agentId), wrapped)) {
       db.prepare(`UPDATE room_tasks SET status = 'running' WHERE id = ?`).run(taskId);
       return true;
@@ -458,7 +476,7 @@ function notifyInitiator(
   const agentId = Number(meta.agent_id);
   if (!Number.isFinite(agentId) || agentId <= 0) return false;
 
-  const prompt = `${badge({ label: "任务完成通知" })} 你在聊天室的全部任务已完成。用 room_read 读取结果并继续。`;
+  const prompt = `${badge({ label: "任务完成通知" })} 你在聊天室（room_id=${roomId}）的全部任务已完成。用 room_read 读取结果并继续。`;
   if (tmuxInject(String(agentId), prompt)) {
     logger.info({ roomId, initiatorSessionId }, "room: initiator summoned");
     return true;

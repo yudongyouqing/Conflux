@@ -156,6 +156,9 @@ const runtimeAgentSchema = z
     instructions: nullableString,
     interval_min: z.number().int().nullable(),
     last_scheduled_run: isoTimestamp.nullable(),
+    // Bundles exported before the managed executor existed have no mode —
+    // they were terminal by definition.
+    execution_mode: z.enum(["terminal", "managed"]).optional(),
     created_at: isoTimestamp,
     updated_at: isoTimestamp,
     api_key_configured: z.boolean(),
@@ -782,6 +785,7 @@ function insertRuntimeAgent(db: DB, row: ExportedRuntimeAgent, id?: number): num
     row.instructions,
     row.interval_min,
     row.last_scheduled_run,
+    row.execution_mode ?? "terminal",
     row.created_at,
     row.updated_at,
   ];
@@ -791,16 +795,16 @@ function insertRuntimeAgent(db: DB, row: ExportedRuntimeAgent, id?: number): num
           .prepare(
             `INSERT INTO runtime_agents
              (name, runtime, workdir, model, base_url, api_key, extra_env, instructions,
-              interval_min, last_scheduled_run, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              interval_min, last_scheduled_run, execution_mode, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(...values)
       : db
           .prepare(
             `INSERT INTO runtime_agents
              (id, name, runtime, workdir, model, base_url, api_key, extra_env, instructions,
-              interval_min, last_scheduled_run, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              interval_min, last_scheduled_run, execution_mode, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(id, ...values);
   return Number(result.lastInsertRowid);
@@ -810,7 +814,7 @@ function updateRuntimeAgent(db: DB, row: ExportedRuntimeAgent, id: number): void
   db.prepare(
     `UPDATE runtime_agents SET name = ?, runtime = ?, workdir = ?, model = ?, base_url = ?,
        extra_env = ?, instructions = ?, interval_min = ?, last_scheduled_run = ?,
-       created_at = ?, updated_at = ? WHERE id = ?`,
+       execution_mode = ?, created_at = ?, updated_at = ? WHERE id = ?`,
   ).run(
     row.name,
     row.runtime,
@@ -821,6 +825,7 @@ function updateRuntimeAgent(db: DB, row: ExportedRuntimeAgent, id: number): void
     row.instructions,
     row.interval_min,
     row.last_scheduled_run,
+    row.execution_mode ?? "terminal",
     row.created_at,
     row.updated_at,
     id,
