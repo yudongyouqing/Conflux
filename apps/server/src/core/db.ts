@@ -1,6 +1,5 @@
 import Database from "better-sqlite3";
 import { existsSync, statSync } from "fs";
-import { join } from "path";
 import { Config } from "../config.js";
 import { logger } from "../log.js";
 import { parseIdentitySource, parseRuntimePid, parseSessionRuntime } from "./session-identity.js";
