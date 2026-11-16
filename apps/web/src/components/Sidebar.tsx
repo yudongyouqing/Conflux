@@ -247,9 +247,13 @@ export function Sidebar({
               );
             })}
             {outsideWindow > 0 && (
-              <div className="px-2 pt-1 pb-2 text-2xs text-ink-faint">
+              <button
+                type="button"
+                onClick={() => onTabChange("graph")}
+                className="w-full px-2 pt-1 pb-2 text-left text-2xs text-ink-faint hover:text-accent transition-colors"
+              >
                 更早的 {outsideWindow} 个会话见「图谱」
-              </div>
+              </button>
             )}
             {recentCount === 0 && outsideWindow === 0 && (
               <div className="px-2 py-6 text-xs text-ink-faint text-center">

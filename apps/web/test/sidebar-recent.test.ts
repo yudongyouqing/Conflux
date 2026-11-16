@@ -22,7 +22,7 @@ afterEach(() => {
 });
 after(() => dom.window.close());
 
-const { render } = await import("@testing-library/react");
+const { render, fireEvent } = await import("@testing-library/react");
 const React = await import("react");
 const { createElement } = React;
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
@@ -45,7 +45,7 @@ const node = (id: string, daysAgo: number | null): GraphNode =>
     ...(daysAgo === null ? {} : { last_heartbeat_at: new Date(Date.now() - daysAgo * DAY).toISOString() }),
   }) as GraphNode;
 
-function mountSidebar(sessions: GraphNode[]) {
+function mountSidebar(sessions: GraphNode[], onTabChange: (tab: string) => void = () => {}) {
   // Sidebar's health badge polls the daemon; keep the test offline.
   mock.method(globalThis, "fetch", async () => Response.json({ ok: true }));
   const client = new QueryClient({
@@ -58,7 +58,7 @@ function mountSidebar(sessions: GraphNode[]) {
       { client },
       createElement(Sidebar, {
         activeTab: "chat",
-        onTabChange: () => {},
+        onTabChange,
         sessions,
         rooms: [],
         selectedRoomId: null,
@@ -109,7 +109,6 @@ test("boundary days land in the right bucket", async () => {
 });
 
 test("group headers collapse and re-expand their sessions", async () => {
-  const { fireEvent } = await import("@testing-library/react");
   const view = mountSidebar([node("a", 0), node("b", 0), node("c", 1)]);
   const todayHeader = view.getByRole("button", { name: /今天/ });
   assert.equal(todayHeader.getAttribute("aria-expanded"), "true");
@@ -122,4 +121,11 @@ test("group headers collapse and re-expand their sessions", async () => {
   assert.ok(view.getByText("会话-c"), "other groups stay visible");
   fireEvent.click(todayHeader);
   assert.ok(view.getByText("会话-a"), "second click re-expands");
+});
+
+test("the out-of-window hint jumps to the graph tab", async () => {
+  const tabs: string[] = [];
+  const view = mountSidebar([node("old", 21), node("fresh", 0)], (tab) => tabs.push(tab));
+  fireEvent.click(view.getByText(/更早的 1 个会话见「图谱」/));
+  assert.deepEqual(tabs, ["graph"], "the hint is the shortcut to the full history");
 });
