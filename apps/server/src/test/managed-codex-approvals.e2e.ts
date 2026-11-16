@@ -155,6 +155,9 @@ test("an approval pauses the run, records sanitized data, and resumes on accept"
       status.pendingApprovals.map((a) => a.id),
       [approval.id],
     );
+    // The badge state must reflect the paused run, not a blanket "running" —
+    // the panel styles waiting_approval for exactly this moment.
+    assert.equal(status.activeRun?.state, "waiting_approval");
 
     const ok = await fx.manager.resolveApproval(fx.instanceId, approval.id, "accept");
     assert.deepEqual(ok, { ok: true });

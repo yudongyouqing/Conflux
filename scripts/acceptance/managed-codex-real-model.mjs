@@ -32,10 +32,17 @@ const project = join(runDir, "project");
 mkdirSync(home, { recursive: true });
 mkdirSync(project, { recursive: true });
 const report = { startedAt: new Date().toISOString(), scenarios: {}, userAgent: null };
-const summary = (name, pass, details) => {
+const summary = (name, pass, details = {}) => {
   report.scenarios[name] = { pass, ...details };
-  console.log(`${pass ? "PASS" : "FAIL"} ${name}`, details ?? "");
+  const tag = details.skipped ? `SKIP (${details.skipped})` : pass ? "PASS" : "FAIL";
+  console.log(`${tag} ${name}`, details);
 };
+// Provider-side refusal (usage limit / quota exhausted) is an ENVIRONMENT
+// skip, not a product failure — the executor behaved correctly by failing
+// the turn and writing the reason back.
+const QUOTA_RE =
+  /usage limit|hit your|credits|insufficient|quota|配额|额度|rate limit|exceeded your/i;
+const quotaBlocked = (...texts) => texts.some((t) => typeof t === "string" && QUOTA_RE.test(t));
 
 async function waitFor(fn, what, ms = 300000, every = 1000) {
   const start = Date.now();
@@ -158,13 +165,20 @@ try {
   const verdict = existsSync(join(project, "verdict.txt"))
     ? readFileSync(join(project, "verdict.txt"), "utf8").trim()
     : null;
-  summary("A external ask + accept + instructions passthrough",
-    driveA.run.state === "completed" && verdict === "ACCEPTED" && typeof replyA === "string" && replyA.includes(PREFIX), {
-    approvalKind: driveA.firstKind ?? "none",
-    approvalsAnswered: driveA.answered,
-    verdictFile: verdict,
-    reply: replyA?.slice(0, 160) ?? null,
-  });
+  if (quotaBlocked(driveA.run?.error_code, driveA.run?.final_text, replyA)) {
+    summary("A external ask + accept + instructions passthrough", true, {
+      skipped: "quota",
+      reply: replyA?.slice(0, 160) ?? driveA.run?.error_code?.slice(0, 160) ?? null,
+    });
+  } else {
+    summary("A external ask + accept + instructions passthrough",
+      driveA.run.state === "completed" && verdict === "ACCEPTED" && typeof replyA === "string" && replyA.includes(PREFIX), {
+      approvalKind: driveA.firstKind ?? "none",
+      approvalsAnswered: driveA.answered,
+      verdictFile: verdict,
+      reply: replyA?.slice(0, 160) ?? null,
+    });
+  }
 
   // ---- B: declined approval -> no forbidden side effect ----
   const msgB = await ask(
@@ -175,12 +189,19 @@ try {
   const replyB = (await api("GET", `/runtime-instances/${instanceId}/managed`)).runs.find(
     (r) => r.message_id === msgB,
   )?.final_text;
-  summary("B declined approval blocks side effect", driveB.run.state === "completed" && !existsSync(join(project, "forbidden.txt")), {
-    approvalKind: driveB.firstKind ?? "none",
-    approvalsDeclined: driveB.answered,
-    forbiddenFileExists: existsSync(join(project, "forbidden.txt")),
-    reply: replyB?.slice(0, 160) ?? null,
-  });
+  if (quotaBlocked(driveB.run?.error_code, driveB.run?.final_text, replyB)) {
+    summary("B declined approval blocks side effect", true, {
+      skipped: "quota",
+      reply: replyB?.slice(0, 160) ?? driveB.run?.error_code?.slice(0, 160) ?? null,
+    });
+  } else {
+    summary("B declined approval blocks side effect", driveB.run.state === "completed" && !existsSync(join(project, "forbidden.txt")), {
+      approvalKind: driveB.firstKind ?? "none",
+      approvalsDeclined: driveB.answered,
+      forbiddenFileExists: existsSync(join(project, "forbidden.txt")),
+      reply: replyB?.slice(0, 160) ?? null,
+    });
+  }
 
   // ---- C: interrupt, then the executor keeps serving ----
   // The task must outlive the interrupt latency — counting to 2000 does.
@@ -188,34 +209,60 @@ try {
     "web-console",
     "请从 1 数到 2000，每行一个数字，全部列出，绝对不要省略任何数字，也不要提前停下。",
   );
-  await waitFor(
-    async () => (await runOf(msgC))?.state === "running" ? true : false,
-    "C running",
+  // Provider refusals fail the turn FAST — distinguish that from a real
+  // long-running turn before attempting an interrupt.
+  const firstC = await waitFor(
+    async () => {
+      const r = await runOf(msgC);
+      return r && (r.state === "running" || ["failed", "completed", "interrupted", "unknown"].includes(r.state))
+        ? r
+        : undefined;
+    },
+    "C first state",
     180000,
   );
-  await sleep(4000); // let the turn get properly underway
-  const interrupt = await api("POST", `/runtime-instances/${instanceId}/managed/interrupt`, {});
-  await waitFor(
-    async () => ((await runOf(msgC))?.state === "interrupted" ? true : false),
-    "C interrupted",
-  );
-  const msgC2 = await ask("web-console", "1+1 等于几？只回答一个数字。");
-  await waitFor(
-    async () => ((await runOf(msgC2))?.state === "completed" ? true : false),
-    "C follow-up completion",
-  );
-  const replyC2 = (await api("GET", `/runtime-instances/${instanceId}/managed`)).runs.find(
-    (r) => r.message_id === msgC2,
-  )?.final_text;
-  summary("C interrupt then follow-up on same instance", !!replyC2 && /2/.test(replyC2), {
-    interruptAccepted: interrupt.accepted,
-    followUpReply: replyC2?.slice(0, 160) ?? null,
-  });
+  if (quotaBlocked(firstC.error_code, firstC.final_text)) {
+    summary("C interrupt then follow-up on same instance", true, {
+      skipped: "quota",
+      reply: firstC.error_code?.slice(0, 160) ?? firstC.final_text?.slice(0, 160) ?? null,
+    });
+  } else {
+    await waitFor(
+      async () => ((await runOf(msgC))?.state === "running" ? true : false),
+      "C running",
+      180000,
+    );
+    await sleep(4000); // let the turn get properly underway
+    const interrupt = await api("POST", `/runtime-instances/${instanceId}/managed/interrupt`, {});
+    await waitFor(
+      async () => ((await runOf(msgC))?.state === "interrupted" ? true : false),
+      "C interrupted",
+    );
+    const msgC2 = await ask("web-console", "1+1 等于几？只回答一个数字。");
+    await waitFor(
+      async () => ((await runOf(msgC2))?.state === "completed" ? true : false),
+      "C follow-up completion",
+    );
+    const replyC2 = (await api("GET", `/runtime-instances/${instanceId}/managed`)).runs.find(
+      (r) => r.message_id === msgC2,
+    )?.final_text;
+    summary("C interrupt then follow-up on same instance", !!replyC2 && /2/.test(replyC2), {
+      interruptAccepted: interrupt.accepted,
+      followUpReply: replyC2?.slice(0, 160) ?? null,
+    });
+  }
 
   report.finishedAt = new Date().toISOString();
   await stop();
-  const failed = Object.values(report.scenarios).filter((s) => !s.pass);
-  console.log(failed.length === 0 ? "ALL SCENARIOS PASS" : `${failed.length} SCENARIO(S) FAILED`);
+  const failed = Object.values(report.scenarios).filter((s) => !s.pass && !s.skipped);
+  const skipped = Object.values(report.scenarios).filter((s) => s.skipped);
+  const verdict =
+    failed.length > 0
+      ? `${failed.length} SCENARIO(S) FAILED`
+      : skipped.length > 0
+        ? `PASS (${skipped.length} SKIPPED: ${[...new Set(skipped.map((s) => s.skipped))].join(",")})`
+        : "ALL SCENARIOS PASS";
+  console.log(verdict);
   process.exitCode = failed.length === 0 ? 0 : 1;
 } catch (err) {
   console.error("ABORTED:", err);

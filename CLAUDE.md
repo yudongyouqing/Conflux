@@ -40,6 +40,7 @@ npm run format             # prettier
 - 唤醒系统独立在 `core/wake/`：`index.ts` 三分诊（忙/空闲/离线）→ `claude.ts`/`codex.ts` 策略 → `launcher.ts` 统一 spawn。提示词一律经 **stdin** 投递（cmd 引号/换行会截断命令行参数——血泪教训）。
 - Codex 的 rollout 读取在 `core/codex-rollout.ts`（纯 IO），标题/busy 派生策略在 `core/codex-titles.ts`。
 - 四条 ask 路径统一走 `core/ask.ts` 的 `askAndMaybeWake`。
+- 受管执行端分层：`core/managed/executor.ts` 是 runtime 无关的调度/状态机（队列、one-turn、exactly-once 终态回写、恢复对账、status/SSE 面）；`core/managed-codex/` 是 Codex 适配器（协议字段、版本闸门、帧归一化），`manager.ts` 只剩组合与进程单例。新运行时接入 = 实现 `core/managed/adapter.ts` 的 RuntimeAdapter。
 - 进程识别令牌表在 `core/runtime-identity.ts`（live.ts 祖先回溯脚本内嵌了一份副本，改动时需同步）。
 
 ## 关键约定
