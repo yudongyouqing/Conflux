@@ -1009,11 +1009,19 @@ export class ManagedCodexManager {
     return {
       live: true,
       threadId: live.threadId,
+      // The badge must tell the truth the panel styles exist for: an active
+      // turn paused on a human decision reads waiting_approval from the run
+      // row, not a blanket "running".
       activeRun: live.activeTurn
         ? {
             runId: live.activeTurn.runId,
             turnId: live.activeTurn.turnId,
-            state: "running",
+            state:
+              (
+                this.db
+                  .prepare(`SELECT state FROM managed_codex_runs WHERE id = ?`)
+                  .get(live.activeTurn.runId) as { state: string } | undefined
+              )?.state ?? "running",
           }
         : null,
       queuedRunIds: queued.map((q) => q.id),

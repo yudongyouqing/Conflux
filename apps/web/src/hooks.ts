@@ -211,13 +211,15 @@ export function useResumeRuntimeInstance() {
 
 // ---- managed Codex executor ----
 
-/** Live status of one managed instance (binding, current run, approvals). */
+/** Live status of one managed instance (binding, current run, approvals).
+ *  Refresh is EVENT-DRIVEN: the events query invalidates this key the
+ *  moment new sequences arrive, so this interval is only a slow fallback. */
 export function useManagedStatus(instanceId: string | null, enabled = true) {
   return useQuery({
     queryKey: ["managed-status", instanceId],
     queryFn: ({ signal }) => api.getManagedStatus(instanceId!, signal),
     enabled: !!instanceId && enabled,
-    refetchInterval: enabled ? 4000 : false,
+    refetchInterval: enabled ? 15000 : false,
   });
 }
 
@@ -233,7 +235,12 @@ export function useManagedEvents(instanceId: string | null, enabled = true) {
       const cursor = (client.getQueryData(key) as number | undefined) ?? 0;
       const res = await api.getManagedEvents(instanceId!, cursor, signal);
       const maxSeq = res.events.reduce((m, e) => Math.max(m, e.sequence), cursor);
-      if (maxSeq !== cursor) client.setQueryData(key, maxSeq);
+      if (maxSeq !== cursor) {
+        client.setQueryData(key, maxSeq);
+        // Fresh sequences = state changed (approval, terminal turn, death);
+        // status must not wait out its slow fallback interval.
+        void client.invalidateQueries({ queryKey: ["managed-status", instanceId] });
+      }
       // Merge with whatever the cache already holds (same key), newest last.
       const prev =
         (client.getQueryData(["managed-events", instanceId]) as ManagedEvent[] | undefined) ?? [];

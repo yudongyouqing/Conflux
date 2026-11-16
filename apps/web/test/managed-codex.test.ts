@@ -260,6 +260,30 @@ test("interrupt disabled while idle; enabled with the active turn", async () => 
   assert.equal(view.getByRole("button", { name: /中断任务/ }).hasAttribute("disabled"), true);
 });
 
+test("fresh events invalidate the status query (event-driven refresh)", async () => {
+  const state: PanelState = {
+    statusByInstance: { "inst-a": statusFixture() },
+    eventsByInstance: {
+      "inst-a": [ev(1, "text", { phase: "delta", delta: "EVENT-DRIVEN-KICKER" })],
+    },
+    calls: [],
+  };
+  const view = mountPanel(state);
+  await waitFor(() => assert.ok(view.getByText(/EVENT-DRIVEN-KICKER/)));
+  // The status fallback interval is 15s — a second status fetch within the
+  // test's window can only come from the events query invalidating it.
+  await waitFor(
+    () =>
+      assert.ok(
+        state.calls.filter(
+          (c) => c.method === "GET" && c.url === "/runtime-instances/inst-a/managed",
+        ).length >= 2,
+        "new event sequences triggered a status refetch",
+      ),
+    { timeout: 4000 },
+  );
+});
+
 test("a stopped instance shows the offline badge and keeps its history", async () => {
   const view = mountPanel({
     statusByInstance: {
