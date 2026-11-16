@@ -783,11 +783,6 @@ function parseMacosToken(token: string): {
   return { pid, lstart, ppid, pgid, sess, digest, cpuCentis };
 }
 
-/** Back-compat boolean view: only "same" counts as a match. */
-function processTokenMatches(stored: string, current: string): boolean {
-  return classifyProcessToken(stored, current) === "same";
-}
-
 function runtimeIdentity(token: string, command: string): ProcessIdentity {
   const tokens = command.match(/"[^"]+"|\S+/g) ?? [];
   const executable =
