@@ -1,0 +1,208 @@
+{
+  "recordedAt": "2026-11-11T06:43:06.493Z",
+  "baseCommit": "d9b5dfb82c47e41e11d2595ae0d7601772b7fc8e",
+  "candidateCommit": "ed55d68bc70e49e7a6a524428e7551655510b4cb",
+  "environment": {
+    "platform": "win32",
+    "release": "10.0.26300",
+    "node": "v22.23.4",
+    "claudeCode": "2.1.278",
+    "claudeObservedModel": "glm-5.3[1m]",
+    "codexCli": "0.164.0",
+    "codexConfiguredModel": "gpt-6.1-sol"
+  },
+  "isolation": {
+    "separateTemporaryDatabases": true,
+    "privateHostProfiles": true,
+    "emptyProfileAuthBefore": {
+      "claude": {
+        "exit": 1,
+        "timedOut": false,
+        "loggedIn": false,
+        "method": "none"
+      },
+      "codex": {
+        "exit": 1,
+        "timedOut": false,
+        "loggedIn": false,
+        "method": null
+      }
+    },
+    "credentialCopies": "private test profiles; removed during final cleanup",
+    "userConfluxDatabase": "no operations performed by this acceptance"
+  },
+  "claude": {
+    "status": "passed",
+    "startedAt": "2026-11-10T07:07:07.845Z",
+    "finishedAt": "2026-11-10T07:07:58.814Z",
+    "sessionId": "0432df85-ce2d-4be5-99b3-5265f12e943e",
+    "mode": "offline-resume",
+    "heartbeat": {
+      "name": "real-host-idle-heartbeat",
+      "status": "passed",
+      "at": "2026-11-10T07:07:40.080Z",
+      "sessionId": "0432df85-ce2d-4be5-99b3-5265f12e943e",
+      "before": "2026-11-10T07:07:24.937Z",
+      "after": "2026-11-10T07:07:39.940Z"
+    },
+    "wakePid": 38312,
+    "task": {
+      "id": 2,
+      "room_id": 2,
+      "executor_session_id": "0432df85-ce2d-4be5-99b3-5265f12e943e",
+      "status": "done",
+      "result": "HOST288_ROOM_WRITE_fb3dc1a2-63e1-4ec7-bf30-47b59040643a"
+    },
+    "mcpAudit": [
+      {
+        "ts": "2026-11-10T07:07:53.134Z",
+        "caller_session": "0432df85-ce2d-4be5-99b3-5265f12e943e",
+        "action": "room_write"
+      }
+    ],
+    "defaultB": {
+      "sessionIds": [
+        "host288-library-B"
+      ],
+      "messageCount": 0,
+      "taskCount": 0
+    }
+  },
+  "codex": {
+    "status": "passed",
+    "initialHostStatus": "completed",
+    "startedAt": "2026-11-11T02:56:02.820Z",
+    "finishedAt": "2026-11-11T02:56:25.046Z",
+    "sessionId": "8dba5574-ff2f-442d-bf2f-797afecec8db",
+    "nativeThread": "01a1c448-3289-7082-b766-0ce4868cc112",
+    "threadBinding": "explicit setup using the thread id emitted by the genuine initial run; automatic rollout binding not claimed",
+    "launchMode": "production mail wake; not the room_summon Codex fallback",
+    "privateProfileAdapter": "temporary cmd adapter only restores CODEX_HOME and forwards to the genuine native Codex CLI",
+    "wakePid": 29892,
+    "nativePids": [
+      10156
+    ],
+    "pidEvidence": "post-run correction: original harness initially selected an older log entry; session id plus attempt time window selects the actual retry PID",
+    "task": {
+      "id": 1,
+      "room_id": 1,
+      "executor_session_id": "8dba5574-ff2f-442d-bf2f-797afecec8db",
+      "status": "done",
+      "result": "HOST288_CODEX_ROOM_WRITE_b8e17bb2-2645-4c25-a88e-a6ffccca2000"
+    },
+    "mcpAudit": [
+      {
+        "ts": "2026-11-11T02:56:21.634Z",
+        "caller_session": "8dba5574-ff2f-442d-bf2f-797afecec8db",
+        "action": "room_write"
+      },
+      {
+        "ts": "2026-11-11T02:56:24.863Z",
+        "caller_session": "8dba5574-ff2f-442d-bf2f-797afecec8db",
+        "action": "reply_ask"
+      }
+    ],
+    "message": {
+      "id": 1,
+      "from_session": "web-console",
+      "to_session": "8dba5574-ff2f-442d-bf2f-797afecec8db",
+      "status": "replied",
+      "reply": "HOST288_CODEX_ROOM_WRITE_b8e17bb2-2645-4c25-a88e-a6ffccca2000_ACK"
+    },
+    "messageCountBeforeRetry": 1,
+    "messageCountAfterRetry": 1,
+    "defaultB": {
+      "sessionIds": [
+        "host288-codex-B"
+      ],
+      "messageCount": 0,
+      "taskCount": 0
+    }
+  },
+  "nativeUi": {
+    "claudeSkillCommand": "observed /conflux and executed /conflux list; real directory returned",
+    "claudeMcpPrompt": "observed /conflux:list (MCP)",
+    "claudeResources": "observed @conflux: directory and per-session resource suggestions; no attachment/read claim",
+    "claudeAmbiguousCandidates": {
+      "questionUi": "native AskUserQuestion displayed complete IDs and candidate metadata",
+      "noContactBeforeChoice": true,
+      "before": {
+        "messages": 0,
+        "tasks": 2
+      },
+      "after": {
+        "messages": 0,
+        "tasks": 2
+      },
+      "completion": "partial: Other free text/cancel flow did not complete before the bounded TUI runner cleaned up"
+    },
+    "codexSkill": "observed /skills -> List skills -> conflux",
+    "codexMcp": "observed /mcp connected conflux with 25 tools",
+    "codexResources": "observed resource URIs and session template in /mcp verbose; no native @ autocomplete claim"
+  },
+  "priorFailures": [
+    {
+      "kind": "hook-data-dir",
+      "status": "reproduced and fixed in candidate; all three hook regressions failed before and passed after"
+    },
+    {
+      "kind": "codex-quota",
+      "status": "initial connection and first wake hit the real usage limit; successful retry occurred after capacity became available"
+    },
+    {
+      "kind": "harness-log-path",
+      "status": "a prior Claude run completed its task but evidence collection used the wrong file; corrected run then exited zero"
+    },
+    {
+      "kind": "tui-timeout",
+      "status": "bounded UI runs were force-cleaned while waiting for input; excluded from graceful-close claims"
+    }
+  ],
+  "remaining": [
+    "complete candidate selection/cancel result and selected-peer continuation in native UI",
+    "actual Ghostty-specific title rewrite",
+    "native resource attachment/read beyond catalog discovery",
+    "broader real host reconnect/stop/resume matrix and non-Windows hosts"
+  ],
+  "checks": {
+    "hookRegressions": {
+      "before": {
+        "pass": 0,
+        "fail": 3
+      },
+      "after": {
+        "pass": 3,
+        "fail": 0
+      }
+    },
+    "server": {
+      "pass": 353,
+      "fail": 0
+    },
+    "build": {
+      "exit": 0
+    },
+    "lint": {
+      "errors": 0,
+      "warnings": 8
+    },
+    "secretScan": {
+      "scope": "changed tracked files",
+      "passed": true
+    }
+  },
+  "cleanup": {
+    "actualCodexRetryLauncherGone": true,
+    "actualPinnedCodexProcessesGone": true,
+    "profileRemoved": true,
+    "credentialCopiesRemoved": true,
+    "sandboxMarkedProcesses": 0,
+    "verifiedAt": "2026-11-11T06:46:50.939Z",
+    "rawArtifactsCredentialSanitizedFiles": 2
+  },
+  "buildFingerprint": {
+    "cli/commands.js": "fd8dfb4efd00e76cd1fdd9648c9548ff6ab550b83900117604791f5c5b679751",
+    "mcp/server.js": "0c4094bdf4c1134441e6478973f846414981b44034d7bf04e73bd01ff51c1f77",
+    "core/wake/launcher.js": "84cfd2f875bbb65abee552c84841864fe7408a1a9341f38fa9473c151f49791f"
+  }
+}
