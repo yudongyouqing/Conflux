@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { CODEX_AUTO_REGISTERED_DESCRIPTION as AUTO_REGISTERED_DESCRIPTION } from "@conflux/shared";
 import type { DB } from "./db.js";
 import { logger } from "../log.js";
 import { promptExcerpt } from "./live.js";
@@ -47,8 +48,6 @@ import {
  * of the first real user instruction (synthetic blobs are skipped by the
  * IO layer).
  */
-
-const AUTO_REGISTERED_DESCRIPTION = "Codex session (auto-registered)";
 
 // A rollout may start slightly BEFORE its MCP row exists (Codex writes the
 // meta line, then spawns MCP children) — allow this much skew.
@@ -156,7 +155,7 @@ export interface CodexTitleRefreshOptions {
  * Returns how many rows were updated.
  */
 export function refreshCodexSessionTitles(db: DB, opts: CodexTitleRefreshOptions = {}): number {
-  const home = opts.codexHome ?? join(process.env.USERPROFILE || process.env.HOME || ".", ".codex");
+  const home = opts.codexHome ?? process.env.CODEX_HOME ?? join(process.env.USERPROFILE || process.env.HOME || ".", ".codex");
   const rows = (
     opts.onlySessionId
       ? db
@@ -171,6 +170,7 @@ export function refreshCodexSessionTitles(db: DB, opts: CodexTitleRefreshOptions
           )
           .all()
   ) as SessionRow[];
+  if (rows.length === 0) return 0;
 
   const eligible = rows.filter((row) => {
     const meta = parseMeta(row);

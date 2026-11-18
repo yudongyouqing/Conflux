@@ -82,7 +82,7 @@ export function wakeCommand(
 /**
  * Append `--mcp-config` so the headless run always has the Conflux MCP
  * tools available even when the target project never mounted them in its
- * own .mcp.json (issue #105: a woken session without check_inbox/reply_ask
+ * own .mcp.json (a woken session without check_inbox/reply_ask
  * can never answer). Optional — omitted when no config file is provided.
  */
 export function withMcpConfig(command: string, mcpConfigPath?: string | null): string {
@@ -114,7 +114,7 @@ export function projectHasConfluxMcp(projectDir: string | null | undefined): boo
 }
 
 /**
- * INTERACTIVE wake command for the tmux path (#162): resume the REAL
+ * INTERACTIVE wake command for the tmux path: resume the REAL
  * conversation in a visible, attachable TUI instead of a headless zombie.
  * No `-p` — the mail arrives as a typed prompt once the TUI has painted.
  * The MCP pre-auth carries over because nobody may be watching when the
@@ -125,7 +125,7 @@ export function tmuxWakeCommand(
   executable: string,
   mcpConfigPath?: string | null,
 ): string {
-  // #105: the project may never have mounted Conflux — without the config
+  // the project may never have mounted Conflux — without the config
   // mount the woken TUI cannot reply_ask, and nobody is watching to notice
   return withMcpConfig(
     `${resumeCommand("claude", sessionId, executable)} --allowedTools ${cmdQuote(

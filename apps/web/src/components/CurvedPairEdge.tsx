@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { BaseEdge, EdgeLabelRenderer, useReactFlow, type EdgeProps } from "@xyflow/react";
 
 /**
@@ -83,7 +83,7 @@ export function CurvedPairEdge(props: EdgeProps) {
     if (!el) return;
     const w = el.offsetWidth;
     setPillW((prev) => (Math.abs(prev - w) > 1 ? w : prev));
-  });
+  }, [label]);
 
   // ---- dot-flow gap around the label --------------------------------------
   // Estimate the arc length (8 samples) and convert the pill's pixel width
@@ -122,6 +122,9 @@ export function CurvedPairEdge(props: EdgeProps) {
   // every edge on the canvas.
   const pendingOffset = useRef<{ key: string; offset: number } | null>(null);
   const rafId = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (rafId.current !== null) cancelAnimationFrame(rafId.current);
+  }, []);
   const flushOffset = () => {
     rafId.current = null;
     const pending = pendingOffset.current;
@@ -211,6 +214,12 @@ export function CurvedPairEdge(props: EdgeProps) {
             flushOffset();
             // press-release without movement = a click: open the channel
             if (!dragged.current) d.onSelect?.();
+            dragged.current = false;
+          }}
+          onPointerCancel={() => {
+            if (rafId.current !== null) cancelAnimationFrame(rafId.current);
+            rafId.current = null;
+            pendingOffset.current = null;
             dragged.current = false;
           }}
           onDoubleClick={(ev) => {

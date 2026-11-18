@@ -1,5 +1,5 @@
 /**
- * Machine-injected prompt text: one badge format, one flattening rule (#162).
+ * Machine-injected prompt text: one badge format, one flattening rule.
  *
  * Everything Conflux types into a session (tmux send-keys now, PTY write
  * later) must be identifiable at a glance as machine-delivered — the badge
@@ -13,11 +13,11 @@ export interface BadgeInput {
   label: string;
   /** originating session's display name */
   from?: string;
-  /** stable handle for follow-up, e.g. "msg #42" */
+  /** stable handle for follow-up, e.g. "msg " */
   ref?: string;
 }
 
-/** `[Conflux·回复 ← web-console · msg #42]` */
+/** `[Conflux·回复 ← web-console · msg ]` */
 export function badge(input: BadgeInput): string {
   const parts = [input.label];
   if (input.from) parts.push(`← ${input.from}`);

@@ -22,7 +22,7 @@ const { configureElectronRuntime } = require("./runtime-config.cjs");
 const { createTray } = require("./tray.cjs");
 const { startMessageNotifications } = require("./desktop-notify.cjs");
 const ptyManager = require("./pty-manager.cjs");
-const { externalLinkDecision } = require("./security.cjs");
+const { externalLinkDecision, installProductionCsp } = require("./security.cjs");
 const { createRendererWatchdog } = require("./renderer-watchdog.cjs");
 const { createServiceHealthMonitor, probeHttp } = require("./service-health.cjs");
 const { configureAutoUpdater } = require("./auto-update.cjs");
@@ -240,7 +240,7 @@ function createWindow(webUrl) {
     minWidth: 960,
     minHeight: 640,
     show: false,
-    // macOS 窗口质感（#111）：标题栏内嵌 + 侧栏毛玻璃材质；深浅随
+    // macOS 窗口质感：标题栏内嵌 + 侧栏毛玻璃材质；深浅随
     // nativeTheme（palette→IPC 已联动）。Windows/Linux 保持系统标题栏。
     ...(process.platform === "darwin"
       ? {
@@ -261,6 +261,7 @@ function createWindow(webUrl) {
   });
 
   const appOrigin = new URL(webUrl).origin;
+  if (runtime.mode === "production") installProductionCsp(mainWindow.webContents.session, appOrigin);
   mainWindow.webContents.on("will-navigate", (event, url) =>
     routeNavigation(event, url, appOrigin)
   );
@@ -289,7 +290,7 @@ function createWindow(webUrl) {
     return { action: "deny" };
   });
   mainWindow.on("close", (event) => {
-    if (isQuitting) return;
+    if (isQuitting || process.env.CONFLUX_QUIT_ON_LAST_WINDOW_CLOSED === "1") return;
     event.preventDefault();
     mainWindow.hide();
   });
@@ -353,38 +354,57 @@ if (!hasSingleInstanceLock) {
   app.on("second-instance", () => focusMainWindow());
   ipcMain.on("conflux:show-window", focusMainWindow);
   // Dark palette → native chrome (macOS menu bar / context menus / dialogs)
-  // follows the app theme instead of the OS appearance (#95)
-  // PTY management (#130): spawn/inject/buffer for runtime agents
-  ipcMain.handle("pty:spawn", (_event, { agentId, command, args, opts }) => {
+  // follows the app theme instead of the OS appearance
+  // PTY management: spawn/inject/buffer for runtime agents
+  const ptySubscriptions = new Map();
+  const trustedSender = (event) => mainWindow && event.sender === mainWindow.webContents;
+  const validAgentId = (id) => Number.isInteger(id) && id > 0;
+  ipcMain.handle("pty:spawn", (event, payload) => {
+    if (!trustedSender(event)) return { ok: false, error: "Unauthorized sender" };
+    const { agentId, command, args = [], opts } = payload ?? {};
+    if (!validAgentId(agentId) || typeof command !== "string" || !command.trim() || !Array.isArray(args) || args.some(arg => typeof arg !== "string")) {
+      return { ok: false, error: "Invalid PTY spawn arguments" };
+    }
     try {
       const entry = ptyManager.spawnAgent(agentId, command, args, opts);
-      // forward output to any subscribed renderers
-      ptyManager.subscribe(agentId, (chunk) => {
+      ptySubscriptions.get(agentId)?.();
+      ptySubscriptions.set(agentId, ptyManager.subscribe(agentId, (chunk) => {
         if (chunk !== null) {
           try { mainWindow?.webContents.send(`pty:output:${agentId}`, chunk); }
           catch { /* window closed */ }
         }
-      });
+      }));
       return { ok: true, pid: entry.pid };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
   });
-  ipcMain.handle("pty:inject", (_event, { agentId, text }) => {
+  ipcMain.handle("pty:inject", (event, payload) => {
+    const { agentId, text } = payload ?? {};
+    if (!trustedSender(event) || !validAgentId(agentId) || typeof text !== "string") return { ok: false };
     return { ok: ptyManager.inject(agentId, text) };
   });
-  ipcMain.handle("pty:buffer", (_event, { agentId }) => {
+  ipcMain.handle("pty:buffer", (event, payload) => {
+    const { agentId } = payload ?? {};
+    if (!trustedSender(event) || !validAgentId(agentId)) return { buffer: null };
     return { buffer: ptyManager.getBuffer(agentId) };
   });
-  ipcMain.handle("pty:alive", (_event, { agentId }) => {
+  ipcMain.handle("pty:alive", (event, payload) => {
+    const { agentId } = payload ?? {};
+    if (!trustedSender(event) || !validAgentId(agentId)) return false;
     return ptyManager.isAlive(agentId);
   });
-  ipcMain.handle("pty:kill", (_event, { agentId }) => {
+  ipcMain.handle("pty:kill", (event, payload) => {
+    const { agentId } = payload ?? {};
+    if (!trustedSender(event) || !validAgentId(agentId)) return { ok: false };
+    ptySubscriptions.get(agentId)?.();
+    ptySubscriptions.delete(agentId);
     ptyManager.kill(agentId);
     return { ok: true };
   });
 
-  ipcMain.on("conflux:native-theme", (_event, mode) => {
+  ipcMain.on("conflux:native-theme", (event, mode) => {
+    if (!trustedSender(event)) return;
     nativeTheme.themeSource = mode === "dark" ? "dark" : "light";
   });
   ipcMain.handle("conflux:pick-directory", async (event) => {
@@ -402,7 +422,7 @@ if (!hasSingleInstanceLock) {
     }
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     log("app ready");
     // macOS menu bar shows the FIRST menu's label where the app name goes —
     // dev mode runs the raw Electron binary, so without this it reads
@@ -431,7 +451,9 @@ if (!hasSingleInstanceLock) {
       showWindow: focusMainWindow,
       quit: () => app.quit(),
     });
-    // OS notifications for cross-session traffic (#119): the hook channel
+    await start(startupController.signal);
+    throwIfStartupAborted(startupController.signal);
+    // OS notifications for cross-session traffic: the hook channel
     // only injects at turn boundaries, so a reply can sit unseen for a full
     // turn. This raises a native notification the moment a message lands;
     // click focuses the workspace window.
@@ -449,7 +471,7 @@ if (!hasSingleInstanceLock) {
       },
     });
     startAutoUpdater();
-    return start(startupController.signal);
+
   }).catch((error) => {
     if (isQuitting || startupController.signal.aborted) return;
     const message = error instanceof Error ? error.message : String(error);
@@ -466,6 +488,11 @@ if (!hasSingleInstanceLock) {
     servicesReady = false;
     rendererWatchdog?.stop();
     stopServiceHealthMonitors();
+    stopMessageNotifications?.();
+    stopMessageNotifications = null;
+    for (const unsubscribe of ptySubscriptions.values()) unsubscribe();
+    ptySubscriptions.clear();
+    ptyManager.killAll();
     tray?.destroy();
     tray = undefined;
     stopDevServices().finally(() => app.quit());

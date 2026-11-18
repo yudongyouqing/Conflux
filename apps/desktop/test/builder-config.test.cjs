@@ -14,14 +14,19 @@ function readBuilderConfig() {
 test("production build config includes app, server, web, and native module resources", () => {
   const config = readBuilderConfig();
 
-  assert.deepEqual(config.files.slice(0, 4), [
-    "apps/desktop/**/*",
+  assert.deepEqual(config.files.slice(0, 8), [
+    "apps/desktop/src/**/*",
+    "apps/desktop/build/**/*",
+    "apps/desktop/package.json",
+    "apps/server/package.json",
     "apps/server/dist/**/*",
+    "!apps/server/dist/test/**/*",
     "apps/server/skills/**/*",
     "apps/web/dist/**/*",
   ]);
   // The runtime dependency closure lives in packaged-deps.test.cjs, which
   // recomputes it from the real node_modules instead of freezing a list.
+  assert.ok(config.files.includes("apps/server/package.json"), "runtime version metadata is packaged beside server dist");
   assert.ok(config.files.includes("node_modules/node-pty/**/*"));
   assert.ok(config.files.includes("node_modules/electron-updater/**/*"));
   assert.ok(config.asarUnpack.includes("**/better-sqlite3/**"));

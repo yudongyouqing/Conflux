@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { runtimeDescriptor, isPresetRuntime } from "../../core/runtime-registry.js";
+import { getManagedBindingBySession } from "../../core/managed-codex/store.js";
 import type { FastifyInstance } from "fastify";
 import {
   registerSession,
@@ -18,17 +21,7 @@ interface RegisterBody {
   session_id?: string;
 }
 
-// Minimal UUIDv4 (avoids an extra dependency for one call site).
-function uuidv4(): string {
-  const b = Buffer.alloc(16);
-  for (let i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256);
-  b[6] = (b[6] & 0x0f) | 0x40;
-  b[8] = (b[8] & 0x3f) | 0x80;
-  const h = b.toString("hex");
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
-}
-
-export function registerSessionRoutes(app: FastifyInstance, ctx: ServerContext): void {
+export function registerSessionRoutes(app: FastifyInstance, ctx: ServerContext, openTerminal: typeof openInTerminal = openInTerminal): void {
   const { db, audit, sendError, sendHttpError, write } = ctx;
   // The resumed terminal's hooks/MCP must register against THIS server's
   // database; without the explicit home a custom data dir would be lost and
@@ -52,7 +45,7 @@ export function registerSessionRoutes(app: FastifyInstance, ctx: ServerContext):
       },
     },
     async (req, reply) => {
-      const sid = req.body.session_id || (req.headers["x-session-id"] as string) || uuidv4();
+      const sid = req.body.session_id || (req.headers["x-session-id"] as string) || randomUUID();
       try {
         const session = await write(() => {
           const created = registerSession(db, {
@@ -108,19 +101,26 @@ export function registerSessionRoutes(app: FastifyInstance, ctx: ServerContext):
       if (id.startsWith("agent-")) {
         return sendHttpError(reply, 400, "internal agents have no terminal");
       }
-      let runtime: "claude" | "codex" = "claude";
-      try {
-        const meta = session.metadata
-          ? (JSON.parse(session.metadata) as Record<string, unknown>)
-          : null;
-        if (meta?.runtime === "codex") runtime = "codex";
-      } catch {
-        // malformed metadata — default runtime
+      // The managed executor retains thread ownership after stopping; an
+      // external terminal would bypass its single-writer recovery checks.
+      if (getManagedBindingBySession(db, id)) {
+        return sendHttpError(reply, 409, "managed conversations must use the managed runtime controls");
       }
+      let meta: Record<string, unknown> = {};
+      try { meta = JSON.parse(session.metadata ?? "{}") as Record<string, unknown>; }
+      catch { /* Historical sessions may have malformed metadata. */ }
+      const runtime = session.runtime ? session.runtime : (typeof meta.runtime === "string" ? meta.runtime : "claude");
+      if (!isPresetRuntime(runtime)) return sendHttpError(reply, 400, "unsupported session runtime");
+      const descriptor = runtimeDescriptor(runtime);
       const settings = getTerminalSettings(db);
-      const executable = runtime === "codex" ? settings.codex_path : settings.claude_path;
-      const result = openInTerminal(settings, {
-        command: resumeCommand(runtime, id, executable),
+      const executable = descriptor.settingsKey ? settings[descriptor.settingsKey] :
+        process.env[descriptor.executableEnv] || descriptor.executable;
+      const nativeId = runtime === "codex"
+        ? meta.codex_session_id
+        : id;
+      if (typeof nativeId !== "string" || !nativeId) return sendHttpError(reply, 400, "native conversation id is missing");
+      const result = openTerminal(settings, {
+        command: resumeCommand(runtime, nativeId, executable),
         cwd: session.project_dir ?? undefined,
         title: `Conflux · ${session.name}`,
         env: terminalEnv,

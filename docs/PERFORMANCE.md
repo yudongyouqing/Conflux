@@ -71,7 +71,7 @@ npm run perf:web
 ```
 
 `perf:web` builds the production app, serves it on an ephemeral loopback port,
-and runs headless Chromium at 1440 脳 900 with deterministic API fixtures. It
+and runs headless Chromium at 1440 × 900 with deterministic API fixtures. It
 does not access a running Conflux server or user database. The fixtures contain
 25, 100, or 300 active sessions in chains, binary trees, or disconnected graphs.
 Each case discards one warm-up navigation and records five new-context

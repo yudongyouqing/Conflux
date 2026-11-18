@@ -24,6 +24,8 @@ test("v8 database with user data upgrades with every row preserved and searchabl
     // exist then and strip columns added after v8 (edge_id arrived with
     // v8 itself, so it stays).
     legacy.exec(`
+      DROP INDEX idx_sessions_room;
+      DROP INDEX idx_messages_room;
       DROP TABLE message_deliveries;
       DROP TABLE runtime_instances;
       DROP TABLE room_tasks;
@@ -65,7 +67,7 @@ test("v8 database with user data upgrades with every row preserved and searchabl
 
     const upgraded = openDb({ dataDir, dbPath, scope: "global" });
     try {
-      assert.equal(upgraded.pragma("user_version", { simple: true }), 15);
+      assert.equal(upgraded.pragma("user_version", { simple: true }), 16);
 
       const count = (table: string) =>
         (upgraded.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;

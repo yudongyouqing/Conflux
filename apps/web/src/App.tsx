@@ -224,7 +224,7 @@ export default function App() {
   }, []);
 
   // ---- graph-tab inspection state (unchanged behavior) ----------------------
-  const [selectedSession, setSelectedSession] = useState<GraphNode | null>(null);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<{ id: number; from: string; to: string } | null>(
     null,
@@ -237,6 +237,7 @@ export default function App() {
     graph.data?.nodes.forEach((n) => m.set(n.id, n));
     return m;
   }, [graph.data]);
+  const selectedSession = selectedSessionId ? nodeMap.get(selectedSessionId) ?? null : null;
 
   const sessionNameLookup = useCallback((id: string) => nodeMap.get(id)?.name, [nodeMap]);
 
@@ -246,15 +247,10 @@ export default function App() {
     (sid: string | null) => {
       setSelectedMessage(null);
       setSelectedEdge(null);
-      if (!sid) {
-        setSelectedSession(null);
-        return;
-      }
-      const node = graph.data?.nodes.find((n) => n.id === sid) ?? null;
-      setSelectedSession(node);
-      if (node) setDrawerOpen(true);
+      setSelectedSessionId(sid);
+      if (sid) setDrawerOpen(true);
     },
-    [graph.data],
+    [],
   );
 
   // "在全局图谱中查看" from a workspace conversation: inspect on the graph
@@ -270,7 +266,7 @@ export default function App() {
   const openGraphEdge = useCallback(
     (edge: { id: number; from: string; to: string }) => {
       switchTab("graph");
-      setSelectedSession(null);
+      setSelectedSessionId(null);
       setSelectedMessage(null);
       setSelectedEdge(edge);
       setDrawerOpen(true);
@@ -279,7 +275,7 @@ export default function App() {
   );
 
   const handleSelectMessage = useCallback((msg: Message | null) => {
-    setSelectedSession(null);
+    setSelectedSessionId(null);
     setSelectedEdge(null);
     setSelectedMessage(msg);
     if (msg) setDrawerOpen(true);
@@ -287,7 +283,7 @@ export default function App() {
 
   const handleSelectEdge = useCallback(
     (edge: { id: number; from: string; to: string } | null) => {
-      setSelectedSession(null);
+      setSelectedSessionId(null);
       setSelectedMessage(null);
       setSelectedEdge(edge);
       if (edge) setDrawerOpen(true);
@@ -297,26 +293,34 @@ export default function App() {
 
   const closeDrawer = useCallback(() => {
     setDrawerOpen(false);
-    setSelectedSession(null);
+    setSelectedSessionId(null);
     setSelectedMessage(null);
     setSelectedEdge(null);
   }, []);
 
   // ---- drawer resize (left-edge handle, rAF-free pointer math) ----------
   const dragRef = useRef<{ startX: number; startW: number } | null>(null);
+  const dragCleanup = useRef<(() => void) | null>(null);
+  useEffect(() => () => dragCleanup.current?.(), []);
   const onHandleDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
       e.preventDefault();
+      dragCleanup.current?.();
       dragRef.current = { startX: e.clientX, startW: drawerWidth };
       const move = (ev: PointerEvent) => {
         if (!dragRef.current) return;
         const next = dragRef.current.startW - (ev.clientX - dragRef.current.startX);
         setDrawerWidth(Math.min(DRAWER_MAX, Math.max(DRAWER_MIN, next)));
       };
-      const up = () => {
+      const cleanup = () => {
         dragRef.current = null;
         window.removeEventListener("pointermove", move);
         window.removeEventListener("pointerup", up);
+        window.removeEventListener("pointercancel", up);
+        dragCleanup.current = null;
+      };
+      const up = () => {
+        cleanup();
         setDrawerWidth((w) => {
           try {
             localStorage.setItem(DRAWER_WIDTH_KEY, String(w));
@@ -328,6 +332,8 @@ export default function App() {
       };
       window.addEventListener("pointermove", move);
       window.addEventListener("pointerup", up);
+      window.addEventListener("pointercancel", up);
+      dragCleanup.current = cleanup;
     },
     [drawerWidth],
   );
@@ -445,7 +451,7 @@ export default function App() {
             "settings",
             visited.has("settings") ? (
               <Suspense fallback={<RoutePending />}>
-                <SettingsTab />
+          <SettingsTab active={tab === "settings"} />
               </Suspense>
             ) : null,
           )}

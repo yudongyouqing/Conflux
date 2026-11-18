@@ -64,11 +64,11 @@ export function recordApproval(
     payload: Record<string, unknown>;
   },
 ): ApprovalRow {
-  db.prepare(
+  const result = db.prepare(
     `INSERT INTO managed_codex_approvals (run_id, rpc_request_id, request_kind, payload, state, created_at)
      VALUES (?, ?, ?, ?, 'pending', ?)`,
   ).run(input.runId, input.rpcRequestId, input.kind, JSON.stringify(input.payload), nowIso());
-  return getApprovalByRpcId(db, input.rpcRequestId)!;
+  return getApproval(db, Number(result.lastInsertRowid))!;
 }
 
 export function getApprovalByRpcId(db: DB, rpcRequestId: string | number): ApprovalRow | null {

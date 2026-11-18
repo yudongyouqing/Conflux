@@ -25,7 +25,7 @@ This skill guides the agent in conducting professional and thorough code reviews
     ```
 2.  **Preflight**: Execute the project's standard verification suite to catch automated failures early.
     ```bash
-    npm run preflight
+    npm run ci:test && npm run build && npm run check:secrets
     ```
 3.  **Context**: Read the PR description and any existing comments to understand the goal and history.
 
@@ -33,7 +33,7 @@ This skill guides the agent in conducting professional and thorough code reviews
 1.  **Identify Changes**:
     *   Check status: `git status`
     *   Read diffs: `git diff` (working tree) and/or `git diff --staged` (staged).
-2.  **Preflight (Optional)**: If the changes are substantial, ask the user if they want to run `npm run preflight` before reviewing.
+2.  **Preflight (Optional)**: If the changes are substantial, ask the user if they want to run `npm run ci:test && npm run build && npm run check:secrets` before reviewing.
 
 ### 3. In-Depth Analysis
 Analyze the code changes based on the following pillars:

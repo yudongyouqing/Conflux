@@ -6,7 +6,8 @@ import { cleanTerminalEnv, posixQuote } from "../terminal.js";
 import { resolveConfig } from "../../config.js";
 import { withMcpConfig } from "./commands.js";
 import { setSetting } from "../app-settings.js";
-import { psMatchClauses } from "../runtime-identity.js";
+import { psMatchClauses, isRuntimeCommand } from "../runtime-identity.js";
+import { retryOnBusy } from "../db.js";
 import { logger } from "../../log.js";
 import { incrementWakeCount, decrementWakeCount } from "./counter.js";
 import type { DB } from "../db.js";
@@ -20,7 +21,7 @@ import type { DB } from "../db.js";
 export interface LaunchRequest {
   db: DB;
   sessionId: string;
-  /** data dir for wake-log capture (#102 streaming) */
+  /** data dir for wake-log capture */
   dataDir?: string;
   projectDir: string | null;
   command: string;
@@ -52,7 +53,7 @@ export function wakeRunEnv(req: { dataDir?: string }, baseEnv: NodeJS.ProcessEnv
  * Shell for headless wake launches. Windows runs the command string through
  * cmd.exe; everywhere else it must be /bin/sh — `process.env.comspec ??
  * "cmd.exe"` unconditionally spawns a nonexistent cmd.exe on macOS/Linux
- * and the wake silently never starts (#105).
+ * and the wake silently never starts.
  *
  * `delayedExpansion` adds /v:on for commands that reference env
  * placeholders (`!VAR!`): leaf env content survives delayed expansion
@@ -78,7 +79,7 @@ export function wakeShell(
 /**
  * Write (idempotently) a minimal MCP mount config pointing at THIS server
  * install, so a woken claude always has check_inbox/reply_ask even when the
- * target project never mounted Conflux in its own .mcp.json (#105).
+ * target project never mounted Conflux in its own .mcp.json.
  */
 export function ensureWakeMcpConfig(
   dataDir?: string,
@@ -260,10 +261,10 @@ export function launchWakeRun(req: LaunchRequest): LaunchResult {
   const shell = wakeShell(process.platform, {
     delayedExpansion: process.platform === "win32",
   });
-  // stdout piped for wake-log capture (#102 streaming); falls back to
+  // stdout piped for wake-log capture; falls back to
   // "ignore" when the data dir is unknown (shouldn't happen — resolveConfig
   // is always available)
-  const captureStdout = !!req.dataDir;
+  const captureStdout = !!dataDir && (req.dataDir !== undefined || (!!req.db.name && req.db.name !== ":memory:"));
   const child = spawn(shell.command, [...shell.args, command], {
     detached: process.platform !== "win32",
     stdio: ["pipe", captureStdout ? "pipe" : "ignore", "ignore"],
@@ -293,8 +294,8 @@ export function launchWakeRun(req: LaunchRequest): LaunchResult {
     releaseSlot();
   });
 
-  if (captureStdout && req.dataDir) {
-    pipeWakeLog(child, req.dataDir, req.sessionId);
+  if (captureStdout) {
+    pipeWakeLog(child, dataDir, req.sessionId);
   }
   // deliver the wake prompt via stdin — see commands.ts docblock
   child.stdin?.on("error", () => {});
@@ -317,7 +318,38 @@ export function launchWakeRun(req: LaunchRequest): LaunchResult {
  * Fire-and-forget: tryAdopt re-runs on every MCP beat, so a late pin still
  * converges.
  */
-export function pinCodexDescendants(db: DB, launcherPid: number, sessionId: string): void {
+export function pinCodexDescendants(db: DB, launcherPid: number, sessionId: string, io: { platform?: NodeJS.Platform } = {}): void {
+  const persist = (pids: number[]) => {
+    if (!db.open || pids.length === 0) return;
+    void retryOnBusy(db, () => {
+      if (!db.open) return;
+      db.transaction(() => {
+        for (const pid of pids) setSetting(db, `codex-current:${pid}`, sessionId);
+      }).immediate();
+    }).catch((error) => logger.warn({ sessionId, error }, "codex wake pid pinning failed"));
+  };
+  if ((io.platform ?? process.platform) !== "win32") {
+    const deadline = Date.now() + 12_000;
+    const probe = () => {
+      if (!db.open) return;
+      execFile("/bin/ps", ["-axo", "pid=,ppid=,command="], { timeout: 3000, windowsHide: true }, (err, stdout) => {
+        if (err || !db.open) return;
+        const rows = String(stdout).split(/\r?\n/).flatMap((line) => {
+          const match = /^\s*(\d+)\s+(\d+)\s+(.+)$/.exec(line);
+          return match ? [{ pid: Number(match[1]), ppid: Number(match[2]), command: match[3] }] : [];
+        });
+        const descendants = new Set([launcherPid]);
+        for (let depth = 0; depth < 6; depth++) {
+          for (const row of rows) if (descendants.has(row.ppid)) descendants.add(row.pid);
+        }
+        const pids = rows.filter((row) => descendants.has(row.pid) && row.pid !== launcherPid && isRuntimeCommand(row.command, "codex")).map((row) => row.pid);
+        if (pids.length > 0) persist(pids);
+        else if (Date.now() < deadline) setTimeout(probe, 300).unref();
+      });
+    };
+    probe();
+    return;
+  }
   const ps = [
     "$ErrorActionPreference='SilentlyContinue'",
     "$deadline=(Get-Date).AddSeconds(12)",
@@ -347,7 +379,7 @@ export function pinCodexDescendants(db: DB, launcherPid: number, sessionId: stri
         .filter((x) => x.length > 0)
         .map(Number);
       if (!err && pids.length > 0) {
-        for (const pid of pids) setSetting(db, `codex-current:${pid}`, sessionId);
+        persist(pids);
         logger.info({ sessionId, pids }, "codex wake pid(s) pinned");
       }
     },

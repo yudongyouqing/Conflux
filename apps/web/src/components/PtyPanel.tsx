@@ -105,7 +105,7 @@ const pty = (globalThis as any).confluxPty as {
         <input
           value={injectText}
           onChange={(e) => setInjectText(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && inject()}
+          onKeyDown={(e) => e.key === "Enter" && !e.nativeEvent.isComposing && inject()}
           placeholder="手动注入 prompt…"
           className="flex-1 px-2.5 py-1.5 rounded-lg border border-line text-xs text-ink bg-surface placeholder-ink-faint outline-none focus:border-accent"
         />

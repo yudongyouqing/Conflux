@@ -50,7 +50,7 @@ export function addTurn(
     now,
     input.conversation_id,
   );
-  return getTurns(db, input.conversation_id).find((t) => t.id === Number(res.lastInsertRowid))!;
+  return db.prepare(`SELECT * FROM turns WHERE id = ?`).get(Number(res.lastInsertRowid)) as Turn;
 }
 
 export function getTurns(db: DB, conversationId: number): Turn[] {

@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 
 import type { DB } from "./db.js";
-import { nowIso } from "./db.js";
+import { nowIso, retryOnBusy } from "./db.js";
 import { STALE_AFTER_MS } from "../config.js";
 import { logger } from "../log.js";
 import type { RuntimeAgent, RuntimeId, RuntimeInstance } from "@conflux/shared";
@@ -331,7 +331,7 @@ export async function startRuntimeAgent(
     else args.push("--resume", opts.resumeSessionId);
   }
 
-  // #128: prefer tmux — a named session (conflux/agent-<id>) lets the wake
+  // prefer tmux — a named session (conflux/agent-<id>) lets the wake
   // system inject prompts into the LIVE process later, instead of spawning
   // a headless zombie with a diverged context
   const env = buildRuntimeEnv(agent, cleanTerminalEnv());
@@ -594,14 +594,20 @@ export function runScheduledAgent(
     },
   );
   child.unref();
+  const writeCompletion = (write: () => void) => {
+    void retryOnBusy(db, () => { if (db.open) write(); }).catch((error) => {
+      logger.warn({ instanceId: instance.id, error }, "scheduled instance completion could not be saved");
+    });
+  };
   child.once("error", () => {
-    if (db.open) failRuntimeInstance(db, instance.id);
+    writeCompletion(() => failRuntimeInstance(db, instance.id));
   });
   child.once("exit", () => {
-    if (db.open)
+    writeCompletion(() => {
       db.prepare(
         "UPDATE runtime_instances SET state = 'ended', ended_at = ?, updated_at = ? WHERE id = ?",
       ).run(nowIso(), nowIso(), instance.id);
+    });
   });
 
   db.prepare(`UPDATE runtime_agents SET last_scheduled_run = ? WHERE id = ?`).run(nowIso(), id);

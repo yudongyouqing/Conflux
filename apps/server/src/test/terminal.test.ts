@@ -100,6 +100,17 @@ test("resumeCommand builds runtime-correct commands with quoted paths", () => {
   );
 });
 
+test("PowerShell launch invokes a quoted executable path", () => {
+  const command = resumeCommand("codex", "thread", "C:/Program Files/codex.exe");
+  const plan = buildLaunchPlan({ terminal: "powershell" }, { command, title: "resume" }, { platform: "win32" });
+  assert.equal(plan[0].args[4], "& 'C:/Program Files/codex.exe' resume thread");
+  assert.ok(plan[2].args.at(-1)?.includes(command), "cmd fallback retains cmd syntax");
+});
+
+test("macOS resume commands preserve shell metacharacters literally", () => {
+  assert.equal(resumeCommand("codex", "thread", '/Applications/My $App/codex', { platform: "darwin" }), "'/Applications/My $App/codex' resume thread");
+});
+
 test("cleanTerminalEnv drops session-scoped Claude vars", () => {
   const env = cleanTerminalEnv({
     PATH: "C:\\bin",

@@ -33,7 +33,9 @@ function tokenize(text: string): Seg[] {
     else if (raw.startsWith("~~")) segs.push({ kind: "strike", value: raw.slice(2, -2) });
     else if (raw.startsWith("[")) {
       const link = /^\[([^\]\n]+)\]\(([^)\s]+)\)$/.exec(raw);
-      if (link) segs.push({ kind: "link", value: link[1], href: link[2] });
+      // Relative paths are safe; explicit protocols use the same conservative
+      // allowlist as the full markdown renderer.
+      if (link && !/^(?!(?:https?|mailto):)[a-z][a-z\d+.-]*:/i.test(link[2])) segs.push({ kind: "link", value: link[1], href: link[2] });
       else segs.push({ kind: "text", value: raw });
     } else segs.push({ kind: "italic", value: raw.slice(1, -1) });
     last = start + raw.length;

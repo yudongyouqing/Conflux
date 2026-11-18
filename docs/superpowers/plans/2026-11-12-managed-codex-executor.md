@@ -19,7 +19,7 @@
 ### 已核对的代码基线
 
 - 2026-11-12 检查时，主 checkout 为本地 dev `85791cf`；fetch 后 origin/dev 为 `d9b5dfb`。执行前重新 fetch，以最新 dev 为基线，禁止在旧 checkout 上整套实现。
-- Codex 源码：`C:/Users/yudongyouqing/code/codex`，本轮读取提交 `5c3ff1dabf644169f4bd74b215719f381e4fdb3f`。本地实际安装 CLI 版本可能不同，执行时记录实际版本与该版本生成的协议 schema。
+- Codex 源码：`<codex-checkout>`，本轮读取提交 `5c3ff1dabf644169f4bd74b215719f381e4fdb3f`。本地实际安装 CLI 版本可能不同，执行时记录实际版本与该版本生成的协议 schema。
 - `apps/server/src/core/ask.ts` 已实现数据库准备 / 外部唤醒分离，以及一次性 claim 和原消息重试。复用此原则，不重建第二套消息总线。
 - `apps/server/src/core/messages.ts` 的 pending/seen/replied/read 与 message_deliveries 的 queued/woken/failed 已分离。新执行状态单独保存，不能把 woken 当成任务成功。
 - `apps/server/src/core/wake/codex.ts` 当前在线空闲会采用摘要注入的新运行。受管模式通过自己的连接工作，禁止走摘要代答 fallback；外部会话仍保留原行为。
@@ -28,7 +28,7 @@
 ### 官方协议与源码依据
 
 - 官方 app-server 文档：https://learn.chatgpt.com/docs/app-server
-- 本地协议定义：`C:/Users/yudongyouqing/code/codex/codex-rs/app-server-protocol/src/protocol/v2/thread.rs`、`turn.rs`。
+- 本地协议定义：`<codex-checkout>/codex-rs/app-server-protocol/src/protocol/v2/thread.rs`、`turn.rs`。
 - 本地 Agent 投递链：`codex-rs/core/src/agent/control.rs`、`session/handlers.rs`、`session/input_queue.rs`。
 - app-server 中使用公开 thread/turn RPC；不把 Codex 内部 collaboration 工具当成可跨任意进程调用的接口。
 

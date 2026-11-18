@@ -1,3 +1,4 @@
+import { APP_VERSION } from "../version.js";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
@@ -184,7 +185,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
     openapi: {
       info: {
         title: "Conflux",
-        version: "0.1.0",
+        version: APP_VERSION,
         description: "Cross-session context query and async messaging for AI coding assistants.",
       },
     },

@@ -1,26 +1,18 @@
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
+import type { ChatRoom } from "@conflux/shared";
+export type { ChatRoom } from "@conflux/shared";
 
 /**
- * Structured collaboration rooms (#137): a chat room is a fixed-topology
+ * Structured collaboration rooms: a chat room is a fixed-topology
  * workflow — named participants, ordered steps (who asks whom), mutual
  * exclusivity (a session belongs to at most one room). Free-mode
  * conversations are untouched; rooms are an additional structure layer.
  */
 
-// Chat rooms are SCOPES, not pipelines (#137 simplify): a named group of
+// Chat rooms are SCOPES, not pipelines: a named group of
 // sessions that can freely ask each other (existing ask_session). No
 // sequential steps, no forced flow — just a boundary.
-
-export interface ChatRoom {
-  id: number;
-  name: string;
-  description: string | null;
-  /** member session ids — free-form conversations happen via existing ask_session */
-  members: string[];
-  created_at: string;
-  updated_at: string;
-}
 
 interface ChatRoomRow {
   id: number;
@@ -31,17 +23,17 @@ interface ChatRoomRow {
   updated_at: string;
 }
 
-function toRoom(db: DB, row: ChatRoomRow): ChatRoom {
+function toRoom(db: DB, row: ChatRoomRow, memberIds?: string[]): ChatRoom {
   // members from the sessions table (authoritative — join/leave updates it),
   // NOT from the stale topology JSON snapshot
-  const members = db
+  const members = memberIds ?? db
     .prepare(`SELECT id FROM sessions WHERE chat_room_id = ?`)
-    .all(row.id) as { id: string }[];
+    .all(row.id).map((member) => (member as { id: string }).id);
   return {
     id: row.id,
     name: row.name,
     description: row.description,
-    members: members.map((m) => m.id),
+    members,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -79,7 +71,15 @@ export function createChatRoom(
 
 export function listChatRooms(db: DB): ChatRoom[] {
   const rows = db.prepare(`SELECT * FROM chat_rooms ORDER BY updated_at DESC`).all() as ChatRoomRow[];
-  return rows.map((r) => toRoom(db, r));
+  if (rows.length === 0) return [];
+  const members = db.prepare(`SELECT id, chat_room_id FROM sessions WHERE chat_room_id IS NOT NULL`).all() as { id: string; chat_room_id: number }[];
+  const byRoom = new Map<number, string[]>();
+  for (const member of members) {
+    const list = byRoom.get(member.chat_room_id) ?? [];
+    list.push(member.id);
+    byRoom.set(member.chat_room_id, list);
+  }
+  return rows.map((r) => toRoom(db, r, byRoom.get(r.id) ?? []));
 }
 
 export function getChatRoom(db: DB, id: number): ChatRoom | null {

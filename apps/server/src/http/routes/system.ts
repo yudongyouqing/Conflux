@@ -20,6 +20,7 @@ interface AuditQs {
   limit?: string;
 }
 interface DataExportQs {
+  project_dir?: string;
   scope?: string;
 }
 interface DataImportBody {
@@ -52,7 +53,7 @@ export function registerSystemRoutes(app: FastifyInstance, ctx: ServerContext): 
     try {
       const bundle = exportData(db, {
         scope,
-        projectDir: process.env.CLAUDE_PROJECT_DIR || process.cwd(),
+        projectDir: req.query.project_dir || process.env.CLAUDE_PROJECT_DIR || process.cwd(),
       });
       logAudit(db, {
         interface: "http",
@@ -159,7 +160,7 @@ export function registerSystemRoutes(app: FastifyInstance, ctx: ServerContext): 
         });
         return reply.send(result);
       } catch (err) {
-        return sendError(reply, err, undefined, "import_data", { conflict }, 400);
+        return sendError(reply, err, undefined, "import_data", { conflict });
       }
     },
   );

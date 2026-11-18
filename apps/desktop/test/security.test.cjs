@@ -51,3 +51,17 @@ test("mailto links go external, scheme-less origins stay denied", () => {
   });
   assert.equal(externalLinkDecision("ftp://example.com/", APP_ORIGIN).action, "deny");
 });
+
+
+test("production CSP is installed on same-origin document responses and preserves other headers", () => {
+  const { installProductionCsp } = require("../src/security.cjs");
+  let handler;
+  installProductionCsp({ webRequest: { onHeadersReceived: (fn) => { handler = fn; } } }, APP_ORIGIN);
+  let response;
+  handler({ url: APP_ORIGIN + "/", resourceType: "mainFrame", responseHeaders: { "content-type": ["text/html"], "content-security-policy": ["default-src *"] } }, value => { response = value; });
+  assert.deepEqual(response.responseHeaders["content-type"], ["text/html"]);
+  assert.deepEqual(Object.keys(response.responseHeaders).filter(k => k.toLowerCase() === "content-security-policy"), ["Content-Security-Policy"]);
+  assert.deepEqual(response.responseHeaders["Content-Security-Policy"], [productionCsp(APP_ORIGIN)]);
+  handler({ url: "https://example.com/", resourceType: "mainFrame", responseHeaders: {} }, value => { response = value; });
+  assert.deepEqual(response, {});
+});

@@ -9,6 +9,7 @@ import { getMessage } from "../core/messages.js";
 import { registerSession } from "../core/sessions.js";
 import type { RuntimeAgent } from "@conflux/shared";
 import { ManagedCodexManager, setManagedCodexManager } from "../core/managed-codex/manager.js";
+import { appendManagedEvent, listManagedEvents } from "../core/managed-codex/store.js";
 
 // Crash-window reconciliation (real child processes — SERIAL *.e2e.ts suite):
 // every run interrupted by a dead generation is resolved from EVIDENCE —
@@ -174,6 +175,23 @@ test("queued tasks survive a crash and continue on the resumed instance", async 
   } finally {
     await fx.dispose();
   }
+});
+
+test("resume preserves replay history and refreshes the reused session identity", async () => {
+  const fx = makeFixture();
+  const manager = fx.manager();
+  try {
+    const { instance } = await manager.start(fx.agent);
+    const sessionId = fx.sessionId();
+    const sequence = appendManagedEvent(fx.db, { instanceId: instance.id, type: "status", payload: { fixture: "before resume" } });
+    await manager.stopManagedInstance(instance.id);
+    fx.db.prepare("UPDATE sessions SET status = 'ended', last_heartbeat_at = '2000-01-01' WHERE id = ?").run(sessionId);
+    const resumed = await manager.resumeInstance(instance.id, fx.agent);
+    const session = fx.db.prepare("SELECT metadata, status FROM sessions WHERE id = ?").get(sessionId) as { metadata: string; status: string };
+    assert.equal(JSON.parse(session.metadata).runtime_instance_id, resumed.instance.id);
+    assert.equal(session.status, "active");
+    assert.ok(listManagedEvents(fx.db, { instanceId: resumed.instance.id }).some((event) => event.sequence === sequence));
+  } finally { await manager.shutdown(); await fx.dispose(); }
 });
 
 test("the send-before-ack window goes unknown and is never resubmitted", async () => {

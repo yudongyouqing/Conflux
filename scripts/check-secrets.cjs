@@ -9,7 +9,13 @@ const IGNORED_DIRECTORIES = new Set([
   "dist",
   "node_modules",
   "release",
-  "superpowers",
+  ".superpowers",
+  ".worktrees",
+  " .worktrees",
+  ".muiltchat",
+  "test-results",
+  "managed-panel-shots",
+  "sidebar-shots",
 ]);
 
 const TEXT_EXTENSIONS = new Set([

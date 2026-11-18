@@ -114,6 +114,7 @@ export function GraphTab({
   );
 
   const rfInstance = useRef<FlowInstance | null>(null);
+  const [flowInstance, setFlowInstance] = useState<FlowInstance | null>(null);
   const viewportRef = useRef<Viewport | null>(null);
   const nodesRef = useRef<Node[]>([]);
   nodesRef.current = nodes;
@@ -121,9 +122,12 @@ export function GraphTab({
   // the scope this component last BUILT for: entering a scope restores its
   // snapshot once; same-scope refreshes keep freshly dragged positions
   const lastBuiltScopeRef = useRef<string | null>(null);
+  const lastBuiltComposition = useRef("");
 
   const snapshotCurrent = useCallback((key: string) => {
-    if (!key) return;
+    // StrictMode replays cleanup before the renderer mounts. Preserve an
+    // existing scope snapshot until this instance has a real flow to save.
+    if (!key || !rfInstance.current) return;
     scopeSnapshots.set(key, {
       positions: Object.fromEntries(nodesRef.current.map((n) => [n.id, n.position])),
       viewport: viewportRef.current ?? undefined,
@@ -148,6 +152,9 @@ export function GraphTab({
   // drag on Windows. The in-memory ref is authoritative immediately; the
   // disk copy trails by the debounce window.
   const offsetPersistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (offsetPersistTimer.current) clearTimeout(offsetPersistTimer.current);
+  }, []);
   const handleOffsetChange = useCallback(
     (key: string, offset: number | null) => {
       if (offset === null) delete manualOffsets.current[key];
@@ -193,11 +200,14 @@ export function GraphTab({
     const styled = styleEdges(offset, selectedEdge, selectedSessionId);
     const endpoints = selectedEdgeEndpoints(selectedEdge);
     const scopeEntered = lastBuiltScopeRef.current !== scopeKey;
+    const composition = `${scope}:${viewMode}:${expandedKey ?? ""}`;
+    const compositionChanged = lastBuiltComposition.current !== composition;
+    lastBuiltComposition.current = composition;
     lastBuiltScopeRef.current = scopeKey;
 
     setNodes((prev) =>
       applyScopePositions(
-        prev,
+        compositionChanged || scopeEntered ? [] : prev,
         built.nodes as Node[],
         scopeEntered,
         scopeSnapshots.get(scopeKey),
@@ -229,19 +239,33 @@ export function GraphTab({
 
   // Reframe when the composition itself changes — dagre/grid/rows swap
   // positions wholesale and the initial fitView never reruns on its own.
-  // A scope with a saved viewport restores it instead of reframing.
+  // Restore once when entering a scope; composition changes frame the new
+  // layout. Wait for the actual React Flow mount, including delayed data.
+  const lastFramedScope = useRef<string | null>(null);
   useEffect(() => {
-    if (!active) return;
-    const snap = scopeSnapshots.get(scopeKey);
+    if (!active) {
+      lastFramedScope.current = null;
+      setFlowInstance(null);
+      return;
+    }
+    if (!flowInstance || nodes.length === 0) return;
+    const entering = lastFramedScope.current !== scopeKey;
+    const snap = entering ? scopeSnapshots.get(scopeKey) : undefined;
+    if (entering && !snap?.viewport) {
+      // The new renderer performs its initial fit after measuring nodes.
+      lastFramedScope.current = scopeKey;
+      return;
+    }
     const t = setTimeout(() => {
-      if (snap?.viewport && rfInstance.current) {
-        rfInstance.current.setViewport(snap.viewport, { duration: 0 });
+      if (snap?.viewport) {
+        flowInstance.setViewport(snap.viewport, { duration: 0 });
       } else {
-        rfInstance.current?.fitView({ padding: 0.3, maxZoom: 1, duration: 400 });
+        flowInstance.fitView({ padding: 0.3, maxZoom: 1, duration: 400 });
       }
+      lastFramedScope.current = scopeKey;
     }, 350);
     return () => clearTimeout(t);
-  }, [active, scopeKey, viewMode, expandedKey, scope]);
+  }, [active, scopeKey, viewMode, expandedKey, scope, flowInstance, nodes.length === 0]);
 
   const onNodeClick: NodeMouseHandler = useCallback(
     (_, node) => {
@@ -302,6 +326,7 @@ export function GraphTab({
 
   return (
     <ReactFlow
+      key={scopeKey}
       nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
@@ -316,10 +341,12 @@ export function GraphTab({
       nodesConnectable={false}
       onInit={(instance) => {
         rfInstance.current = instance;
+        setFlowInstance(instance);
       }}
       minZoom={0.2}
       maxZoom={1.25}
-      fitView
+      defaultViewport={scopeSnapshots.get(scopeKey)?.viewport}
+      fitView={!scopeSnapshots.get(scopeKey)?.viewport}
       fitViewOptions={{ padding: 0.3, maxZoom: 1, duration: 400 }}
       proOptions={{ hideAttribution: true }}
       className="bg-paper"

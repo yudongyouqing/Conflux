@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Style-token floor guard (#109): arbitrary font sizes below the 11px
+ * Style-token floor guard: arbitrary font sizes below the 11px
  * ladder floor and inline font-size declarations are rejected. Grows into a
  * full token linter; start narrow so legacy code passes.
  */

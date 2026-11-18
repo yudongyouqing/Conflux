@@ -27,6 +27,14 @@ test("markdown links render as anchors with safe attrs", () => {
   assert.match(html, />docs<\/a>/);
 });
 
+test("unsafe inline link protocols stay inert while web and email links remain usable", () => {
+  for (const url of ["javascript:alert%281%29", "JaVaScRiPt:evil", "data:text/html,evil", "vbscript:evil"]) {
+    assert.doesNotMatch(render(`[bad](${url})`), /<a /);
+  }
+  assert.match(render("[mail](mailto:a@example.com)"), /href="mailto:a@example.com"/);
+  assert.match(render("[relative](/docs)"), /href="\/docs"/);
+});
+
 test("unclosed markers stay literal", () => {
   const html = render("count **two and `one");
   assert.match(html, /\*\*two/);

@@ -80,6 +80,7 @@ function createDevServiceSpawnOptions(
     // npm.cmd fallback needs cmd.exe; direct npm CLI launches do not.
     shell,
     windowsHide: true,
+    detached: process.platform !== "win32",
   };
 }
 
@@ -89,6 +90,7 @@ function waitForHttp(
 ) {
   const deadline = Date.now() + timeoutMs;
   let timer;
+  let timeout;
   let request;
 
   return new Promise((resolve, reject) => {
@@ -100,6 +102,7 @@ function waitForHttp(
 
     const cleanup = () => {
       if (timer) clearTimeout(timer);
+      if (timeout) clearTimeout(timeout);
       if (request) request.destroy();
       signal?.removeEventListener("abort", abort);
     };
@@ -126,7 +129,11 @@ function waitForHttp(
       request = http.get(url, (response) => {
         response.resume();
         request = undefined;
-        finish(resolve);
+        if (response.statusCode >= 200 && response.statusCode < 400) {
+          finish(resolve);
+        } else {
+          retry();
+        }
       });
       request.once("error", retry);
     };
@@ -136,6 +143,7 @@ function waitForHttp(
       return;
     }
     signal?.addEventListener("abort", abort, { once: true });
+    timeout = setTimeout(() => finish(reject, new Error(`Timed out waiting for ${url}`)), timeoutMs);
     attempt();
   });
 }
@@ -229,7 +237,7 @@ function waitForService(
   });
 }
 
-function stopChild(child, { platform = process.platform, spawnFn = spawn } = {}) {
+function stopChild(child, { platform = process.platform, spawnFn = spawn, killFn = process.kill, timeoutMs = 2_000 } = {}) {
   if (!child) return Promise.resolve();
   if (stoppingChildren.has(child)) return stoppingChildren.get(child);
 
@@ -251,10 +259,41 @@ function stopChild(child, { platform = process.platform, spawnFn = spawn } = {})
     return stopping;
   }
 
-  if (!child.killed && (child.exitCode === null || child.exitCode === undefined)) {
-    child.kill("SIGTERM");
-  }
-  const stopping = Promise.resolve();
+  const stopping = new Promise((resolve) => {
+    let timer;
+    let probe;
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearInterval(probe);
+      child.removeListener?.("exit", onExit);
+      resolve();
+    };
+    const signal = (name) => {
+      try {
+        if (child.pid) killFn(-child.pid, name);
+        else child.kill(name);
+      } catch {
+        // The owned process group may have already exited.
+      }
+    };
+    const checkGroup = () => {
+      try {
+        killFn(-child.pid, 0);
+      } catch (error) {
+        if (error.code === "ESRCH") finish();
+      }
+    };
+    const onExit = () => child.pid ? checkGroup() : finish();
+    child.once?.("exit", onExit);
+    signal("SIGTERM");
+    if (!child.once) { finish(); return; }
+    if (!settled && child.pid) probe = setInterval(checkGroup, 25);
+    if (child.exitCode !== null && child.exitCode !== undefined) onExit();
+    if (!settled) timer = setTimeout(() => { signal("SIGKILL"); finish(); }, timeoutMs);
+  });
   stoppingChildren.set(child, stopping);
   return stopping;
 }

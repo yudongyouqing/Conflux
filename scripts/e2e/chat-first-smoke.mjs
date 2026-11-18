@@ -89,7 +89,7 @@ mkdirSync(ARTIFACTS, { recursive: true });
 
 const server = spawn(process.execPath, ["--import", "tsx", "apps/server/src/index.ts", "serve"], {
   cwd: ROOT,
-  env: { ...process.env, CONFLUX_HOME: home, CONFLUX_PORT: String(SERVER_PORT) },
+  env: { ...process.env, CONFLUX_HOME: home, CONFLUX_PORT: String(SERVER_PORT), CLAUDE_PATH: join(home, "fixture-cli-not-installed"), CODEX_PATH: join(home, "fixture-cli-not-installed") },
   stdio: ["ignore", "ignore", "pipe"],
 });
 const web = spawn(
@@ -161,7 +161,7 @@ try {
   page.on("request", (request) => outbound.push(request.url()));
 
   // ---- 1. cold start: chat workspace with the empty guide ---------------
-  await page.goto(`http://127.0.0.1:${WEB_PORT}/`);
+  await page.goto(`http://127.0.0.1:${WEB_PORT}/`, { waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: "创建聊天室" }).waitFor({ timeout: 15_000 });
   await page.screenshot({ path: join(ARTIFACTS, "guide-1440.png"), fullPage: true });
   ok("cold start lands on chat with the empty guide");
@@ -390,7 +390,7 @@ try {
   // room-list failure state: error + retry, never the empty guide
   const errorPage = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   await errorPage.route("**/chat-rooms", (route) => route.abort());
-  await errorPage.goto(`http://127.0.0.1:${WEB_PORT}/`);
+  await errorPage.goto(`http://127.0.0.1:${WEB_PORT}/`, { waitUntil: "domcontentloaded" });
   await errorPage.getByRole("alert").waitFor({ timeout: 15_000 });
   await errorPage.getByRole("button", { name: "重试" }).waitFor();
   assert.equal(await errorPage.getByText("还没有聊天室").count(), 0);

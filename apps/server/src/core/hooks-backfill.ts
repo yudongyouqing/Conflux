@@ -18,7 +18,7 @@ import { probeRuntimePids } from "./liveness.js";
  * "transcript activity after process start") and register the winners
  * through the same registerSession path SessionStart uses.
  *
- * Verified by hand on 2026-09-20 before this module existed (issue #75).
+ * Verified by hand on 2026-09-20 before this module existed.
  */
 
 export interface BackfillCandidate {
@@ -174,7 +174,7 @@ export interface BackfillIo {
  * cwd equals the process cwd AND the transcript was active after the
  * process started; the most recently active candidate wins a contested pid.
  * Rows that already exist (prompt-created, pid-less) only get the pid
- * merged — names are never overwritten (issue #75 idempotency clause).
+ * merged — names are never overwritten.
  */
 export async function backfillLiveClaudeSessions(
   db: DB,
@@ -248,7 +248,7 @@ export function resolveClaudeHome(): string {
 /**
  * Process cwd (lsof) + start time (ps lstart, local tz). null fields mean
  * "could not determine" — the matcher treats them as unverifiable. win32
- * returns null outright: Phase 1 is macOS/Linux (issue #75 boundary note).
+ * returns null outright: Phase 1 is macOS/Linux.
  */
 export async function runtimeProcInfo(pid: number): Promise<RuntimeProcInfo | null> {
   if (platform() === "win32") return null;

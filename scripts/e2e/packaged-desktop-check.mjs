@@ -25,7 +25,7 @@
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -73,10 +73,9 @@ async function waitFor(fn, { timeoutMs = 30_000, label = "condition" }) {
 function snapshotUserData() {
   if (!existsSync(REAL_USER_DATA)) return "absent";
   const out = ps(
-    `(Get-ChildItem -Recurse -Force -ErrorAction SilentlyContinue '${REAL_USER_DATA}' |` +
-      ` Measure-Object -Property Length -Sum).Count.ToString() + ':' +` +
-      ` [int64](Get-ChildItem -Recurse -Force -ErrorAction SilentlyContinue '${REAL_USER_DATA}' |` +
-      ` Measure-Object -Property Length -Sum).Sum`,
+    `$items = Get-ChildItem -LiteralPath '${REAL_USER_DATA.replaceAll("'", "''")}' -Recurse -Force -ErrorAction SilentlyContinue; ` +
+      `$summary = $items | Measure-Object -Property Length -Sum; ` +
+      `$summary.Count.ToString() + ':' + [int64]$summary.Sum`,
   ).trim();
   return out;
 }
@@ -92,16 +91,13 @@ function listenerPid(port) {
 
 /** True when `childPid`'s ancestor chain reaches `rootPid`. */
 function pidDescendsFrom(childPid, rootPid) {
-  let current = childPid;
-  for (let hop = 0; hop < 12 && Number.isFinite(current) && current > 0; hop++) {
-    if (current === rootPid) return true;
-    const parent = Number(
-      ps(`(Get-CimInstance Win32_Process -Filter "ProcessId=${current}").ParentProcessId`).trim(),
-    );
-    if (!Number.isFinite(parent) || parent <= 0) return false;
-    current = parent;
-  }
-  return false;
+  assert.ok(Number.isInteger(childPid) && childPid > 0);
+  assert.ok(Number.isInteger(rootPid) && rootPid > 0);
+  return ps(
+    `$current = ${childPid}; for ($hop = 0; $hop -lt 12 -and $current -gt 0; $hop++) { ` +
+      `if ($current -eq ${rootPid}) { 'true'; return }; ` +
+      `$current = (Get-CimInstance Win32_Process -Filter "ProcessId=$current").ParentProcessId }; 'false'`,
+  ).trim() === "true";
 }
 
 function pidAlive(pid) {
@@ -192,7 +188,8 @@ try {
 
   const fileVersion = ps(`(Get-Item '${exe}').VersionInfo.ProductVersion`).trim();
   console.log("running exe ProductVersion:", fileVersion);
-  assert.match(fileVersion, /^0\.3\.1(\.0)?$/, "running version matches the package");
+  const expectedVersion = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version;
+  assert.ok(fileVersion === expectedVersion || fileVersion === expectedVersion + ".0", "running version matches the package");
 
   // ---- explicit quit path, then wait -------------------------------------
   // Closing every PAGE target (Target.closeTarget) closes the real

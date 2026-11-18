@@ -48,3 +48,16 @@ test("scans explicit files and reports paths and line numbers only", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+
+test("collects documented plans while skipping local worktrees and prototypes", () => {
+  const { mkdirSync } = require("node:fs");
+  const { collectFiles } = require("./check-secrets.cjs");
+  const root = mkdtempSync(join(tmpdir(), "conflux-secret-scope-"));
+  try {
+    for (const dir of ["docs/superpowers", ".superpowers", ".worktrees", " .worktrees", ".muiltchat", "test-results"]) {
+      mkdirSync(join(root, dir), { recursive: true }); writeFileSync(join(root, dir, "sample.md"), "placeholder");
+    }
+    assert.deepEqual(collectFiles(root), [join(root, "docs/superpowers/sample.md")]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

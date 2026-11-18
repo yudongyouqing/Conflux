@@ -634,20 +634,13 @@ function buildEnvBlock(
   apiKey: string,
 ): Record<string, string> {
   const env: Record<string, string> = {};
-  const isClaude = runtime !== "codex";
-  if (isClaude) {
+  if (runtime === "claude") {
     if (baseUrl) env.ANTHROPIC_BASE_URL = baseUrl;
-    if (apiKey) env.ANTHROPIC_API_KEY = apiKey;
-    if (model) {
-      env.ANTHROPIC_MODEL = model;
-      env.ANTHROPIC_DEFAULT_HAIKU_MODEL = model;
-      env.ANTHROPIC_DEFAULT_SONNET_MODEL = model;
-      env.ANTHROPIC_DEFAULT_OPUS_MODEL = model;
-    }
-  } else {
+    if (apiKey) env.ANTHROPIC_AUTH_TOKEN = apiKey;
+    if (model) env.ANTHROPIC_MODEL = model;
+  } else if (runtime === "codex") {
     if (baseUrl) env.OPENAI_BASE_URL = baseUrl;
     if (apiKey) env.OPENAI_API_KEY = apiKey;
-    if (model) env.OPENAI_MODEL = model;
   }
   return env;
 }
@@ -668,16 +661,11 @@ function EnvPreview({
   onExtraEnvChange: (v: string) => void;
 }) {
   const autoEnv = buildEnvBlock(runtime, model, baseUrl, apiKey);
-  const autoLines = Object.entries(autoEnv).map(([k, v]) => `${k}=${v}`);
+  const autoLines = Object.entries(autoEnv).map(([k, v]) =>
+    `${k}=${k === "ANTHROPIC_AUTH_TOKEN" || k === "OPENAI_API_KEY" ? `•••• (${v.length} chars)` : v}`,
+  );
   const autoText = autoLines.length > 0 ? autoLines.join("\n") : "(填写上方字段后自动生成)";
 
-  // mask API key in preview
-  const displayText = apiKey
-    ? autoText.replace(
-        new RegExp(`=(${apiKey.slice(0, 8)}.*?)(?:\\n|$)`),
-        `=$1...(${apiKey.length} chars)`,
-      )
-    : autoText;
 
   return (
     <div className="space-y-1.5">
@@ -686,7 +674,7 @@ function EnvPreview({
       </div>
       {/* auto-derived block (read-only preview) */}
       <pre className="px-3 py-2 rounded-lg bg-tile text-2xs text-ink-muted font-mono whitespace-pre-wrap break-all leading-relaxed">
-        {displayText}
+        {autoText}
       </pre>
       {/* custom additions (editable) */}
       <textarea

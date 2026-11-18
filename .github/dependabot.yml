@@ -1,4 +1,4 @@
-# Dependabot 自动依赖更新（#160）
+# Dependabot 自动依赖更新
 # 注意：仓库默认分支是 main，但 main-merge-gate 只放行来自 dev 的 PR，
 # 所以这里必须显式 target-branch: dev，否则机器人开的 PR 会永远卡在必需检查上。
 version: 2

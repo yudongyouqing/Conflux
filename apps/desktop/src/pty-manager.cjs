@@ -1,18 +1,18 @@
 /**
- * Lightweight PTY manager (#130): spawn runtime agents in Conflux-owned
+ * Lightweight PTY manager: spawn runtime agents in Conflux-owned
  * pseudo-terminals. We hold the master fd — stdout streams to the desktop
  * panel (plain text, no terminal emulation), and wake injection writes
  * directly to the PTY without tmux.
  */
 const pty = require("node-pty");
+const { homedir } = require("node:os");
 
 const ptys = new Map(); // agentId → { process, buffer, listeners }
 
 function spawnAgent(agentId, command, args, opts = {}) {
   if (ptys.has(agentId)) return ptys.get(agentId);
 
-  const term = process.platform === "win32" ? "cmd.exe" : "/bin/zsh";
-  const cwd = opts.cwd || process.env.HOME;
+  const cwd = opts.cwd || homedir();
 
   const ptyProcess = pty.spawn(command, args, {
     name: "xterm-256color",
@@ -78,4 +78,8 @@ function kill(agentId) {
   ptys.delete(agentId);
 }
 
-module.exports = { spawnAgent, inject, getBuffer, subscribe, isAlive, kill };
+function killAll() {
+  for (const id of ptys.keys()) kill(id);
+}
+
+module.exports = { spawnAgent, inject, getBuffer, subscribe, isAlive, kill, killAll };

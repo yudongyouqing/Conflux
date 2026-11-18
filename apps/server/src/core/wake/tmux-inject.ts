@@ -3,7 +3,7 @@ import { basename } from "node:path";
 import { logger } from "../../log.js";
 
 /**
- * tmux typed delivery (#128 live injection, #162 typed mail): one IO layer
+ * tmux typed delivery: one IO layer
  * (realTmuxIO) plus the name conventions and pure parsing around it. If the
  * target session was launched by Conflux inside tmux — or the user runs it
  * in their own tmux — we can inject a prompt into the RUNNING process: the
@@ -24,7 +24,7 @@ export function tmuxAvailable(): boolean {
   }
 }
 
-// ---- typed delivery IO (#162) --------------------------------------------------
+// ---- typed delivery IO --------------------------------------------------
 
 /** Every process-touching tmux/ps operation, injectable for tests. */
 export interface TmuxIO {
@@ -161,8 +161,8 @@ export function tmuxSessionAlive(sessionId: string): boolean {
  * Type a prompt into a Conflux-managed tmux session (by agent id) —
  * room orchestration's injection entry point. Returns true if delivered.
  */
-export function tmuxInject(sessionId: string, prompt: string): boolean {
-  const name = tmuxSessionName(sessionId);
+export function tmuxInject(sessionId: string, prompt: string, target?: string): boolean {
+  const name = target ?? tmuxSessionName(sessionId);
   if (!realTmuxIO.alive(name)) return false;
   if (!realTmuxIO.send(name, prompt)) return false;
   logger.info({ sessionId }, "tmux inject: prompt delivered to live process");

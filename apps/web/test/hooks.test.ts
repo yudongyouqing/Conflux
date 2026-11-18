@@ -11,6 +11,7 @@ import {
   useStartRuntimeAgent,
   useStopRuntimeInstance,
   useResumeRuntimeInstance,
+  useManagedEvents,
 } from "../src/hooks.ts";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost" });
@@ -162,4 +163,19 @@ test("runtime start, stop and resume refresh affected runtime and session views"
     await mutation.mutateAsync("existing-instance");
     keys.forEach((key) => assert.equal(queryClient.getQueryState([key])?.isInvalidated, true));
   }
+});
+
+test("managed events restart replay when their event cache has been cleared", async () => {
+  const cursors: number[] = [];
+  mock.method(globalThis, "fetch", async (input: string | URL | Request) => {
+    const after = Number(new URL(String(input), "http://localhost").searchParams.get("after"));
+    cursors.push(after);
+    return Response.json({ events: after ? [] : [{ sequence: 1, type: "text", payload: {} }] });
+  });
+  const { result, queryClient } = setupHook(() => useManagedEvents("one"));
+  await waitFor(() => assert.equal(result.current.data?.length, 1));
+  queryClient.setQueryData(["managed-events", "one"], []);
+  await result.current.refetch();
+  assert.deepEqual(cursors, [0, 0]);
+  assert.equal(result.current.data?.length, 1);
 });

@@ -11,7 +11,7 @@
 //
 // Usage: node scripts/acceptance/managed-codex-screenshots.mjs [outDir]
 import { spawn } from "node:child_process";
-import { createWriteStream, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
@@ -45,6 +45,11 @@ async function api(method, path, body, headers) {
   return text ? JSON.parse(text) : undefined;
 }
 
+if (!existsSync(join(ROOT, "apps/web/dist/index.html"))) {
+  throw new Error("Build the web application before capturing: npm run build -w apps/web");
+}
+
+let browser;
 const home = mkdtempSync(join(tmpdir(), "conflux-shots-home-"));
 const project = mkdtempSync(join(tmpdir(), "conflux-shots-proj-"));
 mkdirSync(OUT, { recursive: true });
@@ -89,7 +94,7 @@ try {
   console.log("managed instance", instanceId, "session", session);
 
   // ---- browser ----
-  const browser = await chromium.launch();
+  browser = await chromium.launch();
   const desktop = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const narrow = await browser.newContext({ viewport: { width: 390, height: 844 } });
 
@@ -185,7 +190,6 @@ try {
   await shoot("stopped-desktop", page);
   await shoot("stopped-narrow", phone);
 
-  await browser.close();
   writeFileSync(
     join(OUT, "README.txt"),
     [
@@ -197,14 +201,18 @@ try {
   );
   console.log("DONE ->", OUT);
 } finally {
-  server.kill();
-  await new Promise((r) => setTimeout(r, 800));
-  if (server.exitCode === null) server.kill("SIGKILL");
-  serverLog.close();
   try {
-    rmSync(home, { recursive: true, force: true });
-    rmSync(project, { recursive: true, force: true });
-  } catch {
-    // Windows may hold handles briefly; leftovers stay in %TEMP%
+    await browser?.close();
+  } finally {
+    server.kill();
+    await new Promise((r) => setTimeout(r, 800));
+    if (server.exitCode === null) server.kill("SIGKILL");
+    serverLog.close();
+    try {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(project, { recursive: true, force: true });
+    } catch {
+      // Windows may hold handles briefly; leftovers stay in %TEMP%
+    }
   }
 }

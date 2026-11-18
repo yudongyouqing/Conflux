@@ -170,3 +170,12 @@ function publicStatus(error: unknown, code: PublicErrorCode): number {
       return 500;
   }
 }
+
+
+/** Reject ambiguous numeric resource names before passing values to SQLite. */
+export function resourceId(raw: string): number {
+  if (!/^[1-9][0-9]*$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
+    throw Object.assign(new Error("invalid resource id"), { statusCode: 400 });
+  }
+  return Number(raw);
+}

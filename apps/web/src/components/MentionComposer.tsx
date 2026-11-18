@@ -155,6 +155,7 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing) return;
             if (e.key === "Enter") {
               if (candidates.length > 0 && mentionQuery !== null) {
                 e.preventDefault();

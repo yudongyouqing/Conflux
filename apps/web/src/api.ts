@@ -96,7 +96,7 @@ export const api = {
   },
 
   checkInbox: (signal?: AbortSignal) =>
-    get<{ messages: Message[] }>("/messages/inbox", { "X-Session-Id": WEB_CONSOLE_ID }, signal),
+    get<{ inbox: Message[] }>("/messages/inbox", { "X-Session-Id": WEB_CONSOLE_ID }, signal),
 
   retryMessage: (id: number) =>
     post<{ message: Message; wake: { woke: boolean; reason?: string } }>(
@@ -226,12 +226,12 @@ export const api = {
   webAsk: (body: { to_session: string; question: string; from_session?: string }) =>
     post<{ message: Message }>("/web/ask", body),
 
-  getContext: (params?: { query?: string; session_id?: string; limit?: number }) => {
+  getContext: (params?: { query?: string; session_id?: string; limit?: number }, signal?: AbortSignal) => {
     const qs = new URLSearchParams();
     if (params?.query) qs.set("query", params.query);
     if (params?.session_id) qs.set("session_id", params.session_id);
     if (params?.limit) qs.set("limit", String(params.limit));
-    return get<{ entries: ContextEntry[] }>(`/context/query?${qs.toString()}`);
+    return get<{ entries: ContextEntry[] }>(`/context/query?${qs.toString()}`, { "X-Session-Id": WEB_CONSOLE_ID }, signal);
   },
 
   getAgents: (signal?: AbortSignal) => get<{ agents: Agent[] }>("/agents", undefined, signal),
@@ -285,11 +285,13 @@ export const api = {
     onError: (msg: string) => void,
     onToolUse?: (name: string, input: unknown) => void,
     onToolResult?: (name: string, result: unknown) => void,
+    signal?: AbortSignal,
   ) => {
     const res = await fetch(`/agents/${agentId}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message, conversation_id: conversationId ?? undefined }),
+      signal,
     });
 
     if (!res.ok) {
@@ -298,10 +300,12 @@ export const api = {
       return;
     }
 
-    const reader = res.body!.getReader();
+    if (!res.body) throw new Error("聊天响应缺少数据流");
+    const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
 
+    try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -336,6 +340,10 @@ export const api = {
           /* skip malformed */
         }
       }
+    }
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
     }
   },
 

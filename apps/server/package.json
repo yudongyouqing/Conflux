@@ -8,9 +8,7 @@
   },
   "files": [
     "dist",
-    "skills",
-    "README.md",
-    ".mcp.json"
+    "skills"
   ],
   "scripts": {
     "build": "tsc",
@@ -19,7 +17,8 @@
     "serve": "tsx src/index.ts serve",
     "test": "node --import tsx --test \"src/test/*.test.ts\"",
     "prepublishOnly": "npm run build",
-    "test:process-e2e": "node --import tsx --test \"src/test/*.e2e.ts\""
+    "test:process-e2e": "node --import tsx --test \"src/test/*.e2e.ts\"",
+    "pretest": "npm run build -w @conflux/shared"
   },
   "engines": {
     "node": ">=18"

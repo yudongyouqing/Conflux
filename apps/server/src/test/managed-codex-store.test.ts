@@ -267,7 +267,7 @@ test("v14 databases upgrade: presets default to terminal and managed tables appe
 
     const upgraded: DB = openDb({ dataDir: dir, dbPath, scope: "global" });
     try {
-      assert.equal(upgraded.pragma("user_version", { simple: true }), 15);
+      assert.equal(upgraded.pragma("user_version", { simple: true }), 16);
       // Preset data preserved, with the mode defaulting to terminal.
       const preset = upgraded
         .prepare(`SELECT name, execution_mode FROM runtime_agents`)

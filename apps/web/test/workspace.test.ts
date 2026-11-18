@@ -721,6 +721,8 @@ if (!globalThis.requestAnimationFrame) {
 if (!globalThis.cancelAnimationFrame) {
   globalThis.cancelAnimationFrame = (() => {}) as typeof cancelAnimationFrame;
 }
+dom.window.requestAnimationFrame = globalThis.requestAnimationFrame;
+dom.window.cancelAnimationFrame = globalThis.cancelAnimationFrame;
 
 
 /** the workspace chat/graph toggle lives in the room header — the sidebar
@@ -758,6 +760,20 @@ test("cold start mounts no React Flow renderer on the chat workspace", async () 
   const view = mountApp();
   await view.findByRole("heading", { name: "房间 A" });
   assert.equal(view.container.querySelectorAll(".react-flow").length, 0);
+});
+
+test("graph inspection follows refreshed session data", async () => {
+  const state = makeState({ graph: graphOf([sessionNode("live-one", "Before refresh")], []) });
+  mockApi(state);
+  const view = mountApp();
+  fireEvent.click(view.getByRole("button", { name: "图谱", exact: true }));
+  await waitFor(() => assert.equal(view.container.querySelectorAll(".react-flow__node").length, 1), { timeout: 10000 });
+  fireEvent.click(view.container.querySelector(".react-flow__node")!);
+  await view.findByRole("heading", { name: "Before refresh" });
+  await act(async () => {
+    view.client.setQueryData(["graph"], graphOf([sessionNode("live-one", "After refresh", { context_count: 5 })], []));
+  });
+  await view.findByRole("heading", { name: "After refresh" });
 });
 
 test("the room graph shows members and internal edges only; drafts survive the switch", async () => {

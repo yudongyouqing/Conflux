@@ -52,7 +52,7 @@ export function registerManagedCodexRoutes(app: FastifyInstance, ctx: ServerCont
            FROM managed_codex_runs WHERE instance_id = ? ORDER BY id DESC LIMIT 20`,
         )
         .all(req.params.id);
-      reply.send({ binding, current: status, runs });
+      reply.send({ binding: binding ?? null, current: status, runs });
     } catch (err) {
       return sendError(reply, err);
     }
@@ -68,16 +68,20 @@ export function registerManagedCodexRoutes(app: FastifyInstance, ctx: ServerCont
     async (req, reply) => {
       const manager = getManagedCodexManager();
       if (!manager) {
-        return reply.code(503).send({ error: "managed executor unavailable" });
+        return ctx.sendHttpError(reply, 503, "managed executor unavailable");
       }
       const afterRaw = Number(req.query.after ?? 0);
       const after = Number.isFinite(afterRaw) && afterRaw > 0 ? afterRaw : 0;
-      const history = listManagedEvents(db, { instanceId: req.params.id, after, limit: 200 });
+      const history = listManagedEvents(db, { instanceId: req.params.id, after, limit: 200 }).map((row) => ({
+        sequence: row.sequence, run_id: row.run_id, type: row.type,
+        payload: JSON.parse(row.payload) as Record<string, unknown>, created_at: row.created_at,
+      }));
 
       if (req.query.stream !== "1") {
         return reply.send({ events: history });
       }
 
+      reply.hijack();
       reply.raw.writeHead(200, {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
@@ -87,15 +91,7 @@ export function registerManagedCodexRoutes(app: FastifyInstance, ctx: ServerCont
         const frame = event as { sequence: number };
         reply.raw.write(`id: ${frame.sequence}\ndata: ${JSON.stringify(event)}\n\n`);
       };
-      for (const row of history) {
-        writeEvent({
-          sequence: row.sequence,
-          run_id: row.run_id,
-          type: row.type,
-          payload: JSON.parse(row.payload) as Record<string, unknown>,
-          created_at: row.created_at,
-        });
-      }
+      for (const row of history) writeEvent(row);
       // Subscribe if the instance is live; a dead instance keeps the stream
       // open (history only) until the client reconnects elsewhere.
       const unsubscribe = manager.subscribe(req.params.id, writeEvent) ?? undefined;
@@ -106,7 +102,7 @@ export function registerManagedCodexRoutes(app: FastifyInstance, ctx: ServerCont
           // broken pipe — the close handler below unsubscribes
         }
       }, 15000);
-      req.raw.on("close", () => {
+      reply.raw.on("close", () => {
         clearInterval(heartbeat);
         unsubscribe?.();
       });
@@ -143,17 +139,17 @@ export function registerManagedCodexRoutes(app: FastifyInstance, ctx: ServerCont
         const manager = requireManager();
         const approvalId = Number(req.params.approvalId);
         if (!Number.isInteger(approvalId) || approvalId <= 0) {
-          return reply.code(400).send({ error: "invalid approval id" });
+          return ctx.sendHttpError(reply, 400, "invalid approval id");
         }
         // Only the human console may answer; the actor comes from the session
         // identity resolution, never from the body.
         const sid = ctx.requireSession(req);
         if (sid !== WEB_CONSOLE_ID) {
-          return reply.code(403).send({ error: "approvals are answered by the user console only" });
+          return ctx.sendHttpError(reply, 403, "approvals are answered by the user console only");
         }
         const result = await manager.resolveApproval(req.params.id, approvalId, req.body?.decision);
         if (!result.ok) {
-          return reply.code(result.status).send({ error: result.reason });
+          return ctx.sendHttpError(reply, result.status, result.reason);
         }
         logAudit(db, {
           interface: "http",

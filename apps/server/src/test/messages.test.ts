@@ -124,6 +124,7 @@ test("listMessages can filter by seen status", () => {
 });
 
 test("recordExchange archives native exchanges without inbox noise", () => {
+  const reverseBefore = getGraph(db, { status: "all" }).edges.find((e) => e.from === "b" && e.to === "a");
   const wBefore =
     getGraph(db, { status: "all" }).edges.find((e) => e.from === "a" && e.to === "b")?.weight ?? 0;
   const m = recordExchange(db, {
@@ -137,10 +138,11 @@ test("recordExchange archives native exchanges without inbox noise", () => {
   // no pending/seen residue — delivery happened out-of-band
   const inbox = checkInbox(db, "b");
   assert.ok(!inbox.some((x) => x.id === m.id));
-  // both directed edges reflect the exchange
+  // Archived exchanges follow the same single-channel contract as live asks.
   const g = getGraph(db, { status: "all" });
   assert.equal(g.edges.find((e) => e.from === "a" && e.to === "b")!.weight, wBefore + 1);
-  assert.ok(g.edges.some((e) => e.from === "b" && e.to === "a"));
+  assert.deepEqual(g.edges.find((e) => e.from === "b" && e.to === "a"), reverseBefore);
+  assert.equal(m.edge_id, g.edges.find((e) => e.from === "a" && e.to === "b")!.id);
 });
 
 test("recordExchange without reply archives as read", () => {

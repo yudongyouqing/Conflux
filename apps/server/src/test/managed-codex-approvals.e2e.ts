@@ -9,7 +9,8 @@ import { getMessage } from "../core/messages.js";
 import { registerSession } from "../core/sessions.js";
 import type { RuntimeAgent } from "@conflux/shared";
 import { ManagedCodexManager, setManagedCodexManager } from "../core/managed-codex/manager.js";
-import { sanitizeApprovalPayload } from "../core/managed-codex/approvals.js";
+import { sanitizeApprovalPayload, recordApproval } from "../core/managed-codex/approvals.js";
+import { enqueueManagedTask, upsertManagedBinding } from "../core/managed-codex/store.js";
 
 // Approval semantics against the shim's @approval turn (real child
 // processes — SERIAL *.e2e.ts suite; see the process-e2e note in
@@ -171,6 +172,18 @@ test("an approval pauses the run, records sanitized data, and resumes on accept"
   } finally {
     await fx.dispose();
   }
+});
+
+test("approval lookup does not disclose another instance's approval state", async () => {
+  const fx = await makeFixture();
+  try {
+    const messageId = insertAsk(fx, "other instance request");
+    upsertManagedBinding(fx.db, { instanceId: "other", sessionId: fx.sessionId, threadId: "other-thread", ownerToken: "other-owner" });
+    const run = enqueueManagedTask(fx.db, { instanceId: "other", messageId, text: "q" });
+    const approval = recordApproval(fx.db, { runId: run.id, rpcRequestId: "0", kind: "commandExecution", payload: {} });
+    const outcome = await fx.manager.resolveApproval(fx.instanceId, approval.id, "accept");
+    assert.equal((outcome as { status: number }).status, 404);
+  } finally { await fx.dispose(); }
 });
 
 test("decline answers the agent and still completes the turn honestly", async () => {

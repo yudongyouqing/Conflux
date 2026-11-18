@@ -20,7 +20,7 @@ export interface AskOptions {
   from_session: string;
   to_session: string;
   question: string;
-  /** chat-room shared thread marker (#151): replies stay visible in the room */
+  /** chat-room shared thread marker: replies stay visible in the room */
   room_id?: number | null;
 }
 
@@ -95,12 +95,19 @@ export async function completeAsk(
   // its polling tick.
   const managedBinding = getManagedBindingBySession(db, message.to_session);
   if (managedBinding) {
-    enqueueManagedTask(db, {
-      messageId: message.id,
-      instanceId: managedBinding.instance_id,
-      text: message.question,
-    });
+    try {
+      await retryOnBusy(db, () => enqueueManagedTask(db, {
+        messageId: message.id,
+        instanceId: managedBinding.instance_id,
+        text: message.question,
+      }));
+    } catch (error) {
+      if (!isLockError(error)) throw error;
+      logger.warn({ messageId: message.id }, "managed enqueue stayed locked — message accepted, retry delivery after claim expiry");
+      return { message: getMessage(db, message.id) ?? message, wake: { woke: false, disposition: "queued", reason: "managed dispatch is locked; message accepted for delivery retry" } };
+    }
     getManagedCodexManager()?.kick(managedBinding.instance_id);
+    try {
     await retryOnBusy(db, () =>
       db
         .prepare(
@@ -109,6 +116,10 @@ export async function completeAsk(
         )
         .run(message.id, claim.token),
     );
+    } catch (error) {
+      if (!isLockError(error)) throw error;
+      logger.warn({ messageId: message.id }, "managed delivery status stayed locked — task already accepted");
+    }
     return {
       message: getMessage(db, message.id) ?? message,
       wake: { woke: true, command: `managed-codex:${managedBinding.instance_id}` },

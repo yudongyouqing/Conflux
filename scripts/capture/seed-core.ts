@@ -1,4 +1,4 @@
-/** Deterministic fixture for the screenshot rig (#113). Runs via tsx. */
+/** Deterministic fixture for the screenshot rig. Runs via tsx. */
 import { openDb } from "../../apps/server/src/core/db.js";
 import { resolveConfig } from "../../apps/server/src/config.js";
 import { registerSession } from "../../apps/server/src/core/sessions.js";

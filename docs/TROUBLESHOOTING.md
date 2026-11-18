@@ -11,7 +11,7 @@
 | 启动方式 | 工作空间 | API 健康检查 |
 | --- | --- | --- |
 | `npm run dev:desktop` | Electron 窗口 | `http://127.0.0.1:9527/healthz` |
-| `npm run dev:all` | `http://127.0.0.1:5173/` | `http://127.0.0.1:9527/healthz` |
+| `npm run dev:web-stack` | `http://127.0.0.1:5173/` | `http://127.0.0.1:9527/healthz` |
 | `npm start` | `http://127.0.0.1:9527/` | `http://127.0.0.1:9527/healthz` |
 
 浏览器开发模式下，`5173` 是 Vite 页面端口，`9527` 是 API 端口。看到 `VITE ready` 只说明 Vite 已启动；看到 `http server listening` 只说明 API 已监听。可以分别检查：
@@ -23,7 +23,7 @@
 
 预期第二条返回包含 `{"ok":true}`。如果 `localhost` 无法打开，优先使用 `127.0.0.1`，避免本机 IPv4/IPv6 解析差异。
 
-不要同时运行 `npm run dev:desktop` 和 `npm run dev:all`，它们会竞争 `5173`、`9527` 和同一个 SQLite 数据目录。停止当前开发命令后再切换入口。
+不要同时运行 `npm run dev:desktop` 和 `npm run dev:web-stack`，它们会竞争 `5173`、`9527` 和同一个 SQLite 数据目录。停止当前开发命令后再切换入口。
 
 ### Electron 桌面壳状态与 MCP 会话在线
 
@@ -101,7 +101,7 @@ npx tsx apps/server/src/index.ts --data-dir .\conflux-recovered data import --fi
 }
 ```
 
-Codex CLI 不读取 `.mcp.json`；其项目级挂载使用仓库根目录的 `.codex/config.toml`（`[mcp_servers.conflux]`，仅 trusted 项目生效），格式见 README「Codex CLI 挂载 MCP」一节。
+Codex CLI 不读取 `.mcp.json`；其项目级挂载使用仓库根目录的 `.codex/config.toml`（`[mcp_servers.conflux]`，仅 trusted 项目生效），格式见 README「Codex CLI」一节。
 
 另注：Codex CLI 0.147–0.154 存在 MCP 工具目录回归（上游 [#37567](https://github.com/openai/codex/issues/37567)、[#23839](https://github.com/openai/codex/issues/23839)）：服务器能连接、握手和响应 `tools/list`，但内部日志出现 `omitting pending optional MCP server`，模型请求里始终没有 MCP 工具（内置 `functions__*` 工具正常）。诊断入口：`~/.codex/logs_2.sqlite` 的 `logs` 表（`target LIKE 'codex_mcp%'`），以及用本地 HTTP sink 抓 `model_providers.custom.base_url` 的请求体核对 `additional_tools`/`tools`。此为 codex 侧问题，与 Conflux 挂载配置无关；可降级到 0.146.0 验证或等待上游修复。
 
@@ -149,12 +149,12 @@ Use the endpoint that matches the command you started:
 | Mode | Workspace | API health check |
 | --- | --- | --- |
 | `npm run dev:desktop` | Electron window | `http://127.0.0.1:9527/healthz` |
-| `npm run dev:all` | `http://127.0.0.1:5173/` | `http://127.0.0.1:9527/healthz` |
+| `npm run dev:web-stack` | `http://127.0.0.1:5173/` | `http://127.0.0.1:9527/healthz` |
 | `npm start` | `http://127.0.0.1:9527/` | `http://127.0.0.1:9527/healthz` |
 
 In browser development mode, `5173` serves Vite and `9527` serves the API. `VITE ready` confirms only the Vite process; `http server listening` confirms only the API. Check both endpoints with the PowerShell commands above. Prefer `127.0.0.1` when `localhost` resolves unexpectedly.
 
-Do not run `npm run dev:desktop` and `npm run dev:all` at the same time. They share ports and the SQLite data directory.
+Do not run `npm run dev:desktop` and `npm run dev:web-stack` at the same time. They share ports and the SQLite data directory.
 
 ### Electron shell health and MCP session liveness
 
@@ -186,7 +186,7 @@ The default data directory is `%USERPROFILE%\.muiltchat` on Windows and `~/.muil
 
 Keep exactly one Conflux server entry in the project `.mcp.json`. New projects should use the `conflux` key; older projects may keep the single `muiltchat` key. Fully exit and restart the MCP host after changing the file. Reloading the web page does not recreate a stdio connection.
 
-Codex CLI does not read `.mcp.json`. Its project-scope mount is the repo-root `.codex/config.toml` with a `[mcp_servers.conflux]` table (trusted projects only); see the "Codex MCP mounting" section in the README for the contents.
+Codex CLI does not read `.mcp.json`. Its project-scope mount is the repo-root `.codex/config.toml` with a `[mcp_servers.conflux]` table (trusted projects only); see the "Codex CLI" section in the README for the contents.
 
 Note: Codex CLI 0.147–0.154 has an MCP tool-catalog regression (upstream [#37567](https://github.com/openai/codex/issues/37567), [#23839](https://github.com/openai/codex/issues/23839)): servers connect, complete the handshake, and answer `tools/list`, but internal logs show `omitting pending optional MCP server` and the model request never includes MCP tools (built-in `functions__*` tools still appear). Diagnostics: the `logs` table in `~/.codex/logs_2.sqlite` (`target LIKE 'codex_mcp%'`), or capture the request body by pointing `model_providers.custom.base_url` at a local HTTP sink and inspecting `additional_tools`/`tools`. This is a Codex-side issue unrelated to the Conflux mount; downgrade to 0.146.0 to confirm or wait for an upstream fix.
 

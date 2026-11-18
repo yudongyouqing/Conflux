@@ -21,6 +21,8 @@ import {
   setManagedCodexManager,
 } from "../core/managed-codex/manager.js";
 import type { ManagedRunState } from "../core/managed-codex/types.js";
+import { realTmuxIO } from "../core/wake/tmux-inject.js";
+import { setSetting } from "../core/app-settings.js";
 
 // End-to-end manager behavior against the controllable app-server shim
 // (real child processes — lives in the SERIAL *.e2e.ts suite; the parallel
@@ -134,6 +136,24 @@ function readShimLog(logPath: string): string[] {
 function shimLog(fx: Fixture): string[] {
   return readShimLog(fx.logPath);
 }
+
+test("managed task completion pushes its committed reply to the asker", async (t) => {
+  const fx = await makeFixture();
+  const sent: string[] = [];
+  t.mock.method(realTmuxIO, "available", () => true);
+  t.mock.method(realTmuxIO, "alive", () => true);
+  t.mock.method(realTmuxIO, "send", (_target: string, prompt: string) => { sent.push(prompt); return true; });
+  try {
+    setSetting(fx.db, "auto_wake", "true");
+    const messageId = insertAsk(fx, "completion notification");
+    fx.db.prepare("UPDATE sessions SET metadata = ? WHERE id = 'asker'").run(JSON.stringify({ tmux_session: "asker-pane" }));
+    await fx.manager.enqueue({ messageId, instanceId: fx.instanceId, text: "completion notification" });
+    await waitFor(() => runState(fx, messageId) === "completed" ? true : undefined);
+    assert.equal(sent.length, 1);
+    assert.match(sent[0], /shim final answer/);
+    assert.ok(getMessage(fx.db, messageId)?.reply_seen_at);
+  } finally { await fx.dispose(); }
+});
 
 test("start binds a real thread id and flips the instance to running", async () => {
   const fx = await makeFixture();

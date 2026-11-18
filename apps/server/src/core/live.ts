@@ -94,10 +94,10 @@ export function getRuntimeProcess(runtime: RuntimeId): RuntimeProcess | null {
   if (++state.attempts > 10) return null;
   try {
     if (process.platform === "win32") {
-      const home = join(process.env.USERPROFILE || process.env.HOME || ".", ".muiltchat");
+      const home = process.env.CONFLUX_HOME || join(process.env.USERPROFILE || process.env.HOME || ".", ".conflux");
       if (!existsSync(home)) mkdirSync(home, { recursive: true });
       const ps1 = join(home, "find-runtime.ps1");
-      if (!existsSync(ps1)) writeFileSync(ps1, PS_SCRIPT, "utf8");
+      if (!existsSync(ps1) || readFileSync(ps1, "utf8") !== PS_SCRIPT) writeFileSync(ps1, PS_SCRIPT, "utf8");
       const out = execSync(
         `powershell -NoProfile -ExecutionPolicy Bypass -File "${ps1}" -StartPid ${process.ppid} -Runtime ${runtime}`,
         { timeout: 5000, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
@@ -201,7 +201,7 @@ export function readRuntimeSessionName(
   pid: number | null,
 ): RuntimeNameInfo | null {
   if (pid === null || !Number.isInteger(pid) || pid <= 0) return null;
-  const home = claudeHome ?? join(process.env.USERPROFILE || process.env.HOME || ".", ".claude");
+  const home = claudeHome ?? process.env.CLAUDE_CONFIG_DIR ?? join(process.env.USERPROFILE || process.env.HOME || ".", ".claude");
   try {
     const raw = readFileSync(join(home, "sessions", `${pid}.json`), "utf8");
     const j = JSON.parse(raw) as { name?: unknown; nameSource?: unknown };
@@ -232,7 +232,7 @@ function dedupeNodeName(db: DB, base: string, excludeId: string): string {
 /**
  * Node name = what the terminal tab shows. Ghostty (zsh title hooks) and
  * Windows Terminal (PowerShell host) both title tabs with the working
- * directory, so basename(cwd) is the cross-platform match (issue #92).
+ * directory, so basename(cwd) is the cross-platform match.
  * A /rename in Claude Code (nameSource=user) overrides and — via the
  * user_named metadata flag — sticks even if the runtime file later
  * disappears. The transcript custom-title entry stays as legacy override.
@@ -247,7 +247,7 @@ function pickNodeName(
     userNamed: boolean;
     fallback: string;
     /** name the session already carries — a user_named session keeps it
-     *  (#103: MCP register_session names must survive hook re-register) */
+     * */
     existingName?: string | null;
   },
 ): string {
@@ -299,7 +299,7 @@ function findTranscriptPaths(
   cwd?: string | null,
   claudeHome?: string,
 ): string[] {
-  const home = claudeHome ?? join(process.env.USERPROFILE || process.env.HOME || ".", ".claude");
+  const home = claudeHome ?? process.env.CLAUDE_CONFIG_DIR ?? join(process.env.USERPROFILE || process.env.HOME || ".", ".claude");
   const projectsDir = join(home, "projects");
   const candidates: string[] = [];
   if (cwd) {
@@ -522,7 +522,7 @@ export function handleHookEvent(
       typeof meta.claude_pid === "number" ? meta.claude_pid : null,
     );
     // keep the node name glued to the terminal tab (the project directory),
-    // with a /rename from Claude Code's own store overriding — issue #92
+    // with a /rename from Claude Code's own store overriding.
     const runtime = readRuntimeSessionName(claudeHome, pid);
     const desired = pickNodeName(db, {
       id,
@@ -541,7 +541,7 @@ export function handleHookEvent(
   // A hooks-late session (hooks installed after this conversation started)
   // only ever fires prompt: record the ancestor pid here too or liveness
   // falls back to the 2-min heartbeat TTL and the row flips stale while the
-  // process is still alive (issue #76). session-start remains the
+  // process is still alive. session-start remains the
   // authoritative pid source — it re-resolves on every resume.
   const claudePid =
     getClaudePid() ?? (typeof meta.claude_pid === "number" ? meta.claude_pid : null);
