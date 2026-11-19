@@ -12,7 +12,7 @@ import { roomMembers, getChatRoom } from "./chat-rooms.js";
 import { prepareAsk, completeAsk, type AskPrepared } from "./ask.js";
 
 /**
- * Room orchestration engine (#152): agents coordinate through a shared room
+ * Room orchestration engine: agents coordinate through a shared room
  * database. The core loop is:
  *
  *   1. An initiator (human or agent) calls room_summon(agent, prompt)
@@ -222,7 +222,7 @@ export function roomStatus(db: DB, roomId: number) {
   return rows;
 }
 
-// ---- broadcast self-select (#151) ----------------------------------------------
+// ---- broadcast self-select ----------------------------------------------
 
 export interface BroadcastResult {
   room_id: number;
@@ -234,7 +234,7 @@ export interface BroadcastResult {
 
 /**
  * Broadcast a prompt to every room member except the sender: each member
- * gets the question via askAndMaybeWake (#163 typed delivery — badge +
+ * gets the question via askAndMaybeWake (typed delivery — badge +
  * full text into their terminal, or hook notice / wake as fallback) and
  * self-selects whether to answer. Replies come back through reply_ask and
  * stay visible in the room's shared thread (messages.room_id).
@@ -381,7 +381,7 @@ export function wrapRoomTaskPrompt(
 }
 
 /**
- * Fallback: headless wake the executor to process a room task (#152).
+ * Fallback: headless wake the executor to process a room task.
  * Uses the existing wake infrastructure (planClaudeWake → launchWakeRun)
  * with a prompt that tells the agent to process and room_write the result.
  */
@@ -445,11 +445,11 @@ function injectIntoProcess(
   try { meta = JSON.parse(session.metadata ?? "{}"); } catch { /* ignore */ }
 
   // Try tmux (Conflux-launched agents) — badged so the injected task is
-  // distinguishable from human typing (#162)
+  // distinguishable from human typing
   const agentId = Number(meta.agent_id);
   if (Number.isFinite(agentId) && agentId > 0) {
     const wrapped = flattenOneLine(wrapRoomTaskPrompt(roomId, taskId, taskToken, prompt));
-    if (tmuxInject(String(agentId), wrapped)) {
+    if (tmuxInject(String(agentId), wrapped, typeof meta.tmux_session === "string" ? meta.tmux_session : undefined)) {
       db.prepare(`UPDATE room_tasks SET status = 'running' WHERE id = ?`).run(taskId);
       return true;
     }
@@ -477,7 +477,7 @@ function notifyInitiator(
   if (!Number.isFinite(agentId) || agentId <= 0) return false;
 
   const prompt = `${badge({ label: "任务完成通知" })} 你在聊天室（room_id=${roomId}）的全部任务已完成。用 room_read 读取结果并继续。`;
-  if (tmuxInject(String(agentId), prompt)) {
+  if (tmuxInject(String(agentId), prompt, typeof meta.tmux_session === "string" ? meta.tmux_session : undefined)) {
     logger.info({ roomId, initiatorSessionId }, "room: initiator summoned");
     return true;
   }

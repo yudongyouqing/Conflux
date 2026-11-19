@@ -47,6 +47,8 @@ test("lock held: health stays responsive during the write's lock wait; write 503
   const logFile = join(dataDir, "server.log");
   // Must be set before the first server module import so the shared pino
   // destination points at the readable file.
+  const previousLogFile = process.env.CONFLUX_LOG_FILE;
+  t.after(() => { if (previousLogFile === undefined) delete process.env.CONFLUX_LOG_FILE; else process.env.CONFLUX_LOG_FILE = previousLogFile; });
   process.env.CONFLUX_LOG_FILE = logFile;
   const { openDb, stopWalCheckpoint } = await import("../core/db.js");
   const { registerSession } = await import("../core/sessions.js");
@@ -59,23 +61,24 @@ test("lock held: health stays responsive during the write's lock wait; write 503
   // node:test runs t.after hooks in registration order and a throwing hook
   // skips the rest — close connections before deleting the directory
   // (Windows EBUSY on an open data.db).
-  t.after(() => seedDb.close());
+  t.after(() => { stopWalCheckpoint(seedDb); seedDb.close(); });
 
   const app = await startHttpServer({ port: 0, overrideDataDir: dataDir });
   t.after(() => app.close());
-  t.after(() => {
-    try {
-      rmSync(dataDir, { recursive: true, force: true });
-    } catch {
-      // disposable temp dir — leave it behind rather than fail the test
-    }
-  });
+
 
   // A second connection in the role of an external CLI/MCP process.
   const locker = openDb({ dataDir, dbPath, scope: "global" });
   t.after(() => {
     stopWalCheckpoint(locker);
     locker.close();
+  });
+  t.after(() => {
+    try {
+      rmSync(dataDir, { recursive: true, force: true });
+    } catch {
+      // disposable temp dir — leave it behind rather than fail the test
+    }
   });
 
   const headers = { "X-Session-Id": "s1" };

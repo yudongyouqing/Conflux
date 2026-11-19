@@ -77,9 +77,9 @@ function stopForReal(
   child?: ChildProcess,
 ) {
   return eventually(
-    () => {
+    async () => {
       try {
-        return stopRuntimeInstance(db, instanceId);
+        return await stopRuntimeInstance(db, instanceId);
       } catch (error) {
         const message = (error as Error).message;
         if (/process identity changed|无法验证进程身份/.test(message)) return null;
@@ -516,7 +516,7 @@ test("the second signal completes the stop through the refresh path", {
   const agent = createRuntimeAgent(db, { name: "stubborn2", runtime: "claude", workdir: shims.dir });
   const bound = await bindShim(db, agent, shims, "sess-stubborn2", { mode: "delayed-exit" });
   await bindForReal(db, bound.instanceId, "sess-stubborn2", bound.pid);
-  stopRuntimeInstance(db, bound.instanceId);
+  await stopRuntimeInstance(db, bound.instanceId);
 
   bound.child.kill();
   const finished = await eventually(

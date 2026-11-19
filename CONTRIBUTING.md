@@ -14,7 +14,7 @@ Conflux 欢迎 Issue、文档改进和 Pull Request。中文说明在前，英�
 4. **实现** — 业务逻辑只写在 core/，接口层做薄适配（见修改边界）。
 5. **本地验证** — 跑完整验证链（见下），完成声明必须附实际命令与结果。
 6. **提交** — 在 feat/fix 分支上以 Conventional Commits + 中文正文说明"为什么"（见分支策略）。
-7. **PR + CI** — 分支推远端开 PR 到 main，CI 全绿才可合并；合并后删除分支。
+7. **PR + CI** — 分支推远端开 PR 到 dev，CI 全绿才可合并；合并后删除分支。
 8. **文档同步** — README 中英双语按需更新（双语同步是仓库约定）。
 
 ### UI 开发规范
@@ -74,7 +74,7 @@ npm run check:secrets
 - `apps/web` 通过 HTTP API 访问数据，不直接访问 SQLite 或 Electron Node API。
 - Electron 专属能力放在 `apps/desktop`，preload 只暴露必要的最小接口。
 - 涉及会话生命周期的修复，先增加可复现测试，再修改实现。
-- 保持现有 `muiltchat` 兼容入口、环境变量和数据目录行为，除非变更说明明确要求调整。
+- 保持现有数据目录兼容行为；v0.3.0 已移除旧 `muiltchat` CLI 和 `MUILTCHAT_*` 环境变量，除非明确要求，不要重新引入。
 
 模块速查：唤醒系统在 core/wake/（提示词必须 stdin）；rollout 读取与标题策略分离（codex-rollout / codex-titles）；四条 ask 路径统一走 core/ask.ts；进程识别令牌表在 core/runtime-identity.ts（live.ts 内嵌副本需同步）。
 
@@ -92,7 +92,7 @@ git diff --check
 ### 分支策略（强制）
 
 - **禁止直接在 main 上开发**。任何新功能、缺陷修复、重构都必须先开分支，再提交 PR 合并——main 随时保持可发布、CI 可过。
-- **分支从最新的 main 切出**，命名体现意图与范围：
+- **分支从最新的 dev 切出**，命名体现意图与范围：
 
 | 前缀      | 用途                 | 示例                   |
 | --------- | -------------------- | ---------------------- |
@@ -103,7 +103,7 @@ git diff --check
 | chore/    | 工具链/依赖/CI       | chore/lint-setup       |
 
 - **一个分支一个主题**：混入无关改动会让评审与回滚都变难；顺手修的小问题另开 fix 分支。
-- **分支生命周期短**：长期分支合主干前 rebase main 解冲突；合并后立即删除远端与本地分支。
+- **分支生命周期短**：长期分支合主干前 rebase dev 解冲突；合并后立即删除远端与本地分支。
 - 笔误/文档错字也走 PR（main 的 enforce_admins 连管理员直推都拦）；嫌慢就走 docs 分支 → dev → main 的快速通道。
 
 ### dev → main 两级流向（强制）
@@ -144,10 +144,10 @@ Issues, documentation improvements, and pull requests are welcome. The repositor
 
 Install dependencies with `npm ci`, then run `npm test -w apps/server`, `npm run build`, `npm run test:desktop`, `node --test scripts/release-config.test.cjs`, and `npm run check:secrets`. `npm run ci:test` runs the test checks in sequence, while `npm run ci:build` builds the shared, server, and web packages.
 
-Keep business rules in `apps/server/src/core`, keep the web app on the HTTP boundary, and expose only minimal desktop capabilities from preload. Add a regression test before changing session lifecycle behavior. Preserve the `muiltchat` compatibility entry points, environment variables, and data directory unless a change explicitly updates them.
+Keep business rules in `apps/server/src/core`, keep the web app on the HTTP boundary, and expose only minimal desktop capabilities from preload. Add a regression test before changing session lifecycle behavior. Preserve legacy data-directory behavior. The old `muiltchat` CLI and `MUILTCHAT_*` environment variables were removed in v0.3.0; do not reintroduce them unless explicitly requested.
 
 Never commit SQLite files, `.muiltchat`, `.electron-dev`, build output, `.env` files, or real credentials. Export bundles must not contain API keys. Redact credentials, personal paths, and database contents before sharing logs. A pull request should explain user-visible behavior, include focused tests, pass the server suite, build, desktop tests, secret scan, and `git diff --check`.
 
-All work happens on purpose-named branches (feat/, fix/, refactor/, docs/, chore/) cut from the latest main; direct commits to main are only allowed for trivial typo-level fixes, and branches are deleted right after merge. Feature work follows an eight-step flow: clarify the request, sketch the design, write a reproducing test for lifecycle bugs, implement in core, run the local verification chain, commit with a rationale, merge only with green CI, and sync both READMEs. UI changes require Playwright screenshot verification plus geometry assertions; the design language is quiet containers with colored identity cards and progressive disclosure, and every component must use the design tokens in docs/DESIGN-TOKENS.md (no raw gray scales, IBM Plex type, three-tier shadows, 10px floor). Platform rules: wake prompts ride stdin (cmd quoting corrupts them), Codex MCP children get a scrubbed environment (identity rides pid pinning), source line endings are LF, and hot event paths must not perform synchronous I/O.
+All work happens on purpose-named branches (feat/, fix/, refactor/, docs/, chore/) cut from the latest dev; all changes, including typo fixes, go through pull requests, and branches are deleted right after merge. Feature work follows an eight-step flow: clarify the request, sketch the design, write a reproducing test for lifecycle bugs, implement in core, run the local verification chain, commit with a rationale, merge only with green CI, and sync both READMEs. UI changes require Playwright screenshot verification plus geometry assertions; the design language is quiet containers with colored identity cards and progressive disclosure, and every component must use the design tokens in docs/DESIGN-TOKENS.md (no raw gray scales, IBM Plex type, three-tier shadows, 10px floor). Platform rules: wake prompts ride stdin (cmd quoting corrupts them), Codex MCP children get a scrubbed environment (identity rides pid pinning), source line endings are LF, and hot event paths must not perform synchronous I/O.
 
 Use Conventional Commit subjects such as `feat:`, `fix:`, `docs:`, `test:`, `build:`, and `ci:` so release notes remain easy to generate.

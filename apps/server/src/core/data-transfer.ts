@@ -261,7 +261,7 @@ export function exportData(db: DB, options: ExportDataOptions = {}): ConfluxData
   const runtimeRows = db
     .prepare(
       `SELECT id, name, runtime, workdir, model, base_url, extra_env, instructions,
-         interval_min, last_scheduled_run, created_at, updated_at,
+         interval_min, last_scheduled_run, execution_mode, created_at, updated_at,
          CASE WHEN api_key IS NOT NULL AND length(api_key) > 0 THEN 1 ELSE 0 END AS api_key_configured
        FROM runtime_agents ORDER BY id ASC`,
     )
@@ -298,14 +298,19 @@ export function exportData(db: DB, options: ExportDataOptions = {}): ConfluxData
 }
 
 export function parseDataBundle(input: unknown): ConfluxDataBundle {
-  const result = bundleSchema.safeParse(input);
-  if (!result.success) {
-    const issue = result.error.issues[0];
-    const path = issue?.path.length ? issue.path.join(".") : "bundle";
-    throw new Error(`invalid data bundle at ${path}: ${issue?.message ?? "invalid value"}`);
+  try {
+    const result = bundleSchema.safeParse(input);
+    if (!result.success) {
+      const issue = result.error.issues[0];
+      const path = issue?.path.length ? issue.path.join(".") : "bundle";
+      throw new Error(`invalid data bundle at ${path}: ${issue?.message ?? "invalid value"}`);
+    }
+    validateReferences(result.data);
+    return result.data as ConfluxDataBundle;
+  } catch (error) {
+    // Parsing is pure validation; persistence errors are classified separately.
+    throw Object.assign(error instanceof Error ? error : new Error(String(error)), { statusCode: 400 });
   }
-  validateReferences(result.data);
-  return result.data as ConfluxDataBundle;
 }
 
 export function importData(

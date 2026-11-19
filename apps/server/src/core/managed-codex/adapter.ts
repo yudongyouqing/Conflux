@@ -1,4 +1,5 @@
 import type { DB } from "../db.js";
+import { dirname } from "node:path";
 import { logger } from "../../log.js";
 import type { RuntimeAgent } from "@conflux/shared";
 import { cleanTerminalEnv } from "../terminal.js";
@@ -42,8 +43,7 @@ export function defaultCodexLaunch(db: DB, agent: RuntimeAgent): ManagedLaunchCo
   const defaultExe = def.settingsKey ? settings[def.settingsKey] : def.executable;
   const executable = process.env[def.executableEnv] || defaultExe;
   const env = buildRuntimeEnv(agent, cleanTerminalEnv());
-  const dataDir = db.name.replace(/[/\\][^/\\]+$/, "");
-  env.CONFLUX_HOME = dataDir;
+  if (db.name && db.name !== ":memory:") env.CONFLUX_HOME = dirname(db.name);
   return {
     executable,
     args: ["app-server"],

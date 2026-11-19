@@ -250,7 +250,7 @@ export function codexRolloutDigest(rolloutPath: string, maxChars = 1500): string
 /** Locate the rollout jsonl for a codex conversation uuid (filename suffix). */
 export function findCodexRolloutPath(codexSessionId: string): string {
   try {
-    const root = join((process.env.USERPROFILE || process.env.HOME || ".") + "/.codex/sessions");
+    const root = join(process.env.CODEX_HOME || join(process.env.USERPROFILE || process.env.HOME || ".", ".codex"), "sessions");
     // day dirs from 30d back to today; the filename embeds the uuid
     for (let t = Date.now() - 30 * 86_400_000; t <= Date.now() + 86_400_000; t += 86_400_000) {
       const d = new Date(t);

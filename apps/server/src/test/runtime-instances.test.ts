@@ -111,12 +111,12 @@ test("Codex launch explicitly configures its managed MCP identity without puttin
   }
 });
 
-test("a managed tmux target remains unique and accepts mail while its agent is busy", () => {
+test("a managed tmux target remains unique and accepts mail while its agent is busy", async () => {
   const { db, cleanup } = makeDb();
   try {
     const preset = createRuntimeAgent(db, { name: "tmux", runtime: "codex" });
     let target: string | undefined;
-    startRuntimeAgent(db, preset.id, {
+    await startRuntimeAgent(db, preset.id, {
       platform: "darwin",
       launch: (_settings, input) => {
         target = input.env?.CONFLUX_TMUX_SESSION;
@@ -348,7 +348,7 @@ test("a live process with changed identity fields is not ended, stopped or resum
     assert.match(listed.limitation ?? "", /仍在运行但身份字段已变化/);
 
     // Stop is refused with the changed-but-alive reason, not a reuse claim.
-    assert.rejects(
+    await assert.rejects(
       () => stopRuntimeInstance(db, instance.id, { inspect: inspectChanged }),
       /仍在运行但身份字段已变化/,
     );
@@ -494,7 +494,7 @@ test("a live instance with a legacy stored token refuses stop and resume instead
     assert.equal(listed.can_stop, false);
     assert.equal(listed.can_resume, false);
     assert.match(listed.limitation ?? "", /无法验证进程身份/);
-    assert.rejects(
+    await assert.rejects(
       () => stopRuntimeInstance(db, instance.id, { inspect }),
       /无法验证进程身份/,
     );
@@ -566,7 +566,7 @@ test("starting and discovered sessions cannot be stopped, and unverified PID can
   try {
     const preset = createRuntimeAgent(db, { name: "test", runtime: "codex" });
     const instance = createRuntimeInstance(db, preset);
-    assert.rejects(
+    await assert.rejects(
       () => stopRuntimeInstance(db, instance.id, { terminate: () => assert.fail("must not kill") }),
       { statusCode: 409 },
     );

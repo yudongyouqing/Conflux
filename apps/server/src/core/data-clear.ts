@@ -8,7 +8,7 @@ import { exportData } from "./data-transfer.js";
  * cross-session messages and published context notes are all derived from
  * the source conversations (Claude Code / Codex transcripts), so clearing
  * them loses nothing original. A full data bundle is always exported before
- * anything is deleted, and old backups rotate (issue #79).
+ * anything is deleted, and old backups rotate.
  *
  * Never touched: runtime agent presets and app settings (except the
  * orphaned claude-current:<pid> markers when their sessions are cleared).
@@ -138,7 +138,10 @@ export function clearDataToPath(
 }
 
 function applyDeletes(db: DB, categories: ClearCategories): void {
-  if (categories.messages) db.prepare("DELETE FROM messages").run();
+  if (categories.messages) {
+    db.prepare("DELETE FROM messages").run();
+    db.prepare("DELETE FROM edges").run();
+  }
   if (categories.context) db.prepare("DELETE FROM context_entries").run();
   if (categories.sessions) {
     // FK cascade (foreign_keys = ON) wipes each session's messages and
@@ -149,7 +152,11 @@ function applyDeletes(db: DB, categories: ClearCategories): void {
         OR to_session NOT IN (SELECT id FROM sessions)`,
     ).run();
     // pid → conversation markers now point at nothing
-    db.prepare("DELETE FROM app_settings WHERE key LIKE 'claude-current:%'").run();
+    db.prepare(`DELETE FROM managed_codex_bindings WHERE session_id NOT IN (SELECT id FROM sessions)`).run();
+    db.prepare(`DELETE FROM room_tasks WHERE initiator_session_id NOT IN (SELECT id FROM sessions)
+      OR executor_session_id NOT IN (SELECT id FROM sessions)`).run();
+    db.prepare(`DELETE FROM app_settings WHERE key LIKE 'claude-current:%'
+      OR key LIKE 'codex-current:%' OR key LIKE 'auto-wake:%'`).run();
   }
 }
 

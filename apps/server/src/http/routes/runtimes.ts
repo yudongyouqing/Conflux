@@ -1,3 +1,4 @@
+import { resourceId } from "../context.js";
 import type { FastifyInstance } from "fastify";
 import {
   RUNTIMES,
@@ -27,6 +28,7 @@ interface RuntimeAgentBody {
   extra_env?: string;
   instructions?: string;
   interval_min?: number | null;
+  execution_mode?: "terminal" | "managed";
 }
 
 export function registerRuntimeRoutes(
@@ -105,7 +107,8 @@ export function registerRuntimeRoutes(
             api_key: { type: "string", maxLength: 500 },
             extra_env: { type: "string", maxLength: 10000 },
             instructions: { type: "string", maxLength: 20000 },
-            interval_min: { type: "integer", minimum: 1, maximum: 10080 },
+            interval_min: { type: "integer", nullable: true, minimum: 1, maximum: 10080 },
+            execution_mode: { type: "string", enum: ["terminal", "managed"] },
           },
         },
       },
@@ -131,7 +134,7 @@ export function registerRuntimeRoutes(
   app.delete<{ Params: { id: string } }>("/runtimes/:id", {}, async (req, reply) => {
     try {
       const ok = await write(() => {
-        const deleted = deleteRuntimeAgent(db, Number(req.params.id));
+        const deleted = deleteRuntimeAgent(db, resourceId(req.params.id));
         if (deleted)
           logAudit(db, {
             interface: "http",
@@ -151,7 +154,7 @@ export function registerRuntimeRoutes(
   // Conflux-held app-server for managed presets)
   app.post<{ Params: { id: string } }>("/runtimes/:id/start", {}, async (req, reply) => {
     try {
-      const result = await startRuntimeAgent(db, Number(req.params.id), io);
+      const result = await startRuntimeAgent(db, resourceId(req.params.id), io);
       logAudit(db, {
         interface: "http",
         action: "start_runtime_agent",

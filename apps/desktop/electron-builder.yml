@@ -13,8 +13,12 @@ extraMetadata:
 artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
 
 files:
-  - apps/desktop/**/*
+  - apps/desktop/src/**/*
+  - apps/desktop/build/**/*
+  - apps/desktop/package.json
+  - apps/server/package.json
   - apps/server/dist/**/*
+  - "!apps/server/dist/test/**/*"
   - apps/server/skills/**/*
   - apps/web/dist/**/*
   # The app dir is the repository root, so electron-builder collects the

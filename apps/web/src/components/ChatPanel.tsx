@@ -1,5 +1,5 @@
 import { useSmoothText } from "../use-smooth-text";
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { ArrowLeft, Send, Bot, User, Wrench, Loader2 } from "lucide-react";
 import { api } from "../api";
 import { MarkdownText } from "./MarkdownText";
@@ -21,6 +21,8 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
   const [conversationId, setConversationId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const streamRef = useRef<AbortController | null>(null);
+  useEffect(() => () => { streamRef.current?.abort(); }, [agent.id]);
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
@@ -32,7 +34,9 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
 
   const handleSend = useCallback(async () => {
     const message = input.trim();
-    if (!message || isStreaming) return;
+    if (!message || isStreaming || streamRef.current) return;
+    const controller = new AbortController();
+    streamRef.current = controller;
 
     setInput("");
     setError(null);
@@ -44,11 +48,13 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
     setIsStreaming(true);
     let receivedAny = false;
 
+    try {
     await api.streamChat(
       agent.id,
       message,
       conversationId,
       (token) => {
+        if (controller.signal.aborted) return;
         receivedAny = true;
         setMessages((prev) => {
           const last = prev[prev.length - 1];
@@ -60,6 +66,7 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
         scrollToBottom();
       },
       (data) => {
+        if (controller.signal.aborted) return;
         setConversationId(data.conversation_id);
         setMessages((prev) =>
           prev.map((m) =>
@@ -70,6 +77,7 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
         );
       },
       (msg) => {
+        if (controller.signal.aborted) return;
         setError(msg);
         setMessages((prev) => {
           const last = prev[prev.length - 1];
@@ -88,10 +96,12 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
         });
       },
       (name, toolInput) => {
+        if (controller.signal.aborted) return;
         setMessages((prev) => [...prev, { kind: "tool", name, input: toolInput, loading: true }]);
         scrollToBottom();
       },
       (name, result) => {
+        if (controller.signal.aborted) return;
         setMessages((prev) => {
           const idx = [...prev]
             .reverse()
@@ -107,13 +117,25 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
         });
         scrollToBottom();
       },
+      controller.signal,
     );
-
-    setIsStreaming(false);
+    } catch (err) {
+      if (!controller.signal.aborted) setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (streamRef.current === controller) streamRef.current = null;
+      if (!controller.signal.aborted) {
+        setIsStreaming(false);
+        setMessages((prev) => prev.flatMap((m): DisplayMessage[] => {
+          if (m.kind === "chat" && m.streaming) return m.content ? [{ ...m, streaming: false }] : [];
+          if (m.kind === "tool" && m.loading) return [{ ...m, loading: false }];
+          return [m];
+        }));
+      }
+    }
   }, [input, isStreaming, agent.id, conversationId, scrollToBottom]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       handleSend();
     }
@@ -124,7 +146,7 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
       {/* Header */}
       <div className="flex items-center gap-3 px-4 h-14 bg-surface border-b border-line flex-shrink-0">
         <button
-          onClick={onBack}
+          onClick={() => { streamRef.current?.abort(); onBack(); }}
           className="flex items-center gap-1 text-xs text-ink-muted hover:text-ink transition-colors"
         >
           <ArrowLeft size={14} /> 返回

@@ -82,10 +82,35 @@ test("browser inbox reads identify the console so incoming questions can become 
   let headers: HeadersInit | undefined;
   mock.method(globalThis, "fetch", async (_input: unknown, init?: RequestInit) => {
     headers = init?.headers;
-    return Response.json({ messages: [] });
+    return Response.json({ inbox: [] });
   });
   await api.checkInbox();
   assert.equal(new Headers(headers).get("X-Session-Id"), "web-console");
+});
+
+test("context reads identify the console and forward cancellation", async () => {
+  let request: RequestInit | undefined;
+  mock.method(globalThis, "fetch", async (_input: unknown, init?: RequestInit) => {
+    request = init;
+    return Response.json({ entries: [] });
+  });
+  const controller = new AbortController();
+  await api.getContext({ session_id: "worker" }, controller.signal);
+  assert.equal(new Headers(request?.headers).get("X-Session-Id"), "web-console");
+  assert.equal(request?.signal, controller.signal);
+});
+
+test("chat streaming forwards cancellation and releases its reader", async () => {
+  const controller = new AbortController();
+  let request: RequestInit | undefined;
+  const stream = new ReadableStream({ start(c) { c.close(); } });
+  mock.method(globalThis, "fetch", async (_input: unknown, init?: RequestInit) => {
+    request = init;
+    return new Response(stream);
+  });
+  await api.streamChat(1, "hello", null, () => {}, () => {}, () => {}, undefined, undefined, controller.signal);
+  assert.equal(request?.signal, controller.signal);
+  assert.equal(stream.locked, false);
 });
 
 test("runtime instance controls use the instance id independently of presets", async () => {

@@ -15,8 +15,8 @@ import {
   type CustomTheme,
 } from "../theme";
 
-export function SettingsTab() {
-  const { data, isLoading, error } = useTerminalSettings();
+export function SettingsTab({ active = true }: { active?: boolean }) {
+  const { data, isLoading, error } = useTerminalSettings(active);
   const save = useSaveTerminalSettings();
   const queryClient = useQueryClient();
   const importInput = useRef<HTMLInputElement>(null);
@@ -50,8 +50,8 @@ export function SettingsTab() {
       .then(setClearCounts)
       .catch(() => setClearCounts(null));
   useEffect(() => {
-    refreshClearCounts();
-  }, []);
+    if (active) void refreshClearCounts();
+  }, [active]);
 
   type ClearKey = "sessions" | "messages" | "context";
   const countOf = (key: ClearKey): number =>
@@ -127,13 +127,15 @@ export function SettingsTab() {
 
   // Refresh wake active count every 3s
   useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
     const timer = setInterval(() => {
       api.getTerminalSettings().then((d) => {
-        setWakeActiveCount(d.wake_active_count ?? 0);
+        if (!cancelled) setWakeActiveCount(d.wake_active_count ?? 0);
       }).catch(() => {/* ignore */});
     }, 3000);
-    return () => clearInterval(timer);
-  }, []);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [active]);
 
   const submit = () => {
     setNotice(null);
@@ -152,20 +154,8 @@ export function SettingsTab() {
     );
   };
 
-  const refreshWorkspace = () => {
-    for (const key of [
-      "graph",
-      "messages",
-      "sessions-list",
-      "agents",
-      "runtimes",
-      "peer-messages",
-      "edge-messages",
-      "peer-flow",
-      "context",
-    ]) {
-      queryClient.invalidateQueries({ queryKey: [key] });
-    }
+  const refreshWorkspace = async () => {
+    await Promise.all([queryClient.invalidateQueries(), refreshClearCounts()]);
   };
 
   const exportWorkspace = async () => {
@@ -212,7 +202,7 @@ export function SettingsTab() {
       if (!confirmed) return;
 
       const result = await api.importData(bundle as ConfluxDataBundle, importConflict);
-      refreshWorkspace();
+      await refreshWorkspace();
       setTransferNotice(
         `导入完成: 新增 ${result.imported}, 覆盖 ${result.overwritten}, 复制 ${result.copied}, 跳过 ${result.skipped}`,
       );
@@ -244,6 +234,13 @@ export function SettingsTab() {
     <div className="h-full overflow-y-auto p-6">
       <div className="max-w-xl mx-auto space-y-5">
         <div>
+          <h2 className="text-ink font-semibold text-base flex items-center gap-2">
+            <Settings size={16} className="text-ink-muted" /> 设置
+          </h2>
+          <p className="text-xs text-ink-muted mt-0.5">
+            「在终端打开」和运行时 agent 启动使用的终端与可执行文件。
+          </p>
+        </div>
         <div className="bg-surface border border-line rounded-xl p-4 space-y-3">
           <h3 className="text-ink font-medium text-sm">主题</h3>
           <div>
@@ -318,14 +315,6 @@ export function SettingsTab() {
               </span>
             </div>
           </div>
-        </div>
-
-          <h2 className="text-ink font-semibold text-base flex items-center gap-2">
-            <Settings size={16} className="text-ink-muted" /> 设置
-          </h2>
-          <p className="text-xs text-ink-muted mt-0.5">
-            「在终端打开」和运行时 agent 启动使用的终端与可执行文件。
-          </p>
         </div>
 
         <div className="bg-surface border border-line rounded-xl p-4 space-y-4 shadow-sm">

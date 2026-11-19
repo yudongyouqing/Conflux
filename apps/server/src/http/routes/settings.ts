@@ -48,7 +48,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: ServerContext)
         body: {
           type: "object",
           properties: {
-            terminal: { type: "string", enum: ["wt", "powershell", "cmd", "wezterm"] },
+            terminal: { type: "string", enum: ["wt", "powershell", "cmd", "wezterm", "terminal", "iterm", "tmux"] },
             claude_path: { type: "string", maxLength: 500 },
             codex_path: { type: "string", maxLength: 500 },
             auto_wake: { type: "boolean" },

@@ -24,7 +24,7 @@ import { cmdQuote } from "../terminal.js";
 /**
  * Wake a session so it processes its inbox:
  *   - terminal reachable (Conflux tmux session, or the user's own tmux
- *     pane) → TYPE the mail in as a real prompt (#162) — prompt-level
+ *     pane) → TYPE the mail in as a real prompt — prompt-level
  *     visibility, badge-prefixed, no process spawned at all
  *   - offline + tmux + claude → relaunch the REAL conversation inside a
  *     detached tmux session: a live, attachable TUI instead of a headless
@@ -74,7 +74,7 @@ export interface WakeOptions {
   io?: TmuxIO;
   /** timer scheduler — injectable for tests (default setTimeout) */
   schedule?: (fn: () => void, ms: number) => void;
-  /** #105 mcp-config mount for the tmux relaunch (defaults to the real one) */
+  /** mcp-config mount for the tmux relaunch (defaults to the real one) */
   mcpConfigPath?: string | null;
 }
 
@@ -102,7 +102,7 @@ export function wakeSessionForMail(db: DB, sessionId: string, opts: WakeOptions 
   const schedule = opts.schedule ?? ((fn, ms) => setTimeout(fn, ms));
   const now = (opts.now ?? new Date()).getTime();
 
-  // #162 typed delivery FIRST — before the dedup window, because typing
+  // typed delivery FIRST — before the dedup window, because typing
   // spawns nothing to stack (dedup exists to stop process pile-ups). Busy
   // user sessions resolve no target inside pushMailTyped and fall through
   // to the busy skip below; a successful typed delivery stamps no dedup
@@ -135,7 +135,7 @@ export function wakeSessionForMail(db: DB, sessionId: string, opts: WakeOptions 
   const exe = wakeExe(db, runtime);
   const offline = session.status !== "active";
 
-  // #162 offline + claude + tmux: relaunch the real conversation as a live
+  // offline + claude + tmux: relaunch the real conversation as a live
   // TUI inside tmux (conflux/<sessionId>, detached — `tmux attach` to watch).
   // The name is stamped into metadata so later injections address it
   // directly. If the TUI never paints, the mail stays pending and the

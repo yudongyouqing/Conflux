@@ -12,10 +12,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 只允许 dev 作为合入 main 的来源分支
-        if: github.head_ref != 'dev'
+        if: github.head_ref != 'dev' || github.event.pull_request.head.repo.full_name != github.repository
+        env:
+          HEAD_REF: ${{ github.head_ref }}
         run: |
-          echo "::error::只允许 dev 分支合入 main（当前来源：${{ github.head_ref }}）。请先把工作合入 dev，再从 dev 发起到 main 的 PR。"
+          echo "::error::只允许 dev 分支合入 main（当前来源：${HEAD_REF}）。请先把工作合入 dev，再从 dev 发起到 main 的 PR。"
           exit 1
       - name: 来源为 dev，放行
-        if: github.head_ref == 'dev'
+        if: github.head_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository
         run: echo "source is dev — OK"

@@ -26,6 +26,7 @@ interface MessageRow {
   created_at: string;
   replied_at: string | null;
   reply_seen_at: string | null;
+  room_id: number | null;
 }
 
 function toMsg(db: DB, row: MessageRow): Message {
@@ -62,8 +63,12 @@ export function askSession(
   db: DB,
   input: { from_session: string; to_session: string; question: string; room_id?: number | null },
 ): Message {
+  return db.transaction(() => {
   if (input.from_session === input.to_session) {
     throw new Error("cannot ask yourself");
+  }
+  if (!db.prepare(`SELECT id FROM sessions WHERE id = ?`).get(input.from_session)) {
+    throw Object.assign(new Error(`source session not found: ${input.from_session}`), { statusCode: 404 });
   }
   // Priority gate: a lower-priority session may not interrupt a higher one.
   // The human web console (from === WEB_CONSOLE_ID) is exempt — people can
@@ -94,6 +99,7 @@ export function askSession(
     )
     .run(input.from_session, input.to_session, input.question, now, edgeId, input.room_id ?? null);
   return getMessage(db, Number(res.lastInsertRowid))!;
+  }).immediate();
 }
 
 export function getMessage(db: DB, id: number): Message | null {
@@ -173,8 +179,8 @@ export function checkReplies(db: DB, sessionId: string, since?: string): Message
 /**
  * Archive an exchange that already happened out-of-band (e.g. Claude Code's
  * native SendMessage). The delivery is complete, so the row is written in
- * its terminal state — no pending/seen inbox noise — and both directions'
- * edges are recorded so the graph reflects the communication.
+ * its terminal state — no pending/seen inbox noise — on the same channel
+ * that carries its questions and replies.
  */
 export function recordExchange(
   db: DB,
@@ -187,16 +193,19 @@ export function recordExchange(
     occurred_at?: string;
   },
 ): Message {
+  return db.transaction(() => {
+  if (input.from_session === input.to_session) throw new Error("cannot ask yourself");
   for (const id of [input.from_session, input.to_session]) {
     const row = db.prepare(`SELECT id FROM sessions WHERE id = ?`).get(id);
     if (!row) throw new Error(`session not found: ${id}`);
   }
   const occurred = input.occurred_at ?? nowIso();
   const status: MessageStatus = input.reply ? "replied" : "read";
+  const edgeId = recordEdge(db, input.from_session, input.to_session);
   const res = db
     .prepare(
-      `INSERT INTO messages (from_session, to_session, question, reply, status, created_at, replied_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO messages (from_session, to_session, question, reply, status, created_at, replied_at, edge_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.from_session,
@@ -206,10 +215,10 @@ export function recordExchange(
       status,
       occurred,
       input.reply ? occurred : null,
+      edgeId,
     );
-  recordEdge(db, input.from_session, input.to_session);
-  if (input.reply) recordEdge(db, input.to_session, input.from_session);
   return getMessage(db, Number(res.lastInsertRowid))!;
+  }).immediate();
 }
 
 /**
@@ -297,7 +306,7 @@ export function forwardInboxFromPid(db: DB, claudePid: number, successorId: stri
   return res.changes;
 }
 
-// ---- undelivered mail: one gather for two renderers (#162) --------------------
+// ---- undelivered mail: one gather for two renderers --------------------
 //
 // The hook stdout notice (context injection — dim) and the typed prompt
 // (tmux send-keys — prompt-level visibility) render the SAME undelivered
@@ -305,6 +314,7 @@ export function forwardInboxFromPid(db: DB, claudePid: number, successorId: stri
 
 export interface MailItem {
   id: number;
+  edge_id?: number | null;
   kind: "reply" | "question";
   /** sender's display name (session name, falling back to id8) */
   from: string;
@@ -327,42 +337,44 @@ export function gatherUnseenMail(db: DB, sessionId: string): MailItem[] {
   // from_session here used to badge the reply with the asker's own name.
   const replies = db
     .prepare(
-      `SELECT m.id, m.reply, s.name, substr(m.to_session, 1, 8) AS sid8
+      `SELECT m.id, m.edge_id, m.reply, s.name, substr(m.to_session, 1, 8) AS sid8
        FROM messages m LEFT JOIN sessions s ON s.id = m.to_session
        WHERE m.from_session = ? AND m.reply IS NOT NULL AND m.reply_seen_at IS NULL
        ORDER BY m.id ASC LIMIT 3`,
     )
-    .all(sessionId) as { id: number; reply: string; name: string | null; sid8: string }[];
+    .all(sessionId) as { id: number; edge_id: number | null; reply: string; name: string | null; sid8: string }[];
   for (const r of replies) {
     items.push({
       id: r.id,
+      edge_id: r.edge_id,
       kind: "reply",
       from: r.name ?? r.sid8,
       body: truncateForTyping(
         flattenOneLine(r.reply),
         MAIL_BODY_LIMIT,
-        `channel show ${r.id} 看全文`,
+        r.edge_id == null ? "check_replies 看全文" : `channel show ${r.edge_id} 看全文`,
       ),
     });
   }
 
   const rows = db
     .prepare(
-      `SELECT m.id, m.question, s.name, substr(m.from_session, 1, 8) AS sid8
+      `SELECT m.id, m.edge_id, m.question, s.name, substr(m.from_session, 1, 8) AS sid8
        FROM messages m LEFT JOIN sessions s ON s.id = m.from_session
        WHERE m.to_session = ? AND m.status = 'pending'
        ORDER BY m.id ASC LIMIT 2`,
     )
-    .all(sessionId) as { id: number; question: string; name: string | null; sid8: string }[];
+    .all(sessionId) as { id: number; edge_id: number | null; question: string; name: string | null; sid8: string }[];
   for (const q of rows) {
     items.push({
       id: q.id,
+      edge_id: q.edge_id,
       kind: "question",
       from: q.name ?? q.sid8,
       body: truncateForTyping(
         flattenOneLine(q.question),
         MAIL_BODY_LIMIT,
-        `channel show ${q.id} 看全文`,
+        q.edge_id == null ? "check_inbox 看全文" : `channel show ${q.edge_id} 看全文`,
       ),
     });
   }
@@ -392,7 +404,7 @@ export function markMailDelivered(db: DB, sessionId: string, items: MailItem[]):
 }
 
 /**
- * Render gathered mail as ONE typed prompt line (#162): badged with
+ * Render gathered mail as ONE typed prompt line: badged with
  * provenance, flattened (send-keys types literal characters — a newline
  * submits early), so it lands in the TUI exactly like a user prompt.
  */
@@ -401,7 +413,7 @@ export function formatTypedMailPrompt(items: MailItem[]): string | null {
   return items
     .map((item) =>
       item.kind === "reply"
-        ? `${badge({ label: "回复", from: item.from, ref: `msg #${item.id}` })} ${item.body} —— 追问用 ask_session，全文 channel show ${item.id}`
+        ? `${badge({ label: "回复", from: item.from, ref: `msg #${item.id}` })} ${item.body} —— 追问用 ask_session，全文 ${item.edge_id == null ? "check_replies" : `channel show ${item.edge_id}`}`
         : `${badge({ label: "提问", from: item.from, ref: `msg #${item.id}` })} ${item.body} —— 用 Conflux 的 reply_ask 回复 msg #${item.id}`,
     )
     .join(" ｜ ");
@@ -421,7 +433,7 @@ export function formatInboxNotice(db: DB, sessionId: string): string | null {
     item.kind === "reply"
       ? `── Conflux · 回复 ← ${item.from} (msg #${item.id}) ──\n` +
         `  ${item.body}\n` +
-        `── 追问 ask_session · 查通道 channel show ${item.id} ──`
+        `── 追问 ask_session · ${item.edge_id == null ? "check_replies" : `查通道 channel show ${item.edge_id}`} ──`
       : `── Conflux · 提问 → 你 (msg #${item.id}) 来自 ${item.from} ──\n` +
         `  ${item.body}\n` +
         `── 回复 reply_ask ──`,

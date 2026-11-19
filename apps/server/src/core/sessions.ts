@@ -54,7 +54,10 @@ export function registerSession(db: DB, input: RegisterInput): Session {
        name = excluded.name,
        description = excluded.description,
        project_dir = COALESCE(excluded.project_dir, sessions.project_dir),
-       metadata = COALESCE(excluded.metadata, sessions.metadata),
+       metadata = CASE WHEN ? THEN json_set(
+         CASE WHEN json_valid(sessions.metadata) AND json_type(sessions.metadata) = 'object'
+           THEN sessions.metadata ELSE '{}' END, '$.priority', ?)
+         ELSE COALESCE(excluded.metadata, sessions.metadata) END,
        runtime = COALESCE(excluded.runtime, sessions.runtime),
        identity_source = COALESCE(excluded.identity_source, sessions.identity_source),
        runtime_pid = COALESCE(excluded.runtime_pid, sessions.runtime_pid),
@@ -71,6 +74,8 @@ export function registerSession(db: DB, input: RegisterInput): Session {
     runtime,
     identitySource,
     runtimePid,
+    input.priority && !input.metadata ? 1 : 0,
+    input.priority ?? null,
   );
   return getSession(db, input.id)!;
 }
@@ -146,10 +151,13 @@ export function setSessionDescription(db: DB, id: string, description: string): 
 
 /**
  * Lazily mark sessions stale if their last heartbeat is older than STALE_AFTER_MS.
- * Cheap: one UPDATE per call. Called from list_sessions / query_context.
+ * Avoid taking a WAL write lock when no rows have expired.
  */
 export function markStaleSessions(db: DB, now: Date = new Date()): number {
   const threshold = new Date(now.getTime() - STALE_AFTER_MS).toISOString();
+  if (!db.prepare(`SELECT 1 FROM sessions WHERE status = 'active' AND last_heartbeat_at < ? LIMIT 1`).get(threshold)) {
+    return 0;
+  }
   const res = db
     .prepare(
       `UPDATE sessions SET status = 'stale' WHERE status = 'active' AND last_heartbeat_at < ?`,

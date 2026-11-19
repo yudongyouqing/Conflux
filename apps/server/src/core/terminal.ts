@@ -204,7 +204,7 @@ export function buildLaunchPlan(
       "-Command",
       opts.env?.CONFLUX_RUNTIME_SHELL && opts.env?.CONFLUX_RUNTIME_COMMAND_LINE
         ? "& $env:CONFLUX_RUNTIME_SHELL /d /v:on /s /c $env:CONFLUX_RUNTIME_COMMAND_LINE"
-        : command,
+        : command.replace(/^"([^"]+)"(?=\s|$)/, (_, exe: string) => `& '${exe.replace(/'/g, "''")}'`),
     ],
     cwd,
   });
@@ -242,10 +242,11 @@ export function buildLaunchPlan(
  * Build the resume command for a session (cmd-syntax string).
  * Pure — unit-testable.
  */
-export function resumeCommand(runtime: string, sessionId: string, executable: string): string {
+export function resumeCommand(runtime: string, sessionId: string, executable: string, io: { platform?: NodeJS.Platform } = {}): string {
   const def = runtimeDescriptor(runtime);
-  const exe = cmdQuote(executable);
-  const args = def.resumeArgs(sessionId).map(cmdQuote).join(" ");
+  const quote = (io.platform ?? process.platform) === "win32" ? cmdQuote : posixQuote;
+  const exe = quote(executable);
+  const args = def.resumeArgs(sessionId).map(quote).join(" ");
   return `${exe} ${args}`;
 }
 
@@ -284,7 +285,7 @@ export function resolveOnPath(
 ): string | null {
   if (/[\\/]/.test(exe)) return existsSync(exe) ? exe : null;
   // macOS has no where.exe; /usr/bin/which covers it (no Store-alias quirks).
-  const resolver = platform === "darwin" ? "/usr/bin/which" : "where.exe";
+  const resolver = platform === "win32" ? "where.exe" : "/usr/bin/which";
   // one retry: under load (CI runners, cold AV scans) where/which can blow
   // the timeout once and come back fine — availability detection must not
   // flap on that (observed flake: windows-latest, 2026-09-24)
@@ -300,6 +301,7 @@ export function resolveOnPath(
         const first = (r.stdout || "").trim().split(/\r?\n/)[0];
         return first || null;
       }
+      if (!r.error && r.status !== null) return null;
     } catch {
       // resolver unavailable — treat as unresolved
     }

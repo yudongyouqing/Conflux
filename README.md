@@ -90,7 +90,7 @@ npm run dev:desktop
 | API 服务器   | <http://127.0.0.1:9527>      |
 | OpenAPI 文档 | <http://127.0.0.1:9527/docs> |
 
-> ⚠️ 不要同时运行 `npm run dev:all` 和 `npm run dev:desktop`——两者使用相同端口与 SQLite 数据目录。只想用浏览器开发时，跑 `npm run dev:web-stack`。
+> ⚠️ 不要同时运行 `npm run dev:web-stack` 和 `npm run dev:desktop`——两者使用相同端口与 SQLite 数据目录。只想用浏览器开发时，跑 `npm run dev:web-stack`。
 
 生产模式（构建后由本地服务器托管前端）：
 
@@ -251,7 +251,7 @@ npx tsx apps/server/src/index.ts data clear --sessions --messages --context
 - CLI 支持 `--scope global` 与 `--scope project`（自动探测 `CLAUDE_PROJECT_DIR`）。
 - 精确查看生效路径：`npx tsx apps/server/src/index.ts --data-dir /path/to/data path`
 - Windows 数据目录为 `%USERPROFILE%\.muiltchat`；卸载 Conflux 不会删除用户数据。
-- 下一版本仅使用 `CONFLUX_HOME` / `CONFLUX_HOST` / `CONFLUX_PORT`，旧 `MUILTCHAT_*` 变量不再读取。
+- v0.3.0 起仅使用 `CONFLUX_HOME` / `CONFLUX_HOST` / `CONFLUX_PORT`，旧 `MUILTCHAT_*` 变量不再读取。
 - 升级前将 CLI 改为 `conflux`，并将所有 `MUILTCHAT_*` 配置改为同后缀的 `CONFLUX_*`。已发布的 v0.2.0 不受影响。
 
 </details>
@@ -273,7 +273,7 @@ npm run package:desktop       # Windows NSIS 安装包
 - ✅ React + Vite + React Flow 工作空间、Fastify API、MCP + Hooks
 - ✅ Claude Code / Codex 存活探测、恢复继承、异步协作消息、自动唤醒
 - ✅ 版本化数据导入导出、旧目录迁移、稳定错误码与敏感信息扫描
-- ✅ 内部标识更名 Conflux，下一版本移除旧 CLI / env 名称；现有数据目录保留
+- ✅ 内部标识更名 Conflux，v0.3.0 起已移除旧 CLI / env 名称；现有数据目录保留
 - ✅ 主题系统（设计令牌 + 自定义主题导入）、数据管理（分类清除 + 自动备份）
 - ✅ 会话优先级 P0/P1/P2、能力检索 `search_sessions`、channel watch CLI、hooks 存量会话补录
 - ✅ GitHub Releases 自动更新链路；签名由发布环境 Secrets 按平台启用

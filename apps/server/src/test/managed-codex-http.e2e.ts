@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { openDb, stopWalCheckpoint, type DB } from "../core/db.js";
+import { appendManagedEvent } from "../core/managed-codex/store.js";
 import { createRuntimeAgent } from "../core/runtime-agents.js";
 import { stopRuntimeInstance } from "../core/runtime-instances.js";
 import { registerSession } from "../core/sessions.js";
@@ -119,11 +120,16 @@ test("managed status endpoint returns binding, runs and current execution; unkno
     });
     assert.equal(terminal.statusCode, 404, "non-managed instance ids stay 404");
 
+    appendManagedEvent(fx.db, { instanceId: fx.instanceId, type: "text", payload: { text: "replayed text" } });
     const events = await fx.app.inject({
       method: "GET",
       url: `/runtime-instances/${fx.instanceId}/managed/events`,
     });
     assert.equal(events.statusCode, 200);
+    const replay = events.json().events;
+    assert.ok(replay.length > 0);
+    assert.equal(typeof replay[0].payload, "object");
+    assert.equal("instance_id" in replay[0], false);
   } finally {
     await fx.dispose();
   }

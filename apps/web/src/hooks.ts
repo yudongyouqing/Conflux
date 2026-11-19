@@ -7,7 +7,7 @@ export type ManagedEvent = ManagedEventPayload;
 export function useGraph() {
   return useQuery({
     queryKey: ["graph"],
-    queryFn: () => api.getGraph("all"),
+    queryFn: ({ signal }) => api.getGraph("all", signal),
     refetchInterval: 5000,
   });
 }
@@ -72,7 +72,7 @@ export function useDaemonHealth() {
 export function useSessionContext(sessionId: string | null) {
   return useQuery({
     queryKey: ["context", sessionId],
-    queryFn: () => api.getContext({ session_id: sessionId!, limit: 20 }),
+    queryFn: ({ signal }) => api.getContext({ session_id: sessionId!, limit: 20 }, signal),
     enabled: !!sessionId,
     refetchInterval: 10000,
   });
@@ -231,19 +231,26 @@ export function useManagedEvents(instanceId: string | null, enabled = true) {
     enabled: !!instanceId && enabled,
     refetchInterval: enabled ? 2000 : false,
     queryFn: async ({ signal, client }) => {
-      const key = ["managed-events-cursor", instanceId] as const;
-      const cursor = (client.getQueryData(key) as number | undefined) ?? 0;
+      const prev = client.getQueryData<ManagedEvent[]>(["managed-events", instanceId]) ?? [];
+      const cursor = prev.reduce((max, event) => Math.max(max, event.sequence), 0);
       const res = await api.getManagedEvents(instanceId!, cursor, signal);
       const maxSeq = res.events.reduce((m, e) => Math.max(m, e.sequence), cursor);
       if (maxSeq !== cursor) {
-        client.setQueryData(key, maxSeq);
         // Fresh sequences = state changed (approval, terminal turn, death);
         // status must not wait out its slow fallback interval.
-        void client.invalidateQueries({ queryKey: ["managed-status", instanceId] });
+        const statusKey = ["managed-status", instanceId];
+        const status = client.getQueryState(statusKey);
+        const initialFetchPending = status?.fetchStatus === "fetching" && status.data === undefined;
+        const refresh = client.invalidateQueries({ queryKey: statusKey });
+        if (initialFetchPending) {
+          // Invalidating an initial fetch joins it rather than restarting it.
+          // Follow that snapshot with one read made after the new events.
+          void refresh.then(() => {
+            if (!signal.aborted) return client.invalidateQueries({ queryKey: statusKey });
+          });
+        }
       }
       // Merge with whatever the cache already holds (same key), newest last.
-      const prev =
-        (client.getQueryData(["managed-events", instanceId]) as ManagedEvent[] | undefined) ?? [];
       const seen = new Set(prev.map((e) => e.sequence));
       const merged = [...prev, ...res.events.filter((e) => !seen.has(e.sequence))];
       return merged.slice(-500);
@@ -289,10 +296,11 @@ export function useResolveManagedApproval() {
 
 // ---- terminal settings + open-in-terminal ----
 
-export function useTerminalSettings() {
+export function useTerminalSettings(enabled = true) {
   return useQuery({
     queryKey: ["terminal-settings"],
     queryFn: () => api.getTerminalSettings(),
+    enabled,
   });
 }
 

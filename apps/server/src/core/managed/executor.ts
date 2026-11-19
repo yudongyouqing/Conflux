@@ -3,8 +3,10 @@ import { randomUUID } from "node:crypto";
 import type { DB } from "../db.js";
 import { nowIso } from "../db.js";
 import { logger } from "../../log.js";
-import type { RuntimeAgent, RuntimeInstance } from "@conflux/shared";
-import { heartbeat, registerSession } from "../sessions.js";
+import type { RuntimeAgent, RuntimeInstance, ManagedRunState } from "@conflux/shared";
+import { heartbeat, registerSession, mergeSessionMeta } from "../sessions.js";
+import { getMessage } from "../messages.js";
+import { maybePushReply } from "../mail-push.js";
 import {
   createRuntimeInstance,
   failRuntimeInstance,
@@ -115,7 +117,7 @@ export class ManagedExecutor {
    *  uses the child's OWN exit confirmation (proc.exited) as the death
    *  witness — a kill request alone proves nothing while the process may
    *  still linger, and an external ps probe misreads unreaped zombies. */
-  private children = new Map<string, AppServerProcess>();
+  private children = new Map<string, Pick<AppServerProcess, "exited">>();
 
   constructor(
     protected db: DB,
@@ -264,7 +266,7 @@ export class ManagedExecutor {
       });
       router.live = live;
       this.instances.set(instanceId, live);
-      this.children.set(instanceId, proc);
+      this.children.set(instanceId, { exited: proc.exited });
       // The instance row carries the binding surface the control APIs read
       // (session identity for liveness; the pid for diagnostics). Process
       // identity verification is intrinsic here — this process spawned the
@@ -559,6 +561,9 @@ export class ManagedExecutor {
               `UPDATE managed_codex_runs SET instance_id = ?, updated_at = ? WHERE instance_id = ?`,
             )
             .run(newInstanceId, nowIso(), instanceId);
+          this.db.prepare(`UPDATE managed_codex_events SET instance_id = ? WHERE instance_id = ?`).run(newInstanceId, instanceId);
+          mergeSessionMeta(this.db, sessionId, { runtime_instance_id: newInstanceId, managed_thread_id: threadId });
+          heartbeat(this.db, sessionId);
           const oldRuns = this.db
             .prepare(
               `SELECT id FROM managed_codex_runs WHERE instance_id = ? AND state IN ('submitting','running','waiting_approval')`,
@@ -601,6 +606,8 @@ export class ManagedExecutor {
             replyText: replyTextFor("completed", historical.finalText, null),
           });
           if (moved) {
+            const message = getMessage(this.db, moved.message_id);
+            if (message) maybePushReply(this.db, message.from_session);
             reconciliation.push(`run ${run.id}: completed per history`);
           }
         } else if (historical.status === "failed" || historical.status === "interrupted") {
@@ -615,6 +622,8 @@ export class ManagedExecutor {
             replyText: replyTextFor(state, null, errorCode),
           });
           if (moved) {
+            const message = getMessage(this.db, moved.message_id);
+            if (message) maybePushReply(this.db, message.from_session);
             reconciliation.push(`run ${run.id}: ${state} per history`);
           }
         } else {
@@ -627,7 +636,8 @@ export class ManagedExecutor {
 
       router.live = live;
       this.instances.set(newInstanceId, live);
-      this.children.set(newInstanceId, proc);
+      this.children.delete(instanceId);
+      this.children.set(newInstanceId, { exited: proc.exited });
       void live.proc.exited.then(() => {
         if (this.instances.get(newInstanceId) === live) this.handleInstanceDeath(live);
       });
@@ -683,7 +693,7 @@ export class ManagedExecutor {
       this.forgotten.delete(instanceId);
       if (!this.instances.has(instanceId)) {
         this.instances.set(instanceId, live);
-        this.children.set(instanceId, live.proc);
+        this.children.set(instanceId, { exited: live.proc.exited });
       }
     }
   }
@@ -856,6 +866,8 @@ export class ManagedExecutor {
     // BEFORE the store flip so a refused decision never consumes the row.
     const existing = getApproval(this.db, approvalId);
     if (!existing) return { ok: false, status: 404, reason: "approval not found" };
+    const belongs = this.db.prepare(`SELECT 1 FROM managed_codex_runs WHERE id = ? AND instance_id = ?`).get(existing.run_id, instanceId);
+    if (!belongs) return { ok: false, status: 404, reason: "approval not found" };
     if (existing.state !== "pending") {
       return { ok: false, status: 409, reason: `approval already ${existing.state}` };
     }
@@ -898,9 +910,9 @@ export class ManagedExecutor {
   instanceStatus(instanceId: string): {
     live: boolean;
     threadId: string;
-    activeRun: { runId: number; turnId: string; state: string } | null;
+    activeRun: { runId: number; turnId: string; state: ManagedRunState } | null;
     queuedRunIds: number[];
-    pendingApprovals: Array<{ id: number; kind: string; payload: unknown }>;
+    pendingApprovals: Array<{ id: number; kind: string; payload: Record<string, unknown> }>;
   } | null {
     const live = this.instances.get(instanceId);
     if (!live) {
@@ -946,7 +958,7 @@ export class ManagedExecutor {
               (
                 this.db
                   .prepare(`SELECT state FROM managed_codex_runs WHERE id = ?`)
-                  .get(live.activeTurn.runId) as { state: string } | undefined
+                  .get(live.activeTurn.runId) as { state: ManagedRunState } | undefined
               )?.state ?? "running",
           }
         : null,
@@ -954,7 +966,7 @@ export class ManagedExecutor {
       pendingApprovals: pending.map((row) => ({
         id: row.id,
         kind: row.request_kind,
-        payload: JSON.parse(row.payload) as unknown,
+        payload: JSON.parse(row.payload) as Record<string, unknown>,
       })),
     };
   }
@@ -1053,6 +1065,8 @@ export class ManagedExecutor {
       logger.warn({ runId: active.runId, state }, "managed terminal transition refused");
       return;
     }
+    const message = getMessage(this.db, moved.message_id);
+    if (message) maybePushReply(this.db, message.from_session);
     live.activeTurn = null;
     // Drain the queue for the next task.
     void this.pump(live.instanceId).catch(() => {});

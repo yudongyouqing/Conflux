@@ -1,3 +1,4 @@
+import { resourceId } from "../context.js";
 import type { FastifyInstance } from "fastify";
 import {
   checkInbox,
@@ -41,7 +42,7 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
       // Phase 2 (external wake) runs strictly after the commit — a rollback
       // would erase the claim and a retry would launch the wake twice.
       const prepared = await write(() => {
-        const claimed = prepareRetryDelivery(db, Number(req.params.id), resolvedActor);
+        const claimed = prepareRetryDelivery(db, resourceId(req.params.id), resolvedActor);
         logAudit(db, {
           caller_session: resolvedActor,
           interface: "http",
@@ -128,7 +129,7 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
         // The reply write is retried as one transaction; typing the typed
         // push into the asker's terminal is external and runs after commit.
         const msg = await write(() => {
-          const replied = replyAsk(db, Number(req.params.id), sid, req.body.reply);
+          const replied = replyAsk(db, resourceId(req.params.id), sid, req.body.reply);
           audit(sid, "reply_ask", { id: req.params.id }, { message_id: replied.id });
           return replied;
         });
@@ -196,7 +197,7 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
     {},
     async (req, reply) => {
       try {
-        const edgeId = Number(req.params.id);
+        const edgeId = resourceId(req.params.id);
         const edge = getEdge(db, edgeId);
         if (!edge) return sendHttpError(reply, 404, "edge not found");
         return reply.send({
@@ -224,7 +225,7 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
     },
     async (req, reply) => {
       try {
-        const edgeId = Number(req.params.id);
+        const edgeId = resourceId(req.params.id);
         const edge = getEdge(db, edgeId);
         if (!edge) return sendHttpError(reply, 404, "edge not found");
         const from = edge.from_session;

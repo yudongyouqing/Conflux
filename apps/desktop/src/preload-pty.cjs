@@ -1,4 +1,4 @@
-// PTY IPC bridge: renderer ↔ main (#130)
+// PTY IPC bridge: renderer ↔ main
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("confluxPty", {

@@ -2,7 +2,7 @@ import type { DB } from "./db.js";
 import { askAndMaybeWake } from "./ask.js";
 
 /**
- * Synchronous ask (#102): deliver + wake, then WAIT in-turn for the reply.
+ * Synchronous ask: deliver + wake, then WAIT in-turn for the reply.
  * The asking AI gets the answer as the tool result of the same turn — real
  * conversation instead of "leave a note and check next turn". On timeout the
  * message stays delivered/pending; the asker falls back to the async layers

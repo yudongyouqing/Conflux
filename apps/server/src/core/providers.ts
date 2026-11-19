@@ -1,6 +1,11 @@
 import type { LanguageModel } from "ai" with { "resolution-mode": "import" };
 import type { ModelConfig } from "@conflux/shared";
 
+export interface ProviderOptions {
+  apiKey?: string;
+  baseURL?: string;
+}
+
 export interface ProviderEntry {
   /** Environment variable that unlocks this provider. */
   envVar: string;
@@ -9,7 +14,7 @@ export interface ProviderEntry {
    * Load the LanguageModel lazily — the @ai-sdk/* packages are ESM-only,
    * so they must be dynamically imported from our CommonJS build.
    */
-  loadModel: (modelId: string) => Promise<LanguageModel>;
+  loadModel: (modelId: string, options?: ProviderOptions) => Promise<LanguageModel>;
 }
 
 /**
@@ -21,17 +26,17 @@ export const providerRegistry: Record<string, ProviderEntry> = {
   anthropic: {
     envVar: "ANTHROPIC_API_KEY",
     hasKey: () => !!process.env.ANTHROPIC_API_KEY,
-    loadModel: async (id) => {
-      const { anthropic } = await import("@ai-sdk/anthropic");
-      return anthropic(id);
+    loadModel: async (id, options) => {
+      const { anthropic, createAnthropic } = await import("@ai-sdk/anthropic");
+      return (options ? createAnthropic(options) : anthropic)(id);
     },
   },
   openai: {
     envVar: "OPENAI_API_KEY",
     hasKey: () => !!process.env.OPENAI_API_KEY,
-    loadModel: async (id) => {
-      const { openai } = await import("@ai-sdk/openai");
-      return openai(id);
+    loadModel: async (id, options) => {
+      const { openai, createOpenAI } = await import("@ai-sdk/openai");
+      return (options ? createOpenAI(options) : openai)(id);
     },
   },
 };

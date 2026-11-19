@@ -55,7 +55,9 @@ function dependencyClosure(entries, root) {
     const key = pkgDir.toLowerCase();
     if (seen.has(key)) return;
     seen.add(key);
-    const rel = path.relative(root, pkgDir).split("\\").join("/");
+    const modulesRoot = fs.realpathSync(path.join(root, "node_modules"));
+    const moduleRelative = path.relative(modulesRoot, fs.realpathSync(pkgDir));
+    const rel = path.join("node_modules", moduleRelative).split("\\").join("/");
     const parts = rel.split("/");
     if (parts[0] !== "node_modules") {
       throw new Error(`${name} resolves outside the root node_modules (${rel}); the builder pattern cannot cover it`);

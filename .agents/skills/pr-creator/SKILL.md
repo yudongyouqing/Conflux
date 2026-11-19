@@ -15,20 +15,20 @@ repository's standards.
 Follow these steps to create a Pull Request:
 
 1.  **Branch Management**: **CRITICAL:** Ensure you are NOT working on the
-    `main` branch.
+    `main` or `dev` branch.
     - Run `git branch --show-current`.
-    - If the current branch is `main`, you MUST create and switch to a new
+    - If the current branch is `main` or `dev`, you MUST create and switch to a new
       descriptive branch:
       ```bash
-      git checkout -b <new-branch-name>
+      git checkout -b <type>/<issue>-<slug> origin/dev
       ```
 
 2.  **Commit Changes**: Verify that all intended changes are committed.
     - Run `git status` to check for unstaged or uncommitted changes.
     - If there are uncommitted changes, stage and commit them with a descriptive
-      message before proceeding. NEVER commit directly to `main`.
+      message before proceeding. NEVER commit directly to `main` or `dev`.
       ```bash
-      git add .
+      git add <intended-files>
       git commit -m "type(scope): description"
       ```
 
@@ -38,6 +38,8 @@ Follow these steps to create a Pull Request:
     - If multiple templates exist (e.g., in `.github/PULL_REQUEST_TEMPLATE/`),
       ask the user which one to use or select the most appropriate one based on
       the context (e.g., `bug_fix.md` vs `feature.md`).
+
+    - If no template exists, follow the PR requirements in `CONTRIBUTING.md`.
 
 4.  **Read Template**: Read the content of the identified template file.
 
@@ -56,13 +58,15 @@ Follow these steps to create a Pull Request:
 6.  **Preflight Check**: Before creating the PR, run the workspace preflight
     script to ensure all build, lint, and test checks pass.
     ```bash
-    npm run preflight
+    npm run ci:test && npm run build && npm run check:secrets
     ```
     If any checks fail, address the issues before proceeding to create the PR.
 
-7.  **Push Branch**: Push the current branch to the remote repository.
+7.  **Push Branch**: Announce the exact branch and commits in the conversation
+    before pushing. Respect any permission denial; do not retry through another
+    tool or vehicle. Then push the current branch to the remote repository.
     **CRITICAL SAFETY RAIL:** Double-check your branch name before pushing.
-    NEVER push if the current branch is `main`.
+    NEVER push if the current branch is `main` or `dev`.
     ```bash
     # Verify current branch is NOT main
     git branch --show-current
@@ -76,7 +80,7 @@ Follow these steps to create a Pull Request:
     ```bash
     # 1. Write the drafted description to a temporary file
     # 2. Create the PR using the --body-file flag
-    gh pr create --title "type(scope): succinct description" --body-file <temp_file_path>
+    gh pr create --base dev --title "type(scope): succinct description" --body-file <temp_file_path>
     # 3. Remove the temporary file
     rm <temp_file_path>
     ```
@@ -87,7 +91,7 @@ Follow these steps to create a Pull Request:
 
 ## Principles
 
-- **Safety First**: NEVER push to `main`. This is your highest priority.
+- **Safety First**: NEVER push to `main` or `dev`. This is your highest priority.
 - **Compliance**: Never ignore the PR template. It exists for a reason.
 - **Completeness**: Fill out all relevant sections.
 - **Accuracy**: Don't check boxes for tasks you haven't done.

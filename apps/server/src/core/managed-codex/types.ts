@@ -11,15 +11,8 @@
  * interrupted. `unknown` marks the crash window where a turn may or may not
  * have been started — it requires explicit reconciliation, never replay.
  */
-export type ManagedRunState =
-  | "queued"
-  | "submitting"
-  | "running"
-  | "waiting_approval"
-  | "completed"
-  | "failed"
-  | "interrupted"
-  | "unknown";
+import type { ManagedRunState } from "@conflux/shared";
+export type { ManagedRunState } from "@conflux/shared";
 
 export const MANAGED_RUN_TERMINAL_STATES: readonly ManagedRunState[] = [
   "completed",
@@ -45,7 +38,7 @@ export interface ManagedTaskInput {
 export interface ManagedCodexEvent {
   sequence: number;
   instanceId: string;
-  runId: string | null;
+  runId: number | null;
   threadId: string | null;
   turnId: string | null;
   type: "text" | "tool" | "approval" | "status" | "error";

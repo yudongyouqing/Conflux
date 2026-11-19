@@ -71,6 +71,7 @@ export interface Session {
   runtime: SessionRuntime | null;
   identity_source: IdentitySource | null;
   runtime_pid: number | null;
+  chat_room_id?: number | null;
   /** Derived from metadata.priority; P1 when unset. */
   priority?: SessionPriority;
 }
@@ -153,7 +154,7 @@ export interface ManagedStatusResponse {
      *  live control (interrupt/approvals) is not. */
     live: boolean;
     threadId: string;
-    activeRun: { runId: number; turnId: string; state: string } | null;
+    activeRun: { runId: number; turnId: string; state: ManagedRunState } | null;
     queuedRunIds: number[];
     pendingApprovals: ManagedApprovalView[];
   };
@@ -259,7 +260,7 @@ export interface GraphNode {
   busy?: boolean;
   /** Agent Card: capability self-description (register_session skills). */
   skills?: string[];
-  /** Owning chat room (#137); null = free-floating */
+  /** Owning chat room; null = free-floating */
   chat_room_id?: number | null;
   /** Ask priority (metadata.priority; P1 default). */
   priority?: SessionPriority;
@@ -299,9 +300,9 @@ export interface Message {
   status: MessageStatus;
   created_at: string;
   replied_at: string | null;
-  /** When the asker's CLI was last pushed this reply via hooks (#102). */
+  /** When the asker's CLI was last pushed this reply via hooks. */
   reply_seen_at?: string | null;
-  /** Chat room shared thread (#152). */
+  /** Chat room shared thread. */
   room_id?: number | null;
 }
 
@@ -359,15 +360,17 @@ export const WEB_CONSOLE_NAME = "Web 控制台";
  */
 export const HOOK_SESSION_DESCRIPTION = "Claude Code session (hook)";
 export const AUTO_REGISTERED_DESCRIPTION = "Claude Code session (auto-registered)";
+export const CODEX_AUTO_REGISTERED_DESCRIPTION = "Codex session (auto-registered)";
 export const WEB_CONSOLE_DESCRIPTION = "浏览器界面身份(从会话详情抽屉发起的对话)";
 
 export const PLACEHOLDER_DESCRIPTIONS = [
   HOOK_SESSION_DESCRIPTION,
   AUTO_REGISTERED_DESCRIPTION,
+  CODEX_AUTO_REGISTERED_DESCRIPTION,
   WEB_CONSOLE_DESCRIPTION,
 ] as const;
 
-// ---- Chat Rooms (#137): structured collaboration workflows ----
+// ---- Chat Rooms: structured collaboration workflows ----
 
 export interface TopologyStep {
   from: string;

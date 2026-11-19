@@ -248,7 +248,7 @@ git commit -m "feat: add versioned data import and export"
 test("flags credential-shaped values but allows documented variable names", () => {
   assert.deepEqual(scanText("OPENAI_API_KEY=your-key-here"), []);
   assert.match(
-    scanText("OPENAI_API_KEY=sk-live-12345678901234567890")[0],
+    scanText("OPENAI_API_KEY=" + "sk-" + "live-12345678901234567890")[0],
     /credential/
   );
 });

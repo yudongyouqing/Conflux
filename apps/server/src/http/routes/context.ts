@@ -1,3 +1,4 @@
+import { resourceId } from "../context.js";
 import type { FastifyInstance } from "fastify";
 import { publishContext, updateContext, deleteContext, listMyContext } from "../../core/context.js";
 import { queryContext } from "../../core/search.js";
@@ -118,7 +119,7 @@ export function registerContextRoutes(app: FastifyInstance, ctx: ServerContext):
       const sid = requireSession(req);
       try {
         const entry = await write(() => {
-          const updated = updateContext(db, Number(req.params.id), sid, {
+          const updated = updateContext(db, resourceId(req.params.id), sid, {
             title: req.body.title,
             content: req.body.content,
             tags: req.body.tags,
@@ -139,7 +140,7 @@ export function registerContextRoutes(app: FastifyInstance, ctx: ServerContext):
     const sid = requireSession(req);
     try {
       const ok = await write(() => {
-        const deleted = deleteContext(db, Number(req.params.id), sid);
+        const deleted = deleteContext(db, resourceId(req.params.id), sid);
         audit(sid, "delete_context", { id: req.params.id }, { ok: deleted });
         return deleted;
       });

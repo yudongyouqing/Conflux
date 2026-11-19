@@ -2,11 +2,11 @@
 
 Conflux 以兼容方式接收旧版 `muiltchat` 数据。普通启动不会删除、移动或覆盖旧数据；迁移必须显式执行。
 
-## 下一版本配置变更 / Next-release configuration change
+## v0.3.0 配置变更 / Configuration changes since v0.3.0
 
-已发布的 v0.2.0 仍支持旧名称；本分支为下一版本移除它们。升级前将任何 `MUILTCHAT_` 前缀替换为 `CONFLUX_`，包括 `HOME`、`HOST`、`PORT`、`LOG_FILE`、`LOG_LEVEL`、`WEB_DIST`、`SESSION_ID`、`AGENT_ID`、`AGENT_RUNTIME`、`ASSUME_SESSION`、`CLAUDE_PID`、`CODEX_PID`。旧变量将被忽略；若原先用 `MUILTCHAT_HOME` 指定自定义数据目录，务必先设置相同值的 `CONFLUX_HOME`。安装或重新链接新版本后，请更新 shell alias、服务配置和 MCP 宿主环境并重启宿主。
+v0.2.0 支持旧名称；v0.3.0 起已移除它们。升级前将任何 `MUILTCHAT_` 前缀替换为 `CONFLUX_`，包括 `HOME`、`HOST`、`PORT`、`LOG_FILE`、`LOG_LEVEL`、`WEB_DIST`、`SESSION_ID`、`AGENT_ID`、`AGENT_RUNTIME`、`ASSUME_SESSION`、`CLAUDE_PID`、`CODEX_PID`。旧变量将被忽略；若原先用 `MUILTCHAT_HOME` 指定自定义数据目录，务必先设置相同值的 `CONFLUX_HOME`。安装或重新链接新版本后，请更新 shell alias、服务配置和 MCP 宿主环境并重启宿主。
 
-The published v0.2.0 still accepts legacy names; the next release removes them. Replace every `MUILTCHAT_` prefix with `CONFLUX_`, including logging, web resource, session, Agent and PID settings. Old variables are ignored. If you used `MUILTCHAT_HOME` for a custom data directory, set `CONFLUX_HOME` to that same path before upgrading. Update shell aliases and service/MCP environments and restart the host after reinstalling or relinking the package.
+Version v0.2.0 accepts legacy names; v0.3.0 and later remove them. Replace every `MUILTCHAT_` prefix with `CONFLUX_`, including logging, web resource, session, Agent and PID settings. Old variables are ignored. If you used `MUILTCHAT_HOME` for a custom data directory, set `CONFLUX_HOME` to that same path before upgrading. Update shell aliases and service/MCP environments and restart the host after reinstalling or relinking the package.
 
 ## 中文
 
@@ -14,11 +14,11 @@ The published v0.2.0 still accepts legacy names; the next release removes them. 
 
 | 旧配置 | 新推荐配置 | 行为 |
 | --- | --- | --- |
-| CLI `muiltchat` | CLI `conflux` | 下一版本不再提供旧入口，请改用 `conflux`。 |
+| CLI `muiltchat` | CLI `conflux` | v0.3.0 起不再提供旧入口，请改用 `conflux`。 |
 | MCP key `muiltchat` | MCP key `conflux` | 旧 key 可以继续使用，但同一 `.mcp.json` 只保留一个 key。 |
-| `MUILTCHAT_HOME` / `MUILTCHAT_HOST` / `MUILTCHAT_PORT` | `CONFLUX_HOME` / `CONFLUX_HOST` / `CONFLUX_PORT` | 下一版本不再读取旧变量，请改用 `CONFLUX_*`。 |
+| `MUILTCHAT_HOME` / `MUILTCHAT_HOST` / `MUILTCHAT_PORT` | `CONFLUX_HOME` / `CONFLUX_HOST` / `CONFLUX_PORT` | v0.3.0 起不再读取旧变量，请改用 `CONFLUX_*`。 |
 | `~/.muiltchat` | 显式目标目录 | 默认仍读取旧目录，不会自动创建 `~/.conflux`。 |
-| npm package `muiltchat` / `@muiltchat/shared` | `conflux` / `@conflux/shared` | 内部 package 已更名；下一版本移除旧 CLI bin 和环境变量。 |
+| npm package `muiltchat` / `@muiltchat/shared` | `conflux` / `@conflux/shared` | 内部 package 已更名；v0.3.0 起已移除旧 CLI bin 和环境变量。 |
 
 目录解析优先级为：CLI `--data-dir`、`CONFLUX_HOME`、已有项目目录 `.muiltchat`，最后是全局 `~/.muiltchat`。
 
@@ -79,11 +79,11 @@ Conflux reads legacy `muiltchat` data without destructive changes. A normal star
 
 | Legacy | Recommended | Behavior |
 | --- | --- | --- |
-| CLI `muiltchat` | CLI `conflux` | The next release no longer provides the legacy bin; use `conflux`. |
+| CLI `muiltchat` | CLI `conflux` | Since v0.3.0, Conflux no longer provides the legacy bin; use `conflux`. |
 | MCP key `muiltchat` | MCP key `conflux` | Keep exactly one key in a project `.mcp.json`. |
-| `MUILTCHAT_HOME` / `MUILTCHAT_HOST` / `MUILTCHAT_PORT` | `CONFLUX_HOME` / `CONFLUX_HOST` / `CONFLUX_PORT` | The next release no longer reads legacy variables; use `CONFLUX_*`. |
+| `MUILTCHAT_HOME` / `MUILTCHAT_HOST` / `MUILTCHAT_PORT` | `CONFLUX_HOME` / `CONFLUX_HOST` / `CONFLUX_PORT` | Since v0.3.0, Conflux no longer reads legacy variables; use `CONFLUX_*`. |
 | `~/.muiltchat` | An explicit destination | The legacy default remains active; `~/.conflux` is not created automatically. |
-| npm package `muiltchat` / `@muiltchat/shared` | `conflux` / `@conflux/shared` | Internal packages are renamed; the next release removes the legacy CLI bin and environment variables. |
+| npm package `muiltchat` / `@muiltchat/shared` | `conflux` / `@conflux/shared` | Internal packages are renamed; v0.3.0 removed the legacy CLI bin and environment variables. |
 
 The data-directory precedence is `--data-dir`, `CONFLUX_HOME`, an existing project `.muiltchat`, and finally `~/.muiltchat`.
 

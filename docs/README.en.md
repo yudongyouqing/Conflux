@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="../docs/assets/conflux-readme-banner.png" alt="Conflux — AI coding sessions converging into one workspace" width="100%">
+  <img src="assets/conflux-readme-banner.png" alt="Conflux — AI coding sessions converging into one workspace" width="100%">
 </div>
 
 <div align="center">
@@ -8,9 +8,9 @@
   <p>A local-first desktop workspace for connecting AI coding sessions, agents, messages, and shared context</p>
   <p><a href="../README.md">简体中文</a> ｜ English</p>
   <p><b>Local-first · Session graph · Async messaging · MCP/HTTP/CLI, one core · macOS/Windows/Linux</b></p>
-  <p><a href="#screenshots">Screenshots</a> · <a href="#not-a-chat-shell-a-graph-of-sessions">Why</a> · <a href="#-quick-start">Quick start</a> · <a href="#-architecture">Architecture</a> · <a href="#-claude-code-integration">Claude Code</a> · <a href="#-data-and-configuration">Data</a> · <a href="#-roadmap">Roadmap</a></p>
+  <p><a href="#screenshots">Screenshots</a> · <a href="#not-a-chat-shell--a-graph-of-sessions">Why</a> · <a href="#-quick-start">Quick start</a> · <a href="#-architecture">Architecture</a> · <a href="#-claude-code-integration">Claude Code</a> · <a href="#-data-and-configuration">Data</a> · <a href="#-roadmap">Roadmap</a></p>
   <p>
-    <img src="https://img.shields.io/badge/Electron-37-47848F?logo=electron&logoColor=white" alt="Electron">
+    <img src="https://img.shields.io/badge/Electron-45-47848F?logo=electron&logoColor=white" alt="Electron">
     <img src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=white" alt="React">
     <img src="https://img.shields.io/badge/Node.js-%3E%3D22-339933?logo=nodedotjs&logoColor=white" alt="Node.js">
     <a href="../LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
@@ -28,7 +28,7 @@ AI coding assistants usually run as isolated processes, which makes simple quest
 
 **Conflux connects those sessions into a graph**: publish knowledge, ask across sessions, receive replies asynchronously, auto-wake offline peers — with no external database, message broker, or hosted control plane. Data stays in a local SQLite database by default.
 
-The public project name, CLI entry, and npm package names are all `Conflux` (`conflux` / `@conflux/shared`). The next release removes the `muiltchat` CLI entry and `MUILTCHAT_*` environment variables. Existing data directories remain supported. See [migration guidance](MIGRATION.md).
+The public project name, CLI entry, and npm package names are all `Conflux` (`conflux` / `@conflux/shared`). Since v0.3.0, the `muiltchat` CLI entry and `MUILTCHAT_*` environment variables have been removed. Existing data directories remain supported. See [migration guidance](MIGRATION.md).
 
 ## Screenshots
 
@@ -90,7 +90,7 @@ Development endpoints:
 | API server   | <http://127.0.0.1:9527>      |
 | OpenAPI docs | <http://127.0.0.1:9527/docs> |
 
-> ⚠️ Do not run `npm run dev:all` and `npm run dev:desktop` at the same time — both use the same ports and SQLite data directory. For a browser-only dev stack run `npm run dev:web-stack`.
+> ⚠️ Do not run `npm run dev:web-stack` and `npm run dev:desktop` at the same time — both use the same ports and SQLite data directory. For a browser-only dev stack run `npm run dev:web-stack`.
 
 Production mode (builds everything, then serves the frontend locally):
 
@@ -217,7 +217,7 @@ Every 30 seconds, alongside the MCP heartbeat and liveness probe, the server sca
 
 ## 🤖 Agents
 
-**Internal agents** are model-backed agents stored in the local database: configure a name, system prompt, provider, and model from the Agents tab, then chat directly. They require `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`; `GET /settings` reports which providers are configured.
+**Internal agents** are model-backed agents stored in the local database: configure a name, system prompt, provider, and model from the Assistants page, then chat directly. They require `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`; `GET /settings` reports which providers are configured.
 
 **Runtime agents** are presets for launching real CLI coding assistants: runtime (Claude Code / Codex), working directory, model, API base URL and key, extra environment variables, startup instructions, heartbeat and scheduled-run intervals. The workspace can launch them in a new terminal window; scheduled presets can also run headlessly in the background. The launcher removes session-scoped environment variables and falls back through platform-specific terminal chains when the preferred one is unavailable.
 
@@ -252,7 +252,7 @@ npx tsx apps/server/src/index.ts data clear --sessions --messages --context
 - The CLI supports `--scope global` and `--scope project` (auto-detected via `CLAUDE_PROJECT_DIR`).
 - Print the effective path: `npx tsx apps/server/src/index.ts --data-dir /path/to/data path`
 - On Windows the data directory is `%USERPROFILE%\.muiltchat`; uninstalling Conflux does not delete user data.
-- The next release reads only `CONFLUX_*` variables. Rename every `MUILTCHAT_*` setting to its `CONFLUX_*` equivalent before upgrading; the already published v0.2.0 is unchanged.
+- Since v0.3.0, Conflux reads only `CONFLUX_*` variables. Rename every `MUILTCHAT_*` setting to its `CONFLUX_*` equivalent before upgrading; the already published v0.2.0 is unchanged.
 
 </details>
 

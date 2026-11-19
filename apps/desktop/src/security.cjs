@@ -66,7 +66,24 @@ function productionCsp(appOrigin) {
   ].join("; ");
 }
 
+function installProductionCsp(session, appOrigin) {
+  const csp = productionCsp(appOrigin);
+  session.webRequest.onHeadersReceived((details, callback) => {
+    if (!isAllowedNavigation(details.url, appOrigin) || !["mainFrame", "subFrame"].includes(details.resourceType)) {
+      callback({});
+      return;
+    }
+    const responseHeaders = { ...details.responseHeaders };
+    for (const name of Object.keys(responseHeaders)) {
+      if (name.toLowerCase() === "content-security-policy") delete responseHeaders[name];
+    }
+    responseHeaders["Content-Security-Policy"] = [csp];
+    callback({ responseHeaders });
+  });
+}
+
 module.exports = {
+  installProductionCsp,
   isAllowedNavigation,
   externalLinkDecision,
   productionCsp,

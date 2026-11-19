@@ -27,6 +27,7 @@ export default defineConfig({
       "/agents": API_TARGET,
       "/conversations": API_TARGET,
       "/settings": API_TARGET,
+      "/data": API_TARGET,
       "/audit": API_TARGET,
       "/healthz": API_TARGET,
       "/docs": API_TARGET,

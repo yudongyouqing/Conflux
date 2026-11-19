@@ -22,6 +22,7 @@ test("uses pipe-safe stdio for Electron child processes", () => {
     stdio: ["ignore", "pipe", "pipe"],
     shell: process.platform === "win32",
     windowsHide: true,
+    detached: process.platform !== "win32",
   });
 });
 
@@ -192,7 +193,7 @@ test("stopChild sends SIGTERM once on non-Windows", () => {
     kill: (signal) => signals.push(signal),
   };
 
-  stopChild(child, { platform: "linux", spawnFn: () => assert.fail("must not spawn") });
+  stopChild(child, { platform: "linux", killFn: (_pid, signal) => signals.push(signal), spawnFn: () => assert.fail("must not spawn") });
   stopChild(child, { platform: "linux", spawnFn: () => assert.fail("must not spawn") });
 
   assert.deepEqual(signals, ["SIGTERM"]);
@@ -324,4 +325,63 @@ test("runtime health failure is reported once and recovery does not fail the app
   servicesReady = false;
   isQuitting = false;
   assert.equal(guard.handleHealthState({ name: "web", state: "unhealthy" }), false);
+});
+
+
+test("waitForHttp retries HTTP errors until a healthy response arrives", async () => {
+  let calls = 0;
+  const server = http.createServer((_req, res) => {
+    res.writeHead(++calls < 3 ? 503 : 200);
+    res.end();
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  try {
+    await waitForHttp(`http://127.0.0.1:${server.address().port}/`, { timeoutMs: 500, intervalMs: 5 });
+    assert.equal(calls, 3);
+  } finally { server.closeAllConnections(); await new Promise((r) => server.close(r)); }
+});
+
+test("waitForHttp times out even when a connected server never sends headers", async () => {
+  const server = http.createServer(() => {});
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const controller = new AbortController();
+  const guard = setTimeout(() => controller.abort(), 300);
+  try {
+    await assert.rejects(waitForHttp(`http://127.0.0.1:${server.address().port}/`, { timeoutMs: 40, signal: controller.signal }), /Timed out waiting/);
+  } finally { clearTimeout(guard); server.closeAllConnections(); await new Promise((r) => server.close(r)); }
+});
+
+
+test("POSIX shutdown waits for exit instead of returning after SIGTERM", async () => {
+  const child = new EventEmitter();
+  child.pid = 1234; child.exitCode = null;
+  child.kill = () => true;
+  let settled = false;
+  const stopping = stopChild(child, { platform: "linux", killFn: (_pid, signal) => { if (signal === 0 && child.exitCode !== null) throw Object.assign(new Error("gone"), { code: "ESRCH" }); return true; } }).then(() => { settled = true; });
+  await new Promise(r => setImmediate(r));
+  assert.equal(settled, false);
+  child.exitCode = 0; child.emit("exit", 0); await stopping;
+  assert.equal(settled, true);
+});
+
+test("POSIX shutdown terminates an owned process group and escalates on timeout", async () => {
+  const child = new EventEmitter();
+  child.pid = 1235; child.exitCode = null;
+  child.kill = () => assert.fail("must stop the detached process group");
+  const signals = [];
+  await stopChild(child, { platform: "linux", timeoutMs: 10, killFn: (pid, signal) => { signals.push([pid, signal]); } });
+  assert.deepEqual(signals, [[-1235, "SIGTERM"], [-1235, "SIGKILL"]]);
+});
+
+
+test("POSIX shutdown keeps waiting for descendants after the shell exits", async () => {
+  const child = new EventEmitter(); child.pid = 1236; child.exitCode = null;
+  let alive = true; let settled = false;
+  const stopping = stopChild(child, { platform: "linux", timeoutMs: 500, killFn: (_pid, signal) => {
+    if (signal === 0 && !alive) throw Object.assign(new Error("gone"), { code: "ESRCH" });
+  } }).then(() => { settled = true; });
+  child.exitCode = 0; child.emit("exit", 0);
+  await new Promise(r => setImmediate(r));
+  assert.equal(settled, false);
+  alive = false; await stopping;
 });

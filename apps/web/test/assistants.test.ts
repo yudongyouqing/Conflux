@@ -218,7 +218,7 @@ function mountAssistants(state: AssistantsState) {
     },
   );
   const client = new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+    defaultOptions: { queries: { retry: false, gcTime: Infinity }, mutations: { gcTime: Infinity } },
   });
   liveClients.push(client);
   const view = render(
@@ -272,6 +272,21 @@ test("creating from the current category skips the chooser and locates the new p
   assert.equal((created.body as { name: string }).name, "新编码助手");
   // the new preset is located (card expanded with its instance section)
   await waitFor(() => assert.match(view.container.textContent ?? "", /还没有运行实例/));
+});
+
+test("runtime environment preview matches injected variables and masks secret values literally", async () => {
+  const view = mountAssistants({ presets: [], agents: [], instances: [], nodes: [], calls: [] });
+  fireEvent.click(await view.findByRole("button", { name: "创建编码助手" }));
+  const dialog = await view.findByRole("dialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: /高级选项/ }));
+  const secret = "sk-[regex.*]full-secret";
+  fireEvent.change(within(dialog).getByPlaceholderText("sk-..."), { target: { value: secret } });
+  fireEvent.change(within(dialog).getByPlaceholderText("claude-sonnet-4 / gpt-5-codex"), { target: { value: "fixture-model" } });
+  const preview = dialog.querySelector("pre")!.textContent ?? "";
+  assert.match(preview, /ANTHROPIC_AUTH_TOKEN=/);
+  assert.match(preview, /ANTHROPIC_MODEL=fixture-model/);
+  assert.doesNotMatch(preview, /ANTHROPIC_API_KEY|ANTHROPIC_DEFAULT_/);
+  assert.ok(!preview.includes(secret));
 });
 
 test("model creation lands in the model chat; the list marks separate conversations", async () => {
@@ -396,7 +411,7 @@ function withPtyFake(fake: {
 }
 
 function mountPty(active: boolean) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity }, mutations: { gcTime: Infinity } } });
   liveClients.push(client);
   const view = render(
     createElement(
@@ -452,7 +467,8 @@ test("hiding the PTY between isAlive and onOutput cancels init too", async () =>
     },
   });
   try {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity }, mutations: { gcTime: Infinity } } });
+    liveClients.push(client);
     const view = render(
       createElement(
         QueryClientProvider,
@@ -548,7 +564,8 @@ test("a controlled instances panel does not start its own query", async () => {
     can_resume: false,
     limitation: null,
   };
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity }, mutations: { gcTime: Infinity } } });
+  liveClients.push(client);
   render(
     createElement(
       QueryClientProvider,

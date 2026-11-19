@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 /**
- * Subscribe to the wake-log SSE stream for one session (#102 live view).
+ * Subscribe to the wake-log SSE stream for one session.
  * Returns the accumulated raw output (the woken agent's stdout) and a live
  * flag. Closes on unmount or sessionId change.
  */
@@ -20,13 +20,15 @@ export function useWakeStream(sessionId: string | null) {
     setLive(false);
     const es = new EventSource(`/wake/${encodeURIComponent(sessionId)}/stream`);
     esRef.current = es;
-    es.addEventListener("start", () => setLive(true));
+    es.addEventListener("start", () => { setText(""); setLive(false); });
     es.addEventListener("pending", () => setLive(false));
+    es.addEventListener("ended", () => setLive(false));
     es.addEventListener("chunk", (ev) => {
-      setLive(true);
       try {
-        const chunk = JSON.parse((ev as MessageEvent).data) as string;
-        setText((prev) => prev + chunk);
+        const chunk: unknown = JSON.parse((ev as MessageEvent).data);
+        if (typeof chunk !== "string") return;
+        setLive(!/\[wake ended [^\]]+\]\s*$/.test(chunk));
+        setText((prev) => (prev + chunk).slice(-256 * 1024));
       } catch {
         // malformed chunk — ignore
       }

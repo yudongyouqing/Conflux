@@ -140,7 +140,7 @@ function safePublicMessage(value: string, fallback: string): string {
   return message;
 }
 
-const SCHEMA_VERSION = 15; // Managed Codex executor: mode column + run/event/approval tables.
+const SCHEMA_VERSION = 16; // Add lookup indexes for channels, rooms and managed execution.
 
 // Keep checkpoint timers tied to their database handles. A process can open
 // more than one temporary database during tests and interface operations.
@@ -159,7 +159,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   metadata TEXT,
   runtime TEXT,
   identity_source TEXT,
-  runtime_pid INTEGER
+  runtime_pid INTEGER,
+  chat_room_id INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
@@ -207,6 +208,9 @@ CREATE TABLE IF NOT EXISTS messages (
   status TEXT NOT NULL DEFAULT 'pending',
   created_at TEXT NOT NULL,
   replied_at TEXT,
+  edge_id INTEGER,
+  reply_seen_at TEXT,
+  room_id INTEGER,
   FOREIGN KEY (from_session) REFERENCES sessions(id) ON DELETE CASCADE,
   FOREIGN KEY (to_session) REFERENCES sessions(id) ON DELETE CASCADE
 );
@@ -250,7 +254,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_instances_resume ON runtime_instan
 
 -- Graph edges: directed, formed dynamically from communication history.
 -- Each ask_session / reply_ask upserts a row (weight + 1).
--- Agent orchestration tasks (#152): each row is one agent execution
+-- Agent orchestration tasks: each row is one agent execution
 -- within a room. The room tracks expected vs received; when all done,
 -- the initiator is summoned to read results.
 CREATE TABLE IF NOT EXISTS room_tasks (
@@ -266,7 +270,7 @@ CREATE TABLE IF NOT EXISTS room_tasks (
   completed_at TEXT
 );
 
--- Structured collaboration rooms (#137): fixed topology workflows.
+-- Structured collaboration rooms: fixed topology workflows.
 -- topology JSON: [{from:"<sessionId>", to:"<sessionId>", order:1}, ...]
 CREATE TABLE IF NOT EXISTS chat_rooms (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -338,6 +342,9 @@ CREATE TABLE IF NOT EXISTS runtime_agents (
   api_key TEXT,
   extra_env TEXT,
   instructions TEXT,
+  interval_min INTEGER,
+  last_scheduled_run TEXT,
+  execution_mode TEXT NOT NULL DEFAULT 'terminal',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -504,14 +511,23 @@ function migrate(db: DB): void {
     // v8: edge-centric channels — messages link to their channel edge, and
     // reply-created reverse edges are collapsed (replies stay on the channel)
     ensureColumn("messages", "edge_id", "edge_id INTEGER");
-    // v10: asker-side reply push (#102) — a reply surfaced to the asker's
+    // v10: asker-side reply push — a reply surfaced to the asker's
     // CLI via the hook channel is marked seen so it never repeats
     ensureColumn("messages", "reply_seen_at", "reply_seen_at TEXT");
-    // v11: chat rooms — a session belongs to at most one room (#137)
+    // v11: chat rooms — a session belongs to at most one room
     ensureColumn("sessions", "chat_room_id", "chat_room_id INTEGER");
-    // v12: room shared thread + orchestration (#152)
+    // v12: room shared thread + orchestration
     ensureColumn("messages", "room_id", "room_id INTEGER");
-    // v13: one-shot task token to fix split-brain (#151)
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_sessions_room ON sessions(chat_room_id);
+      CREATE INDEX IF NOT EXISTS idx_messages_edge ON messages(edge_id, id);
+      CREATE INDEX IF NOT EXISTS idx_messages_room ON messages(room_id, id);
+      CREATE INDEX IF NOT EXISTS idx_messages_pair ON messages(from_session, to_session, id);
+      CREATE INDEX IF NOT EXISTS idx_room_tasks_scope ON room_tasks(room_id, initiator_session_id, status);
+      CREATE INDEX IF NOT EXISTS idx_managed_bindings_session ON managed_codex_bindings(session_id);
+      CREATE INDEX IF NOT EXISTS idx_managed_approvals_run ON managed_codex_approvals(run_id, state);
+    `);
+    // v13: one-shot task token to fix split-brain
     ensureColumn("room_tasks", "task_token", "task_token TEXT");
     // backfill task_token for existing rows with random tokens
     db.exec(`

@@ -127,6 +127,7 @@ async function startProductionService(paths, options = {}) {
     env: spec.env,
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
+    detached: process.platform !== "win32",
   });
 
   try {

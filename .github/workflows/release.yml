@@ -62,14 +62,20 @@ jobs:
       - name: Scan source for credentials
         run: npm run check:secrets
 
-      - name: Build shared package
-        run: npm run build -w packages/shared
+      - name: Build application resources
+        run: npm run build
 
       - name: Run server tests
         run: npm test -w apps/server
 
-      - name: Build application resources
-        run: npm run build
+      - name: Run web tests
+        run: npm test -w apps/web
+
+      - name: Run process E2E tests
+        run: npm run test:process-e2e -w apps/server
+
+      - name: Check lint and design tokens
+        run: npm run lint && npm run check:tokens
 
       - name: Run desktop module tests
         run: npm run test:desktop

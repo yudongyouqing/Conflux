@@ -14,7 +14,7 @@ import { realTmuxIO, tmuxSessionName, type TmuxIO } from "./wake/tmux-inject.js"
 export type { TmuxIO };
 
 /**
- * Typed mail delivery (#162): push undelivered mail straight into the
+ * Typed mail delivery: push undelivered mail straight into the
  * target's terminal as a REAL prompt (badge-prefixed, single line) instead
  * of waiting for the next UserPromptSubmit hook. Prompt-level visibility is
  * only reachable by typing — this is the one channel Claude Code renders

@@ -1,3 +1,4 @@
+import { resourceId } from "../context.js";
 import type { FastifyInstance } from "fastify";
 import {
   createAgent,
@@ -98,7 +99,7 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: ServerContext): v
   // GET /agents/:id
   app.get<{ Params: { id: string } }>("/agents/:id", {}, async (req, reply) => {
     try {
-      const agent = getAgent(db, Number(req.params.id));
+      const agent = getAgent(db, resourceId(req.params.id));
       if (!agent) return sendHttpError(reply, 404, "agent not found");
       return reply.send({ agent });
     } catch (err) {
@@ -134,7 +135,7 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: ServerContext): v
     async (req, reply) => {
       try {
         const agent = await write(() =>
-          updateAgent(db, Number(req.params.id), {
+          updateAgent(db, resourceId(req.params.id), {
             name: req.body.name,
             system_prompt: req.body.system_prompt,
             model_config: req.body.model_config as ModelConfig | undefined,
@@ -152,7 +153,7 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: ServerContext): v
   // DELETE /agents/:id
   app.delete<{ Params: { id: string } }>("/agents/:id", {}, async (req, reply) => {
     try {
-      const ok = deleteAgent(db, Number(req.params.id));
+      const ok = deleteAgent(db, resourceId(req.params.id));
       if (!ok) return sendHttpError(reply, 404, "agent not found");
       return reply.send({ deleted: true });
     } catch (err) {
@@ -178,7 +179,7 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: ServerContext): v
       },
     },
     async (req, reply) => {
-      const agentId = Number(req.params.id);
+      const agentId = resourceId(req.params.id);
       const agent = getAgent(db, agentId);
       if (!agent) return sendHttpError(reply, 404, "agent not found");
 
@@ -277,7 +278,7 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: ServerContext): v
   // GET /agents/:id/conversations
   app.get<{ Params: { id: string } }>("/agents/:id/conversations", {}, async (req, reply) => {
     try {
-      const conversations = listConversations(db, { agent_id: Number(req.params.id) });
+      const conversations = listConversations(db, { agent_id: resourceId(req.params.id) });
       return reply.send({ conversations });
     } catch (err) {
       return sendError(reply, err);
@@ -287,7 +288,7 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: ServerContext): v
   // GET /conversations/:id/turns
   app.get<{ Params: { id: string } }>("/conversations/:id/turns", {}, async (req, reply) => {
     try {
-      const turns = getTurns(db, Number(req.params.id));
+      const turns = getTurns(db, resourceId(req.params.id));
       return reply.send({ turns });
     } catch (err) {
       return sendError(reply, err);
@@ -297,7 +298,7 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: ServerContext): v
   // DELETE /conversations/:id
   app.delete<{ Params: { id: string } }>("/conversations/:id", {}, async (req, reply) => {
     try {
-      const ok = deleteConversation(db, Number(req.params.id));
+      const ok = deleteConversation(db, resourceId(req.params.id));
       if (!ok) return sendHttpError(reply, 404, "conversation not found");
       return reply.send({ deleted: true });
     } catch (err) {
@@ -311,15 +312,15 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: ServerContext): v
   // not just reachability.
   app.post<{
     Body: { provider?: string; base_url?: string; api_key?: string; model?: string };
-  }>("/agents/test-provider", {}, async (req, reply) => {
-    const { provider = "anthropic", api_key, model } = req.body;
+  }>("/agents/test-provider", { schema: { body: { type: "object", required: ["api_key"], properties: { provider: { type: "string", enum: Object.keys(providerRegistry) }, api_key: { type: "string", minLength: 1 }, base_url: { type: "string" }, model: { type: "string" } } } } }, async (req, reply) => {
+    const { provider = "anthropic", api_key, base_url, model } = req.body;
     try {
       if (!api_key) return sendHttpError(reply, 400, "API key is required for a connectivity test");
       const testModel = model || (provider === "openai" ? "gpt-4o-mini" : "claude-sonnet-4-20250514");
       const { generateText } = await import("ai");
       const entry = providerRegistry[provider];
       if (!entry) return sendHttpError(reply, 400, `unknown provider: ${provider}`);
-      const langModel = await entry.loadModel(testModel);
+      const langModel = await entry.loadModel(testModel, { apiKey: api_key, baseURL: base_url });
       const result = await generateText({
         model: langModel,
         prompt: "Reply with just: OK",

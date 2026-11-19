@@ -31,7 +31,7 @@ test("CI runs server tests, builds, desktop tests, and secret scan", () => {
   assert.match(ci, /npm run check:tokens/);
   assert.match(ci, /check:secrets/);
   assert.match(ci, /npm run test:perf:server/);
-  assert.match(ci, /npm run perf:server/);
+  assert.match(ci, /node scripts\/performance\/server-database\.cjs/);
   assert.match(ci, /server-database-performance/);
   assert.match(ci, /ubuntu-latest/);
   assert.match(ci, /windows-latest/);
@@ -46,9 +46,9 @@ test("release workflow builds and publishes all desktop platforms from a version
   assert.match(release, /ubuntu-latest/);
   assert.match(release, /electron-builder/);
   assert.ok(
-    release.indexOf("npm run build -w packages/shared") <
+    release.indexOf("npm run build") <
       release.indexOf("npm test -w apps/server"),
-    "release workflow must build shared before server tests"
+    "release workflow must build resources before server tests"
   );
   assert.match(release, /upload-artifact/);
   assert.doesNotMatch(
@@ -83,4 +83,11 @@ test("root scripts expose reproducible CI and directory packaging commands", () 
   assert.match(packageJson.scripts["ci:test"], /npm test -w apps\/server/);
   assert.match(packageJson.scripts["ci:build"], /npm run build/);
   assert.match(packageJson.scripts["package:desktop:dir"], /--dir/);
+});
+
+
+test("main gate requires same-repository dev and never interpolates the branch into shell code", () => {
+  const source = read(".github/workflows/main-gate.yml");
+  assert.match(source, /head\.repo\.full_name/);
+  assert.doesNotMatch(source, /echo.*\$\{\{ github\.head_ref \}\}/);
 });

@@ -1,17 +1,18 @@
+import { APP_VERSION } from "../version.js";
 import { Command, Option } from "commander";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, realpathSync } from "node:fs";
 
 import { resolveConfig, type Scope, DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT } from "../config.js";
-import { openDb, publicError, type DB } from "../core/db.js";
+import { openDb, stopWalCheckpoint, publicError, type DB } from "../core/db.js";
 import { migrateDataDir, readMigrationStatus } from "../core/config-migration.js";
 import { handleHookEvent, readJsonFile } from "../core/live.js";
 import { clearData, getClearableCounts } from "../core/data-clear.js";
 import { runBackfill } from "../core/hooks-backfill.js";
 import { installSessionCommands } from "./session-commands.js";
-import { logger } from "../log.js";
+import { logger, setLogLevel } from "../log.js";
 import { registerSession, listSessions, endSession } from "../core/sessions.js";
 import { publishContext, updateContext, deleteContext, listMyContext } from "../core/context.js";
 import { queryContext } from "../core/search.js";
@@ -62,7 +63,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
   program
     .name("conflux")
     .description("Cross-session context query and conversation system")
-    .version("0.1.0")
+    .version(APP_VERSION)
     .option("--data-dir <path>", "override the Conflux data directory (also via CONFLUX_HOME)")
     .option("--scope <scope>", '"project" or "global" (default: auto)', "auto")
     .option(
@@ -127,7 +128,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
 
       if (o.status) {
         if (o.from) throw new Error("migrate --status cannot be combined with --from");
-        const destination = o.to ?? o.dataDir ?? join(homedir(), ".conflux");
+        const destination = o.to ?? o.dataDir ?? process.env.CONFLUX_HOME ?? join(homedir(), ".conflux");
         console.log(JSON.stringify(readMigrationStatus(destination), null, 2));
         return;
       }
@@ -157,9 +158,9 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       if (!scope) throw new Error("scope must be global or project");
       const result = await runOp(
         program,
-        () => exportData(openDbFrom(o), { scope, projectDir: o.projectDir }),
+        () => withDb(openDbFrom(o), (db) => exportData(db, { scope, projectDir: o.projectDir })),
         "GET",
-        `/data/export?scope=${encodeURIComponent(scope)}`,
+        `/data/export?scope=${encodeURIComponent(scope)}${o.projectDir ? `&project_dir=${encodeURIComponent(o.projectDir)}` : ""}`,
       );
       writeDataOutput(result, o.output);
     });
@@ -178,7 +179,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       const bundle = JSON.parse(readFileSync(resolve(o.file), "utf8")) as unknown;
       const result = await runOp(
         program,
-        () => importData(openDbFrom(o), bundle, { conflict }),
+        () => withDb(openDbFrom(o), (db) => importData(db, bundle, { conflict })),
         "POST",
         "/data/import",
         { bundle, conflict },
@@ -245,7 +246,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       const status = o.status ?? "active";
       const res = await runOp(
         program,
-        () => getGraph(openDbFrom(o), { status }),
+        () => withDb(openDbFrom(o), (db) => getGraph(db, { status })),
         "GET",
         `/graph?status=${encodeURIComponent(status)}`,
       );
@@ -264,7 +265,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       const status = o.status ?? "active";
       const res = await runOp(
         program,
-        () => ({ sessions: listSessions(openDbFrom(o), { status }) }),
+        () => withDb(openDbFrom(o), (db) => ({ sessions: listSessions(db, { status }) })),
         "GET",
         `/sessions?status=${encodeURIComponent(status)}`,
       );
@@ -280,8 +281,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       const o = this.optsWithGlobals();
       const res = await runOp(
         program,
-        () => {
-          const db = openDbFrom(o);
+        () => withDb(openDbFrom(o), (db) => {
           const sid = resolveCliSessionId(db);
           const session = registerSession(db, {
             id: sid,
@@ -297,7 +297,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
             result: { session_id: sid },
           });
           return { session_id: sid, session };
-        },
+        }),
         "POST",
         "/sessions/register",
         { name: o.name, description: o.desc },
@@ -311,11 +311,12 @@ export function buildCli(_argv?: string | readonly string[]): Command {
     .requiredOption("--id <id>")
     .action(function (this: Command) {
       const o = this.optsWithGlobals();
-      // No dedicated HTTP endpoint exists; remote sessions naturally go stale.
+      // Ending a remote session requires an explicit server endpoint.
       const res = o.http
-        ? { ok: true }
+        ? (() => { throw new Error("sessions end does not support --http"); })()
         : (() => {
             const db = openDbFrom(o);
+            try {
             endSession(db, o.id);
             logAudit(db, {
               caller_session: o.id,
@@ -325,6 +326,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
               result: { ok: true },
             });
             return { ok: true };
+            } finally { stopWalCheckpoint(db); db.close(); }
           })();
       console.log(JSON.stringify(res, null, 2));
     });
@@ -343,8 +345,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       const tags = parseTags(o.tags);
       const res = await runOp(
         program,
-        () => {
-          const db = openDbFrom(o);
+        () => withDb(openDbFrom(o), (db) => {
           const sid = resolveCliSessionId(db);
           const entry = publishContext(db, {
             session_id: sid,
@@ -360,7 +361,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
             result: { entry_id: entry.id },
           });
           return { entry };
-        },
+        }),
         "POST",
         "/context",
         { title: o.title, content: o.content, tags },
@@ -375,8 +376,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       const o = this.optsWithGlobals();
       const res = await runOp(
         program,
-        () => {
-          const db = openDbFrom(o);
+        () => withDb(openDbFrom(o), (db) => {
           const sid = resolveCliSessionId(db);
           const entries = listMyContext(db, sid);
           logAudit(db, {
@@ -387,7 +387,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
             result: { count: entries.length },
           });
           return { entries };
-        },
+        }),
         "GET",
         "/context/mine",
       );
@@ -417,8 +417,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       if (o.limit) qs.set("limit", String(o.limit));
       const res = await runOp(
         program,
-        () => {
-          const db = openDbFrom(o);
+        () => withDb(openDbFrom(o), (db) => {
           const sid = resolveCliSessionId(db);
           const entries = queryContext(db, args);
           logAudit(db, {
@@ -429,7 +428,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
             result: { count: entries.length },
           });
           return { entries };
-        },
+        }),
         "GET",
         `/context/query?${qs.toString()}`,
       );
@@ -453,8 +452,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       if (tags !== undefined) patch.tags = tags;
       const res = await runOp(
         program,
-        () => {
-          const db = openDbFrom(o);
+        () => withDb(openDbFrom(o), (db) => {
           const sid = resolveCliSessionId(db);
           const entry = updateContext(db, id, sid, patch);
           logAudit(db, {
@@ -465,7 +463,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
             result: entry ? { id: entry.id } : null,
           });
           return { entry: entry ?? null };
-        },
+        }),
         "PUT",
         `/context/${id}`,
         patch,
@@ -482,8 +480,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       const id = Number(o.id);
       const res = await runOp(
         program,
-        () => {
-          const db = openDbFrom(o);
+        () => withDb(openDbFrom(o), (db) => {
           const sid = resolveCliSessionId(db);
           const ok = deleteContext(db, id, sid);
           logAudit(db, {
@@ -494,7 +491,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
             result: { ok },
           });
           return { deleted: ok };
-        },
+        }),
         "DELETE",
         `/context/${id}`,
       );
@@ -524,8 +521,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       if (o.maxTokens !== undefined) modelConfig.max_tokens = o.maxTokens;
       const res = await runOp(
         program,
-        () => {
-          const db = openDbFrom(o);
+        () => withDb(openDbFrom(o), (db) => {
           const sid = resolveCliSessionId(db);
           const agent = createAgent(db, {
             name: o.name,
@@ -541,7 +537,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
             result: { id: agent.id },
           });
           return { agent };
-        },
+        }),
         "POST",
         "/agents",
         {
@@ -561,8 +557,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       const o = this.optsWithGlobals();
       const res = await runOp(
         program,
-        () => {
-          const db = openDbFrom(o);
+        () => withDb(openDbFrom(o), (db) => {
           const sid = resolveCliSessionId(db);
           const agentList = listAgents(db);
           logAudit(db, {
@@ -573,7 +568,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
             result: { count: agentList.length },
           });
           return { agents: agentList };
-        },
+        }),
         "GET",
         "/agents",
       );
@@ -589,8 +584,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       const id = Number(o.id);
       const res = await runOp(
         program,
-        () => {
-          const db = openDbFrom(o);
+        () => withDb(openDbFrom(o), (db) => {
           const sid = resolveCliSessionId(db);
           const ok = deleteAgent(db, id);
           logAudit(db, {
@@ -601,7 +595,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
             result: { ok },
           });
           return { deleted: ok };
-        },
+        }),
         "DELETE",
         `/agents/${id}`,
       );
@@ -624,7 +618,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
         const snapshot = await readChannelSnapshot(program, db, edgeId);
         console.log(JSON.stringify(snapshot, null, 2));
       } finally {
-        db?.close();
+        if (db) { stopWalCheckpoint(db); db.close(); }
       }
     });
 
@@ -649,7 +643,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
         }
       } finally {
         process.off("SIGINT", stop);
-        db?.close();
+        if (db) { stopWalCheckpoint(db); db.close(); }
       }
     });
 
@@ -665,8 +659,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       const o = this.optsWithGlobals();
       const res = await runOp(
         program,
-        async () => {
-          const db = openDbFrom(o);
+        () => withDb(openDbFrom(o), async (db) => {
           const sid = resolveCliSessionId(db);
           const result = await askAndMaybeWake(db, {
             from_session: sid,
@@ -681,7 +674,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
             result: { message_id: result.message.id },
           });
           return result;
-        },
+        }),
         "POST",
         "/messages/ask",
         { to_session: o.to, question },
@@ -794,8 +787,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       const o = this.optsWithGlobals();
       const res = await runOp(
         program,
-        () => {
-          const db = openDbFrom(o);
+        () => withDb(openDbFrom(o), (db) => {
           const sid = resolveCliSessionId(db);
           const inbox = checkInbox(db, sid);
           logAudit(db, {
@@ -806,7 +798,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
             result: { count: inbox.length },
           });
           return { inbox };
-        },
+        }),
         "GET",
         "/messages/inbox",
       );
@@ -823,8 +815,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       const id = Number(o.id);
       const res = await runOp(
         program,
-        async () => {
-          const db = openDbFrom(o);
+        () => withDb(openDbFrom(o), async (db) => {
           const sid = resolveCliSessionId(db);
           const m = await replyAskAndPush(db, id, sid, reply);
           logAudit(db, {
@@ -835,7 +826,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
             result: { message_id: m.id },
           });
           return { message: m };
-        },
+        }),
         "POST",
         `/messages/${id}/reply`,
         { reply },
@@ -852,8 +843,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       const qs = o.since ? `?since=${encodeURIComponent(o.since)}` : "";
       const res = await runOp(
         program,
-        () => {
-          const db = openDbFrom(o);
+        () => withDb(openDbFrom(o), (db) => {
           const sid = resolveCliSessionId(db);
           const replies = checkReplies(db, sid, o.since);
           logAudit(db, {
@@ -864,7 +854,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
             result: { count: replies.length },
           });
           return { replies };
-        },
+        }),
         "GET",
         `/messages/replies${qs}`,
       );
@@ -896,7 +886,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       if (o.limit) qs.set("limit", String(o.limit));
       const res = await runOp(
         program,
-        () => ({ messages: listMessages(openDbFrom(o), args) }),
+        () => withDb(openDbFrom(o), (db) => ({ messages: listMessages(db, args) })),
         "GET",
         `/messages?${qs.toString()}`,
       );
@@ -920,14 +910,14 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       if (o.limit) qs.set("limit", String(o.limit));
       const res = await runOp(
         program,
-        () => ({
-          entries: queryAudit(openDbFrom(o), {
+        () => withDb(openDbFrom(o), (db) => ({
+          entries: queryAudit(db, {
             session: o.session,
             action: o.action,
             iface: o.interface,
             limit: o.limit ? Number(o.limit) : undefined,
           }),
-        }),
+        })),
         "GET",
         `/audit?${qs.toString()}`,
       );
@@ -1015,7 +1005,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
       // they never saw SessionStart and would otherwise surface as stale or
       // not at all (issue #75). Best-effort: install must not fail here.
       try {
-        const report = await runBackfill(openDb(resolveConfig("global")));
+        const report = await withDb(openDbFrom(this.optsWithGlobals()), (db) => runBackfill(db));
         if (report.registered.length > 0 || report.refreshed > 0) {
           console.log(
             `backfilled ${report.registered.length} running session(s)` +
@@ -1034,7 +1024,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
     .command("backfill")
     .description("register still-running Claude Code sessions that predate hooks install")
     .action(async function (this: Command) {
-      const report = await runBackfill(openDb(resolveConfig("global")));
+      const report = await withDb(openDbFrom(this.optsWithGlobals()), (db) => runBackfill(db));
       for (const r of report.registered) {
         console.log(`registered ${r.id} (pid ${r.pid}) as "${r.name}"`);
       }
@@ -1100,7 +1090,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
         // malformed stdin — ignore quietly, hooks must never block a session
       }
       try {
-        const db = openDb(resolveConfig("global"));
+        await withDb(openDbFrom(this.optsWithGlobals()), (db) => {
         handleHookEvent(db, event as HookEvent, payload as never);
         // UserPromptSubmit / SessionStart stdout is injected into the
         // conversation context — the only push channel into a live session.
@@ -1112,6 +1102,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
             if (notice) process.stdout.write(notice + "\n");
           }
         }
+        });
       } catch (err) {
         logger.warn(
           { err: err instanceof Error ? err.message : String(err) },
@@ -1146,7 +1137,7 @@ function claudeSettingsPath(): string {
  * entrypoint is currently running.
  */
 function hookCommandBase(): string {
-  const argv1 = resolve(process.argv[1]);
+  const argv1 = realpathSync(resolve(process.argv[1]));
   const asDist = argv1.replace(/src([\\/])index\.ts$/, "dist$1index.js");
   const entry = asDist.endsWith(".js") && existsSync(asDist) ? asDist : argv1;
   return entry.endsWith(".js") ? `node "${entry}"` : `npx tsx "${entry}"`;
@@ -1216,7 +1207,7 @@ function openDbFrom(o: CliOpts): DB {
 function withDb<T>(db: DB, fn: (db: DB) => T | Promise<T>): T | Promise<T> {
   return Promise.resolve(undefined)
     .then(() => fn(db))
-    .finally(() => db.close()) as T | Promise<T>;
+    .finally(() => { stopWalCheckpoint(db); if (db.open) db.close(); }) as T | Promise<T>;
 }
 
 /**
@@ -1236,7 +1227,6 @@ async function runOp(
 ): Promise<unknown> {
   const opts = program.opts();
   if (opts.logLevel) {
-    const { setLogLevel } = await import("../log.js");
     setLogLevel(opts.logLevel);
   }
   if (opts.http) {
@@ -1255,7 +1245,7 @@ async function remote(
   const sid = process.env.CONFLUX_SESSION_ID || randomUUID();
   const headers: Record<string, string> = {
     "X-Session-Id": sid,
-    "Content-Type": "application/json",
+    ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
   };
   const init: RequestInit = { method, headers };
   if (body !== undefined) init.body = JSON.stringify(body);
