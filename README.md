@@ -28,7 +28,7 @@ AI 编程助手通常以彼此隔离的进程运行，于是这些简单的问�
 
 **Conflux 把这些会话连成一张图**：发布知识、跨会话提问、异步收回复、离线自动唤醒——不依赖任何外部数据库、消息代理或托管控制平面，数据默认就在本机 SQLite 里。
 
-公开项目名、CLI 入口和 npm package 名称均为 `Conflux`（`conflux` / `@conflux/shared`）。下一版本移除旧 CLI 入口 `muiltchat` 和 `MUILTCHAT_*` 环境变量；默认数据目录仍保留，见 [迁移指南](docs/MIGRATION.md)。
+公开项目名、CLI 入口和 npm package 名称均为 `Conflux`（`conflux` / `@conflux/shared`）。v0.3.0 起已移除旧 CLI 入口 `muiltchat` 和 `MUILTCHAT_*` 环境变量；默认数据目录仍保留，见 [迁移指南](docs/MIGRATION.md)。
 
 ## 界面预览
 
@@ -71,7 +71,7 @@ CLI  ─┘        │
 
 ## 🚀 快速开始
 
-**环境要求**：Node.js 22 LTS（server 包仍声明 ≥18 兼容）· npm ≥ 9 · 需要 MCP 会话集成时装 Claude Code · 需要内置智能体时准备 Anthropic/OpenAI API key。
+**环境要求**：Node.js 22 LTS · npm ≥ 9 · 需要 MCP 会话集成时装 Claude Code · 需要内置智能体时准备 Anthropic/OpenAI API key。
 
 ```bash
 git clone https://github.com/yudongyouqing/Conflux.git
@@ -295,7 +295,7 @@ npm test -w apps/server  # server 回归测试
 npm run ci:test          # CI 等价测试 + 发布配置检查
 npm run ci:build         # CI 等价构建
 npm run check:secrets    # 敏感信息扫描
-node --test apps/desktop/test/dev-services.test.cjs apps/desktop/test/runtime-config.test.cjs
+npm run test:desktop     # 桌面端测试
 ```
 
 ## 📡 HTTP API

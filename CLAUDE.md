@@ -25,13 +25,16 @@ npm run dev:desktop        # Electron 开发模式（唯一推荐入口，自动
 npm run dev:all            # 同 dev:desktop（别名）；纯浏览器栈用 dev:web-stack
 npm test -w apps/server    # server 回归测试（core 层）
 npm run test:process-e2e -w apps/server  # 运行实例真实子进程 E2E（串行执行，勿与并行套件同时跑）
-node --test apps/desktop/test/dev-services.test.cjs apps/desktop/test/runtime-config.test.cjs apps/desktop/test/security.test.cjs
+npm test -w apps/web       # web 单元测试
+npm run test:desktop       # Electron/桌面端测试
 npm run build              # shared → server → web 全量构建
 npm run lint               # eslint（server/web/shared 源码）
+npm run check:tokens       # 设计令牌静态校验
+npm run check:secrets      # 敏感信息扫描
 npm run format             # prettier
 ```
 
-端口：API 9527（`/docs` 有 OpenAPI）、Vite 5173。数据目录默认 `~/.muiltchat`（`CONFLUX_HOME` 优先，`MUILTCHAT_HOME` 兼容覆盖；迁移见 docs/MIGRATION.md）。
+端口：API 9527（`/docs` 有 OpenAPI）、Vite 5173。数据目录默认 `~/.muiltchat`（可用 `CONFLUX_HOME` 覆盖，v0.3.0 起不再读取 `MUILTCHAT_*` 环境变量；迁移见 docs/MIGRATION.md）。
 
 ## 架构边界（改代码前必读）
 
@@ -54,8 +57,9 @@ npm run format             # prettier
 
 ## 验证清单（提交前）
 
-1. `npm test -w apps/server`
-2. `node --test apps/desktop/test/*.test.cjs`（改动桌面运行时时）
-3. `npm run build`
-4. `npm run lint`（保持 0 error）
-5. UI 改动：`npx playwright screenshot` 截图自查（playwright 已是 devDependency）；新组件遵守 [docs/DESIGN-TOKENS.md](docs/DESIGN-TOKENS.md)（令牌强制、禁裸灰阶、反模式清单）
+1. `npm test -w apps/server`（以及串行 `npm run test:process-e2e -w apps/server`）
+2. `npm test -w apps/web`
+3. `npm run test:desktop`（改动桌面运行时时）
+4. `npm run build`
+5. `npm run lint`（保持 0 error）、`npm run check:tokens`、`npm run check:secrets`
+6. UI 改动：`npx playwright screenshot` 截图自查（playwright 已是 devDependency）；新组件遵守 [docs/DESIGN-TOKENS.md](docs/DESIGN-TOKENS.md)（令牌强制、禁裸灰阶、11px 字号地板、反模式清单）

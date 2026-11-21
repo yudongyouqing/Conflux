@@ -71,7 +71,7 @@ Identical behavior: the `conflux` CLI, REST API (OpenAPI at `/docs`), and MCP to
 
 ## 🚀 Quick Start
 
-**Requirements**: Node.js 22 LTS (the server package still declares ≥18 compatibility) · npm ≥ 9 · Claude Code for MCP session integration · an Anthropic/OpenAI API key for internal agents.
+**Requirements**: Node.js 22 LTS · npm ≥ 9 · Claude Code for MCP session integration · an Anthropic/OpenAI API key for internal agents.
 
 ```bash
 git clone https://github.com/yudongyouqing/Conflux.git
@@ -273,7 +273,7 @@ Artifacts are written to `release/` (ignored by Git). Windows local packaging al
 - ✅ React + Vite + React Flow workspace, Fastify API, MCP + hooks
 - ✅ Claude Code / Codex liveness, resume lineage, async collaboration messages, auto-wake
 - ✅ Versioned data transfer, legacy directory migration, stable error codes, secret scanning
-- ✅ Internal Conflux rename; next release removes legacy CLI/env names while retaining existing data directories
+- ✅ Internal Conflux rename; v0.3.0 removed legacy CLI/env names while retaining existing data directories
 - ✅ Theming (design tokens + custom palette import), data management (scoped clear + auto backup)
 - ✅ Session priority P0/P1/P2, capability search `search_sessions`, channel watch CLI, hooks backfill for running sessions
 - ✅ GitHub Releases automatic updates; platform signing is enabled through release Secrets
@@ -295,7 +295,7 @@ npm test -w apps/server  # Server regression suite
 npm run ci:test          # CI-equivalent tests + release config checks
 npm run ci:build         # CI-equivalent build
 npm run check:secrets    # Credential scan
-node --test apps/desktop/test/dev-services.test.cjs apps/desktop/test/runtime-config.test.cjs
+npm run test:desktop     # Desktop tests
 ```
 
 ## 📡 HTTP API
