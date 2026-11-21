@@ -82,7 +82,7 @@ export function wakeCommand(
     return `${shellQuote(executable, platform)} exec resume ${shellQuote(sessionId, platform)} ${CODEX_WAKE_FLAGS} -`;
   }
   return withMcpConfig(
-    `${resumeCommand("claude", sessionId, executable)} --allowedTools ${shellQuote(
+    `${resumeCommand("claude", sessionId, executable, { platform })} --allowedTools ${shellQuote(
       HEADLESS_ALLOWED_TOOLS,
       platform,
     )} -p`,
@@ -144,7 +144,7 @@ export function tmuxWakeCommand(
   // tmux always runs under a POSIX shell — quote with posixQuote so `*` in
   // HEADLESS_ALLOWED_TOOLS is never glob-expanded by /bin/sh.
   return withMcpConfig(
-    `${resumeCommand("claude", sessionId, executable)} --allowedTools ${posixQuote(
+    `${resumeCommand("claude", sessionId, executable, { platform: "linux" })} --allowedTools ${posixQuote(
       HEADLESS_ALLOWED_TOOLS,
     )}`,
     mcpConfigPath,

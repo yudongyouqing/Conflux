@@ -69,25 +69,39 @@ function toAgent(row: RuntimeAgentRow): RuntimeAgent {
 const SECRET_ENV_KEY_RE = /(?:key|token|secret|password|auth|credential)/i;
 
 /**
+ * Redact secret-named entries inside a runtime agent's JSON `extra_env` blob.
+ * - `"mask"`: replaces secret values with `"••••"` for HTTP display.
+ * - `"omit"`: removes secret keys altogether for portable data exports.
+ */
+export function redactExtraEnv(
+  raw: string | null,
+  mode: "mask" | "omit" = "mask",
+): string | null {
+  if (!raw) return raw;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return raw;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (SECRET_ENV_KEY_RE.test(k) && v) {
+        if (mode === "mask") out[k] = "••••";
+      } else {
+        out[k] = v;
+      }
+    }
+    if (mode === "omit" && Object.keys(out).length === 0) return null;
+    return JSON.stringify(out);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Strip plaintext credentials before returning a runtime agent over HTTP.
  * Internal callers (launch/resume) still read the unredacted SQLite row.
  */
 export function redactRuntimeAgent(agent: RuntimeAgent): RuntimeAgent {
-  let redactedExtraEnv = agent.extra_env;
-  if (agent.extra_env) {
-    try {
-      const parsed = JSON.parse(agent.extra_env) as Record<string, unknown>;
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        const masked: Record<string, unknown> = {};
-        for (const [k, v] of Object.entries(parsed)) {
-          masked[k] = SECRET_ENV_KEY_RE.test(k) && v ? "••••" : v;
-        }
-        redactedExtraEnv = JSON.stringify(masked);
-      }
-    } catch {
-      redactedExtraEnv = null;
-    }
-  }
+  const redactedExtraEnv = redactExtraEnv(agent.extra_env, "mask");
   return {
     ...agent,
     api_key: null,

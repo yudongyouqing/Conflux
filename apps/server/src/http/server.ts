@@ -41,6 +41,7 @@ import { registerChatRoomRoutes } from "./routes/chat-rooms.js";
 import { registerManagedCodexRoutes } from "./routes/managed-codex.js";
 import {
   ManagedCodexManager,
+  getManagedCodexManager,
   setManagedCodexManager,
 } from "../core/managed-codex/manager.js";
 
@@ -186,6 +187,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
     if (managedManager) {
       const manager = managedManager;
       managedManager = null;
+      if (getManagedCodexManager() === manager) setManagedCodexManager(null);
       manager.stopQueuePolling();
       await manager.shutdown();
     }

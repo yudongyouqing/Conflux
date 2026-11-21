@@ -179,7 +179,11 @@ export class ManagedRpcConnection {
   respondError(id: number | string, code: number, message: string, data?: unknown): void {
     if (this.closed) return;
     const error = data !== undefined ? { code, message, data } : { code, message };
-    this.transport.write(JSON.stringify({ jsonrpc: "2.0", id, error }) + "\n");
+    try {
+      this.transport.write(JSON.stringify({ jsonrpc: "2.0", id, error }) + "\n");
+    } catch {
+      // Peer stdin already closed while refusing an unsolicited request.
+    }
   }
 
   /** Feed raw bytes from the peer's stdout. */

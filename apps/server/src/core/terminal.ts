@@ -315,8 +315,8 @@ export function resolveOnPath(
   platform: NodeJS.Platform = process.platform,
 ): string | null {
   if (/[\\/]/.test(exe)) return existsSync(exe) ? exe : null;
-  // macOS has no where.exe; /usr/bin/which covers it (no Store-alias quirks).
-  const resolver = platform === "win32" ? "where.exe" : "/usr/bin/which";
+  // POSIX uses `which` from PATH (varies between /usr/bin/which and /bin/which across Linux distros).
+  const resolver = platform === "win32" ? "where.exe" : "which";
   // one retry: under load (CI runners, cold AV scans) where/which can blow
   // the timeout once and come back fine — availability detection must not
   // flap on that (observed flake: windows-latest, 2026-09-24)

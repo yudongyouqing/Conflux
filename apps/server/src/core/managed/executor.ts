@@ -571,6 +571,7 @@ export class ManagedExecutor {
         binding.thread_id,
       );
       const threadId = resumed.threadId;
+      live.threadId = threadId;
       const history = resumed.turns;
 
       // Ownership handover: binding moves to the new instance with a fresh
@@ -793,7 +794,7 @@ export class ManagedExecutor {
       const definitive = err instanceof RpcRemoteError;
       if (definitive) {
         const errorCode = message.slice(0, 500);
-        finalizeRunAndReply(this.db, {
+        const moved = finalizeRunAndReply(this.db, {
           runId: claimed.id,
           ownerToken: live.ownerToken,
           patch: { state: "failed", errorCode },
@@ -801,6 +802,10 @@ export class ManagedExecutor {
           replierSessionId: live.sessionId,
           replyText: `[受管执行失败] ${errorCode}`,
         });
+        if (moved) {
+          const msg = getMessage(this.db, moved.message_id);
+          if (msg) maybePushReply(this.db, msg.from_session);
+        }
       } else {
         markRunUnknown(this.db, claimed.id, `turn send unverifiable: ${message.slice(0, 400)}`);
       }
@@ -925,11 +930,15 @@ export class ManagedExecutor {
     if (originalId === undefined) {
       return { ok: false, status: 409, reason: "approval is not answerable on this connection" };
     }
+    try {
+      this.opts.adapter.respond(live.proc.conn, originalId, { decision });
+    } catch {
+      return { ok: false, status: 409, reason: "managed instance is not live" };
+    }
     const outcome = resolveApproval(this.db, { approvalId, decision });
     if (!outcome.ok) return outcome;
     const row = outcome.row;
     live.liveApprovals.delete(approvalId);
-    this.opts.adapter.respond(live.proc.conn, originalId, { decision });
     const stillWaiting = listPendingApprovals(this.db, [row.run_id]).some((r) =>
       live.liveApprovals.has(r.id),
     );

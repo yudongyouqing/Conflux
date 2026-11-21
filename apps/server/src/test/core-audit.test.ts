@@ -10,7 +10,8 @@ import { registerSession, markStaleSessions } from "../core/sessions.js";
 import { askSession, recordExchange, listEdgeMessages, gatherUnseenMail, formatTypedMailPrompt, replyAsk } from "../core/messages.js";
 import { recordApproval } from "../core/managed-codex/approvals.js";
 import { enqueueManagedTask, upsertManagedBinding } from "../core/managed-codex/store.js";
-import { createRuntimeAgent, runScheduledAgent } from "../core/runtime-agents.js";
+import { createRuntimeAgent, redactRuntimeAgent, runScheduledAgent } from "../core/runtime-agents.js";
+import { wakeCommand, tmuxWakeCommand } from "../core/wake/commands.js";
 import { exportData, importData } from "../core/data-transfer.js";
 import { clearData } from "../core/data-clear.js";
 import { setSetting, getSetting } from "../core/app-settings.js";
@@ -354,6 +355,67 @@ test("Codex rollout lookup respects CODEX_HOME", () => {
     assert.equal(findCodexRolloutPath("audit-custom-home"), path);
   } finally {
     if (previous === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = previous;
+    cleanup();
+  }
+});
+
+test("runtime redaction masks HTTP secrets and strips secret extra_env keys from exportData", () => {
+  const { db, cleanup } = makeDb();
+  try {
+    const created = createRuntimeAgent(db, {
+      name: "sec-agent",
+      runtime: "claude",
+      api_key: "sk-live-secret-value",
+      extra_env: JSON.stringify({
+        ANTHROPIC_AUTH_TOKEN: "tok-secret",
+        HTTP_PROXY: "http://127.0.0.1:7890",
+      }),
+    });
+    const redacted = redactRuntimeAgent(created);
+    assert.equal(redacted.api_key, null);
+    assert.equal(redacted.api_key_configured, true);
+    assert.deepEqual(JSON.parse(redacted.extra_env!), {
+      ANTHROPIC_AUTH_TOKEN: "••••",
+      HTTP_PROXY: "http://127.0.0.1:7890",
+    });
+
+    const bundle = exportData(db);
+    const exported = bundle.runtime_agents.find((a) => a.name === "sec-agent")!;
+    assert.equal(exported.api_key_configured, true);
+    assert.deepEqual(JSON.parse(exported.extra_env!), {
+      HTTP_PROXY: "http://127.0.0.1:7890",
+    });
+  } finally {
+    cleanup();
+  }
+});
+
+test("wakeCommand and tmuxWakeCommand quote executable and sessionId with target platform rules", () => {
+  const posixWake = wakeCommand("claude", "sess id", "/opt/my dir/claude", "/tmp/my mcp.json", "linux");
+  assert.ok(posixWake.startsWith("'/opt/my dir/claude' --resume 'sess id'"), posixWake);
+  assert.ok(posixWake.includes("--mcp-config '/tmp/my mcp.json'"), posixWake);
+
+  const tmuxCmd = tmuxWakeCommand("sess id", "/opt/my dir/claude", "/tmp/my mcp.json");
+  assert.ok(tmuxCmd.startsWith("'/opt/my dir/claude' --resume 'sess id'"), tmuxCmd);
+});
+
+test("Windows Codex descendant pinning casts hashtable keys and frontier to uint32", (t) => {
+  const { db, cleanup } = makeDb();
+  let psScript = "";
+  t.mock.method(
+    childProcess,
+    "execFile",
+    (_file: string, args: string[], _opts: unknown, callback: (error: null, stdout: string) => void) => {
+      psScript = args[args.length - 1] ?? "";
+      callback(null, "333\n");
+    },
+  );
+  try {
+    pinCodexDescendants(db, 100, "win-sess", { platform: "win32" });
+    assert.ok(psScript.includes("$k=[uint32]$p.ParentProcessId"), psScript);
+    assert.ok(psScript.includes("$frontier=@([uint32]100)"), psScript);
+    assert.equal(getSetting(db, "codex-current:333"), "win-sess");
+  } finally {
     cleanup();
   }
 });
