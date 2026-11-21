@@ -68,14 +68,16 @@ test("collects .env dotfiles and .toml configs so accidental secrets are never s
   try {
     writeFileSync(join(root, ".env"), "OPENAI_API_KEY=sk-live-12345678901234567890\n", "utf8");
     writeFileSync(join(root, ".env.local"), "TOKEN=placeholder\n", "utf8");
+    writeFileSync(join(root, ".env.test.local"), "ANTHROPIC_API_KEY=sk-ant-12345678901234567890\n", "utf8");
     writeFileSync(join(root, "config.toml"), "key = 'ok'\n", "utf8");
     const collected = collectFiles(root).sort();
     assert.deepEqual(collected, [
       join(root, ".env"),
       join(root, ".env.local"),
+      join(root, ".env.test.local"),
       join(root, "config.toml"),
     ].sort());
-    assert.equal(scanFiles(collected).length, 1);
+    assert.equal(scanFiles(collected).length, 2);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

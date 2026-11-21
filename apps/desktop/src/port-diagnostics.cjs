@@ -23,8 +23,12 @@ function parseTasklistCommand(output, pid) {
   return null;
 }
 
-async function findWindowsPortOwner(port, host = "127.0.0.1", { execFileFn = execFile } = {}) {
-  if (process.platform !== "win32") return null;
+async function findWindowsPortOwner(
+  port,
+  host = "127.0.0.1",
+  { execFileFn = execFile, platform = process.platform } = {},
+) {
+  if (platform !== "win32") return null;
 
   let netstat;
   try {
@@ -90,7 +94,7 @@ async function findPortOwner(
   host = "127.0.0.1",
   { execFileFn = execFile, platform = process.platform } = {},
 ) {
-  if (platform === "win32") return findWindowsPortOwner(port, host, { execFileFn });
+  if (platform === "win32") return findWindowsPortOwner(port, host, { execFileFn, platform });
   return findPosixPortOwner(port, host, { execFileFn });
 }
 
