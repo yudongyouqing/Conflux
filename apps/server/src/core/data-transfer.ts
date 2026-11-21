@@ -16,6 +16,7 @@ import { z } from "zod";
 
 import type { DB } from "./db.js";
 import { nowIso } from "./db.js";
+import { redactExtraEnv } from "./runtime-agents.js";
 
 export type { ConfluxDataBundle, DataBundleScope, ExportedRuntimeAgent } from "@conflux/shared";
 
@@ -286,7 +287,11 @@ export function exportData(db: DB, options: ExportDataOptions = {}): ConfluxData
       : runtimeRows
   ).map((agent) => {
     const { api_key_configured, ...portable } = agent;
-    return { ...portable, api_key_configured: api_key_configured === 1 } as ExportedRuntimeAgent;
+    return {
+      ...portable,
+      extra_env: redactExtraEnv(portable.extra_env, "omit"),
+      api_key_configured: api_key_configured === 1,
+    } as ExportedRuntimeAgent;
   });
 
   return {

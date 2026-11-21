@@ -66,4 +66,16 @@ test("resolves POSIX lsof output into an owner summary", async () => {
     execFileFn: (_cmd, _args, _opts, cb) => cb(null, "p4321\ncnode\n", ""),
   });
   assert.deepEqual(owner, { pid: 4321, command: "node" });
+
+  const winOwner = await findPortOwner(9527, "127.0.0.1", {
+    platform: "win32",
+    execFileFn: (cmd, _args, _opts, cb) => {
+      if (cmd === "netstat") {
+        cb(null, "  TCP    127.0.0.1:9527    0.0.0.0:0    LISTENING    2468\r\n", "");
+      } else {
+        cb(null, '"node.exe","2468","Console","1","42,000 K"\r\n', "");
+      }
+    },
+  });
+  assert.deepEqual(winOwner, { pid: 2468, command: "node.exe" });
 });

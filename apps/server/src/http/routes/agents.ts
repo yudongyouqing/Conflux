@@ -222,7 +222,10 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: ServerContext): v
         content: t.content,
       }));
 
-      // SSE headers
+      // SSE headers (preserve @fastify/cors headers set before hijack)
+      for (const [k, v] of Object.entries(reply.getHeaders())) {
+        if (v !== undefined) reply.raw.setHeader(k, v);
+      }
       reply.hijack();
       reply.raw.writeHead(200, {
         "Content-Type": "text/event-stream",

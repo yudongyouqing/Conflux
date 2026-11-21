@@ -23,6 +23,7 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const streamRef = useRef<AbortController | null>(null);
+  const historyAbortRef = useRef<AbortController | null>(null);
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
@@ -33,7 +34,9 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    historyAbortRef.current?.abort();
+    historyAbortRef.current = controller;
     streamRef.current?.abort();
     streamRef.current = null;
     setMessages([]);
@@ -43,13 +46,13 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
     setLoadingHistory(true);
 
     api
-      .getConversations(agent.id)
+      .getConversations(agent.id, controller.signal)
       .then(async ({ conversations }) => {
-        if (cancelled) return;
+        if (controller.signal.aborted) return;
         const latest = conversations[0];
         if (!latest) return;
-        const { turns } = await api.getTurns(latest.id);
-        if (cancelled) return;
+        const { turns } = await api.getTurns(latest.id, controller.signal);
+        if (controller.signal.aborted) return;
         setConversationId(latest.id);
         setMessages(
           turns
@@ -61,21 +64,26 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
         scrollToBottom();
       })
       .catch(() => {
-        // Fresh chat still works even if history lookup fails
+        // Fresh chat still works even if history lookup fails or is aborted
       })
       .finally(() => {
-        if (!cancelled) setLoadingHistory(false);
+        if (historyAbortRef.current === controller) historyAbortRef.current = null;
+        if (!controller.signal.aborted) setLoadingHistory(false);
       });
 
     return () => {
-      cancelled = true;
+      controller.abort();
+      if (historyAbortRef.current === controller) historyAbortRef.current = null;
       streamRef.current?.abort();
     };
   }, [agent.id, scrollToBottom]);
 
   const handleNewChat = useCallback(() => {
+    historyAbortRef.current?.abort();
+    historyAbortRef.current = null;
     streamRef.current?.abort();
     streamRef.current = null;
+    setLoadingHistory(false);
     setIsStreaming(false);
     setConversationId(null);
     setMessages([]);
@@ -85,6 +93,9 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
   const handleSend = useCallback(async () => {
     const message = input.trim();
     if (!message || isStreaming || streamRef.current) return;
+    historyAbortRef.current?.abort();
+    historyAbortRef.current = null;
+    setLoadingHistory(false);
     const controller = new AbortController();
     streamRef.current = controller;
 
@@ -211,8 +222,10 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
           <button
             type="button"
             onClick={handleNewChat}
-            disabled={isStreaming && messages.length === 0}
-            className="flex items-center gap-1 px-2 py-1 rounded-md text-2xs text-ink-muted hover:text-ink hover:bg-tile-hover border border-line transition-colors"
+            disabled={
+              !isStreaming && !loadingHistory && messages.length === 0 && conversationId === null && !error
+            }
+            className="flex items-center gap-1 px-2 py-1 rounded-md text-2xs text-ink-muted hover:text-ink hover:bg-tile-hover border border-line transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             title="开启新对话"
           >
             <Plus size={12} /> 新对话

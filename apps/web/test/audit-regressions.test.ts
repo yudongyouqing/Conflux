@@ -49,6 +49,31 @@ test("chat ignores IME confirmation, aborts on back and releases input after tra
   await act(async () => { fail(new DOMException("aborted", "AbortError")); });
 });
 
+test("chat cancels in-flight history load when starting a new chat so stale turns never overwrite", async () => {
+  let resolveConvs!: (v: { conversations: Array<{ id: number; agent_id: number; title: string; created_at: string; updated_at: string }> }) => void;
+  let convSignal: AbortSignal | undefined;
+  mock.method(api, "getConversations", (_agentId: number, signal?: AbortSignal) => {
+    convSignal = signal;
+    return new Promise((resolve) => { resolveConvs = resolve as typeof resolveConvs; });
+  });
+  mock.method(api, "getTurns", async () => ({
+    turns: [{ id: 1, conversation_id: 9, role: "user" as const, content: "stale-turn", created_at: "2026-11-20T00:00:00Z" }],
+  }));
+
+  const view = render(createElement(ChatPanel, { agent, onBack: () => {} }));
+  const newChatBtn = view.getByRole("button", { name: /新对话/ }) as HTMLButtonElement;
+  assert.equal(newChatBtn.disabled, false, "enabled while history is loading");
+  fireEvent.click(newChatBtn);
+  assert.equal(convSignal?.aborted, true, "in-flight history request aborted on new chat");
+
+  await act(async () => {
+    resolveConvs({ conversations: [{ id: 9, agent_id: 1, title: "old", created_at: "2026-11-20T00:00:00Z", updated_at: "2026-11-20T00:00:00Z" }] });
+    await new Promise((r) => setTimeout(r, 10));
+  });
+  assert.equal(view.queryByText("stale-turn"), null, "stale history must not overwrite fresh chat");
+  assert.equal(newChatBtn.disabled, true, "disabled when chat is empty and idle");
+});
+
 test("hidden settings do not poll and import invalidates every workspace cache and refreshes counts", async () => {
   const calls: string[] = [];
   let count = 1;

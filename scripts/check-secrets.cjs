@@ -90,7 +90,10 @@ function collectFiles(root) {
         visit(absolute);
         continue;
       }
-      if (entry.name.includes(".test.") || entry.name.endsWith(".db")) continue;
+      const lower = entry.name.toLowerCase();
+      if ((entry.name.includes(".test.") && !lower.startsWith(".env.")) || entry.name.endsWith(".db")) {
+        continue;
+      }
       if (isScannableFile(entry.name)) files.push(absolute);
     }
   }

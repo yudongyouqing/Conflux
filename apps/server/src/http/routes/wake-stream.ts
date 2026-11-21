@@ -17,6 +17,9 @@ export function registerWakeStreamRoutes(app: FastifyInstance, ctx: ServerContex
 
   app.get<{ Params: { sessionId: string } }>("/wake/:sessionId/stream", options, (req, reply) => {
     const logPath = join(dataDir, "wake-logs", `${req.params.sessionId}.log`);
+    for (const [k, v] of Object.entries(reply.getHeaders())) {
+      if (v !== undefined) reply.raw.setHeader(k, v);
+    }
     reply.hijack();
     reply.raw.writeHead(200, {
       "Content-Type": "text/event-stream",

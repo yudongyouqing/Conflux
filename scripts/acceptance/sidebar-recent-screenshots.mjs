@@ -122,8 +122,7 @@ try {
   await sleep(800);
   if (server.exitCode === null) server.kill("SIGKILL");
   serverLog.close();
-  let browser;
-try {
+  try {
     rmSync(home, { recursive: true, force: true });
   } catch {
     // Windows handle lag; leftovers stay in %TEMP%

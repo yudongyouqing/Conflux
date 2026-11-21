@@ -186,8 +186,13 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
               }
             }
             if (e.key === "Escape") {
-              if (target) setTarget(null);
-              else setText("");
+              if (target) {
+                e.preventDefault();
+                setTarget(null);
+              } else if (text) {
+                e.preventDefault();
+                setText("");
+              }
             }
           }}
           className="w-full bg-surface text-ink text-sm rounded-lg px-3 py-2 border border-line placeholder-ink-faint outline-none focus:border-accent"

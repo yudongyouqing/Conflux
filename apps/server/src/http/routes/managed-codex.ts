@@ -82,6 +82,9 @@ export function registerManagedCodexRoutes(app: FastifyInstance, ctx: ServerCont
         return reply.send({ events: history });
       }
 
+      for (const [k, v] of Object.entries(reply.getHeaders())) {
+        if (v !== undefined) reply.raw.setHeader(k, v);
+      }
       reply.hijack();
       reply.raw.writeHead(200, {
         "Content-Type": "text/event-stream",

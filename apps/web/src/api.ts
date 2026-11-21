@@ -262,11 +262,11 @@ export const api = {
       signal,
     ),
 
-  getConversations: (agentId: number) =>
-    get<{ conversations: Conversation[] }>(`/agents/${agentId}/conversations`),
+  getConversations: (agentId: number, signal?: AbortSignal) =>
+    get<{ conversations: Conversation[] }>(`/agents/${agentId}/conversations`, undefined, signal),
 
-  getTurns: (conversationId: number) =>
-    get<{ turns: Turn[] }>(`/conversations/${conversationId}/turns`),
+  getTurns: (conversationId: number, signal?: AbortSignal) =>
+    get<{ turns: Turn[] }>(`/conversations/${conversationId}/turns`, undefined, signal),
 
   deleteConversation: (id: number) => del<{ deleted: boolean }>(`/conversations/${id}`),
 

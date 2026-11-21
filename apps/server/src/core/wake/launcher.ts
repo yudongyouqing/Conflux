@@ -383,6 +383,7 @@ export function pinCodexDescendants(db: DB, launcherPid: number, sessionId: stri
     return;
   }
   // Single Win32_Process snapshot per poll instead of per-PID WMI queries.
+  // Cast keys and frontier to [uint32] so Hashtable.ContainsKey matches CIM UInt32 values.
   const ps = [
     "$ErrorActionPreference='SilentlyContinue'",
     "$deadline=(Get-Date).AddSeconds(12)",
@@ -390,13 +391,13 @@ export function pinCodexDescendants(db: DB, launcherPid: number, sessionId: stri
     "while((Get-Date) -lt $deadline -and $all.Count -eq 0){",
     "  $procs=@(Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine)",
     "  $byParent=@{}",
-    "  foreach($p in $procs){ if(-not $byParent.ContainsKey($p.ParentProcessId)){ $byParent[$p.ParentProcessId]=@() }; $byParent[$p.ParentProcessId]+=$p }",
-    "  $frontier=@(LAUNCHER_PID)",
+    "  foreach($p in $procs){ $k=[uint32]$p.ParentProcessId; if(-not $byParent.ContainsKey($k)){ $byParent[$k]=@() }; $byParent[$k]+=$p }",
+    "  $frontier=@([uint32]LAUNCHER_PID)",
     "  foreach($i in 1..6){",
-    "    $kids=@(); foreach($f in $frontier){ if($byParent.ContainsKey($f)){ $kids+=$byParent[$f] } }",
+    "    $kids=@(); foreach($f in $frontier){ $fk=[uint32]$f; if($byParent.ContainsKey($fk)){ $kids+=$byParent[$fk] } }",
     "    if($kids.Count -eq 0){ break }",
     "    $all+=@($kids | Where-Object { __RUNTIME_MATCH__ })",
-    "    $frontier=@($kids | ForEach-Object { $_.ProcessId })",
+    "    $frontier=@($kids | ForEach-Object { [uint32]$_.ProcessId })",
     "  }",
     "  if($all.Count -eq 0){ Start-Sleep -Milliseconds 300 }",
     "}",
@@ -427,7 +428,7 @@ function pipeWakeLog(child: ReturnType<typeof spawn>, dataDir: string, sessionId
   try {
     const dir = join(dataDir, "wake-logs");
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    const safeSessionId = sessionId.replace(/[^A-Za-z0-9._-]/g, "_") || "wake";
+    const safeSessionId = sessionId.replace(/[^A-Za-z0-9_-]/g, "_") || "wake";
     const fd = openSync(join(dir, `${safeSessionId}.log`), "a");
     let closed = false;
     const closeOnce = () => {
