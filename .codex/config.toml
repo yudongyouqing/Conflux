@@ -1,3 +1,7 @@
+# Windows default (uses cmd /c to resolve npx.cmd).
+# On macOS/Linux, change to:
+#   command = "npx"
+#   args = ["tsx", "apps/server/src/index.ts", "mcp"]
 [mcp_servers.conflux]
 command = "cmd"
 args = ["/c", "npx", "tsx", "apps/server/src/index.ts", "mcp"]

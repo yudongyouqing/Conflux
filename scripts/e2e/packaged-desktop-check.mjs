@@ -28,7 +28,6 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 
 const appDir = process.argv[2];
@@ -130,10 +129,11 @@ console.log("real userData count:size (before):", userDataBefore);
 // the session environment. CONFLUX_QUIT_ON_LAST_WINDOW_CLOSED is the E2E
 // exit affordance: CDP Browser.close then reaches the real before-quit
 // teardown instead of dying in the tray. --version would LAUNCH the app.
+const psQuote = (value) => value.replaceAll("'", "''");
 const launched = ps(
-  `$env:CONFLUX_HOME='${home}'; $env:CONFLUX_QUIT_ON_LAST_WINDOW_CLOSED='1'; ` +
-    `$p = Start-Process -FilePath '${exe}' ` +
-    `-ArgumentList '--remote-debugging-port=${DEBUG_PORT}','--user-data-dir=${userDataDir}' ` +
+  `$env:CONFLUX_HOME='${psQuote(home)}'; $env:CONFLUX_QUIT_ON_LAST_WINDOW_CLOSED='1'; ` +
+    `$p = Start-Process -FilePath '${psQuote(exe)}' ` +
+    `-ArgumentList '--remote-debugging-port=${DEBUG_PORT}','--user-data-dir=${psQuote(userDataDir)}' ` +
     `-PassThru; $p.Id`,
 ).trim();
 const appPid = Number(launched.split(/\s+/).pop());
@@ -186,7 +186,7 @@ try {
   await page.getByRole("button", { name: "创建编码助手" }).waitFor({ timeout: 20_000 });
   console.log("✓ unified assistants page reachable");
 
-  const fileVersion = ps(`(Get-Item '${exe}').VersionInfo.ProductVersion`).trim();
+  const fileVersion = ps(`(Get-Item '${psQuote(exe)}').VersionInfo.ProductVersion`).trim();
   console.log("running exe ProductVersion:", fileVersion);
   const expectedVersion = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version;
   assert.ok(fileVersion === expectedVersion || fileVersion === expectedVersion + ".0", "running version matches the package");
@@ -241,6 +241,6 @@ console.log("✓ real userData count/size unchanged (coarse signal; isolation re
 console.log(`exit: ${exitPath} (${exitCheckPassed ? "graceful, verified" : "FAILED, forced"})`);
 console.log("ALL PACKAGED CHECKS " + (exitCheckPassed ? "PASSED" : "FAILED (exit)"));
 
-rmSync(home, { recursive: true, force: true });
-rmSync(userDataDir, { recursive: true, force: true });
+rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+rmSync(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 if (!exitCheckPassed) process.exitCode = 1;

@@ -150,10 +150,15 @@ function ok(name) {
 try {
   await Promise.all([waitFor(`${API}/healthz`), waitFor(`http://127.0.0.1:${WEB_PORT}/`)]);
   // controlled fake sessions; --controls also disables auto-wake
-  spawnSync(process.execPath, ["--import", "tsx", "scripts/capture/seed-core.ts", home, "--controls", "--chat-first"], {
-    cwd: ROOT,
-    stdio: "inherit",
-  });
+  const seedResult = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "scripts/capture/seed-core.ts", home, "--controls", "--chat-first"],
+    {
+      cwd: ROOT,
+      stdio: "inherit",
+    },
+  );
+  assert.equal(seedResult.status, 0, "chat-first fixture seed failed");
 
   await withBrowser(async () => chromium.launch(), async (browser) => {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
@@ -274,7 +279,7 @@ try {
   );
   await page.getByRole("button", { name: "返回当前房间" }).click();
   await page.waitForFunction(() => document.querySelectorAll(".react-flow__node").length === 2);
-  assert.ok(page.getByRole("heading", { name: "P1 验收房" }));
+  await page.getByRole("heading", { name: "P1 验收房" }).waitFor();
   await headerToggle("聊天").click();
   ok("global graph round-trips back to the same room target");
 
@@ -411,7 +416,7 @@ try {
   stop(web);
   // bounded cleanup of our own temp dir; failures keep it for inspection
   if (!process.exitCode) {
-    rmSync(home, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   } else {
     console.error(`kept isolated home for inspection: ${home}`);
   }

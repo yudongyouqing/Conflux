@@ -10,8 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  actions: write
+  contents: read
 
 jobs:
   desktop:
@@ -28,7 +27,7 @@ jobs:
           - os: macos-latest
             platform: macOS
             flag: mac
-            target: dmg
+            target: dmg zip
           - os: ubuntu-latest
             platform: Linux
             flag: linux
@@ -80,8 +79,8 @@ jobs:
       - name: Run desktop module tests
         run: npm run test:desktop
 
-      - name: Test packaged-module smoke lifecycle
-        run: node --test scripts/packaged-module-smoke.test.cjs
+      - name: Test release config and packaged-module smoke lifecycle
+        run: node --test scripts/release-config.test.cjs scripts/packaged-module-smoke.test.cjs
 
       - name: Build Windows release
         if: matrix.platform == 'Windows'
