@@ -27,7 +27,9 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
   const [autoWake, setAutoWake] = useState(true);
   const [wakeMaxConcurrent, setWakeMaxConcurrent] = useState(3);
   const [wakeActiveCount, setWakeActiveCount] = useState(0);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [terminalNotice, setTerminalNotice] = useState<string | null>(null);
+  const [wakeNotice, setWakeNotice] = useState<string | null>(null);
+  const [savingSection, setSavingSection] = useState<"terminal" | "wake" | null>(null);
   const [transferNotice, setTransferNotice] = useState<string | null>(null);
   const [transferPending, setTransferPending] = useState(false);
   const [importConflict, setImportConflict] = useState<"skip" | "overwrite" | "copy">("skip");
@@ -137,19 +139,35 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
     return () => { cancelled = true; clearInterval(timer); };
   }, [active]);
 
-  const submit = () => {
-    setNotice(null);
+  const submitTerminal = () => {
+    setTerminalNotice(null);
+    setSavingSection("terminal");
     save.mutate(
       {
         terminal,
         claude_path: claudePath,
         codex_path: codexPath,
+      },
+      {
+        onSuccess: () => setTerminalNotice("已保存"),
+        onError: (e) => setTerminalNotice(`保存失败: ${(e as Error).message}`),
+        onSettled: () => setSavingSection((prev) => (prev === "terminal" ? null : prev)),
+      },
+    );
+  };
+
+  const submitWake = () => {
+    setWakeNotice(null);
+    setSavingSection("wake");
+    save.mutate(
+      {
         auto_wake: autoWake,
         wake_max_concurrent: wakeMaxConcurrent,
       },
       {
-        onSuccess: () => setNotice("已保存"),
-        onError: (e) => setNotice(`保存失败: ${(e as Error).message}`),
+        onSuccess: () => setWakeNotice("已保存"),
+        onError: (e) => setWakeNotice(`保存失败: ${(e as Error).message}`),
+        onSettled: () => setSavingSection((prev) => (prev === "wake" ? null : prev)),
       },
     );
   };
@@ -362,24 +380,25 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
           </div>
 
           <div className="flex items-center justify-between pt-1">
-            {notice ? (
+            {terminalNotice ? (
               <span
                 className={`text-xs ${
-                  notice.startsWith("保存失败") ? "text-danger" : "text-success"
+                  terminalNotice.startsWith("保存失败") ? "text-danger" : "text-success"
                 } flex items-center gap-1`}
               >
-                {notice === "已保存" && <Check size={12} />}
-                {notice}
+                {terminalNotice === "已保存" && <Check size={12} />}
+                {terminalNotice}
               </span>
             ) : (
               <span />
             )}
             <button
-              onClick={submit}
+              type="button"
+              onClick={submitTerminal}
               disabled={save.isPending}
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-accent text-on-accent text-xs hover:bg-accent-deep disabled:opacity-50"
             >
-              {save.isPending && <Loader2 size={12} className="animate-spin" />}
+              {savingSection === "terminal" && <Loader2 size={12} className="animate-spin" />}
               保存
             </button>
           </div>
@@ -440,25 +459,25 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
           </label>
 
           <div className="flex items-center justify-between pt-1">
-            {notice ? (
+            {wakeNotice ? (
               <span
                 className={`text-xs ${
-                  notice.startsWith("保存失败") ? "text-danger" : "text-success"
+                  wakeNotice.startsWith("保存失败") ? "text-danger" : "text-success"
                 } flex items-center gap-1`}
               >
-                {notice === "已保存" && <Check size={12} />}
-                {notice}
+                {wakeNotice === "已保存" && <Check size={12} />}
+                {wakeNotice}
               </span>
             ) : (
               <span />
             )}
             <button
               type="button"
-              onClick={submit}
+              onClick={submitWake}
               disabled={save.isPending}
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-accent text-on-accent text-xs hover:bg-accent-deep disabled:opacity-50"
             >
-              {save.isPending && <Loader2 size={12} className="animate-spin" />}
+              {savingSection === "wake" && <Loader2 size={12} className="animate-spin" />}
               保存
             </button>
           </div>

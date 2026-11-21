@@ -266,7 +266,7 @@ export function GraphTab({
 
   // Apply selection & highlight styling without re-running layout.
   useEffect(() => {
-    if (!active || !graph) return;
+    if (!active) return;
     const endpoints = selectedEdgeEndpoints(selectedEdge);
     setNodes((prev) =>
       prev.map((n) => {
@@ -283,7 +283,7 @@ export function GraphTab({
       }),
     );
     setEdges(styleEdges(baseEdgesRef.current, selectedEdge, selectedSessionId));
-  }, [active, graph, selectedSessionId, selectedEdge, setNodes, setEdges]);
+  }, [active, selectedSessionId, selectedEdge, setNodes, setEdges]);
 
   // Reframe when the composition itself changes — dagre/grid/rows swap
   // positions wholesale and the initial fitView never reruns on its own.
@@ -422,7 +422,9 @@ export function GraphTab({
       {edges.length === 0 && nodes.length > 0 && (
         <Panel position="bottom-center" className="!mb-4">
           <div className="text-2xs text-ink-faint bg-surface/90 backdrop-blur-sm border border-line rounded-full px-3 py-1 shadow-[0_2px_10px_rgba(16,24,40,0.08)]">
-            当前视图暂无会话间消息通道 —— 发起一次对话即可建立连线
+            {viewMode === "dirs" && (graph?.edges.length ?? 0) > 0
+              ? "展开目录卡片查看目录内连线，或切换「仅活跃 / 全部」查看跨目录通道"
+              : "当前视图暂无会话间消息通道 —— 发起一次对话即可建立连线"}
           </div>
         </Panel>
       )}

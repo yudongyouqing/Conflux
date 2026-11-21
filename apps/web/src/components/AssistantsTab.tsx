@@ -226,6 +226,7 @@ export function AssistantsTab({ active, onOpenSession }: AssistantsTabProps) {
                 <ModelCard
                   key={key}
                   agent={agent}
+                  deleting={delAgent.isPending && delAgent.variables === agent.id}
                   onChat={() => setChatAgentId(agent.id)}
                   onDelete={() => delAgent.mutate(agent.id)}
                 />
@@ -339,11 +340,12 @@ function CodingCard({
             <div className="flex items-center gap-1">
               <button
                 type="button"
+                disabled={del.isPending && del.variables === preset.id}
                 onClick={() => {
                   setConfirmDelete(false);
                   del.mutate(preset.id);
                 }}
-                className="px-2 py-1 rounded-md bg-danger text-on-accent text-2xs font-medium hover:opacity-90"
+                className="px-2 py-1 rounded-md bg-danger text-on-accent text-2xs font-medium hover:opacity-90 disabled:opacity-50"
               >
                 确认删除
               </button>
@@ -358,8 +360,9 @@ function CodingCard({
           ) : (
             <button
               type="button"
+              disabled={del.isPending && del.variables === preset.id}
               onClick={() => setConfirmDelete(true)}
-              className="p-1.5 rounded-lg text-ink-faint hover:text-danger hover:bg-danger-soft"
+              className="p-1.5 rounded-lg text-ink-faint hover:text-danger hover:bg-danger-soft disabled:opacity-50"
               title="删除预设"
             >
               <Trash2 size={13} />
@@ -422,10 +425,12 @@ function CodingCard({
 
 function ModelCard({
   agent,
+  deleting,
   onChat,
   onDelete,
 }: {
   agent: Agent;
+  deleting: boolean;
   onChat: () => void;
   onDelete: () => void;
 }) {
@@ -433,7 +438,13 @@ function ModelCard({
   const [confirmDelete, setConfirmDelete] = useState(false);
   return (
     <div className="rounded-xl border border-line bg-surface overflow-hidden">
-      <div className="flex items-center gap-3 p-4 cursor-pointer" onClick={() => setExpanded(!expanded)}>
+      <div
+        className="flex items-center gap-3 p-4 cursor-pointer"
+        onClick={() => {
+          if (expanded) setConfirmDelete(false);
+          setExpanded(!expanded);
+        }}
+      >
         <div className="w-9 h-9 rounded-lg bg-indigo-600 flex items-center justify-center flex-shrink-0">
           <Bot size={17} className="text-white" />
         </div>
@@ -482,11 +493,12 @@ function ModelCard({
               <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                 <button
                   type="button"
+                  disabled={deleting}
                   onClick={() => {
                     setConfirmDelete(false);
                     onDelete();
                   }}
-                  className="px-2 py-0.5 rounded-md bg-danger text-on-accent font-medium hover:opacity-90"
+                  className="px-2 py-0.5 rounded-md bg-danger text-on-accent font-medium hover:opacity-90 disabled:opacity-50"
                 >
                   确认删除
                 </button>
@@ -501,11 +513,12 @@ function ModelCard({
             ) : (
               <button
                 type="button"
+                disabled={deleting}
                 onClick={(e) => {
                   e.stopPropagation();
                   setConfirmDelete(true);
                 }}
-                className="flex items-center gap-1 text-danger/80 hover:text-danger"
+                className="flex items-center gap-1 text-danger/80 hover:text-danger disabled:opacity-50"
               >
                 <Trash2 size={11} /> 删除
               </button>
