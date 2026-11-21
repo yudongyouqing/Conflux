@@ -24,8 +24,8 @@ const CONFIG_PATH = path.join(DESKTOP, "electron-builder.yml");
 // seen anywhere in the walk — the latter keeps the stale check from
 // flagging patterns that a fresh npm ci hoists to the root even when this
 // checkout happens to nest them.
-const ENTRY_DEPENDENCIES = ["node-pty", "electron-updater", "better-sqlite3"];
-const NATIVE_PACKAGES = ["node-pty", "better-sqlite3"];
+const ENTRY_DEPENDENCIES = ["electron-updater", "better-sqlite3"];
+const NATIVE_PACKAGES = ["better-sqlite3"];
 
 test("builder root production graph includes the desktop workspace", () => {
   const rootPackage = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));

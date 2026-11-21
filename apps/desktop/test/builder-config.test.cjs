@@ -27,10 +27,9 @@ test("production build config includes app, server, web, and native module resou
   // The runtime dependency closure lives in packaged-deps.test.cjs, which
   // recomputes it from the real node_modules instead of freezing a list.
   assert.ok(config.files.includes("apps/server/package.json"), "runtime version metadata is packaged beside server dist");
-  assert.ok(config.files.includes("node_modules/node-pty/**/*"));
   assert.ok(config.files.includes("node_modules/electron-updater/**/*"));
   assert.ok(config.asarUnpack.includes("**/better-sqlite3/**"));
-  assert.ok(config.asarUnpack.includes("**/node-pty/**"));
+  assert.ok(!config.files.some((pattern) => pattern.includes("node-pty")), "unused node-pty is not packaged");
   assert.ok(config.win.target.some((target) => target.target === "nsis"));
   assert.equal(
     config.artifactName,

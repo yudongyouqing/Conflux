@@ -24,7 +24,6 @@ import {
 } from "../hooks";
 import { buildAssistantCatalog, type CodingAssistantItem } from "../assistant-catalog";
 import { CreateAgentWizard, type CreatedAssistant } from "./CreateAgentWizard";
-import { PtyPanel } from "./PtyPanel";
 import { RuntimeInstanceRow, RuntimeInstancesPanel } from "./RuntimeInstancesPanel";
 import { ChatPanel } from "./ChatPanel";
 import { ManagedCodexPanel } from "./ManagedCodexPanel";
@@ -34,7 +33,7 @@ type Category = "coding" | "model";
 const CATEGORY_LABELS: Record<Category, string> = { coding: "编码助手", model: "模型助手" };
 
 export interface AssistantsTabProps {
-  /** polling/PTY subscriptions pause while another view is showing */
+  /** polling subscriptions pause while another view is showing */
   active: boolean;
   /** Open a conversation with a preset's real session (workspace target). */
   onOpenSession?: (sessionId: string) => void;
@@ -44,7 +43,7 @@ export interface AssistantsTabProps {
  * Unified assistants page: one entry, two categories (编码 = CLI presets,
  * 模型 = API personas). Every association shown here comes from the
  * identity-based catalog projection; navigation and category switches never
- * start or stop CLI processes, and the PTY only streams while visible.
+ * start or stop CLI processes.
  */
 export function AssistantsTab({ active, onOpenSession }: AssistantsTabProps) {
   // the page's own queries pause while another view is showing; the shared
@@ -61,7 +60,6 @@ export function AssistantsTab({ active, onOpenSession }: AssistantsTabProps) {
   const [category, setCategory] = useState<Category>("coding");
   const [wizardOpen, setWizardOpen] = useState(false);
   const [expandedPreset, setExpandedPreset] = useState<number | null>(null);
-  const [ptyAgentId, setPtyAgentId] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [chatAgentId, setChatAgentId] = useState<number | null>(null);
   const [managedTarget, setManagedTarget] = useState<{
@@ -202,8 +200,6 @@ export function AssistantsTab({ active, onOpenSession }: AssistantsTabProps) {
                   launch={launch}
                   del={delPreset}
                   onOpenSession={onOpenSession}
-                  onOpenPty={(id) => setPtyAgentId((prev) => (prev === id ? null : id))}
-                  ptyOpen={ptyAgentId === item.preset.id}
                   onOpenManaged={(instanceId) =>
                     setManagedTarget({ instanceId, name: item.preset.name })
                   }
@@ -239,19 +235,6 @@ export function AssistantsTab({ active, onOpenSession }: AssistantsTabProps) {
         )}
       </div>
 
-      {ptyAgentId !== null && category === "coding" && (
-        <div className="mt-4 border border-line rounded-xl overflow-hidden bg-surface h-[300px] flex-shrink-0 max-w-2xl mx-auto">
-          <PtyPanel
-            agentId={ptyAgentId}
-            agentName={
-              catalog.coding.find((c) => c.preset.id === ptyAgentId)?.preset.name ??
-              `助手 #${ptyAgentId}`
-            }
-            active={active}
-          />
-        </div>
-      )}
-
       <CreateAgentWizard
         open={wizardOpen}
         onClose={() => setWizardOpen(false)}
@@ -271,8 +254,6 @@ function CodingCard({
   launch,
   del,
   onOpenSession,
-  onOpenPty,
-  ptyOpen,
   onOpenManaged,
 }: {
   item: CodingAssistantItem;
@@ -283,11 +264,10 @@ function CodingCard({
   launch: (id: number, name: string) => void;
   del: ReturnType<typeof useDeleteRuntimeAgent>;
   onOpenSession?: (sessionId: string) => void;
-  onOpenPty: (id: number) => void;
-  ptyOpen: boolean;
   onOpenManaged: (instanceId: string) => void;
 }) {
   const { preset, instances, sessions } = item;
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const managed = preset.execution_mode === "managed";
   // stats derive from the real instances — the preset's live flag never
   // decides what the user is told here
@@ -355,23 +335,36 @@ function CodingCard({
             )}
             {managed ? "启动（受管）" : "启动"}
           </button>
-          <button
-            onClick={() => onOpenPty(preset.id)}
-            aria-pressed={ptyOpen}
-            title="查看终端输出（桌面端）"
-            className={`p-1.5 rounded-lg transition-colors ${
-              ptyOpen ? "bg-accent-soft text-accent" : "text-ink-faint hover:bg-tile-hover"
-            }`}
-          >
-            <Terminal size={13} />
-          </button>
-          <button
-            onClick={() => del.mutate(preset.id)}
-            className="p-1.5 rounded-lg text-ink-faint hover:text-danger hover:bg-danger-soft"
-            title="删除预设"
-          >
-            <Trash2 size={13} />
-          </button>
+          {confirmDelete ? (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmDelete(false);
+                  del.mutate(preset.id);
+                }}
+                className="px-2 py-1 rounded-md bg-danger text-on-accent text-2xs font-medium hover:opacity-90"
+              >
+                确认删除
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(false)}
+                className="px-1.5 py-1 rounded-md text-2xs text-ink-muted hover:bg-tile-hover"
+              >
+                取消
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmDelete(true)}
+              className="p-1.5 rounded-lg text-ink-faint hover:text-danger hover:bg-danger-soft"
+              title="删除预设"
+            >
+              <Trash2 size={13} />
+            </button>
+          )}
           {expanded ? (
             <ChevronUp size={14} className="text-ink-faint" />
           ) : (
@@ -437,6 +430,7 @@ function ModelCard({
   onDelete: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   return (
     <div className="rounded-xl border border-line bg-surface overflow-hidden">
       <div className="flex items-center gap-3 p-4 cursor-pointer" onClick={() => setExpanded(!expanded)}>
@@ -461,7 +455,7 @@ function ModelCard({
             e.stopPropagation();
             onChat();
           }}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-accent hover:bg-accent-deep text-on-accent transition-colors shadow-sm"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-accent hover:bg-accent-deep text-on-accent transition-colors shadow-card"
         >
           <MessageSquare size={12} /> 对话
         </button>
@@ -484,15 +478,38 @@ function ModelCard({
             <span>
               ID: {agent.id} · 更新于 {new Date(agent.updated_at).toLocaleString()}
             </span>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete();
-              }}
-              className="flex items-center gap-1 text-red-500/70 hover:text-red-500"
-            >
-              <Trash2 size={11} /> 删除
-            </button>
+            {confirmDelete ? (
+              <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmDelete(false);
+                    onDelete();
+                  }}
+                  className="px-2 py-0.5 rounded-md bg-danger text-on-accent font-medium hover:opacity-90"
+                >
+                  确认删除
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmDelete(false)}
+                  className="px-1.5 py-0.5 rounded-md text-ink-muted hover:bg-tile-hover"
+                >
+                  取消
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setConfirmDelete(true);
+                }}
+                className="flex items-center gap-1 text-danger/80 hover:text-danger"
+              >
+                <Trash2 size={11} /> 删除
+              </button>
+            )}
           </div>
         </div>
       )}
