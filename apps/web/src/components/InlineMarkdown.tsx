@@ -17,6 +17,14 @@ interface Seg {
   href?: string;
 }
 
+function hasControlChar(s: string): boolean {
+  for (let i = 0; i < s.length; i++) {
+    const code = s.charCodeAt(i);
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
+}
+
 const TOKEN_RE =
   /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(__[^_\n]+__)|(\*[^*\n]+\*)|(~~[^~\n]+~~)|(\[[^\]\n]+\]\([^)\s]+\))/g;
 
@@ -33,10 +41,19 @@ function tokenize(text: string): Seg[] {
     else if (raw.startsWith("~~")) segs.push({ kind: "strike", value: raw.slice(2, -2) });
     else if (raw.startsWith("[")) {
       const link = /^\[([^\]\n]+)\]\(([^)\s]+)\)$/.exec(raw);
-      // Relative paths are safe; explicit protocols use the same conservative
-      // allowlist as the full markdown renderer.
-      if (link && !/^(?!(?:https?|mailto):)[a-z][a-z\d+.-]*:/i.test(link[2])) segs.push({ kind: "link", value: link[1], href: link[2] });
-      else segs.push({ kind: "text", value: raw });
+      // Relative paths are safe; reject ASCII control chars and explicit
+      // protocols outside the conservative allowlist.
+      const href = link?.[2];
+      if (
+        link &&
+        href &&
+        !hasControlChar(href) &&
+        !/^(?!(?:https?|mailto):)[a-z][a-z\d+.-]*:/i.test(href)
+      ) {
+        segs.push({ kind: "link", value: link[1], href });
+      } else {
+        segs.push({ kind: "text", value: raw });
+      }
     } else segs.push({ kind: "italic", value: raw.slice(1, -1) });
     last = start + raw.length;
   }

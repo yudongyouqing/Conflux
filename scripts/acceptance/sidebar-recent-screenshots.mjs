@@ -1,4 +1,4 @@
-// Browser acceptance for the home sidebar's recency window (#324): seeds
+// Browser acceptance for the home sidebar's recency window: seeds
 // one isolated server with sessions across age buckets (via API) and
 // backdates their heartbeats directly in SQLite, then screenshots the home
 // sidebar on desktop + narrow viewports. Expected: 今天/昨天/最近 7 天/10 天内
@@ -55,6 +55,7 @@ const server = spawn(
 server.stdout.pipe(serverLog);
 server.stderr.pipe(serverLog);
 
+let browser;
 try {
   await waitFor(
     async () => (await fetch(`${BASE}/healthz`).catch(() => null))?.ok,
@@ -78,7 +79,7 @@ try {
   }
   db.close();
 
-  const browser = await chromium.launch();
+  browser = await chromium.launch();
   for (const [label, viewport] of [
     ["desktop", { width: 1280, height: 800 }],
     ["narrow", { width: 390, height: 844 }],
@@ -106,6 +107,7 @@ try {
     }
   }
   await browser.close();
+  browser = undefined;
   writeFileSync(
     join(OUT, "README.txt"),
     [
@@ -115,11 +117,13 @@ try {
   );
   console.log("DONE ->", OUT);
 } finally {
+  await browser?.close().catch(() => {});
   server.kill();
   await sleep(800);
   if (server.exitCode === null) server.kill("SIGKILL");
   serverLog.close();
-  try {
+  let browser;
+try {
     rmSync(home, { recursive: true, force: true });
   } catch {
     // Windows handle lag; leftovers stay in %TEMP%

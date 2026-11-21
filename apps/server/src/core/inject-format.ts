@@ -19,9 +19,15 @@ export interface BadgeInput {
 
 /** `[Conflux·回复 ← web-console · msg ]` */
 export function badge(input: BadgeInput): string {
-  const parts = [input.label];
-  if (input.from) parts.push(`← ${input.from}`);
-  if (input.ref) parts.push(`· ${input.ref}`);
+  const parts = [flattenOneLine(input.label)];
+  if (input.from) {
+    const from = flattenOneLine(input.from);
+    if (from) parts.push(`← ${from}`);
+  }
+  if (input.ref) {
+    const ref = flattenOneLine(input.ref);
+    if (ref) parts.push(`· ${ref}`);
+  }
   return `[Conflux·${parts.join(" ")}]`;
 }
 

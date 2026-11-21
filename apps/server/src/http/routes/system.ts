@@ -11,6 +11,7 @@ import {
 } from "../../core/data-clear.js";
 import { mkdirSync } from "node:fs";
 import { logAudit } from "../../core/audit.js";
+import { logger } from "../../log.js";
 import type { ServerContext } from "../context.js";
 
 interface AuditQs {
@@ -55,12 +56,16 @@ export function registerSystemRoutes(app: FastifyInstance, ctx: ServerContext): 
         scope,
         projectDir: req.query.project_dir || process.env.CLAUDE_PROJECT_DIR || process.cwd(),
       });
-      logAudit(db, {
-        interface: "http",
-        action: "export_data",
-        args: { scope },
-        result: dataTransferSummary(bundle),
-      });
+      try {
+        logAudit(db, {
+          interface: "http",
+          action: "export_data",
+          args: { scope },
+          result: dataTransferSummary(bundle),
+        });
+      } catch (auditErr) {
+        logger.warn({ err: auditErr, scope }, "failed to audit data export");
+      }
       reply.header("Content-Disposition", 'attachment; filename="conflux-data-v1.json"');
       return reply.send(bundle);
     } catch (err) {
@@ -77,8 +82,7 @@ export function registerSystemRoutes(app: FastifyInstance, ctx: ServerContext): 
     }
   });
 
-  // POST /data/clear - auto-backup a full bundle, then delete the
-  // selected categories (issue #79)
+  // POST /data/clear - auto-backup a full bundle, then delete the selected categories
   app.post<{ Body: DataClearBody }>("/data/clear", {}, async (req, reply) => {
     const categories = req.body?.categories ?? {};
     if (!categories.sessions && !categories.messages && !categories.context) {

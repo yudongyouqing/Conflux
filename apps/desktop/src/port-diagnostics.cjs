@@ -49,7 +49,50 @@ async function findWindowsPortOwner(port, host = "127.0.0.1", { execFileFn = exe
   }
 }
 
-const findPortOwner = findWindowsPortOwner;
+function parseLsofOwner(output) {
+  let pid = null;
+  let command;
+  for (const rawLine of String(output ?? "").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (line.startsWith("p")) {
+      const parsed = Number(line.slice(1));
+      if (Number.isSafeInteger(parsed) && parsed > 0) {
+        pid = parsed;
+      }
+    } else if (line.startsWith("c") && pid !== null && command === undefined) {
+      const name = line.slice(1).trim();
+      if (name) command = name;
+    }
+    if (pid !== null && command !== undefined) break;
+  }
+  if (pid === null) return null;
+  return command ? { pid, command } : { pid };
+}
+
+async function findPosixPortOwner(port, _host = "127.0.0.1", { execFileFn = execFile } = {}) {
+  try {
+    const lsof = await runExecFile(execFileFn, "lsof", [
+      "-nP",
+      `-iTCP:${port}`,
+      "-sTCP:LISTEN",
+      "-F",
+      "pc",
+    ]);
+    return parseLsofOwner(lsof.stdout);
+  } catch {
+    return null;
+  }
+}
+
+async function findPortOwner(
+  port,
+  host = "127.0.0.1",
+  { execFileFn = execFile, platform = process.platform } = {},
+) {
+  if (platform === "win32") return findWindowsPortOwner(port, host, { execFileFn });
+  return findPosixPortOwner(port, host, { execFileFn });
+}
 
 function assertPortAvailable(port, host = "127.0.0.1", { findOwner = findPortOwner } = {}) {
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
@@ -132,7 +175,9 @@ function runExecFile(execFileFn, command, args) {
 module.exports = {
   assertPortAvailable,
   findPortOwner,
+  findPosixPortOwner,
   findWindowsPortOwner,
+  parseLsofOwner,
   parseNetstatOwner,
   parseTasklistCommand,
 };

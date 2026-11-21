@@ -41,7 +41,7 @@ export function sanitizeApprovalPayload(
 ): Record<string, unknown> {
   if (kind === "commandExecution") {
     return {
-      kind: params.kind ?? "command",
+      kind: typeof params.kind === "string" ? params.kind : "command",
       command: typeof params.command === "string" ? params.command : null,
       cwd: typeof params.cwd === "string" ? params.cwd : null,
       reason: typeof params.reason === "string" ? params.reason : null,
@@ -69,13 +69,6 @@ export function recordApproval(
      VALUES (?, ?, ?, ?, 'pending', ?)`,
   ).run(input.runId, input.rpcRequestId, input.kind, JSON.stringify(input.payload), nowIso());
   return getApproval(db, Number(result.lastInsertRowid))!;
-}
-
-export function getApprovalByRpcId(db: DB, rpcRequestId: string | number): ApprovalRow | null {
-  const row = db
-    .prepare(`SELECT * FROM managed_codex_approvals WHERE rpc_request_id = ?`)
-    .get(String(rpcRequestId)) as ApprovalRow | undefined;
-  return row ?? null;
 }
 
 export function getApproval(db: DB, id: number): ApprovalRow | null {
@@ -117,13 +110,22 @@ export function resolveApproval(
   if (row.state === "expired") {
     return { ok: false, status: 409, reason: "approval expired with its connection" };
   }
+  let updatedPayload = row.payload;
+  try {
+    const parsed = JSON.parse(row.payload) as Record<string, unknown>;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      updatedPayload = JSON.stringify({ ...parsed, decision: input.decision });
+    }
+  } catch {
+    // keep existing payload if malformed
+  }
   const res = db
     .prepare(
       `UPDATE managed_codex_approvals
-       SET state = 'resolved', resolved_at = ?
+       SET state = 'resolved', payload = ?, resolved_at = ?
        WHERE id = ? AND state = 'pending'`,
     )
-    .run(nowIso(), input.approvalId);
+    .run(updatedPayload, nowIso(), input.approvalId);
   if (!res.changes) return { ok: false, status: 409, reason: "approval already resolved" };
   return { ok: true, row: getApproval(db, input.approvalId)! };
 }

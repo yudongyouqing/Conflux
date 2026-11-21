@@ -1,4 +1,5 @@
 import type { DB } from "./db.js";
+import { parseRuntimePid } from "./session-identity.js";
 
 export const MCP_HEARTBEAT_INTERVAL_MS = 15_000;
 export const MCP_LEASE_TTL_MS = 90_000;
@@ -20,6 +21,7 @@ interface SessionRow {
   status: string;
   metadata: string | null;
   last_heartbeat_at: string;
+  runtime_pid: number | null;
 }
 
 function readMetadata(value: string | null): Record<string, unknown> | null {
@@ -37,7 +39,9 @@ function readMetadata(value: string | null): Record<string, unknown> | null {
 function getSessionRow(db: DB, id: string): SessionRow | null {
   return (
     (db
-      .prepare(`SELECT id, status, metadata, last_heartbeat_at FROM sessions WHERE id = ?`)
+      .prepare(
+        `SELECT id, status, metadata, last_heartbeat_at, runtime_pid FROM sessions WHERE id = ?`,
+      )
       .get(id) as SessionRow | undefined) ?? null
   );
 }
@@ -137,11 +141,9 @@ export function markMcpDisconnected(
   // lease fields instead: the row falls back to runtime-PID
   // reconciliation (which skips rows carrying lease metadata).
   const pid =
-    typeof current.runtime_pid === "number"
-      ? current.runtime_pid
-      : typeof current.claude_pid === "number"
-        ? current.claude_pid
-        : null;
+    parseRuntimePid(row.runtime_pid) ??
+    parseRuntimePid(current.runtime_pid) ??
+    parseRuntimePid(current.claude_pid);
   if (pid !== null && isProcessAlive(pid)) {
     const next: Record<string, unknown> = { ...current };
     for (const key of [
@@ -180,6 +182,7 @@ export function markMcpDisconnected(
 /** Signal-0 liveness probe (EPERM on Windows is a dead/zombie pid — see
  * refreshClaudePid in live.ts for the same quirk). */
 function isProcessAlive(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
     return true;
@@ -191,7 +194,7 @@ function isProcessAlive(pid: number): boolean {
 export function expireMcpLeases(db: DB, now: Date = new Date()): { expired: number } {
   const rows = db
     .prepare(
-      `SELECT id, status, metadata, last_heartbeat_at FROM sessions
+      `SELECT id, status, metadata, last_heartbeat_at, runtime_pid FROM sessions
         WHERE status = 'active' AND metadata LIKE '%"mcp_connection_id"%'`,
     )
     .all() as SessionRow[];

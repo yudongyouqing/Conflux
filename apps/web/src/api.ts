@@ -35,11 +35,17 @@ async function get<T>(
   return res.json() as Promise<T>;
 }
 
-async function post<T>(path: string, body: unknown, headers?: Record<string, string>): Promise<T> {
+async function post<T>(
+  path: string,
+  body: unknown,
+  headers?: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<T> {
   const res = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...headers },
     body: JSON.stringify(body),
+    ...(signal ? { signal } : {}),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -71,7 +77,7 @@ async function put<T>(path: string, body: unknown): Promise<T> {
 }
 
 export const api = {
-  health: () => get<{ ok: boolean }>("/healthz"),
+  health: (signal?: AbortSignal) => get<{ ok: boolean }>("/healthz", undefined, signal),
 
   getGraph: (status = "all", signal?: AbortSignal) =>
     get<Graph>(`/graph?status=${encodeURIComponent(status)}`, undefined, signal),
@@ -202,14 +208,14 @@ export const api = {
   openSessionTerminal: (sessionId: string) =>
     post<{ opener: string }>(`/sessions/${encodeURIComponent(sessionId)}/open-terminal`, {}),
 
-  getTerminalSettings: () =>
+  getTerminalSettings: (signal?: AbortSignal) =>
     get<{
       terminal: TerminalSettings;
       options: TerminalOption[];
       auto_wake: boolean;
       wake_max_concurrent: number;
       wake_active_count: number;
-    }>("/settings/terminal"),
+    }>("/settings/terminal", undefined, signal),
 
   saveTerminalSettings: (
     body: Partial<TerminalSettings> & {
@@ -244,6 +250,17 @@ export const api = {
   }) => post<{ agent: Agent }>("/agents", body),
 
   deleteAgent: (id: number) => del<{ deleted: boolean }>(`/agents/${id}`),
+
+  testProvider: (
+    body: { provider: string; base_url?: string; api_key?: string; model?: string },
+    signal?: AbortSignal,
+  ) =>
+    post<{ ok: boolean; error?: string; model?: string; response?: string }>(
+      "/agents/test-provider",
+      body,
+      undefined,
+      signal,
+    ),
 
   getConversations: (agentId: number) =>
     get<{ conversations: Conversation[] }>(`/agents/${agentId}/conversations`),
@@ -305,49 +322,63 @@ export const api = {
     const decoder = new TextDecoder();
     let buffer = "";
 
+    const dispatchPart = (part: string) => {
+      const dataLine = part
+        .split(/\r?\n/)
+        .find((l) => l.startsWith("data: "));
+      if (!dataLine) return;
+      try {
+        const data = JSON.parse(dataLine.slice(6));
+        switch (data.type) {
+          case "token":
+            onToken(data.content);
+            break;
+          case "done":
+            onDone(data);
+            break;
+          case "error":
+            onError(data.message);
+            break;
+          case "tool_use":
+            onToolUse?.(data.name, data.input);
+            break;
+          case "tool_result":
+            onToolResult?.(data.name, data.result);
+            break;
+        }
+      } catch {
+        /* skip malformed */
+      }
+    };
+
     try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const parts = buffer.split("\n\n");
-      buffer = parts.pop() ?? "";
-
-      for (const part of parts) {
-        const dataLine = part.split("\n").find((l) => l.startsWith("data: "));
-        if (!dataLine) continue;
-        try {
-          const data = JSON.parse(dataLine.slice(6));
-          switch (data.type) {
-            case "token":
-              onToken(data.content);
-              break;
-            case "done":
-              onDone(data);
-              break;
-            case "error":
-              onError(data.message);
-              break;
-            case "tool_use":
-              onToolUse?.(data.name, data.input);
-              break;
-            case "tool_result":
-              onToolResult?.(data.name, data.result);
-              break;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          buffer += decoder.decode();
+          if (buffer.trim()) {
+            for (const part of buffer.split(/\r?\n\r?\n/)) {
+              if (part.trim()) dispatchPart(part);
+            }
           }
-        } catch {
-          /* skip malformed */
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split(/\r?\n\r?\n/);
+        buffer = parts.pop() ?? "";
+
+        for (const part of parts) {
+          dispatchPart(part);
         }
       }
-    }
     } finally {
       await reader.cancel().catch(() => {});
       reader.releaseLock();
     }
   },
 
-  // ---- Chat Rooms (#137) ----
+  // ---- Chat Rooms ----
   chatRooms: {
     list: (signal?: AbortSignal) => get<{ rooms: ChatRoom[] }>("/chat-rooms", undefined, signal),
     create: (body: { name: string; description?: string; members: string[] }) =>
@@ -363,12 +394,12 @@ export const api = {
       post<{ task_id: number; injected: boolean; method: string }>(`/chat-rooms/${roomId}/summon`, {
         executor_session_id: executorSessionId,
         prompt,
-        sender_session_id: senderIdentity ?? "web-console",
+        sender_session_id: senderIdentity ?? WEB_CONSOLE_ID,
       }),
     broadcast: (roomId: number, prompt: string, senderIdentity?: string) =>
       post<{ room_id: number; members: string[]; message_ids: number[] }>(
         `/chat-rooms/${roomId}/broadcast`,
-        { prompt, sender_session_id: senderIdentity ?? "web-console" },
+        { prompt, sender_session_id: senderIdentity ?? WEB_CONSOLE_ID },
       ),
     messages: (roomId: number, signal?: AbortSignal) =>
       get<{ messages: RoomThreadMessage[] }>(

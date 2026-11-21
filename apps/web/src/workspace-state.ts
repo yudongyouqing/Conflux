@@ -51,7 +51,8 @@ export function loadWorkspacePreference(storage: StorageLike = localStorage): Wo
   try {
     const raw = storage.getItem(WORKSPACE_PREFERENCE_KEY);
     if (raw === null) return null;
-    return isValidPreference(JSON.parse(raw)) ? (JSON.parse(raw) as WorkspacePreference) : null;
+    const parsed: unknown = JSON.parse(raw);
+    return isValidPreference(parsed) ? parsed : null;
   } catch {
     return null;
   }

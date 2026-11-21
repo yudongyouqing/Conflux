@@ -30,30 +30,34 @@ export interface CreateAgentInput {
 }
 
 export function createAgent(db: DB, input: CreateAgentInput): Agent {
-  const now = nowIso();
-  const res = db
-    .prepare(
-      `INSERT INTO agents (name, system_prompt, model_config, description, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      input.name,
-      input.system_prompt,
-      JSON.stringify(input.model_config),
-      input.description ?? null,
-      now,
-      now,
-    );
-  const agent = getAgent(db, Number(res.lastInsertRowid))!;
-  // Register as a session so the agent is visible in the graph and can
-  // participate in cross-session communication.
-  registerSession(db, {
-    id: `agent-${agent.id}`,
-    name: agent.name,
-    description: agent.description ?? "Internal agent",
-    project_dir: null,
-  });
-  return agent;
+  return db
+    .transaction(() => {
+      const now = nowIso();
+      const res = db
+        .prepare(
+          `INSERT INTO agents (name, system_prompt, model_config, description, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          input.name,
+          input.system_prompt,
+          JSON.stringify(input.model_config),
+          input.description ?? null,
+          now,
+          now,
+        );
+      const agent = getAgent(db, Number(res.lastInsertRowid))!;
+      // Register as a session so the agent is visible in the graph and can
+      // participate in cross-session communication.
+      registerSession(db, {
+        id: `agent-${agent.id}`,
+        name: agent.name,
+        description: agent.description ?? "Internal agent",
+        project_dir: null,
+      });
+      return agent;
+    })
+    .immediate();
 }
 
 export function getAgent(db: DB, id: number): Agent | null {
@@ -74,30 +78,48 @@ export interface UpdateAgentInput {
 }
 
 export function updateAgent(db: DB, id: number, input: UpdateAgentInput): Agent | null {
-  const existing = getAgent(db, id);
-  if (!existing) return null;
-  const now = nowIso();
-  db.prepare(
-    `UPDATE agents SET
-       name = ?,
-       system_prompt = ?,
-       model_config = ?,
-       description = ?,
-       updated_at = ?
-     WHERE id = ?`,
-  ).run(
-    input.name ?? existing.name,
-    input.system_prompt ?? existing.system_prompt,
-    input.model_config ? JSON.stringify(input.model_config) : JSON.stringify(existing.model_config),
-    input.description !== undefined ? (input.description ?? null) : existing.description,
-    now,
-    id,
-  );
-  return getAgent(db, id);
+  return db
+    .transaction(() => {
+      const existing = getAgent(db, id);
+      if (!existing) return null;
+      const now = nowIso();
+      const nextName = input.name ?? existing.name;
+      const nextDescription =
+        input.description !== undefined ? (input.description ?? null) : existing.description;
+      db.prepare(
+        `UPDATE agents SET
+           name = ?,
+           system_prompt = ?,
+           model_config = ?,
+           description = ?,
+           updated_at = ?
+         WHERE id = ?`,
+      ).run(
+        nextName,
+        input.system_prompt ?? existing.system_prompt,
+        input.model_config
+          ? JSON.stringify(input.model_config)
+          : JSON.stringify(existing.model_config),
+        nextDescription,
+        now,
+        id,
+      );
+      db.prepare(`UPDATE sessions SET name = ?, description = ? WHERE id = ?`).run(
+        nextName,
+        nextDescription ?? "Internal agent",
+        `agent-${id}`,
+      );
+      return getAgent(db, id);
+    })
+    .immediate();
 }
 
 export function deleteAgent(db: DB, id: number): boolean {
-  endSession(db, `agent-${id}`);
-  const res = db.prepare(`DELETE FROM agents WHERE id = ?`).run(id);
-  return res.changes > 0;
+  return db
+    .transaction(() => {
+      const res = db.prepare(`DELETE FROM agents WHERE id = ?`).run(id);
+      if (res.changes > 0) endSession(db, `agent-${id}`);
+      return res.changes > 0;
+    })
+    .immediate();
 }

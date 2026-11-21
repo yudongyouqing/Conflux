@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { X, Plus, Users } from "lucide-react";
-import type { ChatRoom, GraphNode } from "@conflux/shared";
+import { WEB_CONSOLE_ID, type ChatRoom, type GraphNode } from "@conflux/shared";
 import { useCreateRoom } from "../room-hooks";
 
 interface ChatRoomWizardProps {
@@ -21,7 +21,7 @@ export function ChatRoomWizard({ sessions, onClose, onCreated }: ChatRoomWizardP
   const [error, setError] = useState<string | null>(null);
   const create = useCreateRoom();
 
-  const selectable = sessions.filter((s) => s.type === "session" && s.id !== "web-console");
+  const selectable = sessions.filter((s) => s.type === "session" && s.id !== WEB_CONSOLE_ID);
 
   const toggleMember = (id: string) => {
     setError(null);
@@ -96,7 +96,7 @@ export function ChatRoomWizard({ sessions, onClose, onCreated }: ChatRoomWizardP
                   }`}
                 >
                   <span
-                    className={`w-1.5 h-1.5 rounded-full ${s2.status === "active" ? "bg-emerald-500" : "bg-ink-faint/50"}`}
+                    className={`w-1.5 h-1.5 rounded-full ${s2.status === "active" ? "bg-success" : "bg-ink-faint/50"}`}
                   />
                   <span className="truncate">{s2.name}</span>
                   {selected && <Plus size={11} className="ml-auto rotate-45" />}

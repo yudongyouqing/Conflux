@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { DB } from "../db.js";
 import { nowIso } from "../db.js";
 import { replyAsk } from "../messages.js";
-import type { ManagedRunState, ManagedTaskInput } from "./types.js";
+import { MANAGED_RUN_TERMINAL_STATES, type ManagedRunState, type ManagedTaskInput } from "./types.js";
 
 /**
  * Database operations for the managed Codex executor. Everything here is
@@ -231,7 +231,7 @@ export function updateManagedRun(
       if (!ownsBinding(db, current.instance_id, ownerToken)) return null;
       // Terminal states are frozen: late notifications from a finished turn
       // must not flip a completed run into failed/interrupted.
-      if (["completed", "failed", "interrupted"].includes(current.state)) return null;
+      if (MANAGED_RUN_TERMINAL_STATES.includes(current.state)) return null;
       if (!guard.fromStates.includes(current.state)) return null;
       const next: ManagedRunPatch = { ...patch };
       db.prepare(
@@ -296,13 +296,19 @@ export function finalizeRunAndReply(
  * thing that must never happen is silently re-running the task.
  */
 export function markRunUnknown(db: DB, runId: number, reason: string): ManagedRunRow | null {
-  const current = selectRun(db, runId);
-  if (!current) return null;
-  if (["completed", "failed", "interrupted"].includes(current.state)) return current;
-  db.prepare(
-    `UPDATE managed_codex_runs SET state = 'unknown', error_code = ?, updated_at = ? WHERE id = ?`,
-  ).run(reason.slice(0, 500), nowIso(), runId);
-  return selectRun(db, runId);
+  return db
+    .transaction((): ManagedRunRow | null => {
+      const current = selectRun(db, runId);
+      if (!current) return null;
+      if (MANAGED_RUN_TERMINAL_STATES.includes(current.state)) return current;
+      db.prepare(
+        `UPDATE managed_codex_runs
+         SET state = 'unknown', error_code = ?, updated_at = ?
+         WHERE id = ? AND state NOT IN ('completed', 'failed', 'interrupted')`,
+      ).run(reason.slice(0, 500), nowIso(), runId);
+      return selectRun(db, runId);
+    })
+    .immediate();
 }
 
 export interface ManagedEventInsert {

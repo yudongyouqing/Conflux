@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import type { TerminalChoice, TerminalOption, TerminalSettings } from "@conflux/shared";
 import { logger } from "../log.js";
+import { runtimeDescriptor } from "./runtime-registry.js";
 
 /**
  * Terminal launching, AgentRecall-style: build an ORDERED list of candidate
@@ -81,8 +82,6 @@ export interface LaunchSpec {
  * Quote a token for a cmd.exe command string (`start` chain). cmd cannot
  * embed quotes, so strip them instead of escaping.
  */
-import { runtimeDescriptor } from "./runtime-registry.js";
-
 export function cmdQuote(s: string): string {
   // '!' too: under delayed expansion (/v:on) a BARE bang sequence expands
   // even without spaces, so executable paths from literal-named directories
@@ -95,6 +94,41 @@ export function posixQuote(s: string): string {
   return /^[-A-Za-z0-9_@%+=:,./]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
+function posixInnerCommand(opts: { command: string; cwd?: string; env?: NodeJS.ProcessEnv }): string {
+  const envPrefix = opts.env
+    ? Object.entries(opts.env)
+        .filter(([k, v]) => v !== undefined && /^[A-Za-z_][A-Za-z0-9_]*$/.test(k))
+        .map(([k, v]) => `${k}=${posixQuote(String(v))}`)
+        .join(" ")
+    : "";
+  return (
+    (opts.cwd ? `cd ${posixQuote(opts.cwd)} && ` : "") +
+    (envPrefix ? `env ${envPrefix} ` : "") +
+    opts.command
+  );
+}
+
+function tmuxLaunchSpec(
+  opts: { command: string; cwd?: string; title: string; env?: NodeJS.ProcessEnv },
+  inner: string,
+): LaunchSpec {
+  // The window lives in the tmux server (auto-started if none); attach
+  // from any terminal to see it. Env is inlined because new windows inherit
+  // the tmux server's environment, not ours.
+  return {
+    file: "tmux",
+    args: [
+      "new-window",
+      "-n",
+      opts.title,
+      ...(opts.cwd ? ["-c", opts.cwd] : []),
+      "sh",
+      "-c",
+      inner,
+    ],
+  };
+}
+
 /**
  * The ordered candidate list for one opener choice (macOS). Env cannot ride
  * along with the osascript/tmux spawn (Terminal.app and the tmux server run
@@ -105,18 +139,13 @@ function macLaunchPlan(
   settings: Pick<TerminalSettings, "terminal">,
   opts: { command: string; cwd?: string; title: string; env?: NodeJS.ProcessEnv },
 ): LaunchSpec[] {
-  const envPrefix = opts.env
-    ? Object.entries(opts.env)
-        .filter(([k]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k))
-        .map(([k, v]) => `${k}=${posixQuote(String(v))}`)
-        .join(" ")
-    : "";
-  const inner =
-    (opts.cwd ? `cd ${posixQuote(opts.cwd)} && ` : "") +
-    (envPrefix ? `env ${envPrefix} ` : "") +
-    opts.command;
-  // AppleScript string literal: escape backslashes and double quotes.
-  const apple = `"${inner.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+  const inner = posixInnerCommand(opts);
+  // AppleScript string literal: escape backslashes, quotes, and line breaks.
+  const apple = `"${inner
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\r/g, "\\r")
+    .replace(/\n/g, "\\n")}"`;
 
   const terminalApp = (): LaunchSpec => ({
     file: "/usr/bin/osascript",
@@ -146,42 +175,44 @@ function macLaunchPlan(
       "end tell",
     ],
   });
-  const tmux = (): LaunchSpec => ({
-    // The window lives in the tmux server (auto-started if none); attach
-    // from any terminal to see it. Env is inlined for the same reason as
-    // above — new windows inherit the SERVER's environment, not ours.
-    file: "tmux",
-    args: [
-      "new-window",
-      "-n",
-      opts.title,
-      ...(opts.cwd ? ["-c", opts.cwd] : []),
-      "sh",
-      "-c",
-      inner,
-    ],
-  });
 
   if (settings.terminal === "iterm") return [iterm(), terminalApp()];
-  if (settings.terminal === "tmux") return [tmux(), terminalApp()];
+  if (settings.terminal === "tmux") return [tmuxLaunchSpec(opts, inner), terminalApp()];
   // "terminal" default — and any windows-flavoured choice that leaked into
   // the same DB via a synced home dir — lands on Terminal.app, which every
   // Mac has.
   return [terminalApp()];
 }
 
+function linuxLaunchPlan(
+  settings: Pick<TerminalSettings, "terminal">,
+  opts: { command: string; cwd?: string; title: string; env?: NodeJS.ProcessEnv },
+): LaunchSpec[] {
+  const inner = posixInnerCommand(opts);
+  const tmux = (): LaunchSpec => tmuxLaunchSpec(opts, inner);
+  const wezterm = (): LaunchSpec => ({
+    file: "wezterm",
+    args: ["start", ...(opts.cwd ? ["--cwd", opts.cwd] : []), "--", "sh", "-c", inner],
+    cwd: opts.cwd,
+  });
+
+  if (settings.terminal === "wezterm") return [wezterm(), tmux()];
+  return [tmux(), wezterm()];
+}
+
 /**
- * The ordered candidate list for one opener choice. The inner command runs
- * under `cmd.exe /d /k` so the window stays open after the CLI exits.
+ * The ordered candidate list for one opener choice. On Windows the inner
+ * command runs under `cmd.exe /d /k` so the window stays open after exit.
  * Pure — unit-testable without spawning anything.
  */
 export function buildLaunchPlan(
   settings: Pick<TerminalSettings, "terminal">,
   opts: { command: string; cwd?: string; title: string; env?: NodeJS.ProcessEnv },
-  io: { platform?: NodeJS.Platform } = {},
+  io: { platform?: NodeJS.Platform; comspec?: string } = {},
 ): LaunchSpec[] {
   const platform = io.platform ?? process.platform;
   if (platform === "darwin") return macLaunchPlan(settings, opts);
+  if (platform !== "win32") return linuxLaunchPlan(settings, opts);
   const { command, cwd, title } = opts;
   const titled = `title ${cmdQuote(title)} && ${command}`;
 
@@ -211,7 +242,7 @@ export function buildLaunchPlan(
   // Plain new console window: the proven `cmd /c start` chain (a windowless
   // serve process cannot hand a console to a plain `cmd /k` child reliably).
   const cmdStart = (): LaunchSpec => ({
-    file: process.env.comspec ?? "cmd.exe",
+    file: io.comspec ?? process.env.comspec ?? "cmd.exe",
     args: [
       "/d",
       "/s",
@@ -321,12 +352,20 @@ export function terminalOptions(
 ): TerminalOption[] {
   const platform = io.platform ?? process.platform;
   const order: TerminalChoice[] =
-    platform === "darwin" ? ["terminal", "iterm", "tmux"] : ["wt", "powershell", "cmd", "wezterm"];
-  return order.map((value) => ({
-    value,
-    ...TERMINAL_LABELS[value],
-    available: TERMINAL_FILES[value].some((f) => resolveOnPath(f, baseEnv, platform) !== null),
-  }));
+    platform === "darwin"
+      ? ["terminal", "iterm", "tmux"]
+      : platform === "win32"
+        ? ["wt", "powershell", "cmd", "wezterm"]
+        : ["tmux", "wezterm"];
+  return order.map((value) => {
+    const files =
+      value === "wezterm" && platform !== "win32" ? ["wezterm"] : TERMINAL_FILES[value];
+    return {
+      value,
+      ...TERMINAL_LABELS[value],
+      available: files.some((f) => resolveOnPath(f, baseEnv, platform) !== null),
+    };
+  });
 }
 
 /**
@@ -341,11 +380,11 @@ export function openInTerminal(
   io: { platform?: NodeJS.Platform; comspec?: string } = {},
 ): { opener: string } {
   const platform = io.platform ?? process.platform;
-  if (platform !== "win32" && platform !== "darwin") {
-    throw new Error("opening a terminal is supported on Windows and macOS only");
+  if (platform !== "win32" && platform !== "darwin" && platform !== "linux") {
+    throw new Error("opening a terminal is supported on Windows, macOS, and Linux only");
   }
   const env = opts.env ?? cleanTerminalEnv();
-  const plan = buildLaunchPlan(settings, { ...opts, env }, { platform });
+  const plan = buildLaunchPlan(settings, { ...opts, env }, { platform, comspec: io.comspec });
 
   let lastError = "no terminal launched";
   for (const spec of plan) {
@@ -373,6 +412,8 @@ export function openInTerminal(
   throw new Error(
     platform === "darwin"
       ? `no terminal available (${lastError}) — macOS 自带 Terminal.app,理论上不应发生`
-      : `no terminal available (${lastError}) — install Windows Terminal or set 终端打开方式 为 "系统默认"`,
+      : platform === "linux"
+        ? `no terminal available (${lastError}) — install tmux or wezterm`
+        : `no terminal available (${lastError}) — install Windows Terminal or set 终端打开方式 为 "系统默认"`,
   );
 }

@@ -1,5 +1,6 @@
 import { WEB_CONSOLE_ID } from "@conflux/shared";
 import { dirname } from "node:path";
+import { resolveConfig } from "../../config.js";
 import type { DB } from "../db.js";
 import { logger } from "../../log.js";
 import {
@@ -12,14 +13,14 @@ import {
 import { getSession, mergeSessionMeta } from "../sessions.js";
 import { hasTranscript } from "../live.js";
 import { pushMailTyped } from "../mail-push.js";
-import { AUTO_WAKE_PROMPT, tmuxWakeCommand } from "./commands.js";
+import { AUTO_WAKE_PROMPT, shellQuote, tmuxWakeCommand } from "./commands.js";
 import { ensureWakeMcpConfig, pinnedMcpLaunch } from "./launcher.js";
 import { planClaudeWake } from "./claude.js";
 import { planCodexWake } from "./codex.js";
 import { launchWakeRun } from "./launcher.js";
 import { realTmuxIO, type TmuxIO } from "./tmux-inject.js";
 import { getRuntimeAgent } from "../runtime-agents.js";
-import { cmdQuote } from "../terminal.js";
+import { flattenOneLine } from "../inject-format.js";
 
 /**
  * Wake a session so it processes its inbox:
@@ -49,12 +50,17 @@ const TMUX_WAKE_MAX_POLLS = 40; // ~16s — a TUI that hasn't painted by then is
  * prefix. Re-attach the agent's instructions to every resume of the real
  * conversation so the prefix stays byte-identical to the original run.
  */
-export function agentPromptSuffix(db: DB, meta: Record<string, unknown> | null): string {
+export function agentPromptSuffix(
+  db: DB,
+  meta: Record<string, unknown> | null,
+  platform: NodeJS.Platform = process.platform,
+): string {
   const agentId = Number(meta?.agent_id);
   if (!Number.isFinite(agentId) || agentId <= 0) return "";
   const agent = getRuntimeAgent(db, agentId);
   if (!agent?.instructions || !agent.instructions.trim()) return "";
-  return ` --append-system-prompt ${cmdQuote(agent.instructions)}`;
+  // Flatten newlines so cmd.exe never truncates a multi-line argument.
+  return ` --append-system-prompt ${shellQuote(flattenOneLine(agent.instructions), platform)}`;
 }
 
 /** Wake concurrency accounting lives in counter.ts — the launcher maintains
@@ -84,33 +90,39 @@ export function wakeSessionForMail(db: DB, sessionId: string, opts: WakeOptions 
     return { woke: false, reason: "not a CLI conversation", disposition: "failed" };
   }
 
-  // Concurrent wake limit: fan-out broadcasts used to spawn every offline
-  // member at once and burn through tokens. The counter tracks spawned-but-
-  // not-yet-exited headless wakes; 0 disables the cap.
-  const maxConcurrent = getWakeMaxConcurrent(db);
-  if (maxConcurrent > 0 && getActiveWakeCount() >= maxConcurrent) {
-    return {
-      woke: false,
-      reason: `wake queue full (${getActiveWakeCount()}/${maxConcurrent})`,
-    };
-  }
-
   const session = getSession(db, sessionId);
   if (!session) return { woke: false, reason: "session not found", disposition: "failed" };
 
   const io = opts.io ?? realTmuxIO;
-  const schedule = opts.schedule ?? ((fn, ms) => setTimeout(fn, ms));
+  const schedule =
+    opts.schedule ??
+    ((fn, ms) => {
+      const t = setTimeout(fn, ms);
+      t.unref?.();
+    });
   const now = (opts.now ?? new Date()).getTime();
+  const tmuxReady = io.available();
 
-  // typed delivery FIRST — before the dedup window, because typing
-  // spawns nothing to stack (dedup exists to stop process pile-ups). Busy
-  // user sessions resolve no target inside pushMailTyped and fall through
-  // to the busy skip below; a successful typed delivery stamps no dedup
-  // entry, so the next mail types too.
-  if (!opts.dryRun && io.available()) {
+  // typed delivery FIRST — before concurrency cap and dedup window, because
+  // typing spawns nothing to stack. Busy user sessions resolve no target
+  // inside pushMailTyped and fall through to the busy skip below; a
+  // successful typed delivery stamps no dedup entry, so the next mail types too.
+  if (!opts.dryRun && tmuxReady) {
     const pushed = pushMailTyped(db, sessionId, io);
     if (pushed.pushed) return { woke: true };
     // no typed target / send failed — fall through to the wake ladder
+  }
+
+  // Concurrent wake limit applies only when we are about to spawn a new
+  // process (not dryRun previews or zero-subprocess typed delivery).
+  if (!opts.dryRun) {
+    const maxConcurrent = getWakeMaxConcurrent(db);
+    if (maxConcurrent > 0 && getActiveWakeCount() >= maxConcurrent) {
+      return {
+        woke: false,
+        reason: `wake queue full (${getActiveWakeCount()}/${maxConcurrent})`,
+      };
+    }
   }
 
   // dedup: an in-flight wake (or a recent one) must not stack
@@ -119,14 +131,18 @@ export function wakeSessionForMail(db: DB, sessionId: string, opts: WakeOptions 
     return { woke: false, reason: "wake already in flight" };
   }
 
-  let runtime: "claude" | "codex" = "claude";
   let meta: Record<string, unknown> | null = null;
   try {
     meta = session.metadata ? (JSON.parse(session.metadata) as Record<string, unknown>) : null;
-    if (meta?.runtime === "codex") runtime = "codex";
   } catch {
-    // default runtime
+    // malformed metadata — fall back to column/default
   }
+  const rawRuntime =
+    session.runtime ?? (typeof meta?.runtime === "string" ? meta.runtime : null) ?? "claude";
+  if (rawRuntime !== "claude" && rawRuntime !== "codex") {
+    return { woke: false, reason: "not a CLI conversation", disposition: "failed" };
+  }
+  const runtime: "claude" | "codex" = rawRuntime;
 
   if (session.status === "active" && meta?.busy === true) {
     return { woke: false, reason: "busy — the running turn will surface the mail" };
@@ -143,22 +159,21 @@ export function wakeSessionForMail(db: DB, sessionId: string, opts: WakeOptions 
   if (
     offline &&
     runtime === "claude" &&
-    io.available() &&
+    tmuxReady &&
     hasTranscript(sessionId, session.project_dir, opts.claudeHome)
   ) {
     // user-session namespace: conflux/<sessionId> (tmuxSessionName is the
     // runtime-AGENT namer — conflux/agent-<registry id> — never reuse it here)
     const name = `conflux/${sessionId}`;
-    // Mount the wake MCP config only when the project doesn't already
-    // carry Conflux itself — an extra mount changes the tools array and
-    // invalidates the whole cached prefix. Explicit test injection wins.
-    // pinned from the db handle — the ambient/global resolution is exactly
-    // how executors landed on the wrong database; an explicit test path
-    // still wins so callers can inject their own pinned config
+    // Pinned from the db handle — the ambient/global resolution is how
+    // executors landed on the wrong database; an explicit test path still
+    // wins so callers can inject their own pinned config.
+    const dbDataDir =
+      db.name && db.name !== ":memory:" ? dirname(db.name) : resolveConfig("global").dataDir;
     const mcpConfig =
       opts.mcpConfigPath ??
-      ensureWakeMcpConfig(dirname(db.name), undefined, pinnedMcpLaunch(dirname(db.name)));
-    const command = tmuxWakeCommand(sessionId, exe, mcpConfig) + agentPromptSuffix(db, meta);
+      ensureWakeMcpConfig(dbDataDir, undefined, pinnedMcpLaunch(dbDataDir));
+    const command = tmuxWakeCommand(sessionId, exe, mcpConfig) + agentPromptSuffix(db, meta, "linux");
     if (opts.dryRun) return { woke: true, command };
     if (io.launch({ name, command, cwd: session.project_dir })) {
       mergeSessionMeta(db, sessionId, { tmux_session: name });
@@ -222,8 +237,9 @@ function scheduleTmuxWakePush(
   let polls = 0;
   let stable = 0;
   const poll = (): void => {
-    if (++polls > TMUX_WAKE_MAX_POLLS) return;
+    if (!db.open || ++polls > TMUX_WAKE_MAX_POLLS) return;
     const painted = io.capture(target).trim().length > 0;
+    if (!painted && !io.alive(target)) return;
     stable = painted ? stable + 1 : 0;
     if (stable >= 2) {
       try {

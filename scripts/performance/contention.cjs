@@ -57,7 +57,7 @@ function makeToken(prefix) {
   return `${prefix}${Date.now().toString(36)}${Math.floor(Math.random() * 1679616).toString(36)}`;
 }
 
-async function runContention({ config, directory, output } = {}) {
+async function runContention({ config, directory } = {}) {
   const report = {
     schemaVersion: 1,
     kind: "contention",
@@ -522,7 +522,7 @@ function main() {
   const output = resolve(
     process.env.PERF_CONTENTION_OUTPUT ?? join(root, "test-results/performance/contention.json"),
   );
-  return runContention({ config, output }).then((report) => {
+  return runContention({ config }).then((report) => {
     report.finishedAt = new Date().toISOString();
     mkdirSync(dirname(output), { recursive: true });
     writeFileSync(output, JSON.stringify(report, null, 2) + "\n");

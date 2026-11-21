@@ -43,7 +43,7 @@ function seriesSummary(values, label) {
     min: Math.min(...values),
     max: Math.max(...values),
     deltaBytes: values.at(-1) - values[0],
-    slopeBytesPerSample: (values.at(-1) - values[0]) / (values.length - 1),
+    slopeBytesPerSample: values.length > 1 ? (values.at(-1) - values[0]) / (values.length - 1) : 0,
   };
 }
 
@@ -53,7 +53,7 @@ function makeToken(prefix) {
   return `${prefix}${Date.now().toString(36)}${Math.floor(Math.random() * 1679616).toString(36)}`;
 }
 
-async function runSoak({ config, directory, output, sampleDelayMs = 0, simulateWriteFailure = false } = {}) {
+async function runSoak({ config, directory, sampleDelayMs = 0, simulateWriteFailure = false } = {}) {
   const report = {
     schemaVersion: 1,
     kind: "soak",
@@ -364,7 +364,7 @@ async function runSoak({ config, directory, output, sampleDelayMs = 0, simulateW
 function main() {
   const config = readSoakConfig();
   const output = resolve(process.env.PERF_SOAK_OUTPUT ?? join(root, "test-results/performance/soak.json"));
-  return runSoak({ config, output }).then((report) => {
+  return runSoak({ config }).then((report) => {
     report.finishedAt = new Date().toISOString();
     mkdirSync(dirname(output), { recursive: true });
     writeFileSync(output, JSON.stringify(report, null, 2) + "\n");

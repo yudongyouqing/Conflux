@@ -1,5 +1,5 @@
-import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { HOOK_SESSION_DESCRIPTION, type RuntimeId } from "@conflux/shared";
 import type { DB } from "./db.js";
@@ -13,7 +13,7 @@ import {
   mergeSessionMeta,
   type Session,
 } from "./sessions.js";
-import { forwardInboxFromPid } from "./messages.js";
+import { forwardInboxFromPid, forwardPendingMessagesToSuccessor } from "./messages.js";
 import { setSetting } from "./app-settings.js";
 import { isRuntimeCommand } from "./liveness.js";
 import { bindRuntimeInstance } from "./runtime-instances.js";
@@ -34,9 +34,8 @@ import { bindRuntimeInstance } from "./runtime-instances.js";
 // ---- ancestor walk: find the Claude Code process pid --------------------
 
 // NOTE: the runtime tokens below duplicate runtime-identity.ts (single
-// source of truth). This ancestor-walk script is battle-tested and
-// disk-cached (find-runtime.ps1), so it keeps its embedded copy until
-// the next deliberate touch of this machinery — keep both in sync.
+// source of truth) because this PowerShell ancestor walk runs inline via
+// -EncodedCommand without needing a disk file — keep both token lists in sync.
 
 const PS_SCRIPT = `param([int]$StartPid, [string]$Runtime)
 $pattern = if ($Runtime -eq "codex") {
@@ -94,13 +93,14 @@ export function getRuntimeProcess(runtime: RuntimeId): RuntimeProcess | null {
   if (++state.attempts > 10) return null;
   try {
     if (process.platform === "win32") {
-      const home = process.env.CONFLUX_HOME || join(process.env.USERPROFILE || process.env.HOME || ".", ".conflux");
-      if (!existsSync(home)) mkdirSync(home, { recursive: true });
-      const ps1 = join(home, "find-runtime.ps1");
-      if (!existsSync(ps1) || readFileSync(ps1, "utf8") !== PS_SCRIPT) writeFileSync(ps1, PS_SCRIPT, "utf8");
-      const out = execSync(
-        `powershell -NoProfile -ExecutionPolicy Bypass -File "${ps1}" -StartPid ${process.ppid} -Runtime ${runtime}`,
-        { timeout: 5000, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+      // Pass script via -EncodedCommand (UTF-16LE base64) so concurrent
+      // hook/MCP startups never race on a shared script file or create ~/.conflux.
+      const inlineScript = `& { ${PS_SCRIPT} } -StartPid ${process.ppid} -Runtime '${runtime}'`;
+      const encoded = Buffer.from(inlineScript, "utf16le").toString("base64");
+      const out = execFileSync(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+        { timeout: 5000, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true },
       ).trim();
       const match = /\b(\d+)\b/.exec(out);
       if (match) {
@@ -111,22 +111,21 @@ export function getRuntimeProcess(runtime: RuntimeId): RuntimeProcess | null {
       // POSIX: walk ppid chain and use the same token matcher as liveness.
       let ppid = process.ppid;
       for (let i = 0; i < 12 && ppid > 1; i++) {
-        const line = execSync(`ps -o command= -p ${ppid}`, {
+        const raw = execFileSync("ps", ["-o", "ppid=,command=", "-p", String(ppid)], {
           timeout: 3000,
           encoding: "utf8",
           stdio: ["ignore", "pipe", "ignore"],
         }).trim();
+        const match = /^(\d+)\s+(.+)$/.exec(raw);
+        if (!match) break;
+        const nextPpid = Number(match[1]) || 0;
+        const line = match[2];
         if (isRuntimeCommand(line, runtime)) {
           state.value = { pid: ppid, command: line };
           state.resolved = true;
           return state.value;
         }
-        const next = execSync(`ps -o ppid= -p ${ppid}`, {
-          timeout: 3000,
-          encoding: "utf8",
-          stdio: ["ignore", "pipe", "ignore"],
-        }).trim();
-        ppid = Number(next) || 0;
+        ppid = nextPpid;
       }
     }
   } catch {
@@ -381,13 +380,7 @@ export function forwardStrandedInboxByTranscript(
     })
     .map((c) => c.id);
   if (matched.length === 0) return 0;
-  const placeholders = matched.map(() => "?").join(",");
-  return db
-    .prepare(
-      `UPDATE messages SET to_session = ?
-       WHERE status IN ('pending','seen') AND to_session IN (${placeholders})`,
-    )
-    .run(successorId, ...matched).changes;
+  return forwardPendingMessagesToSuccessor(db, matched, successorId);
 }
 
 /**
@@ -552,7 +545,7 @@ export function handleHookEvent(
       id,
       title,
       runtime,
-      cwd: payload.cwd,
+      cwd: payload.cwd ?? existing?.project_dir,
       userNamed: meta.user_named === true,
       fallback: excerpt ?? existing?.name ?? "claude",
       existingName: existing?.name ?? null,
@@ -615,30 +608,33 @@ export function findSessionByRuntimePid(
     .prepare(
       `SELECT * FROM sessions
        WHERE status = 'active'
-         AND (metadata LIKE '%"runtime_pid":%' OR metadata LIKE '%"claude_pid":%')
+         AND (
+           runtime_pid = ?
+           OR metadata LIKE '%"runtime_pid":%'
+           OR metadata LIKE '%"claude_pid":%'
+         )
        ORDER BY last_heartbeat_at DESC LIMIT 50`,
     )
-    .all() as Session[];
+    .all(pid) as Session[];
   for (const row of rows) {
     if (row.id === excludeId) continue;
     const meta = parseMeta(row);
+    if (row.runtime_pid === pid && (row.runtime === runtime || meta.runtime === runtime)) {
+      return row;
+    }
     if (meta.runtime_pid === pid && meta.runtime === runtime) {
       return row;
     }
     if (
       runtime === "claude" &&
-      meta.claude_pid === pid &&
+      (row.runtime_pid === pid || meta.claude_pid === pid) &&
+      (row.runtime === null || row.runtime === undefined || row.runtime === "claude") &&
       (meta.runtime === undefined || meta.runtime === "claude")
     ) {
       return row;
     }
   }
   return null;
-}
-
-/** Find the Claude Code session (compatibility wrapper). */
-export function findSessionByClaudePid(db: DB, pid: number): Session | null {
-  return findSessionByRuntimePid(db, "claude", pid);
 }
 
 /**

@@ -631,6 +631,10 @@ function scheduleWalCheckpoint(config: Config, db: DB): void {
 
   if (checkpointTimers.has(db)) return;
   const timer = setInterval(() => {
+    if (!db.open) {
+      stopWalCheckpoint(db);
+      return;
+    }
     try {
       const walPath = `${config.dbPath}-wal`;
       if (existsSync(walPath)) {

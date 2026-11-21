@@ -29,7 +29,7 @@ import {
 } from "./workspace-state";
 import { ChatRoomWizard } from "./components/ChatRoomWizard";
 import { Menu, X } from "lucide-react";
-import type { Message, GraphNode, ChatRoom } from "@conflux/shared";
+import type { GraphNode, ChatRoom } from "@conflux/shared";
 
 // Low-frequency destinations load on first visit, then stay mounted
 // (keep-alive) like every other view. The graph view also lazy-loads so a
@@ -50,8 +50,12 @@ const DRAWER_MAX = 560;
 const DRAWER_WIDTH_KEY = "conflux.drawer-width";
 
 function initialDrawerWidth(): number {
-  const v = Number(localStorage.getItem(DRAWER_WIDTH_KEY));
-  return Number.isFinite(v) && v >= DRAWER_MIN && v <= DRAWER_MAX ? v : DRAWER_DEFAULT;
+  try {
+    const v = Number(localStorage.getItem(DRAWER_WIDTH_KEY));
+    return Number.isFinite(v) && v >= DRAWER_MIN && v <= DRAWER_MAX ? v : DRAWER_DEFAULT;
+  } catch {
+    return DRAWER_DEFAULT;
+  }
 }
 
 const TAB_LABELS: Record<TabId, string> = {
@@ -67,7 +71,7 @@ export default function App() {
   const [tab, setTab] = useState<TabId>("chat");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // views mount on first visit and never unmount — viewport zoom, scroll
-  // positions and query caches survive tab switches (#107)
+  // positions and query caches survive tab switches
   const [visited, setVisited] = useState<ReadonlySet<TabId>>(new Set(["chat"]));
   const switchTab = useCallback((next: TabId) => {
     setTab(next);
@@ -166,6 +170,8 @@ export default function App() {
 
   const handleRoomCreated = useCallback((room: ChatRoom) => {
     setTarget({ kind: "room", id: room.id });
+    setGraphInspectId(null);
+    setTab("chat");
     // remember the server's real creation time immediately — the list
     // refetch may still be in flight when the persist effect runs
     lastRoomRef.current = { id: room.id, createdAt: room.created_at };
@@ -225,12 +231,13 @@ export default function App() {
 
   // ---- graph-tab inspection state (unchanged behavior) ----------------------
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<{ id: number; from: string; to: string } | null>(
     null,
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerWidth, setDrawerWidth] = useState(initialDrawerWidth);
+  const drawerWidthRef = useRef(drawerWidth);
+  drawerWidthRef.current = drawerWidth;
 
   const nodeMap = useMemo(() => {
     const m = new Map<string, GraphNode>();
@@ -245,7 +252,6 @@ export default function App() {
 
   const handleSelectSession = useCallback(
     (sid: string | null) => {
-      setSelectedMessage(null);
       setSelectedEdge(null);
       setSelectedSessionId(sid);
       if (sid) setDrawerOpen(true);
@@ -267,24 +273,15 @@ export default function App() {
     (edge: { id: number; from: string; to: string }) => {
       switchTab("graph");
       setSelectedSessionId(null);
-      setSelectedMessage(null);
       setSelectedEdge(edge);
       setDrawerOpen(true);
     },
     [switchTab],
   );
 
-  const handleSelectMessage = useCallback((msg: Message | null) => {
-    setSelectedSessionId(null);
-    setSelectedEdge(null);
-    setSelectedMessage(msg);
-    if (msg) setDrawerOpen(true);
-  }, []);
-
   const handleSelectEdge = useCallback(
     (edge: { id: number; from: string; to: string } | null) => {
       setSelectedSessionId(null);
-      setSelectedMessage(null);
       setSelectedEdge(edge);
       if (edge) setDrawerOpen(true);
     },
@@ -294,7 +291,6 @@ export default function App() {
   const closeDrawer = useCallback(() => {
     setDrawerOpen(false);
     setSelectedSessionId(null);
-    setSelectedMessage(null);
     setSelectedEdge(null);
   }, []);
 
@@ -306,7 +302,7 @@ export default function App() {
     (e: ReactPointerEvent<HTMLDivElement>) => {
       e.preventDefault();
       dragCleanup.current?.();
-      dragRef.current = { startX: e.clientX, startW: drawerWidth };
+      dragRef.current = { startX: e.clientX, startW: drawerWidthRef.current };
       const move = (ev: PointerEvent) => {
         if (!dragRef.current) return;
         const next = dragRef.current.startW - (ev.clientX - dragRef.current.startX);
@@ -335,7 +331,7 @@ export default function App() {
       window.addEventListener("pointercancel", up);
       dragCleanup.current = cleanup;
     },
-    [drawerWidth],
+    [],
   );
   const resetDrawerWidth = useCallback(() => {
     setDrawerWidth(DRAWER_DEFAULT);
@@ -433,8 +429,6 @@ export default function App() {
             visited.has("messages") ? (
               <MessageTab
                 active={tab === "messages"}
-                onSelectMessage={handleSelectMessage}
-                selectedMessageId={selectedMessage?.id ?? null}
                 onOpenPeerConversation={openSession}
               />
             ) : null,
@@ -478,7 +472,7 @@ export default function App() {
 
         {/* The detail rail belongs to the graph view (node/edge/channel
          * inspection); messages own their full-screen view, the rest are
-         * self-contained. Closable + resizable (#107). */}
+         * self-contained. Closable + resizable. */}
         {tab === "graph" && drawerOpen && (
           <aside
             className="relative border-l border-line bg-surface overflow-hidden flex-shrink-0"
@@ -502,7 +496,6 @@ export default function App() {
             </button>
             <DetailPanel
               session={selectedSession}
-              message={selectedMessage}
               edge={selectedEdge}
               sessionNameLookup={sessionNameLookup}
               sessionStatusLookup={sessionStatusLookup}

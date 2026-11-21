@@ -22,5 +22,3 @@ const desktopApi = Object.freeze({
 });
 
 contextBridge.exposeInMainWorld("confluxDesktop", desktopApi);
-// Keep the old global for pages that still reference the pre-rename API.
-contextBridge.exposeInMainWorld("muiltchatDesktop", desktopApi);

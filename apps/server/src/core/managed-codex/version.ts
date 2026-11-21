@@ -67,7 +67,7 @@ export function assertSupportedCodexVersion(userAgent: string | undefined | null
   if (`${major}.${minor}` !== gate.minor) {
     throw Object.assign(
       new Error(
-        `codex-cli ${version} is not supported by the managed executor (certified for ${SUPPORTED_CODEX_CLI_MINOR}.x) — install codex-cli ${gate.minor}.x, wait for a Conflux update, or set ${ALLOW_MINOR_ENV}=${gate.minor} to override at your own risk`,
+        `codex-cli ${version} is not supported by the managed executor (certified for ${SUPPORTED_CODEX_CLI_MINOR}.x) — install codex-cli ${gate.minor}.x, wait for a Conflux update, or set ${ALLOW_MINOR_ENV}=${major}.${minor} to override at your own risk`,
       ),
       { statusCode: 400 },
     );

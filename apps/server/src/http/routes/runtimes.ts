@@ -5,9 +5,11 @@ import {
   createRuntimeAgent,
   deleteRuntimeAgent,
   listRuntimeAgentsWithLiveness,
+  redactRuntimeAgent,
   startRuntimeAgent,
 } from "../../core/runtime-agents.js";
 import { logAudit } from "../../core/audit.js";
+import { logger } from "../../log.js";
 import { RUNTIME_IDS } from "../../core/runtime-registry.js";
 import { WEB_CONSOLE_ID, type ServerContext } from "../context.js";
 import {
@@ -61,12 +63,16 @@ export function registerRuntimeRoutes(
             action === "stop"
               ? { instance: await stopRuntimeInstance(db, req.params.id, io) }
               : await resumeRuntimeInstance(db, req.params.id, io);
-          logAudit(db, {
-            interface: "http",
-            action: `${action}_runtime_instance`,
-            args: { id: req.params.id },
-            result: { instance_id: result.instance.id, state: result.instance.state },
-          });
+          try {
+            logAudit(db, {
+              interface: "http",
+              action: `${action}_runtime_instance`,
+              args: { id: req.params.id },
+              result: { instance_id: result.instance.id, state: result.instance.state },
+            });
+          } catch (auditErr) {
+            logger.warn({ err: auditErr, id: req.params.id, action }, "failed to audit runtime action");
+          }
           return reply.send(result);
         } catch (error) {
           return sendError(reply, error, WEB_CONSOLE_ID, `${action}_runtime_instance`, {
@@ -79,12 +85,12 @@ export function registerRuntimeRoutes(
 
   // ---- runtime agents (user-defined CLI agent presets: Claude Code / Codex) ----
 
-  // GET /runtimes — catalog (supported CLIs) + configured presets
+  // GET /runtimes — catalog (supported CLIs) + configured presets (credentials redacted)
   app.get("/runtimes", {}, async (_req, reply) => {
     try {
       return reply.send({
         runtimes: RUNTIMES,
-        agents: listRuntimeAgentsWithLiveness(db),
+        agents: listRuntimeAgentsWithLiveness(db).map(redactRuntimeAgent),
       });
     } catch (err) {
       return sendError(reply, err);
@@ -124,7 +130,7 @@ export function registerRuntimeRoutes(
           });
           return created;
         });
-        return reply.code(201).send({ agent });
+        return reply.code(201).send({ agent: redactRuntimeAgent(agent) });
       } catch (err) {
         return sendError(reply, err);
       }
@@ -155,12 +161,16 @@ export function registerRuntimeRoutes(
   app.post<{ Params: { id: string } }>("/runtimes/:id/start", {}, async (req, reply) => {
     try {
       const result = await startRuntimeAgent(db, resourceId(req.params.id), io);
-      logAudit(db, {
-        interface: "http",
-        action: "start_runtime_agent",
-        args: { id: req.params.id },
-        result,
-      });
+      try {
+        logAudit(db, {
+          interface: "http",
+          action: "start_runtime_agent",
+          args: { id: req.params.id },
+          result,
+        });
+      } catch (auditErr) {
+        logger.warn({ err: auditErr, id: req.params.id }, "failed to audit runtime agent start");
+      }
       return reply.send(result);
     } catch (err) {
       return sendError(reply, err);

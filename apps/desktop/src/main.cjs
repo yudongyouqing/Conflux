@@ -21,7 +21,6 @@ const { resolveRuntimePaths } = require("./runtime-paths.cjs");
 const { configureElectronRuntime } = require("./runtime-config.cjs");
 const { createTray } = require("./tray.cjs");
 const { startMessageNotifications } = require("./desktop-notify.cjs");
-const ptyManager = require("./pty-manager.cjs");
 const { externalLinkDecision, installProductionCsp } = require("./security.cjs");
 const { createRendererWatchdog } = require("./renderer-watchdog.cjs");
 const { createServiceHealthMonitor, probeHttp } = require("./service-health.cjs");
@@ -256,6 +255,7 @@ function createWindow(webUrl) {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
       preload: path.join(__dirname, "preload.cjs"),
     },
   });
@@ -309,7 +309,7 @@ function createWindow(webUrl) {
     }
     mainWindow.show();
   });
-  startRendererWatchdog();
+  mainWindow.webContents.once("did-finish-load", startRendererWatchdog);
   return mainWindow.loadURL(webUrl);
 }
 
@@ -351,58 +351,14 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
+  const trustedSender = (event) => mainWindow && event.sender === mainWindow.webContents;
   app.on("second-instance", () => focusMainWindow());
-  ipcMain.on("conflux:show-window", focusMainWindow);
+  app.on("activate", () => focusMainWindow());
+  ipcMain.on("conflux:show-window", (event) => {
+    if (trustedSender(event)) focusMainWindow();
+  });
   // Dark palette → native chrome (macOS menu bar / context menus / dialogs)
   // follows the app theme instead of the OS appearance
-  // PTY management: spawn/inject/buffer for runtime agents
-  const ptySubscriptions = new Map();
-  const trustedSender = (event) => mainWindow && event.sender === mainWindow.webContents;
-  const validAgentId = (id) => Number.isInteger(id) && id > 0;
-  ipcMain.handle("pty:spawn", (event, payload) => {
-    if (!trustedSender(event)) return { ok: false, error: "Unauthorized sender" };
-    const { agentId, command, args = [], opts } = payload ?? {};
-    if (!validAgentId(agentId) || typeof command !== "string" || !command.trim() || !Array.isArray(args) || args.some(arg => typeof arg !== "string")) {
-      return { ok: false, error: "Invalid PTY spawn arguments" };
-    }
-    try {
-      const entry = ptyManager.spawnAgent(agentId, command, args, opts);
-      ptySubscriptions.get(agentId)?.();
-      ptySubscriptions.set(agentId, ptyManager.subscribe(agentId, (chunk) => {
-        if (chunk !== null) {
-          try { mainWindow?.webContents.send(`pty:output:${agentId}`, chunk); }
-          catch { /* window closed */ }
-        }
-      }));
-      return { ok: true, pid: entry.pid };
-    } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
-    }
-  });
-  ipcMain.handle("pty:inject", (event, payload) => {
-    const { agentId, text } = payload ?? {};
-    if (!trustedSender(event) || !validAgentId(agentId) || typeof text !== "string") return { ok: false };
-    return { ok: ptyManager.inject(agentId, text) };
-  });
-  ipcMain.handle("pty:buffer", (event, payload) => {
-    const { agentId } = payload ?? {};
-    if (!trustedSender(event) || !validAgentId(agentId)) return { buffer: null };
-    return { buffer: ptyManager.getBuffer(agentId) };
-  });
-  ipcMain.handle("pty:alive", (event, payload) => {
-    const { agentId } = payload ?? {};
-    if (!trustedSender(event) || !validAgentId(agentId)) return false;
-    return ptyManager.isAlive(agentId);
-  });
-  ipcMain.handle("pty:kill", (event, payload) => {
-    const { agentId } = payload ?? {};
-    if (!trustedSender(event) || !validAgentId(agentId)) return { ok: false };
-    ptySubscriptions.get(agentId)?.();
-    ptySubscriptions.delete(agentId);
-    ptyManager.kill(agentId);
-    return { ok: true };
-  });
-
   ipcMain.on("conflux:native-theme", (event, mode) => {
     if (!trustedSender(event)) return;
     nativeTheme.themeSource = mode === "dark" ? "dark" : "light";
@@ -490,9 +446,6 @@ if (!hasSingleInstanceLock) {
     stopServiceHealthMonitors();
     stopMessageNotifications?.();
     stopMessageNotifications = null;
-    for (const unsubscribe of ptySubscriptions.values()) unsubscribe();
-    ptySubscriptions.clear();
-    ptyManager.killAll();
     tray?.destroy();
     tray = undefined;
     stopDevServices().finally(() => app.quit());

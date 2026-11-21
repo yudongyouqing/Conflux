@@ -1,10 +1,11 @@
 import type { ModelMessage, ToolSet } from "ai" with { "resolution-mode": "import" };
 import { z } from "zod";
 import type { DB } from "./db.js";
-import type { Agent } from "@conflux/shared";
+import { WEB_CONSOLE_ID, type Agent } from "@conflux/shared";
 import { registerSession, listSessions } from "./sessions.js";
 import { queryContext } from "./search.js";
-import { askSession, checkInbox } from "./messages.js";
+import { checkInbox } from "./messages.js";
+import { askAndMaybeWake } from "./ask.js";
 import { replyAskAndPush } from "./mail-push.js";
 import { publishContext } from "./context.js";
 import { recordEdge } from "./graph.js";
@@ -103,8 +104,8 @@ export async function* runAgentChat(
     }
   }
 
-  // Record edge from agent session to "web-ui" for graph visualization
-  recordEdge(db, agentSessionId, "web-ui");
+  // Record edge from agent session to the web console for graph visualization
+  recordEdge(db, agentSessionId, WEB_CONSOLE_ID);
 }
 
 // ---- Tool definitions ----
@@ -158,15 +159,20 @@ async function defineTools(db: DB, sessionId: string): Promise<ToolSet> {
         to_session: z.string().describe("Target session ID"),
         question: z.string().describe("The question"),
       }),
-      execute: async ({ to_session, question }) =>
-        safe(() => {
-          const msg = askSession(db, {
+      execute: async ({ to_session, question }) => {
+        try {
+          const { message, wake } = await askAndMaybeWake(db, {
             from_session: sessionId,
             to_session,
             question,
           });
-          return { message_id: msg.id, status: "sent" };
-        }),
+          return { message_id: message.id, status: "sent", wake };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logger.warn({ err: msg }, "tool execution error");
+          return { error: msg };
+        }
+      },
     }),
     check_inbox: tool({
       description: "Check if other sessions have asked you questions that are pending a reply.",

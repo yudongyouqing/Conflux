@@ -313,20 +313,26 @@ test("managed dispatch retries a transient enqueue lock without duplicating the 
   } finally { cleanup(); }
 });
 
-test("Windows runtime discovery refreshes stale helpers under CONFLUX_HOME", { skip: process.platform !== "win32" }, (t) => {
+test("Windows runtime discovery runs inline via -EncodedCommand without creating disk helpers", { skip: process.platform !== "win32" }, (t) => {
   const { db, cleanup } = makeDb();
   const previous = process.env.CONFLUX_HOME;
   const previousPid = process.env.CONFLUX_CODEX_PID;
   try {
-    const home = join(dirname(db.name), "conflux");
-    mkdirSync(home);
-    const helper = join(home, "find-runtime.ps1");
-    writeFileSync(helper, "stale helper");
+    const home = join(dirname(db.name), "conflux-unused");
     process.env.CONFLUX_HOME = home;
     delete process.env.CONFLUX_CODEX_PID;
-    t.mock.method(childProcess, "execSync", () => "321");
+    let seenArgs: readonly string[] = [];
+    t.mock.method(
+      childProcess,
+      "execFileSync",
+      (_file: string, args: readonly string[] = []) => {
+        seenArgs = args;
+        return "321";
+      },
+    );
     assert.equal(getRuntimeProcess("codex")?.pid, 321);
-    assert.notEqual(readFileSync(helper, "utf8"), "stale helper");
+    assert.ok(seenArgs.includes("-EncodedCommand"), "uses inline -EncodedCommand");
+    assert.equal(fs.existsSync(join(home, "find-runtime.ps1")), false, "never writes find-runtime.ps1");
   } finally {
     if (previous === undefined) delete process.env.CONFLUX_HOME; else process.env.CONFLUX_HOME = previous;
     if (previousPid === undefined) delete process.env.CONFLUX_CODEX_PID; else process.env.CONFLUX_CODEX_PID = previousPid;

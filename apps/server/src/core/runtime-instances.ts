@@ -30,6 +30,8 @@ function listingIO(db: DB, io: RuntimeProcessIO): RuntimeProcessIO {
   const cache = inspectionCache.get(db) ?? new Map();
   if (cache.size > 400) cache.clear();
   inspectionCache.set(db, cache);
+  const now = Date.now();
+  const prefetched = new Set<number>();
   if (!io.inspect && process.platform === "win32") {
     const selected = db
       .prepare(
@@ -39,12 +41,15 @@ function listingIO(db: DB, io: RuntimeProcessIO): RuntimeProcessIO {
       .all() as { runtime_pid: number }[];
     const missing = [...new Set(selected.map((row) => row.runtime_pid))].filter((pid) => {
       const cached = cache.get(pid);
-      return !cached || Date.now() - cached.at >= 3000;
+      return !cached || now - cached.at >= 3000;
     });
     if (missing.length) {
       const identities = inspectWindowsProcesses(missing);
-      for (const pid of missing)
-        cache.set(pid, { at: Date.now(), identity: identities.get(pid) ?? null });
+      const fetchedAt = Date.now();
+      for (const pid of missing) {
+        prefetched.add(pid);
+        cache.set(pid, { at: fetchedAt, identity: identities.get(pid) ?? null });
+      }
     }
   }
   return {
@@ -52,14 +57,12 @@ function listingIO(db: DB, io: RuntimeProcessIO): RuntimeProcessIO {
     inspect: (pid) => {
       if (perRead.has(pid)) return perRead.get(pid)!;
       const cached = io.inspect ? undefined : cache.get(pid);
-      const identity =
-        cached && Date.now() - cached.at < 3000
-          ? cached.identity
-          : !io.inspect && process.platform === "win32"
-            ? null
-            : (io.inspect ?? inspectRuntimeProcess)(pid);
+      const cacheFresh = cached && (prefetched.has(pid) || now - cached.at < 3000);
+      const identity = cacheFresh
+        ? cached.identity
+        : (io.inspect ?? inspectRuntimeProcess)(pid);
       perRead.set(pid, identity);
-      if (!io.inspect) {
+      if (!io.inspect && !cacheFresh) {
         cache.set(pid, { at: Date.now(), identity });
       }
       return identity;
@@ -121,7 +124,7 @@ export function createRuntimeInstance(
   const now = nowIso();
   const snapshot: SafeSnapshot = {
     name: agent.name,
-    runtime: agent.runtime,
+    runtime: agent.runtime as RuntimeId,
     workdir: agent.workdir,
     model: agent.model,
     instructions: agent.instructions,
@@ -199,9 +202,12 @@ export function bindRuntimeInstance(
   return true;
 }
 
-function ownedSession(db: DB, row: InstanceRow): boolean {
+function ownedSession(
+  db: DB,
+  row: InstanceRow,
+  session: ReturnType<typeof getSession> = row.session_id ? getSession(db, row.session_id) : null,
+): boolean {
   if (!row.session_id || !row.runtime_pid) return false;
-  const session = getSession(db, row.session_id);
   if (!session || session.runtime !== row.runtime || session.runtime_pid !== row.runtime_pid)
     return false;
   try {
@@ -214,9 +220,12 @@ function ownedSession(db: DB, row: InstanceRow): boolean {
   return !current || current === row.session_id;
 }
 
-function resumableSession(db: DB, row: InstanceRow): string | null {
+function resumableSession(
+  db: DB,
+  row: InstanceRow,
+  session: ReturnType<typeof getSession> = row.session_id ? getSession(db, row.session_id) : null,
+): string | null {
   if (!row.session_id) return null;
-  const session = getSession(db, row.session_id);
   if (!session) return null;
   let meta: Record<string, unknown>;
   try {
@@ -269,8 +278,10 @@ function toPublic(db: DB, row: InstanceRow, io: RuntimeProcessIO): RuntimeInstan
   // or the row could be resumed while the original process still runs.
   const gone = identity === "exited" || relation === "replaced";
   const changedButAlive = relation === "changed";
+  const owned = ownedSession(db, row, session);
+  const resumable = resumableSession(db, row, session);
   const canStop =
-    sameProcess && ownedSession(db, row) && row.state !== "ended" && row.state !== "failed";
+    sameProcess && owned && row.state !== "ended" && row.state !== "failed";
   const terminal = ["ended", "stale", "failed"].includes(row.state);
   const root = row.resumed_from ?? row.id;
   const activeResume = db
@@ -290,13 +301,13 @@ function toPublic(db: DB, row: InstanceRow, io: RuntimeProcessIO): RuntimeInstan
   let limitation: string | null = null;
   if (!row.runtime_pid || !row.process_token)
     limitation = "尚未绑定可验证的运行时进程，无法安全停止";
-  else if (!ownedSession(db, row)) limitation = "会话与实例的进程归属不匹配，拒绝停止";
+  else if (!owned) limitation = "会话与实例的进程归属不匹配，拒绝停止";
   else if (changedButAlive) limitation = "进程仍在运行但身份字段已变化（父进程/进程组/命令行），拒绝停止与恢复";
   else if (!sameProcess && !gone) limitation = "无法验证进程身份，拒绝停止或恢复";
   else if (gone && identity !== "exited") limitation = "原进程 PID 已被复用，拒绝停止";
   if (terminal && !credentialsValid)
     limitation = "原预设已删除或连接配置已变更，无法恢复；请从预设重新启动";
-  else if (terminal && !resumableSession(db, row)) limitation = "没有可恢复的原始对话标识";
+  else if (terminal && !resumable) limitation = "没有可恢复的原始对话标识";
   else if (terminal && sameProcess) limitation = "原运行时进程仍在运行，无法重复恢复";
   else if (activeResume) limitation = "原恢复实例尚未确认退出，无法重复恢复";
   if (row.stop_requested_at && !gone) limitation = "已请求停止，等待进程退出";
@@ -305,7 +316,7 @@ function toPublic(db: DB, row: InstanceRow, io: RuntimeProcessIO): RuntimeInstan
     ...safe,
     can_stop: canStop,
     can_resume:
-      terminal && gone && credentialsValid && !!resumableSession(db, row) && !activeResume,
+      terminal && gone && credentialsValid && !!resumable && !activeResume,
     limitation,
     last_seen: session?.last_heartbeat_at ?? null,
   };
@@ -323,8 +334,6 @@ function refreshInstances(db: DB, io: RuntimeProcessIO, onlyId?: string): void {
   for (const row of rows) {
     let state = row.state;
     const session = row.session_id ? getSession(db, row.session_id) : null;
-    if (row.state === "starting" && Date.now() - Date.parse(row.created_at) > 120_000)
-      state = "failed";
     if (row.runtime_pid) {
       const identity = (io.inspect ?? inspectRuntimeProcess)(row.runtime_pid);
       // A "changed" relation (live process, mutated descriptors) must NOT
@@ -341,7 +350,7 @@ function refreshInstances(db: DB, io: RuntimeProcessIO, onlyId?: string): void {
         Date.now() - Date.parse(session.last_heartbeat_at) > STALE_AFTER_MS
       )
         state = "stale";
-      else if (row.state !== "starting") state = "running";
+      else state = "running";
     }
     if (state !== row.state) {
       db.prepare(
@@ -587,14 +596,7 @@ export function inspectRuntimeProcess(pid: number): ProcessIdentity | "exited" |
     }
     if (!token || !command) return null;
     return runtimeIdentity(token, command);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      try {
-        process.kill(pid, 0);
-      } catch (probe) {
-        if ((probe as NodeJS.ErrnoException).code === "ESRCH") return "exited";
-      }
-    }
+  } catch {
     try {
       process.kill(pid, 0);
     } catch (probe) {

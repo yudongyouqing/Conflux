@@ -1,6 +1,6 @@
-import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Loader2, Play, CheckCircle2, Circle, AlertCircle, UserPlus } from "lucide-react";
-import type { ChatRoom, GraphNode } from "@conflux/shared";
+import { WEB_CONSOLE_ID, type ChatRoom, type GraphNode } from "@conflux/shared";
 import { useRoomBroadcast, useRoomMessages, useRoomSummon, useRoomTasks } from "../room-hooks";
 import { targetKey, type Draft } from "../workspace-state";
 import { MarkdownText } from "./MarkdownText";
@@ -15,9 +15,9 @@ const STATUS_ICON: Record<string, typeof Circle> = {
 
 const STATUS_COLOR: Record<string, string> = {
   pending: "text-ink-faint",
-  running: "text-accent animate-pulse",
-  done: "text-emerald-500",
-  failed: "text-red-500",
+  running: "text-accent",
+  done: "text-success",
+  failed: "text-danger",
 };
 
 export interface RoomChatProps {
@@ -64,10 +64,18 @@ export function RoomChat({
   const summon = useRoomSummon(onSubmitted);
   const broadcast = useRoomBroadcast(onSubmitted);
 
-  const [senderIdentity, setSenderIdentity] = useState<string>("web-console");
+  const [senderIdentity, setSenderIdentity] = useState<string>(WEB_CONSOLE_ID);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // If the chosen sender member leaves the room, reset to web-console so the
+  // submitted identity matches what the <select> displays.
+  useEffect(() => {
+    if (senderIdentity !== WEB_CONSOLE_ID && !members.some((m) => m.id === senderIdentity)) {
+      setSenderIdentity(WEB_CONSOLE_ID);
+    }
+  }, [members, senderIdentity]);
 
   // a directed target is valid only while the member is still in the room;
   // it is kept (and sending blocked) rather than silently dropped — falling
@@ -108,6 +116,8 @@ export function RoomChat({
   };
 
   const handleKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    // IME composition Enter confirms the candidate — never hijack it for mentions or submit.
+    if (e.nativeEvent.isComposing) return;
     if (mentionQuery !== null && mentionMatches.length > 0) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -121,16 +131,18 @@ export function RoomChat({
       }
       if (e.key === "Tab" || e.key === "Enter") {
         e.preventDefault();
-        pickMention(mentionMatches[mentionIndex]);
+        const picked = mentionMatches[Math.min(mentionIndex, mentionMatches.length - 1)];
+        if (picked) pickMention(picked);
         return;
       }
       if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
         setMentionQuery(null);
         return;
       }
     }
-    // IME composition Enter confirms the candidate, it must not submit
-    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       send();
     }
@@ -185,8 +197,19 @@ export function RoomChat({
               重试
             </button>
           </div>
+        ) : threadQuery.isError && tasks.length === 0 && thread.length === 0 ? (
+          <div role="alert" className="text-center py-8 space-y-2">
+            <div className="text-xs text-danger">广播记录加载失败：{(threadQuery.error as Error).message}</div>
+            <button
+              type="button"
+              onClick={() => threadQuery.refetch()}
+              className="px-3 py-1.5 rounded-lg bg-accent-soft text-accent text-xs font-medium"
+            >
+              重试
+            </button>
+          </div>
         ) : tasks.length === 0 && thread.length === 0 ? (
-          <div className="room-empty-state text-center py-12 text-ink-faint text-xs">
+          <div className="text-center py-12 text-ink-faint text-xs">
             <div>{noMembers ? "房间还没有成员" : "还没有任务"}</div>
             <div className="mt-1">
               {noMembers
@@ -199,7 +222,7 @@ export function RoomChat({
             {tasks.map((task) => {
               const Icon = STATUS_ICON[task.status] ?? Circle;
               return (
-                <div key={task.id} className="rounded-xl bg-surface p-4 shadow-sm space-y-2">
+                <div key={task.id} className="rounded-xl bg-surface p-4 shadow-card space-y-2">
                   <div className="flex items-center gap-2 text-xs">
                     <Icon
                       size={13}
@@ -230,7 +253,7 @@ export function RoomChat({
                 <div className="text-2xs text-ink-faint mb-2">广播讨论</div>
                 <div className="space-y-3">
                   {thread.map((m) => (
-                    <div key={m.id} className="rounded-xl bg-surface p-3 shadow-sm space-y-1.5">
+                    <div key={m.id} className="rounded-xl bg-surface p-3 shadow-card space-y-1.5">
                       <div className="text-2xs text-ink-faint">
                         {m.from_name} → {m.to_name} · #{m.id}
                       </div>
@@ -248,7 +271,7 @@ export function RoomChat({
           </>
         )}
         {threadQuery.isError && thread.length > 0 && (
-          <div className="text-2xs text-amber-700 text-center">连接中断，显示上次获取的内容</div>
+          <div className="text-2xs text-warning text-center">连接中断，显示上次获取的内容</div>
         )}
       </div>
 
@@ -295,7 +318,7 @@ export function RoomChat({
                 onChange={(e) => setSenderIdentity(e.target.value)}
                 className="px-2 py-1 rounded-lg border border-line text-2xs text-ink bg-surface focus:border-accent outline-none"
               >
-                <option value="web-console">👤 Web 控制台</option>
+                <option value={WEB_CONSOLE_ID}>👤 Web 控制台</option>
                 {members.map((m) => (
                   <option key={m.id} value={m.id}>
                     🤖 {m.name}

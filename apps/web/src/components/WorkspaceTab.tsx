@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, lazy, Suspense } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { Loader2, Plus, RefreshCw, Users, MessageSquare, Network, Bot, Info, Globe } from "lucide-react";
 import type { ChatRoom, Graph, GraphNode } from "@conflux/shared";
@@ -88,16 +88,35 @@ export function WorkspaceTab({
 
   // Esc closes the details drawer and hands focus back to its trigger
   useEffect(() => {
-    if (!detailsOpen || !active) return;
+    if (!detailsOpen || !active || !target) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onToggleDetails();
-        detailsButtonRef.current?.focus();
-      }
+      if (e.defaultPrevented || e.key !== "Escape") return;
+      if (document.querySelector('[role="dialog"]')) return;
+      onToggleDetails();
+      detailsButtonRef.current?.focus();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [detailsOpen, active, onToggleDetails]);
+  }, [detailsOpen, active, target, onToggleDetails]);
+
+  const activeRoom =
+    target?.kind === "room" ? rooms.find((r) => r.id === target.id) : undefined;
+  const scopedGraph = useMemo(
+    () => (graph && activeRoom ? scopeGraphToRoom(graph, activeRoom.members ?? []) : undefined),
+    [graph, activeRoom],
+  );
+  const handleGraphSelectSession = useCallback(
+    (sid: string | null) => {
+      if (sid) onGraphNodeSelect(sid);
+    },
+    [onGraphNodeSelect],
+  );
+  const handleGraphSelectEdge = useCallback(
+    (edge: { id: number; from: string; to: string } | null) => {
+      if (edge) onOpenGraphEdge(edge);
+    },
+    [onOpenGraphEdge],
+  );
 
   if (target === null) {
     if (roomsQuery.isLoading) {
@@ -160,7 +179,7 @@ export function WorkspaceTab({
   }
 
   if (target.kind === "room") {
-    const room = rooms.find((r) => r.id === target.id);
+    const room = activeRoom;
     if (!room) {
       return (
         <div className="h-full flex items-center justify-center text-xs text-ink-faint">
@@ -171,9 +190,6 @@ export function WorkspaceTab({
     const members = (room.members ?? [])
       .map((id) => sessions.find((s) => s.id === id))
       .filter((s): s is GraphNode => !!s);
-    // plain projection (no memo): the graph object already changes identity
-    // only on polls, and hooks can't live inside this conditional branch
-    const scopedGraph = graph ? scopeGraphToRoom(graph, room.members ?? []) : undefined;
     return (
       <div className="flex flex-col h-full min-h-0">
         <div className="room-chat-header flex items-center gap-2 px-4 py-3 border-b border-line flex-shrink-0">
@@ -236,18 +252,15 @@ export function WorkspaceTab({
                 scope={graphScope}
                 scopeKey={graphScope === "room" ? `room:${room.id}` : "global"}
                 active={active}
-                onSelectSession={(sid) => {
-                  if (sid) onGraphNodeSelect(sid);
-                }}
+                onSelectSession={handleGraphSelectSession}
                 selectedSessionId={null}
-                onSelectEdge={(edge) => {
-                  if (edge) onOpenGraphEdge(edge);
-                }}
+                onSelectEdge={handleGraphSelectEdge}
                 selectedEdge={null}
               />
             </Suspense>
           ) : (
             <RoomChat
+              key={room.id}
               room={room}
               members={members}
               active={active}
@@ -312,6 +325,7 @@ export function WorkspaceTab({
       </div>
       <div className="flex-1 min-h-0">
         <PeerConversation
+          key={target.id}
           peerId={target.id}
           peerNode={node}
           active={active}

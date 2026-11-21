@@ -86,10 +86,12 @@ export function resolveDataHome(options: DataHomeOptions = {}): string {
   const confluxHome = nonEmpty(env.CONFLUX_HOME);
   if (confluxHome) return resolve(confluxHome);
 
-  const projectDir = nonEmpty(options.projectDir) ?? nonEmpty(env.CLAUDE_PROJECT_DIR);
-  if (projectDir) {
-    const projectHome = resolve(join(projectDir, ".muiltchat"));
-    if (options.scope === "project" || existsSync(projectHome)) return projectHome;
+  if (options.scope !== "global") {
+    const projectDir = nonEmpty(options.projectDir) ?? nonEmpty(env.CLAUDE_PROJECT_DIR);
+    if (projectDir) {
+      const projectHome = resolve(join(projectDir, ".muiltchat"));
+      if (options.scope === "project" || existsSync(projectHome)) return projectHome;
+    }
   }
 
   return resolve(join(options.homeDir ?? homedir(), ".muiltchat"));

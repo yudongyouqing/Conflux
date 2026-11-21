@@ -1,52 +1,53 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { waitForPtyEcho } = require("./packaged-module-smoke.cjs");
+const path = require("node:path");
+const { REQUIRED_MODULES, verifyPackagedModules } = require("./packaged-module-smoke.cjs");
 
-function fixture() {
-  let data, exit;
-  let kills = 0;
-  const child = {
-    onData(fn) { data = fn; return { dispose() {} }; },
-    onExit(fn) { exit = fn; return { dispose() {} }; },
-    kill() { kills++; exit({ exitCode: 1 }); },
-  };
-  return { child, data: (text) => data(text), exit: (code) => exit({ exitCode: code }), kills: () => kills };
-}
-
-test("echo alone does not pass until the PTY has exited", async () => {
-  const f = fixture();
-  let finished = false;
-  const result = waitForPtyEcho(f.child, { disposeOnExit: false }).then(() => { finished = true; });
-  f.data("conflux-pty-smoke\r\n");
-  await new Promise(setImmediate);
-  assert.equal(finished, false);
-  f.exit(0);
-  await result;
-  assert.equal(f.kills(), 0);
+test("rejects relative or missing app.asar paths", async () => {
+  await assert.rejects(() => verifyPackagedModules(""), /Expected absolute app\.asar path/);
+  await assert.rejects(() => verifyPackagedModules("relative/app.asar"), /Expected absolute app\.asar path/);
 });
 
-test("Windows exit releases the owned ConPTY after observing the shell exit", async () => {
-  const f = fixture();
-  const result = waitForPtyEcho(f.child, { disposeOnExit: true });
-  f.data("conflux-pty-smoke");
-  assert.equal(f.kills(), 0);
-  f.exit(0);
-  await result;
-  assert.equal(f.kills(), 1);
-});
-
-test("failed exit and missing echo fail the smoke", async () => {
-  for (const code of [0, 1]) {
-    const f = fixture();
-    const result = waitForPtyEcho(f.child);
-    f.exit(code);
-    await assert.rejects(result, /without successful echo/);
+test("verifies electron-updater and better-sqlite3 and closes the smoke DB", async () => {
+  const closed = [];
+  class FakeDb {
+    constructor(target) {
+      assert.equal(target, ":memory:");
+    }
+    prepare() {
+      return { get: () => ({ one: 1 }) };
+    }
+    close() {
+      closed.push(true);
+    }
   }
+  const asar = path.resolve("app.asar");
+  await verifyPackagedModules(asar, {
+    loadModule: (specifier) => {
+      if (specifier.endsWith("electron-updater")) return { autoUpdater: {} };
+      if (specifier.endsWith("better-sqlite3")) return FakeDb;
+      throw new Error(`unexpected module ${specifier}`);
+    },
+  });
+  assert.equal(closed.length, 1);
+  assert.deepEqual(REQUIRED_MODULES, ["electron-updater", "better-sqlite3"]);
 });
 
-test("a stalled probe terminates only its own PTY and reports failure", async () => {
-  const f = fixture();
-  const result = waitForPtyEcho(f.child, { timeoutMs: 20 });
-  await assert.rejects(result, /timed out/);
-  assert.equal(f.kills(), 1);
+test("reports missing modules or failed SQLite queries", async () => {
+  const asar = path.resolve("app.asar");
+  await assert.rejects(
+    () =>
+      verifyPackagedModules(asar, {
+        loadModule: (specifier) => {
+          if (specifier.endsWith("electron-updater")) throw new Error("cannot find module");
+          return class {
+            prepare() {
+              return { get: () => ({ one: 0 }) };
+            }
+            close() {}
+          };
+        },
+      }),
+    /electron-updater: cannot find module[\s\S]*SQLite binding: SELECT 1 failed/,
+  );
 });

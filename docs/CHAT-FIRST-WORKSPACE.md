@@ -49,7 +49,7 @@ Conflux 打开即进入聊天工作界面：左侧是聊天室与最近会话，
 | A05 建房/删房/加成员/移成员可用 | `workspace.test.ts`、冒烟（API 数量核对） |
 | A06 房间图仅成员与内部边；全局可往返 | `graph-scope.test.ts`、`workspace.test.ts`、冒烟 |
 | A07 首聊不挂 React Flow；隐藏视图无副作用 | `workspace.test.ts`（无 .react-flow）、活动/助手门控回归 |
-| A08 统一助手入口、分类创建、模型独立对话、PTY 可达 | `assistants.test.ts`、`collaboration-controls.test.ts`、web-smoke |
+| A08 统一助手入口、分类创建、模型独立对话 | `assistants.test.ts`、`collaboration-controls.test.ts`、web-smoke |
 | A09 同 id 异类型/同名/多实例/外部会话关联正确 | `assistants.test.ts` 投影 6 条 |
 | A10 can_stop/can_resume=false 禁用并说明 | `collaboration-controls.test.ts` 4 条守卫 |
 | A11 活动记录与外部边对话保留 | `workspace.test.ts` 活动分流、web-smoke |

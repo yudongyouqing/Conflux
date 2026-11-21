@@ -243,17 +243,27 @@ function stopChild(child, { platform = process.platform, spawnFn = spawn, killFn
 
   if (platform === "win32" && child.pid) {
     const stopping = new Promise((resolve) => {
+      let settled = false;
+      let timer;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve();
+      };
       const killer = spawnFn(
         "taskkill",
         ["/pid", String(child.pid), "/T", "/F"],
         { windowsHide: true, stdio: "ignore" }
       );
       if (!killer?.once) {
-        resolve();
+        finish();
         return;
       }
-      killer.once("error", resolve);
-      killer.once("exit", resolve);
+      killer.once("error", finish);
+      killer.once("exit", finish);
+      timer = setTimeout(finish, timeoutMs);
+      timer.unref?.();
     });
     stoppingChildren.set(child, stopping);
     return stopping;

@@ -20,13 +20,6 @@ export const MANAGED_RUN_TERMINAL_STATES: readonly ManagedRunState[] = [
   "interrupted",
 ];
 
-/** One managed instance owns exactly one root thread in one app-server. */
-export interface ManagedCodexBinding {
-  instanceId: string;
-  sessionId: string;
-  threadId: string;
-}
-
 /** Input for enqueueing a task; `text` is the exact prompt snapshot to send. */
 export interface ManagedTaskInput {
   messageId: number;

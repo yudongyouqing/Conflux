@@ -121,17 +121,6 @@ function itemOf(params: unknown): ItemShape | null {
   };
 }
 
-/** Is this notification a terminal turn completion (drives run finality)? */
-export function isTerminalNotification(method: string): boolean {
-  return method === "turn/completed";
-}
-
-/** Extract the agent-visible final message from a completed agentMessage item. */
-export function finalTextFromItem(item: unknown): string | null {
-  const shape = itemOf({ item });
-  return shape?.type === "agentMessage" && typeof shape.text === "string" ? shape.text : null;
-}
-
 /**
  * Final text for a turn: the LAST completed agentMessage item wins; deltas
  * are display-only and never concatenated (the completed item already holds

@@ -53,6 +53,14 @@ export interface HttpServerOptions {
 
 export type RuntimePidProbe = () => Promise<RuntimePidSnapshot | null>;
 
+const LOCAL_CORS_ORIGIN_RE = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i;
+
+export function isAllowedCorsOrigin(origin: string | undefined): boolean {
+  // Non-browser clients (CLI, MCP, Electron main, Node fetch) send no Origin.
+  if (!origin) return true;
+  return LOCAL_CORS_ORIGIN_RE.test(origin);
+}
+
 export function requestDurationMs(start: number, end: number): number {
   return Math.max(0, Math.round((end - start) * 100) / 100);
 }
@@ -169,16 +177,23 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
     );
   });
 
-  const closeResources = () => {
+  let managedManager: ManagedCodexManager | null = null;
+  const closeResources = async () => {
     clearInterval(consoleBeat);
     clearInterval(abandonedSweep);
     clearInterval(scheduleTimer);
     clearInterval(livenessTimer);
+    if (managedManager) {
+      const manager = managedManager;
+      managedManager = null;
+      manager.stopQueuePolling();
+      await manager.shutdown();
+    }
     stopWalCheckpoint(db);
     if (db.open) db.close();
   };
   app.addHook("onClose", async () => {
-    closeResources();
+    await closeResources();
   });
 
   await app.register(swagger, {
@@ -194,8 +209,11 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
     routePrefix: "/docs",
   });
 
-  // CORS — allow the Vite dev server (and any local client) to call the API.
-  await app.register(cors, { origin: true });
+  // CORS — allow only loopback origins (Vite dev server / local Electron / browser)
+  // so arbitrary external web pages cannot call the local daemon.
+  await app.register(cors, {
+    origin: (origin, cb) => cb(null, isAllowedCorsOrigin(origin)),
+  });
 
   // Serve the built frontend when either the packaged or repository path exists.
   if (existsSync(webDist)) {
@@ -235,19 +253,15 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   // silently re-run. The queue poll drains tasks enqueued by OTHER
   // processes (MCP children, CLI one-shots) against this server's live
   // executors, and heartbeats their sessions.
-  const managedManager = new ManagedCodexManager(db);
+  managedManager = new ManagedCodexManager(db);
   setManagedCodexManager(managedManager);
   managedManager.startQueuePolling();
   registerManagedCodexRoutes(app, ctx);
-  app.addHook("onClose", async () => {
-    managedManager.stopQueuePolling();
-    await managedManager.shutdown();
-  });
 
   try {
     await app.listen({ host, port });
   } catch (err) {
-    closeResources();
+    await closeResources();
     throw err;
   }
   logger.info({ webDist, host, port, dataDir: config.dataDir }, "http server listening");

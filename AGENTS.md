@@ -13,6 +13,7 @@ This repository is an npm workspaces monorepo for Conflux (legacy alias `muiltch
 - `npm test -w apps/web` runs web unit tests.
 - `npm run test:desktop` runs Electron/desktop tests.
 - `npm run lint` checks server, web, and shared TypeScript with ESLint.
+- `npm run check:tokens` validates design-token rules on web source files.
 - `npm run format` formats supported TypeScript, TSX, and CSS files.
 - `npm run dev:server` and `npm run dev:web` start local development services.
 - `npm run check:secrets` scans the repository for accidentally committed secrets.
@@ -23,7 +24,7 @@ Use TypeScript with two-space indentation, semicolons, and double quotes, matchi
 
 ## Testing Guidelines
 
-Tests use Node's built-in test runner with `tsx`; name files `*.test.ts` (desktop tests use `*.test.cjs`). Place tests beside the owning workspace's test directory and describe behavior in test names. Add focused regression coverage for changed contracts, then run the affected workspace suite and `npm run build`. UI changes should also be checked at desktop and narrow viewport sizes when layout is involved, and every component must use the design tokens defined in `docs/DESIGN-TOKENS.md` (no raw gray scales, IBM Plex type, three-tier shadows, 10px floor).
+Tests use Node's built-in test runner with `tsx`; name files `*.test.ts` (desktop tests use `*.test.cjs`). Place tests beside the owning workspace's test directory and describe behavior in test names. Add focused regression coverage for changed contracts, then run the affected workspace suite and `npm run build`. UI changes should also be checked at desktop and narrow viewport sizes when layout is involved, and every component must use the design tokens defined in `docs/DESIGN-TOKENS.md` (no raw gray scales, IBM Plex type, three-tier shadows, 11px floor).
 
 ## Commit & Pull Request Guidelines
 

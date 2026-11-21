@@ -166,7 +166,7 @@ export function refreshCodexSessionTitles(db: DB, opts: CodexTitleRefreshOptions
       : db
           .prepare(
             `SELECT id, name, description, project_dir, created_at, metadata FROM sessions
-             WHERE status = 'active' AND metadata LIKE '%"runtime":"codex"%'`,
+             WHERE status = 'active' AND (runtime = 'codex' OR metadata LIKE '%"runtime":"codex"%')`,
           )
           .all()
   ) as SessionRow[];
@@ -249,6 +249,13 @@ export function refreshCodexSessionTitles(db: DB, opts: CodexTitleRefreshOptions
     updated++;
   }
 
+  const rolloutBySessionId = new Map<string, CodexRollout>();
+  for (const r of rollouts) {
+    if (r.codexSessionId && !rolloutBySessionId.has(r.codexSessionId)) {
+      rolloutBySessionId.set(r.codexSessionId, r);
+    }
+  }
+
   // Stamped rows bind absolutely; unstamped rows go through the matcher.
   const stamped = new Map<string, CodexRollout>();
   const matchRows: MatchRow[] = [];
@@ -259,7 +266,7 @@ export function refreshCodexSessionTitles(db: DB, opts: CodexTitleRefreshOptions
     if (stamp) {
       // Previously bound: the stamp is absolute. Rollout gone (archived,
       // pruned) → skip — re-guessing would steal a sibling's rollout.
-      const own = rollouts.find((r) => r.codexSessionId === stamp);
+      const own = rolloutBySessionId.get(stamp);
       if (own) stamped.set(row.id, own);
       continue;
     }
@@ -319,22 +326,38 @@ export function refreshCodexSessionTitles(db: DB, opts: CodexTitleRefreshOptions
       const lastExcerpt = promptExcerpt(prompts[prompts.length - 1]) ?? title;
 
       ownedSessionIds.add(rollout.codexSessionId);
-      if (title !== row.name) renameSession(db, row.id, title);
-      if (lastExcerpt !== row.description) setSessionDescription(db, row.id, lastExcerpt);
-      // Rewrite metadata wholesale to drop `temp` (a titled session is an
-      // adopted identity, not a placeholder that hides when stale).
+      const codexTitleKind = thread ? "thread" : "prompt";
       const meta = parseMeta(row);
-      const { temp: _drop, ...rest } = meta;
-      db.prepare(`UPDATE sessions SET metadata = ? WHERE id = ?`).run(
-        JSON.stringify({
-          ...rest,
-          named: true,
-          codex_session_id: rollout.codexSessionId,
-          codex_name: title,
-          codex_title: thread ? "thread" : "prompt",
-        }),
-        row.id,
-      );
+      const metadataUnchanged =
+        meta.temp === undefined &&
+        meta.named === true &&
+        meta.codex_session_id === rollout.codexSessionId &&
+        meta.codex_name === title &&
+        meta.codex_title === codexTitleKind;
+      if (title === row.name && lastExcerpt === row.description && metadataUnchanged) {
+        continue;
+      }
+      db.transaction(() => {
+        if (title !== row.name) renameSession(db, row.id, title);
+        if (lastExcerpt !== row.description) setSessionDescription(db, row.id, lastExcerpt);
+        // Re-read metadata inside the transaction so concurrent heartbeat/busy
+        // updates are preserved while `temp` is dropped.
+        const fresh = db.prepare(`SELECT metadata FROM sessions WHERE id = ?`).get(row.id) as
+          | { metadata: string | null }
+          | undefined;
+        const freshMeta = fresh ? parseMeta(fresh) : meta;
+        const { temp: _drop, ...rest } = freshMeta;
+        db.prepare(`UPDATE sessions SET metadata = ? WHERE id = ?`).run(
+          JSON.stringify({
+            ...rest,
+            named: true,
+            codex_session_id: rollout.codexSessionId,
+            codex_name: title,
+            codex_title: codexTitleKind,
+          }),
+          row.id,
+        );
+      }).immediate();
       updated++;
     } catch {
       continue; // one bad row must not block the rest
@@ -354,7 +377,7 @@ export function refreshCodexSessionTitles(db: DB, opts: CodexTitleRefreshOptions
       const meta = parseMeta(fresh);
       const stamp = typeof meta.codex_session_id === "string" ? meta.codex_session_id : null;
       if (!stamp) continue;
-      const r = rollouts.find((x) => x.codexSessionId === stamp);
+      const r = rolloutBySessionId.get(stamp);
       if (!r) continue;
       const busy = nowBusy - r.mtimeMs < CODEX_BUSY_FRESH_MS;
       if (meta.busy === busy) continue;

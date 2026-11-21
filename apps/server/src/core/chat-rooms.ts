@@ -43,30 +43,45 @@ export function createChatRoom(
   db: DB,
   input: { name: string; description?: string; members: string[] },
 ): ChatRoom {
-  if (!input.name.trim()) throw new Error("room name required");
-  // free-join: rooms can start empty; members added later
-  const now = nowIso();
-  // store members as the legacy topology column (array of {from,to} pairs for
-  // schema compat — every member pairs with the first for storage)
-  const legacyTopology = input.members.map((sid, i) => ({
-    from: input.members[0],
-    to: sid,
-    order: i + 1,
-  })).filter((s) => s.from !== s.to);
-  const res = db
-    .prepare(
-      `INSERT INTO chat_rooms (name, description, topology, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)`,
-    )
-    .run(input.name.trim(), input.description ?? null, JSON.stringify(legacyTopology), now, now);
-  const row = db
-    .prepare(`SELECT * FROM chat_rooms WHERE id = ?`)
-    .get(Number(res.lastInsertRowid)) as ChatRoomRow;
-  // claim members (mutual exclusivity)
-  for (const sid of input.members) {
-    db.prepare(`UPDATE sessions SET chat_room_id = ? WHERE id = ?`).run(row.id, sid);
+  if (!input.name.trim()) {
+    throw Object.assign(new Error("room name required"), { statusCode: 400 });
   }
-  return toRoom(db, row);
+  // free-join: rooms can start empty; members added later
+  return db
+    .transaction(() => {
+      const now = nowIso();
+      // store members as the legacy topology column (array of {from,to} pairs for
+      // schema compat — every member pairs with the first for storage)
+      const legacyTopology = input.members
+        .map((sid, i) => ({
+          from: input.members[0],
+          to: sid,
+          order: i + 1,
+        }))
+        .filter((s) => s.from !== s.to);
+      const res = db
+        .prepare(
+          `INSERT INTO chat_rooms (name, description, topology, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?)`,
+        )
+        .run(
+          input.name.trim(),
+          input.description ?? null,
+          JSON.stringify(legacyTopology),
+          now,
+          now,
+        );
+      const row = db
+        .prepare(`SELECT * FROM chat_rooms WHERE id = ?`)
+        .get(Number(res.lastInsertRowid)) as ChatRoomRow;
+      // claim members (mutual exclusivity)
+      const claimMember = db.prepare(`UPDATE sessions SET chat_room_id = ? WHERE id = ?`);
+      for (const sid of input.members) {
+        claimMember.run(row.id, sid);
+      }
+      return toRoom(db, row);
+    })
+    .immediate();
 }
 
 export function listChatRooms(db: DB): ChatRoom[] {
@@ -88,26 +103,36 @@ export function getChatRoom(db: DB, id: number): ChatRoom | null {
 }
 
 export function deleteChatRoom(db: DB, id: number): boolean {
-  // release members
-  db.prepare(`UPDATE sessions SET chat_room_id = NULL WHERE chat_room_id = ?`).run(id);
-  const res = db.prepare(`DELETE FROM chat_rooms WHERE id = ?`).run(id);
-  return res.changes > 0;
+  return db
+    .transaction(() => {
+      // release members and clean up room-owned tasks/message tags
+      db.prepare(`UPDATE sessions SET chat_room_id = NULL WHERE chat_room_id = ?`).run(id);
+      db.prepare(`DELETE FROM room_tasks WHERE room_id = ?`).run(id);
+      db.prepare(`UPDATE messages SET room_id = NULL WHERE room_id = ?`).run(id);
+      const res = db.prepare(`DELETE FROM chat_rooms WHERE id = ?`).run(id);
+      return res.changes > 0;
+    })
+    .immediate();
 }
 
 /** Sessions in a room — authoritative source is sessions.chat_room_id. */
 export function roomMembers(db: DB, roomId: number): string[] {
   const rows = db
-    .prepare('SELECT id FROM sessions WHERE chat_room_id = ?')
+    .prepare("SELECT id FROM sessions WHERE chat_room_id = ?")
     .all(roomId) as { id: string }[];
   return rows.map((r) => r.id);
 }
 
-
 /** Add a session to a room (mutual exclusivity: removes from any previous room). */
 export function joinRoom(db: DB, roomId: number, sessionId: string): void {
   const room = getChatRoom(db, roomId);
-  if (!room) throw new Error("room not found");
-  db.prepare(`UPDATE sessions SET chat_room_id = ? WHERE id = ?`).run(roomId, sessionId);
+  if (!room) throw Object.assign(new Error("room not found"), { statusCode: 404 });
+  const res = db
+    .prepare(`UPDATE sessions SET chat_room_id = ? WHERE id = ?`)
+    .run(roomId, sessionId);
+  if (res.changes === 0) {
+    throw Object.assign(new Error(`session not found: ${sessionId}`), { statusCode: 404 });
+  }
 }
 
 /** Remove a session from its room. */

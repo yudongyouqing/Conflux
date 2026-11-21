@@ -1,3 +1,2 @@
-import { installTheme, applySavedCustomTheme } from './theme';
-installTheme();
-applySavedCustomTheme();
+import { refreshTokenApplication } from "./theme";
+refreshTokenApplication();

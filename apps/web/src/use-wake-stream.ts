@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 /**
  * Subscribe to the wake-log SSE stream for one session.
@@ -8,7 +8,6 @@ import { useEffect, useRef, useState } from "react";
 export function useWakeStream(sessionId: string | null) {
   const [text, setText] = useState("");
   const [live, setLive] = useState(false);
-  const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
     if (!sessionId) {
@@ -19,7 +18,6 @@ export function useWakeStream(sessionId: string | null) {
     setText("");
     setLive(false);
     const es = new EventSource(`/wake/${encodeURIComponent(sessionId)}/stream`);
-    esRef.current = es;
     es.addEventListener("start", () => { setText(""); setLive(false); });
     es.addEventListener("pending", () => setLive(false));
     es.addEventListener("ended", () => setLive(false));
@@ -36,7 +34,6 @@ export function useWakeStream(sessionId: string | null) {
     es.onerror = () => setLive(false);
     return () => {
       es.close();
-      esRef.current = null;
     };
   }, [sessionId]);
 

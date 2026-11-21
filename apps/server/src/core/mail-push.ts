@@ -71,9 +71,12 @@ export function pushMailTyped(db: DB, sessionId: string, io: TmuxIO = realTmuxIO
 
   // the user's own terminal — see the claude-only / idle-only caveats above
   const pid =
-    [meta.claude_pid, meta.runtime_pid].map(Number).find((n) => Number.isFinite(n) && n > 0) ??
-    null;
-  const isClaude = (session.runtime ?? "claude") === "claude";
+    [session.runtime_pid, meta.claude_pid, meta.runtime_pid]
+      .map(Number)
+      .find((n) => Number.isSafeInteger(n) && n > 0) ?? null;
+  const runtime =
+    session.runtime ?? (typeof meta.runtime === "string" ? meta.runtime : null) ?? "claude";
+  const isClaude = runtime === "claude";
   if (pid !== null && isClaude && session.status === "active" && !busy) {
     const pane = io.paneForPid(pid);
     if (pane) return deliver(db, sessionId, pane, "pane", io);
@@ -92,7 +95,14 @@ function deliver(
   const prompt = formatTypedMailPrompt(items);
   if (!prompt) return { pushed: false, reason: "inbox empty" };
   if (!io.send(target, prompt)) return { pushed: false, reason: "send failed" };
-  markMailDelivered(db, sessionId, items);
+  try {
+    markMailDelivered(db, sessionId, items);
+  } catch (err) {
+    logger.warn(
+      { sessionId, via, err: err instanceof Error ? err.message : String(err) },
+      "typed mail sent but delivery receipt could not be saved",
+    );
+  }
   logger.info({ sessionId, via, items: items.length }, "typed mail delivered");
   return { pushed: true, via };
 }

@@ -12,7 +12,7 @@
   ],
   "scripts": {
     "build": "tsc",
-    "dev": "tsx src/index.ts",
+    "dev": "tsx src/index.ts serve",
     "mcp": "tsx src/index.ts mcp",
     "serve": "tsx src/index.ts serve",
     "test": "node --import tsx --test \"src/test/*.test.ts\"",
@@ -21,7 +21,7 @@
     "pretest": "npm run build -w @conflux/shared"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "keywords": [
     "mcp",

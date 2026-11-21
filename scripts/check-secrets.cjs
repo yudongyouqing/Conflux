@@ -27,12 +27,19 @@ const TEXT_EXTENSIONS = new Set([
   ".json",
   ".md",
   ".mjs",
+  ".toml",
   ".ts",
   ".tsx",
   ".txt",
   ".yaml",
   ".yml",
 ]);
+
+function isScannableFile(name) {
+  const lower = name.toLowerCase();
+  if (lower === ".env" || lower.startsWith(".env.")) return true;
+  return TEXT_EXTENSIONS.has(path.extname(lower));
+}
 
 const RULES = [
   { category: "private-key", pattern: /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----/ },
@@ -84,7 +91,7 @@ function collectFiles(root) {
         continue;
       }
       if (entry.name.includes(".test.") || entry.name.endsWith(".db")) continue;
-      if (TEXT_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) files.push(absolute);
+      if (isScannableFile(entry.name)) files.push(absolute);
     }
   }
   visit(root);

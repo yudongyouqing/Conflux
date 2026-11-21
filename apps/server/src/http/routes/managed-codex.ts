@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { logAudit } from "../../core/audit.js";
+import { logger } from "../../log.js";
 import { getManagedCodexManager } from "../../core/managed-codex/manager.js";
 import { listManagedEvents } from "../../core/managed-codex/store.js";
 import { WEB_CONSOLE_ID, type ServerContext } from "../context.js";
@@ -87,25 +88,39 @@ export function registerManagedCodexRoutes(app: FastifyInstance, ctx: ServerCont
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
       });
+      let closed = false;
+      let unsubscribe: (() => void) | undefined;
+      let heartbeat: NodeJS.Timeout | undefined;
+      const cleanup = () => {
+        if (closed) return;
+        closed = true;
+        if (heartbeat) clearInterval(heartbeat);
+        unsubscribe?.();
+      };
       const writeEvent = (event: unknown) => {
+        if (closed || reply.raw.writableEnded) return;
         const frame = event as { sequence: number };
-        reply.raw.write(`id: ${frame.sequence}\ndata: ${JSON.stringify(event)}\n\n`);
+        try {
+          reply.raw.write(`id: ${frame.sequence}\ndata: ${JSON.stringify(event)}\n\n`);
+        } catch {
+          cleanup();
+        }
       };
       for (const row of history) writeEvent(row);
       // Subscribe if the instance is live; a dead instance keeps the stream
       // open (history only) until the client reconnects elsewhere.
-      const unsubscribe = manager.subscribe(req.params.id, writeEvent) ?? undefined;
-      const heartbeat = setInterval(() => {
-        try {
-          reply.raw.write(": ping\n\n");
-        } catch {
-          // broken pipe — the close handler below unsubscribes
-        }
-      }, 15000);
-      reply.raw.on("close", () => {
-        clearInterval(heartbeat);
-        unsubscribe?.();
-      });
+      if (!closed) {
+        unsubscribe = manager.subscribe(req.params.id, writeEvent) ?? undefined;
+        heartbeat = setInterval(() => {
+          try {
+            reply.raw.write(": ping\n\n");
+          } catch {
+            cleanup();
+          }
+        }, 15000);
+        heartbeat.unref?.();
+        reply.raw.on("close", cleanup);
+      }
       await Promise.resolve(); // headers flushed; the stream stays open
     },
   );
@@ -117,13 +132,17 @@ export function registerManagedCodexRoutes(app: FastifyInstance, ctx: ServerCont
       try {
         const manager = requireManager();
         const result = await manager.interrupt(req.params.id, req.body?.expected_turn_id ?? null);
-        logAudit(db, {
-          interface: "http",
-          caller_session: WEB_CONSOLE_ID,
-          action: "managed_codex_interrupt",
-          args: { id: req.params.id, expected_turn_id: req.body?.expected_turn_id ?? null },
-          result,
-        });
+        try {
+          logAudit(db, {
+            interface: "http",
+            caller_session: WEB_CONSOLE_ID,
+            action: "managed_codex_interrupt",
+            args: { id: req.params.id, expected_turn_id: req.body?.expected_turn_id ?? null },
+            result,
+          });
+        } catch (auditErr) {
+          logger.warn({ err: auditErr, id: req.params.id }, "failed to audit managed interrupt");
+        }
         reply.send(result);
       } catch (err) {
         return sendError(reply, err);
@@ -151,12 +170,16 @@ export function registerManagedCodexRoutes(app: FastifyInstance, ctx: ServerCont
         if (!result.ok) {
           return ctx.sendHttpError(reply, result.status, result.reason);
         }
-        logAudit(db, {
-          interface: "http",
-          caller_session: sid,
-          action: "managed_codex_approval",
-          args: { id: req.params.id, approvalId, decision: req.body?.decision },
-        });
+        try {
+          logAudit(db, {
+            interface: "http",
+            caller_session: sid,
+            action: "managed_codex_approval",
+            args: { id: req.params.id, approvalId, decision: req.body?.decision },
+          });
+        } catch (auditErr) {
+          logger.warn({ err: auditErr, id: req.params.id, approvalId }, "failed to audit managed approval");
+        }
         reply.send({ ok: true });
       } catch (err) {
         return sendError(reply, err, WEB_CONSOLE_ID, "managed_codex_approval", {

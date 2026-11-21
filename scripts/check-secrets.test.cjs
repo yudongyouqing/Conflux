@@ -61,3 +61,22 @@ test("collects documented plans while skipping local worktrees and prototypes", 
     assert.deepEqual(collectFiles(root), [join(root, "docs/superpowers/sample.md")]);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test("collects .env dotfiles and .toml configs so accidental secrets are never skipped", () => {
+  const { collectFiles } = require("./check-secrets.cjs");
+  const root = mkdtempSync(join(tmpdir(), "conflux-secret-env-"));
+  try {
+    writeFileSync(join(root, ".env"), "OPENAI_API_KEY=sk-live-12345678901234567890\n", "utf8");
+    writeFileSync(join(root, ".env.local"), "TOKEN=placeholder\n", "utf8");
+    writeFileSync(join(root, "config.toml"), "key = 'ok'\n", "utf8");
+    const collected = collectFiles(root).sort();
+    assert.deepEqual(collected, [
+      join(root, ".env"),
+      join(root, ".env.local"),
+      join(root, "config.toml"),
+    ].sort());
+    assert.equal(scanFiles(collected).length, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

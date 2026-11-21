@@ -101,23 +101,33 @@ export function GraphTab({
   // poll rebuilds (read when edges are rebuilt) and page reloads (localStorage).
   const OFFSETS_KEY = "conflux:edge-offsets:v1";
   const LEGACY_OFFSETS_KEY = "muiltchat:edge-offsets:v1"; // pre-rename key, read-only
-  const manualOffsets = useRef<Record<string, number>>(
-    (() => {
-      try {
-        return JSON.parse(
-          localStorage.getItem(OFFSETS_KEY) ?? localStorage.getItem(LEGACY_OFFSETS_KEY) ?? "{}",
-        );
-      } catch {
-        return {};
+  const manualOffsetsRef = useRef<Record<string, number> | null>(null);
+  if (manualOffsetsRef.current === null) {
+    let loaded: Record<string, number> = {};
+    try {
+      const parsed: unknown = JSON.parse(
+        localStorage.getItem(OFFSETS_KEY) ?? localStorage.getItem(LEGACY_OFFSETS_KEY) ?? "{}",
+      );
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        loaded = parsed as Record<string, number>;
       }
-    })(),
-  );
+    } catch {
+      loaded = {};
+    }
+    manualOffsetsRef.current = loaded;
+  }
+  const manualOffsets: Record<string, number> = manualOffsetsRef.current;
 
   const rfInstance = useRef<FlowInstance | null>(null);
   const [flowInstance, setFlowInstance] = useState<FlowInstance | null>(null);
   const viewportRef = useRef<Viewport | null>(null);
   const nodesRef = useRef<Node[]>([]);
   nodesRef.current = nodes;
+  const baseEdgesRef = useRef<Edge[]>([]);
+  const selectedSessionIdRef = useRef(selectedSessionId);
+  selectedSessionIdRef.current = selectedSessionId;
+  const selectedEdgeRef = useRef(selectedEdge);
+  selectedEdgeRef.current = selectedEdge;
   const scopeKeyRef = useRef(scopeKey);
   // the scope this component last BUILT for: entering a scope restores its
   // snapshot once; same-scope refreshes keep freshly dragged positions
@@ -152,22 +162,34 @@ export function GraphTab({
   // drag on Windows. The in-memory ref is authoritative immediately; the
   // disk copy trails by the debounce window.
   const offsetPersistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => {
-    if (offsetPersistTimer.current) clearTimeout(offsetPersistTimer.current);
+  const flushManualOffsets = useCallback(() => {
+    try {
+      localStorage.setItem(OFFSETS_KEY, JSON.stringify(manualOffsetsRef.current ?? {}));
+    } catch {
+      // storage full/blocked — in-memory override still works this session
+    }
   }, []);
+  useEffect(
+    () => () => {
+      if (offsetPersistTimer.current) {
+        clearTimeout(offsetPersistTimer.current);
+        offsetPersistTimer.current = null;
+        flushManualOffsets();
+      }
+    },
+    [flushManualOffsets],
+  );
   const handleOffsetChange = useCallback(
     (key: string, offset: number | null) => {
-      if (offset === null) delete manualOffsets.current[key];
-      else manualOffsets.current[key] = Math.round(offset);
+      const store = manualOffsetsRef.current ?? (manualOffsetsRef.current = {});
+      if (offset === null) delete store[key];
+      else store[key] = Math.round(offset);
       if (offsetPersistTimer.current) clearTimeout(offsetPersistTimer.current);
       offsetPersistTimer.current = setTimeout(() => {
-        try {
-          localStorage.setItem(OFFSETS_KEY, JSON.stringify(manualOffsets.current));
-        } catch {
-          // storage full/blocked — in-memory override still works this session
-        }
+        offsetPersistTimer.current = null;
+        flushManualOffsets();
       }, 250);
-      setEdges((eds) =>
+      const applyOffset = (eds: Edge[]) =>
         eds.map((e) => {
           const d = e.data as
             | { offsetKey?: string; offset?: number; autoOffset?: number }
@@ -175,16 +197,17 @@ export function GraphTab({
           if (d?.offsetKey !== key) return e;
           const auto = d.autoOffset ?? 0;
           return { ...e, data: { ...d, offset: offset === null ? auto : Math.round(offset) } };
-        }),
-      );
+        });
+      baseEdgesRef.current = applyOffset(baseEdgesRef.current);
+      setEdges(applyOffset);
     },
-    [setEdges],
+    [flushManualOffsets, setEdges],
   );
 
-  // Sync data into state via the pure builders in graph-builders.ts. Runs
-  // only while active — a hidden graph does no layout work; re-activating
-  // rebuilds once from the freshest data. Dragged positions survive polls;
-  // on a scope switch the target scope's snapshot positions are restored.
+  // Sync topology data into state via the pure builders in graph-builders.ts.
+  // Runs only while active and only when graph data or view composition
+  // changes — selection changes are styled in a separate lightweight effect so
+  // clicking a node/edge never re-runs Dagre layout.
   useEffect(() => {
     if (!active || !graph) return;
     const startedAt = performance.now();
@@ -196,9 +219,12 @@ export function GraphTab({
           : viewMode === "all"
             ? buildAllView({ data: graph, onSelectEdge })
             : buildActiveView({ data: graph, onSelectEdge });
-    const offset = applyEdgeOffsets(built.edges, manualOffsets.current, handleOffsetChange);
-    const styled = styleEdges(offset, selectedEdge, selectedSessionId);
-    const endpoints = selectedEdgeEndpoints(selectedEdge);
+    const offset = applyEdgeOffsets(built.edges, manualOffsets, handleOffsetChange);
+    baseEdgesRef.current = offset;
+    const selSession = selectedSessionIdRef.current;
+    const selEdge = selectedEdgeRef.current;
+    const styled = styleEdges(offset, selEdge, selSession);
+    const endpoints = selectedEdgeEndpoints(selEdge);
     const scopeEntered = lastBuiltScopeRef.current !== scopeKey;
     const composition = `${scope}:${viewMode}:${expandedKey ?? ""}`;
     const compositionChanged = lastBuiltComposition.current !== composition;
@@ -211,31 +237,53 @@ export function GraphTab({
         built.nodes as Node[],
         scopeEntered,
         scopeSnapshots.get(scopeKey),
-        selectedSessionId,
+        selSession,
       ).map((n) => ({
         ...n,
         data: { ...n.data, highlighted: !!endpoints?.has(n.id) },
       })),
     );
     setEdges(styled);
-    console.debug(
-      "[conflux:perf] graph build",
-      graphBuildMetrics(built.nodes.length, built.edges.length, startedAt, performance.now()),
-    );
+    if (import.meta.env?.DEV) {
+      console.debug(
+        "[conflux:perf] graph build",
+        graphBuildMetrics(built.nodes.length, built.edges.length, startedAt, performance.now()),
+      );
+    }
   }, [
     active,
     graph,
     scope,
     scopeKey,
-    selectedSessionId,
-    selectedEdge,
     viewMode,
     expandedKey,
     onSelectEdge,
     handleOffsetChange,
+    manualOffsets,
     setNodes,
     setEdges,
   ]);
+
+  // Apply selection & highlight styling without re-running layout.
+  useEffect(() => {
+    if (!active || !graph) return;
+    const endpoints = selectedEdgeEndpoints(selectedEdge);
+    setNodes((prev) =>
+      prev.map((n) => {
+        const nextSelected = n.id === selectedSessionId;
+        const nextHighlighted = !!endpoints?.has(n.id);
+        if (n.selected === nextSelected && n.data?.highlighted === nextHighlighted) {
+          return n;
+        }
+        return {
+          ...n,
+          selected: nextSelected,
+          data: { ...n.data, highlighted: nextHighlighted },
+        };
+      }),
+    );
+    setEdges(styleEdges(baseEdgesRef.current, selectedEdge, selectedSessionId));
+  }, [active, graph, selectedSessionId, selectedEdge, setNodes, setEdges]);
 
   // Reframe when the composition itself changes — dagre/grid/rows swap
   // positions wholesale and the initial fitView never reruns on its own.
@@ -298,7 +346,7 @@ export function GraphTab({
 
   if (error && !graph)
     return (
-      <div className="flex items-center justify-center h-full text-red-500 text-sm">
+      <div className="flex items-center justify-center h-full text-danger text-sm">
         连接失败: {error}
       </div>
     );
@@ -373,7 +421,7 @@ export function GraphTab({
       {/* no edges in view: say WHY instead of looking like a broken graph */}
       {edges.length === 0 && nodes.length > 0 && (
         <Panel position="bottom-center" className="!mb-4">
-          <div className="text-2xs text-ink-faint bg-surface/90 backdrop-blur-sm border border-slate-100 rounded-full px-3 py-1 shadow-[0_2px_10px_rgba(16,24,40,0.08)]">
+          <div className="text-2xs text-ink-faint bg-surface/90 backdrop-blur-sm border border-line rounded-full px-3 py-1 shadow-[0_2px_10px_rgba(16,24,40,0.08)]">
             当前视图暂无会话间消息通道 —— 发起一次对话即可建立连线
           </div>
         </Panel>

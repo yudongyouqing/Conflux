@@ -10,7 +10,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { useDaemonHealth } from "../hooks";
-import type { ChatRoom, GraphNode } from "@conflux/shared";
+import { WEB_CONSOLE_ID, type ChatRoom, type GraphNode } from "@conflux/shared";
 import { sessionStatusAppearance } from "./StatusDot";
 import { ChatRoomList } from "./ChatRoomList";
 
@@ -88,7 +88,7 @@ export function Sidebar({
   const listable = useMemo(
     () =>
       sessions
-        .filter((s) => s.type === "session" && s.id !== "web-console")
+        .filter((s) => s.type === "session" && s.id !== WEB_CONSOLE_ID)
         .sort((a, b) => (b.last_heartbeat_at ?? "").localeCompare(a.last_heartbeat_at ?? "")),
     [sessions],
   );

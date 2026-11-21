@@ -4,6 +4,8 @@ const http = require("node:http");
 
 const {
   assertPortAvailable,
+  findPortOwner,
+  parseLsofOwner,
   parseNetstatOwner,
   parseTasklistCommand,
 } = require("../src/port-diagnostics.cjs");
@@ -52,4 +54,16 @@ test("resolves Windows netstat and tasklist output into an owner summary", () =>
     '"node.exe","2468","Console","1","42,000 K"',
   ].join("\r\n");
   assert.deepEqual(parseTasklistCommand(tasklist, 2468), { command: "node.exe" });
+});
+
+test("resolves POSIX lsof output into an owner summary", async () => {
+  assert.deepEqual(parseLsofOwner("p4321\ncnode\nf12\n"), { pid: 4321, command: "node" });
+  assert.deepEqual(parseLsofOwner("p9876\n"), { pid: 9876 });
+  assert.equal(parseLsofOwner(""), null);
+
+  const owner = await findPortOwner(9527, "127.0.0.1", {
+    platform: "darwin",
+    execFileFn: (_cmd, _args, _opts, cb) => cb(null, "p4321\ncnode\n", ""),
+  });
+  assert.deepEqual(owner, { pid: 4321, command: "node" });
 });

@@ -45,7 +45,9 @@ export function registerSessionRoutes(app: FastifyInstance, ctx: ServerContext, 
       },
     },
     async (req, reply) => {
-      const sid = req.body.session_id || (req.headers["x-session-id"] as string) || randomUUID();
+      const headerSid = req.headers["x-session-id"];
+      const normalizedHeaderSid = Array.isArray(headerSid) ? headerSid[0] : headerSid;
+      const sid = req.body.session_id || normalizedHeaderSid || randomUUID();
       try {
         const session = await write(() => {
           const created = registerSession(db, {

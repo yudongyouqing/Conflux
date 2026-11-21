@@ -15,7 +15,7 @@ after(cleanup);
 
 test("getTerminalSettings returns defaults on a fresh db", () => {
   assert.deepEqual(getTerminalSettings(db), {
-    terminal: process.platform === "darwin" ? "terminal" : "wt",
+    terminal: process.platform === "darwin" ? "terminal" : process.platform === "win32" ? "wt" : "tmux",
     claude_path: "claude",
     codex_path: "codex",
   });
@@ -179,6 +179,33 @@ test("terminalOptions on darwin lists mac openers only", () => {
     ["terminal", "iterm", "tmux"],
   );
   assert.ok(opts.every((o) => typeof o.label === "string" && o.label.length > 0));
+});
+
+test("buildLaunchPlan and terminalOptions on linux use tmux and wezterm", () => {
+  const linux = { platform: "linux" as NodeJS.Platform };
+  const opts = terminalOptions(process.env, linux);
+  assert.deepEqual(
+    opts.map((o) => o.value),
+    ["tmux", "wezterm"],
+  );
+  const tmuxPlan = buildLaunchPlan(
+    { terminal: "tmux" },
+    { command: "claude --resume abc", cwd: "/tmp/proj", title: "conflux · x" },
+    linux,
+  );
+  assert.deepEqual(
+    tmuxPlan.map((s) => s.file),
+    ["tmux", "wezterm"],
+  );
+  const wezPlan = buildLaunchPlan(
+    { terminal: "wezterm" },
+    { command: "claude --resume abc", cwd: "/tmp/proj", title: "conflux · x" },
+    linux,
+  );
+  assert.deepEqual(
+    wezPlan.map((s) => s.file),
+    ["wezterm", "tmux"],
+  );
 });
 
 test("cleanTerminalEnv keeps POSIX essentials", () => {

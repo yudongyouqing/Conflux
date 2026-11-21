@@ -187,10 +187,14 @@ export const codexAdapter: RuntimeAdapter = {
         errorMessage: turn?.error?.message ?? null,
       };
     }
+    const nestedTurnId =
+      typeof ids.turn === "object" && ids.turn !== null && typeof (ids.turn as { id?: unknown }).id === "string"
+        ? (ids.turn as { id: string }).id
+        : null;
     return {
       type: normalized.type,
       payload: normalized.payload,
-      turnId: typeof ids.turnId === "string" ? ids.turnId : null,
+      turnId: typeof ids.turnId === "string" ? ids.turnId : nestedTurnId,
       agentText,
       turnCompleted,
     };

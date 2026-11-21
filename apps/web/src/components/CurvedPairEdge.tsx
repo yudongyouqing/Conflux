@@ -71,8 +71,12 @@ export function CurvedPairEdge(props: EdgeProps) {
   const lx = 0.25 * p0.x + 0.5 * c.x + 0.25 * p2.x;
   const ly = 0.25 * p0.y + 0.5 * c.y + 0.25 * p2.y;
 
-  const stroke = (style as { stroke?: string } | undefined)?.stroke;
-  const isSelected = stroke === "#2563eb";
+  const edgeStyle = style as { stroke?: string; strokeWidth?: number } | undefined;
+  const stroke = edgeStyle?.stroke;
+  const isSelected = stroke === "#2563eb" || stroke === "#3b82f6";
+  const railStroke = stroke ?? (isSelected ? "#3b82f6" : "#9ca8b6");
+  const railWidth = edgeStyle?.strokeWidth ?? 2;
+  const showFlowDots = props.animated !== false;
   const manual = d.offsetKey !== undefined && d.onOffsetChange !== undefined;
 
   // ---- pill measurement (drives the dot-flow gap) -------------------------
@@ -156,24 +160,25 @@ export function CurvedPairEdge(props: EdgeProps) {
         markerEnd={markerEnd}
         style={{
           ...style,
-          strokeWidth: 2,
-          stroke: isSelected ? "#3b82f6" : "#9ca8b6",
+          strokeWidth: railWidth,
+          stroke: railStroke,
         }}
       />
       {/* animated dot-flow riding the rail — gapped around the label pill */}
-      {beadPaths.map((p, i) => (
-        <path
-          key={i}
-          d={p}
-          fill="none"
-          className="react-flow__edge-path rf-flow-dots"
-          style={{
-            stroke: isSelected ? "#60a5fa" : "#94a3b8",
-            strokeWidth: 2.5,
-            pointerEvents: "none",
-          }}
-        />
-      ))}
+      {showFlowDots &&
+        beadPaths.map((p, i) => (
+          <path
+            key={i}
+            d={p}
+            fill="none"
+            className="react-flow__edge-path rf-flow-dots"
+            style={{
+              stroke: isSelected ? "#60a5fa" : "#94a3b8",
+              strokeWidth: Math.max(2, Math.min(railWidth + 0.5, 4)),
+              pointerEvents: "none",
+            }}
+          />
+        ))}
       <EdgeLabelRenderer>
         <div
           ref={pillRef}
@@ -187,12 +192,12 @@ export function CurvedPairEdge(props: EdgeProps) {
           title={manual ? "拖动调整弧度 · 双击复位" : undefined}
           className={`nodrag nopan touch-none select-none ${
             label
-              ? `px-2 py-0.5 rounded-full text-2xs font-medium max-w-[140px] truncate border shadow-sm bg-surface cursor-pointer hover:border-accent/60 ${
-                  isSelected ? "border-accent/60 text-accent-deep" : "border-gray-200 text-gray-600"
+              ? `px-2 py-0.5 rounded-full text-2xs font-medium max-w-[140px] truncate border shadow-card bg-surface cursor-pointer hover:border-accent/60 ${
+                  isSelected ? "border-accent/60 text-accent-deep" : "border-line text-ink-muted"
                 }${manual ? " active:cursor-grabbing" : ""}`
               : `w-2.5 h-2.5 rounded-full border ${
                   manual
-                    ? "border-gray-300 bg-gray-100 opacity-0 hover:opacity-100 cursor-grab active:cursor-grabbing"
+                    ? "border-line-strong bg-paper opacity-0 hover:opacity-100 cursor-grab active:cursor-grabbing"
                     : "hidden"
                 } transition-opacity`
           }`}

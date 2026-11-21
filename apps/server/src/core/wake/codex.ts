@@ -1,5 +1,5 @@
 import { codexRolloutDigest, findCodexRolloutPath } from "../codex-rollout.js";
-import { AUTO_WAKE_PROMPT, buildWakePrompt, freshWakeCommand, wakeCommand } from "./commands.js";
+import { buildWakePrompt, freshWakeCommand, wakeCommand } from "./commands.js";
 
 /**
  * Codex wake policy. Two codex-specific constraints drive everything:
@@ -34,7 +34,3 @@ export function planCodexWake(input: CodexWakePlanInput): WakePlanCodex {
     : "";
   return { command: freshWakeCommand("codex", input.exe), prompt: buildWakePrompt(digest) };
 }
-
-// re-export for the dispatcher's offline prompt (codex offline wakes use
-// the plain prompt — the resumed thread carries its own context)
-export { AUTO_WAKE_PROMPT };

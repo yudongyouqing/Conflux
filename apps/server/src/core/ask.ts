@@ -57,8 +57,12 @@ export interface AskPrepared {
 }
 
 export function prepareAsk(db: DB, opts: AskOptions): AskPrepared {
-  const message = askSession(db, opts);
-  return claimMessageWake(db, message.id, opts.from_session, true);
+  return db
+    .transaction(() => {
+      const message = askSession(db, opts);
+      return claimMessageWake(db, message.id, opts.from_session, true);
+    })
+    .immediate();
 }
 
 /** Phase 1 for manual retries — the same database-only contract as prepareAsk. */
@@ -162,7 +166,7 @@ export async function completeAsk(
     return { message: getMessage(db, message.id) ?? message, wake };
   }
   // A typed wake may already have marked the question seen.
-  return { message: getMessage(db, message.id)!, wake };
+  return { message: getMessage(db, message.id) ?? message, wake };
 }
 
 function claimMessageWake(db: DB, id: number, actor: string, initial: boolean): AskPrepared {

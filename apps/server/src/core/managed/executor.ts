@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { DB } from "../db.js";
 import { nowIso } from "../db.js";
 import { logger } from "../../log.js";
-import type { RuntimeAgent, RuntimeInstance, ManagedRunState } from "@conflux/shared";
+import type { RuntimeAgent, RuntimeInstance, ManagedRunState, SessionRuntime } from "@conflux/shared";
 import { heartbeat, registerSession, mergeSessionMeta } from "../sessions.js";
 import { getMessage } from "../messages.js";
 import { maybePushReply } from "../mail-push.js";
@@ -203,13 +203,14 @@ export class ManagedExecutor {
       throw Object.assign(new Error("preset is not in managed execution mode"), { statusCode: 400 });
     }
     const instance = opts.instance ?? createRuntimeInstance(this.db, agent);
-    const launch = this.opts.resolveLaunch
-      ? this.opts.resolveLaunch(agent)
-      : this.opts.adapter.defaultLaunch(this.db, agent);
     const { router, handlers } = this.makeRouter();
 
+    let launch: ReturnType<RuntimeAdapter["defaultLaunch"]>;
     let proc: AppServerProcess;
     try {
+      launch = this.opts.resolveLaunch
+        ? this.opts.resolveLaunch(agent)
+        : this.opts.adapter.defaultLaunch(this.db, agent);
       proc = spawnAppServer({
         executable: launch.executable,
         args: launch.args,
@@ -250,7 +251,7 @@ export class ManagedExecutor {
         name: `${agent.name} (managed)`,
         description: `Conflux 受管 ${this.opts.adapter.label} 执行端实例 ${instanceId}`,
         project_dir: agent.workdir,
-        runtime: this.opts.adapter.runtime,
+        runtime: this.opts.adapter.runtime as SessionRuntime,
         identity_source: "internal",
         metadata: {
           agent_id: agent.id,
@@ -264,9 +265,6 @@ export class ManagedExecutor {
         threadId,
         ownerToken,
       });
-      router.live = live;
-      this.instances.set(instanceId, live);
-      this.children.set(instanceId, { exited: proc.exited });
       // The instance row carries the binding surface the control APIs read
       // (session identity for liveness; the pid for diagnostics). Process
       // identity verification is intrinsic here — this process spawned the
@@ -276,6 +274,9 @@ export class ManagedExecutor {
           `UPDATE runtime_instances SET state = 'running', session_id = ?, runtime_pid = ?, updated_at = ? WHERE id = ?`,
         )
         .run(sessionId, proc.child.pid ?? null, nowIso(), instanceId);
+      router.live = live;
+      this.instances.set(instanceId, live);
+      this.children.set(instanceId, { exited: proc.exited });
       // Child death outside shutdown: expire this generation's approvals,
       // mark the in-flight run unknown, and end the instance row.
       void live.proc.exited.then(() => {
@@ -284,25 +285,12 @@ export class ManagedExecutor {
       logger.info({ instanceId, threadId }, "managed instance running");
       return { instance, threadId };
     } catch (err) {
+      this.instances.delete(instanceId);
+      this.children.delete(instanceId);
       proc.kill();
       failRuntimeInstance(this.db, instanceId);
       throw err;
     }
-  }
-
-  /** Is this session the live executor of a managed instance? */
-  isManagedSession(sessionId: string): boolean {
-    return this.bindingForSession(sessionId) !== null;
-  }
-
-  /** Resolve the live instance bound to a managed session, if any. */
-  bindingForSession(sessionId: string): { instanceId: string; threadId: string } | null {
-    for (const live of this.instances.values()) {
-      if (live.sessionId === sessionId) {
-        return { instanceId: live.instanceId, threadId: live.threadId };
-      }
-    }
-    return null;
   }
 
   /** Enqueue a task and (if idle) kick the scheduler. Database-first. */
@@ -382,32 +370,64 @@ export class ManagedExecutor {
       );
     }
     this.instances.delete(instanceId);
-    if (live.activeTurn) {
-      markRunUnknown(this.db, live.activeTurn.runId, "instance stopped mid-turn");
-      expirePendingApprovals(this.db, [live.activeTurn.runId]);
-      live.activeTurn = null;
+    const inFlightRunId = live.activeTurn?.runId ?? live.submittingRunId;
+    if (inFlightRunId !== null) {
+      markRunUnknown(this.db, inFlightRunId, "instance stopped mid-turn");
+      expirePendingApprovals(this.db, [inFlightRunId]);
     }
+    live.activeTurn = null;
+    live.submitting = false;
+    live.submittingRunId = null;
+    live.deferred = [];
+    live.liveApprovals.clear();
+    live.agentTexts = [];
+    this.db
+      .prepare(`UPDATE managed_codex_bindings SET active_turn_id = NULL, updated_at = ? WHERE instance_id = ?`)
+      .run(nowIso(), instanceId);
     live.proc.kill();
     await live.proc.exited;
-    this.db
-      .prepare(`UPDATE runtime_instances SET state = 'ended', ended_at = ?, updated_at = ? WHERE id = ?`)
-      .run(nowIso(), nowIso(), instanceId);
+    this.children.delete(instanceId);
+    this.subscribers.delete(instanceId);
+    if (this.db.open) {
+      this.db
+        .prepare(`UPDATE runtime_instances SET state = 'ended', ended_at = ?, updated_at = ? WHERE id = ?`)
+        .run(nowIso(), nowIso(), instanceId);
+    }
   }
 
   /** Stop everything this executor owns (server shutdown path). */
   async shutdown(): Promise<void> {
-    for (const live of [...this.instances.values()]) {
+    this.stopQueuePolling();
+    const active = [...this.instances.values()];
+    for (const live of active) {
       this.instances.delete(live.instanceId);
-      if (live.activeTurn) {
-        markRunUnknown(this.db, live.activeTurn.runId, "manager shutdown mid-turn");
-        expirePendingApprovals(this.db, [live.activeTurn.runId]);
-        live.activeTurn = null;
+      const inFlightRunId = live.activeTurn?.runId ?? live.submittingRunId;
+      if (inFlightRunId !== null && this.db.open) {
+        markRunUnknown(this.db, inFlightRunId, "manager shutdown mid-turn");
+        expirePendingApprovals(this.db, [inFlightRunId]);
+      }
+      live.activeTurn = null;
+      live.submitting = false;
+      live.submittingRunId = null;
+      live.deferred = [];
+      live.liveApprovals.clear();
+      live.agentTexts = [];
+      if (this.db.open) {
+        this.db
+          .prepare(`UPDATE managed_codex_bindings SET active_turn_id = NULL, updated_at = ? WHERE instance_id = ?`)
+          .run(nowIso(), live.instanceId);
       }
       live.proc.kill();
-      await live.proc.exited;
-      this.db
-        .prepare(`UPDATE runtime_instances SET state = 'ended', ended_at = ?, updated_at = ? WHERE id = ?`)
-        .run(nowIso(), nowIso(), live.instanceId);
+    }
+    await Promise.all(active.map((live) => live.proc.exited));
+    for (const live of active) {
+      this.children.delete(live.instanceId);
+      this.subscribers.delete(live.instanceId);
+      if (this.db.open) {
+        this.db
+          .prepare(`UPDATE runtime_instances SET state = 'ended', ended_at = ?, updated_at = ? WHERE id = ?`)
+          .run(nowIso(), nowIso(), live.instanceId);
+      }
     }
   }
 
@@ -472,12 +492,16 @@ export class ManagedExecutor {
     const probe = opts.inspect ?? inspectRuntimeProcess;
     const knownChild = this.children.get(instanceId);
     if (knownChild) {
+      let timer: NodeJS.Timeout | undefined;
       const confirmed = await Promise.race([
         knownChild.exited.then(() => true as const),
-        new Promise<false>((resolve) =>
-          setTimeout(() => resolve(false), confirmExitBudgetMs).unref?.(),
-        ),
-      ]);
+        new Promise<false>((resolve) => {
+          timer = setTimeout(() => resolve(false), confirmExitBudgetMs);
+          timer.unref?.();
+        }),
+      ]).finally(() => {
+        if (timer) clearTimeout(timer);
+      });
       if (!confirmed) {
         if (!oldRow.runtime_pid) throw cannotVerify();
         const inspected = probe(oldRow.runtime_pid);
@@ -502,18 +526,24 @@ export class ManagedExecutor {
     }
 
     const instance = createRuntimeInstance(this.db, agent, instanceId);
-    const launch = this.opts.resolveLaunch
-      ? this.opts.resolveLaunch(agent)
-      : this.opts.adapter.defaultLaunch(this.db, agent);
     const { router, handlers } = this.makeRouter();
-    const proc = spawnAppServer({
-      executable: launch.executable,
-      args: launch.args,
-      cwd: launch.cwd,
-      env: launch.env,
-      handlers,
-      rpcOptions: this.opts.rpcOptions ?? { requestTimeoutMs: 30_000 },
-    });
+    let proc: AppServerProcess;
+    try {
+      const launch = this.opts.resolveLaunch
+        ? this.opts.resolveLaunch(agent)
+        : this.opts.adapter.defaultLaunch(this.db, agent);
+      proc = spawnAppServer({
+        executable: launch.executable,
+        args: launch.args,
+        cwd: launch.cwd,
+        env: launch.env,
+        handlers,
+        rpcOptions: this.opts.rpcOptions ?? { requestTimeoutMs: 30_000 },
+      });
+    } catch (err) {
+      failRuntimeInstance(this.db, instance.id);
+      throw err;
+    }
 
     const newInstanceId = instance.id;
     const ownerToken = randomUUID();
@@ -566,7 +596,7 @@ export class ManagedExecutor {
           heartbeat(this.db, sessionId);
           const oldRuns = this.db
             .prepare(
-              `SELECT id FROM managed_codex_runs WHERE instance_id = ? AND state IN ('submitting','running','waiting_approval')`,
+              `SELECT id FROM managed_codex_runs WHERE instance_id = ? AND state IN ('submitting','running','waiting_approval','unknown')`,
             )
             .all(newInstanceId) as { id: number }[];
           expirePendingApprovals(this.db, oldRuns.map((r) => r.id));
@@ -634,13 +664,6 @@ export class ManagedExecutor {
         }
       }
 
-      router.live = live;
-      this.instances.set(newInstanceId, live);
-      this.children.delete(instanceId);
-      this.children.set(newInstanceId, { exited: proc.exited });
-      void live.proc.exited.then(() => {
-        if (this.instances.get(newInstanceId) === live) this.handleInstanceDeath(live);
-      });
       this.db
         .prepare(
           `UPDATE runtime_instances SET state = 'running', session_id = ?, runtime_pid = ?, updated_at = ? WHERE id = ?`,
@@ -649,14 +672,23 @@ export class ManagedExecutor {
       this.db
         .prepare(`UPDATE runtime_instances SET state = 'ended', ended_at = ?, updated_at = ? WHERE id = ?`)
         .run(nowIso(), nowIso(), instanceId);
+      router.live = live;
+      this.instances.set(newInstanceId, live);
+      this.children.delete(instanceId);
+      this.children.set(newInstanceId, { exited: proc.exited });
+      void live.proc.exited.then(() => {
+        if (this.instances.get(newInstanceId) === live) this.handleInstanceDeath(live);
+      });
       logger.info({ from: instanceId, to: newInstanceId, threadId }, "managed instance resumed");
-      await this.pump(newInstanceId);
-      return { instance, threadId, reconciliation };
     } catch (err) {
+      this.instances.delete(newInstanceId);
+      this.children.delete(newInstanceId);
       proc.kill();
       failRuntimeInstance(this.db, newInstanceId);
       throw err;
     }
+    await this.pump(newInstanceId);
+    return { instance, threadId: live.threadId, reconciliation };
   }
 
   /**
@@ -716,6 +748,12 @@ export class ManagedExecutor {
         text: claimed.submit_text,
         clientMessageId: claimed.request_id ?? undefined,
       });
+      if (this.instances.get(instanceId) !== live || !this.db.open) {
+        live.submitting = false;
+        live.submittingRunId = null;
+        live.deferred = [];
+        return;
+      }
       const moved = updateManagedRun(
         this.db,
         claimed.id,
@@ -731,6 +769,11 @@ export class ManagedExecutor {
         live.deferred = [];
         return;
       }
+      this.db
+        .prepare(
+          `UPDATE managed_codex_bindings SET active_turn_id = ?, updated_at = ? WHERE instance_id = ?`,
+        )
+        .run(turnId, nowIso(), instanceId);
       live.activeTurn = { runId: claimed.id, turnId };
       logger.info({ instanceId, runId: claimed.id, turnId }, "managed turn started");
       // Frames that raced the response in the same stdout chunk are now
@@ -740,6 +783,7 @@ export class ManagedExecutor {
       live.submitting = false;
       live.submittingRunId = null;
       live.deferred = [];
+      if (!this.db.open) return;
       const message = err instanceof Error ? err.message : String(err);
       // A remote JSON-RPC error is a definitive answer (bad params, busy
       // thread): the turn did NOT start — fail the run and keep draining.
@@ -748,13 +792,15 @@ export class ManagedExecutor {
       // side, so replaying would double-execute. Those go unknown.
       const definitive = err instanceof RpcRemoteError;
       if (definitive) {
-        updateManagedRun(
-          this.db,
-          claimed.id,
-          live.ownerToken,
-          { state: "failed", errorCode: message.slice(0, 500) },
-          { fromStates: ["submitting", "running"] },
-        );
+        const errorCode = message.slice(0, 500);
+        finalizeRunAndReply(this.db, {
+          runId: claimed.id,
+          ownerToken: live.ownerToken,
+          patch: { state: "failed", errorCode },
+          fromStates: ["submitting", "running"],
+          replierSessionId: live.sessionId,
+          replyText: `[受管执行失败] ${errorCode}`,
+        });
       } else {
         markRunUnknown(this.db, claimed.id, `turn send unverifiable: ${message.slice(0, 400)}`);
       }
@@ -816,7 +862,11 @@ export class ManagedExecutor {
       activeTurnId: live.activeTurn?.turnId ?? null,
     });
     if (cls.kind === "refuse") {
-      this.opts.adapter.respond(live.proc.conn, id, { error: cls.reason });
+      if (live.proc.conn.respondError) {
+        live.proc.conn.respondError(id, -32601, cls.reason);
+      } else {
+        this.opts.adapter.respond(live.proc.conn, id, { error: cls.reason });
+      }
       return;
     }
     const active = live.activeTurn!;
@@ -838,7 +888,7 @@ export class ManagedExecutor {
       instanceId: live.instanceId,
       runId: active.runId,
       type: "approval",
-      payload: { phase: "requested", approvalId: row.id, kind: cls.approvalKind, ...JSON.parse(row.payload) },
+      payload: { ...cls.sanitized, phase: "requested", approvalId: row.id, kind: cls.approvalKind },
     });
     logger.info(
       { instanceId: live.instanceId, runId: active.runId, approvalId: row.id, kind: cls.approvalKind },
@@ -880,13 +930,18 @@ export class ManagedExecutor {
     const row = outcome.row;
     live.liveApprovals.delete(approvalId);
     this.opts.adapter.respond(live.proc.conn, originalId, { decision });
-    updateManagedRun(
-      this.db,
-      row.run_id,
-      live.ownerToken,
-      { state: "running" },
-      { fromStates: ["waiting_approval"] },
+    const stillWaiting = listPendingApprovals(this.db, [row.run_id]).some((r) =>
+      live.liveApprovals.has(r.id),
     );
+    if (!stillWaiting) {
+      updateManagedRun(
+        this.db,
+        row.run_id,
+        live.ownerToken,
+        { state: "running" },
+        { fromStates: ["waiting_approval"] },
+      );
+    }
     this.recordEvent({
       instanceId,
       runId: row.run_id,
@@ -975,38 +1030,55 @@ export class ManagedExecutor {
   private handleInstanceDeath(live: LiveInstance): void {
     // Death callbacks can outlive the database (tests, server teardown) —
     // reconciling into a closed handle would just crash the process.
+    this.instances.delete(live.instanceId);
     if (!this.db.open) {
-      this.instances.delete(live.instanceId);
+      this.children.delete(live.instanceId);
+      this.subscribers.delete(live.instanceId);
       return;
     }
-    this.instances.delete(live.instanceId);
-    const runIds = live.activeTurn ? [live.activeTurn.runId] : [];
-    if (live.activeTurn) markRunUnknown(this.db, live.activeTurn.runId, "app-server exited mid-turn");
+    const inFlightRunId = live.activeTurn?.runId ?? live.submittingRunId;
+    const runIds = inFlightRunId !== null ? [inFlightRunId] : [];
+    if (inFlightRunId !== null) markRunUnknown(this.db, inFlightRunId, "app-server exited mid-turn");
     expirePendingApprovals(this.db, runIds);
+    live.activeTurn = null;
+    live.submitting = false;
+    live.submittingRunId = null;
+    live.deferred = [];
+    live.liveApprovals.clear();
+    live.agentTexts = [];
+    this.db
+      .prepare(`UPDATE managed_codex_bindings SET active_turn_id = NULL, updated_at = ? WHERE instance_id = ?`)
+      .run(nowIso(), live.instanceId);
     this.recordEvent({
       instanceId: live.instanceId,
-      runId: live.activeTurn?.runId ?? null,
+      runId: inFlightRunId,
       type: "status",
       payload: { phase: "instance_died" },
     });
     this.db
       .prepare(`UPDATE runtime_instances SET state = 'ended', ended_at = ?, updated_at = ? WHERE id = ?`)
       .run(nowIso(), nowIso(), live.instanceId);
+    this.children.delete(live.instanceId);
+    this.subscribers.delete(live.instanceId);
     logger.warn({ instanceId: live.instanceId }, "managed instance died");
   }
 
   private handleNotification(live: LiveInstance, method: string, params: unknown): void {
     const normalized = this.opts.adapter.normalizeNotification(method, params);
     if (!normalized) return;
-    const turnId = normalized.turnId ?? live.activeTurn?.turnId ?? null;
+    const matchesActive =
+      live.activeTurn !== null &&
+      (normalized.turnId === null || normalized.turnId === live.activeTurn.turnId);
+    const turnId = normalized.turnId ?? (matchesActive ? live.activeTurn!.turnId : null);
     this.recordEvent({
       instanceId: live.instanceId,
-      runId: live.activeTurn?.runId ?? null,
+      runId: matchesActive ? live.activeTurn!.runId : null,
       type: normalized.type,
       payload: { ...normalized.payload, ...(turnId ? { turnId } : {}) },
     });
-    // Track completed agent texts for the final merge.
-    if (normalized.agentText !== null) live.agentTexts.push(normalized.agentText);
+    // Track completed agent texts for the active turn only so late frames
+    // from an interrupted/previous turn never corrupt the next reply.
+    if (normalized.agentText !== null && matchesActive) live.agentTexts.push(normalized.agentText);
     if (normalized.turnCompleted) {
       this.finalizeTurn(live, normalized.turnCompleted);
     }
@@ -1063,11 +1135,21 @@ export class ManagedExecutor {
     }
     if (!moved) {
       logger.warn({ runId: active.runId, state }, "managed terminal transition refused");
+      live.activeTurn = null;
+      live.liveApprovals.clear();
+      live.agentTexts = [];
+      void this.pump(live.instanceId).catch(() => {});
       return;
     }
+    expirePendingApprovals(this.db, [active.runId]);
+    this.db
+      .prepare(`UPDATE managed_codex_bindings SET active_turn_id = NULL, updated_at = ? WHERE instance_id = ?`)
+      .run(nowIso(), live.instanceId);
     const message = getMessage(this.db, moved.message_id);
     if (message) maybePushReply(this.db, message.from_session);
     live.activeTurn = null;
+    live.liveApprovals.clear();
+    live.agentTexts = [];
     // Drain the queue for the next task.
     void this.pump(live.instanceId).catch(() => {});
   }

@@ -94,9 +94,13 @@ export function buildCli(_argv?: string | readonly string[]): Command {
     .action(async function (this: Command) {
       const { startHttpServer } = await import("../http/server.js");
       const o = this.optsWithGlobals();
+      const port = Number(o.port);
+      if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+        throw new Error(`invalid --port: ${o.port}`);
+      }
       await startHttpServer({
         host: o.host,
-        port: Number(o.port),
+        port,
         scope: normaliseScope(o.scope),
         overrideDataDir: o.dataDir,
       });
@@ -444,7 +448,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
     .option("--tags <tags>", "comma-separated tags")
     .action(async function (this: Command) {
       const o = this.optsWithGlobals();
-      const id = Number(o.id);
+      const id = parsePositiveIntId(o.id, "context id");
       const tags = parseTags(o.tags);
       const patch: { title?: string; content?: string; tags?: string[] } = {};
       if (o.title !== undefined) patch.title = o.title;
@@ -477,7 +481,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
     .requiredOption("--id <id>")
     .action(async function (this: Command) {
       const o = this.optsWithGlobals();
-      const id = Number(o.id);
+      const id = parsePositiveIntId(o.id, "context id");
       const res = await runOp(
         program,
         () => withDb(openDbFrom(o), (db) => {
@@ -581,7 +585,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
     .requiredOption("--id <id>")
     .action(async function (this: Command) {
       const o = this.optsWithGlobals();
-      const id = Number(o.id);
+      const id = parsePositiveIntId(o.id, "agent id");
       const res = await runOp(
         program,
         () => withDb(openDbFrom(o), (db) => {
@@ -688,7 +692,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
     .argument("<id>")
     .action(async function (this: Command, rawId: string) {
       const o = this.optsWithGlobals();
-      const id = Number(rawId);
+      const id = parsePositiveIntId(rawId, "message id");
       const result = await runOp(
         program,
         async () =>
@@ -812,7 +816,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
     .argument("<reply>")
     .action(async function (this: Command, reply: string) {
       const o = this.optsWithGlobals();
-      const id = Number(o.id);
+      const id = parsePositiveIntId(o.id, "message id");
       const res = await runOp(
         program,
         () => withDb(openDbFrom(o), async (db) => {
@@ -1003,7 +1007,7 @@ export function buildCli(_argv?: string | readonly string[]): Command {
 
       // Backfill sessions that were already running before hooks existed —
       // they never saw SessionStart and would otherwise surface as stale or
-      // not at all (issue #75). Best-effort: install must not fail here.
+      // not at all. Best-effort: install must not fail here.
       try {
         const report = await withDb(openDbFrom(this.optsWithGlobals()), (db) => runBackfill(db));
         if (report.registered.length > 0 || report.refreshed > 0) {
@@ -1202,12 +1206,22 @@ function openDbFrom(o: CliOpts): DB {
 /**
  * Run a one-shot read/write against a fresh connection and always close it.
  * A leaked better-sqlite3 handle keeps data.db locked on Windows long
- * after the command's work is done (issue #83).
+ * after the command's work is done.
  */
-function withDb<T>(db: DB, fn: (db: DB) => T | Promise<T>): T | Promise<T> {
+function withDb<T>(db: DB, fn: (db: DB) => T | Promise<T>): Promise<T> {
   return Promise.resolve(undefined)
     .then(() => fn(db))
-    .finally(() => { stopWalCheckpoint(db); if (db.open) db.close(); }) as T | Promise<T>;
+    .finally(() => {
+      stopWalCheckpoint(db);
+      if (db.open) db.close();
+    });
+}
+
+function parsePositiveIntId(raw: string, label = "id"): number {
+  if (!/^[1-9][0-9]*$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
+    throw new Error(`${label} must be a positive integer`);
+  }
+  return Number(raw);
 }
 
 /**

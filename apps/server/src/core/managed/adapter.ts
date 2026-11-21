@@ -12,6 +12,7 @@ import type { RuntimeAgent } from "@conflux/shared";
 export interface AdapterConnection {
   request(method: string, params?: unknown): Promise<unknown>;
   respond(id: number | string, result: unknown): void;
+  respondError?(id: number | string, code: number, message: string, data?: unknown): void;
 }
 
 /** Launch description for the runtime's app-server-shaped child. */

@@ -50,9 +50,7 @@ const quotaBlocked = (...texts) => texts.some((t) => typeof t === "string" && QU
 async function waitFor(fn, what, ms = 300000, every = 1000) {
   const start = Date.now();
   for (;;) {
-    const v = await fn().catch((e) => {
-      throw e;
-    });
+    const v = await fn();
     if (v) return v;
     if (Date.now() - start > ms) throw new Error(`timeout waiting for ${what}`);
     await sleep(every);
@@ -87,6 +85,7 @@ const stop = async () => {
   server.kill();
   await sleep(800);
   if (server.exitCode === null) server.kill("SIGKILL");
+  serverLog.end();
   writeFileSync(join(runDir, "report.json"), JSON.stringify(report, null, 2));
   console.log("report + logs ->", runDir);
 };

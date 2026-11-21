@@ -85,7 +85,7 @@ test("seen cards preserve read status and never offer retry", () => {
     }),
   );
   assert.equal(view.queryByRole("button", { name: "重试唤醒" }), null);
-  assert.match(view.container.textContent ?? "", /seen/);
+  assert.match(view.container.textContent ?? "", /已查看/);
   assert.doesNotMatch(view.container.textContent ?? "", /未送达/);
 });
 
