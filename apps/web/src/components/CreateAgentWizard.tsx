@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bot,
   Terminal,
@@ -11,6 +11,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useCreateAgent, useCreateRuntimeAgent, useRuntimes, useSessions } from "../hooks";
+import { api } from "../api";
 import { ClaudeIcon, OpenAIIcon } from "./brand-icons";
 import type { ComponentType } from "react";
 
@@ -68,13 +69,13 @@ export function CreateAgentWizard({ open, onClose, initialKind, onCreated }: Cre
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="创建智能体"
+        aria-label="创建助手"
         className="bg-surface border border-line rounded-2xl shadow-overlay w-full max-w-lg max-h-[88vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-line sticky top-0 bg-surface rounded-t-2xl">
           <h3 className="text-sm font-semibold text-ink">
-            {kind === null ? "创建智能体" : kind === "agent" ? "新建模型智能体" : "新建 CLI 运行时"}
+            {kind === null ? "创建助手" : kind === "agent" ? "新建模型助手" : "新建编码助手"}
           </h3>
           <button onClick={onClose} className="text-ink-faint hover:text-ink" title="关闭">
             <X size={15} />
@@ -85,7 +86,7 @@ export function CreateAgentWizard({ open, onClose, initialKind, onCreated }: Cre
           <TypeChooser onPick={setKind} />
         ) : kind === "agent" ? (
           <>
-            <StepBack onBack={() => setKind(null)} label="模型智能体" />
+            <StepBack onBack={() => setKind(null)} label="模型助手" />
             <AgentCreateForm
               onClose={onClose}
               onCreated={(id) => onCreated?.({ kind: "model", id })}
@@ -93,7 +94,7 @@ export function CreateAgentWizard({ open, onClose, initialKind, onCreated }: Cre
           </>
         ) : (
           <>
-            <StepBack onBack={() => setKind(null)} label="CLI 运行时" />
+            <StepBack onBack={() => setKind(null)} label="编码助手" />
             <RuntimeCreateForm
               onClose={onClose}
               onCreated={(id) => onCreated?.({ kind: "coding", id })}
@@ -129,7 +130,7 @@ function TypeChooser({ onPick }: { onPick: (k: "agent" | "runtime") => void }) {
           <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center flex-shrink-0">
             <Bot size={15} className="text-white" />
           </div>
-          <span className="text-sm font-semibold text-ink">模型智能体</span>
+          <span className="text-sm font-semibold text-ink">模型助手</span>
         </div>
         <p className="text-xs text-ink-muted mt-2 leading-5">
           在应用里直接对话的 API 人格：给它系统提示词和模型，适合问答、总结类任务。
@@ -145,7 +146,7 @@ function TypeChooser({ onPick }: { onPick: (k: "agent" | "runtime") => void }) {
           <div className="w-8 h-8 rounded-lg bg-orange-600 flex items-center justify-center flex-shrink-0">
             <Terminal size={15} className="text-white" />
           </div>
-          <span className="text-sm font-semibold text-ink">CLI 运行时</span>
+          <span className="text-sm font-semibold text-ink">编码助手</span>
         </div>
         <p className="text-xs text-ink-muted mt-2 leading-5">
           真正的 Claude Code / Codex：选一个项目工作目录，在终端窗口启动，
@@ -158,7 +159,7 @@ function TypeChooser({ onPick }: { onPick: (k: "agent" | "runtime") => void }) {
 
 // ---- 模型智能体表单（原 Agents 页内联表单） --------------------------------
 
-const PROVIDERS = ["anthropic", "openai", "google", "mistral", "local"];
+const PROVIDERS = ["anthropic", "openai"];
 
 function AgentCreateForm({
   onClose,
@@ -177,16 +178,20 @@ function AgentCreateForm({
   });
 
   const handleCreate = () => {
-    if (!form.name || !form.model || !form.system_prompt) return;
+    const name = form.name.trim();
+    const model = form.model.trim();
+    const systemPrompt = form.system_prompt.trim();
+    const description = form.description.trim();
+    if (!name || !model || !systemPrompt) return;
     createMut.mutate(
       {
-        name: form.name,
-        system_prompt: form.system_prompt,
+        name,
+        system_prompt: systemPrompt,
         model_config: {
           provider: form.provider,
-          model: form.model,
+          model,
         },
-        description: form.description || undefined,
+        description: description || undefined,
       },
       {
         onSuccess: (data) => {
@@ -248,14 +253,14 @@ function AgentCreateForm({
         </button>
         <button
           onClick={handleCreate}
-          disabled={!form.name || !form.model || !form.system_prompt || createMut.isPending}
+          disabled={!form.name.trim() || !form.model.trim() || !form.system_prompt.trim() || createMut.isPending}
           className="px-3 py-1.5 rounded-lg text-xs font-medium bg-accent hover:bg-accent-deep disabled:bg-paper disabled:text-ink-faint text-on-accent transition-colors"
         >
           {createMut.isPending ? "创建中..." : "创建"}
         </button>
       </div>
       {createMut.isError && (
-        <div className="text-xs text-red-500">{(createMut.error as Error).message}</div>
+        <div className="text-xs text-danger">{(createMut.error as Error).message}</div>
       )}
     </div>
   );
@@ -347,6 +352,8 @@ function RuntimeCreateForm({
   const [advanced, setAdvanced] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; error?: string; model?: string; response?: string } | null>(null);
+  const testAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => { testAbortRef.current?.abort(); }, []);
   const knownDirs = useKnownProjectDirs();
   const canBrowse = typeof window.confluxDesktop?.pickDirectory === "function";
 
@@ -368,10 +375,16 @@ function RuntimeCreateForm({
     setForm((f) => ({ ...f, [k]: v }));
 
   const submit = () => {
-    if (!form.name.trim() || create.isPending) return;
+    const name = form.name.trim();
+    if (!name || create.isPending) return;
+    const rawInterval = form.interval_min.trim() ? Number(form.interval_min) : undefined;
+    const intervalMin =
+      rawInterval !== undefined && Number.isFinite(rawInterval) && rawInterval > 0
+        ? rawInterval
+        : undefined;
     create.mutate(
       {
-        name: form.name,
+        name,
         runtime: form.runtime,
         workdir: form.workdir || undefined,
         model: form.model || undefined,
@@ -379,7 +392,7 @@ function RuntimeCreateForm({
         api_key: form.api_key || undefined,
         extra_env: form.extra_env || undefined,
         instructions: form.instructions || undefined,
-        interval_min: form.interval_min.trim() ? Number(form.interval_min) : undefined,
+        interval_min: intervalMin,
         ...(form.execution_mode === "managed" ? { execution_mode: "managed" as const } : {}),
       },
       {
@@ -437,7 +450,7 @@ function RuntimeCreateForm({
               type="checkbox"
               checked={form.execution_mode === "managed"}
               onChange={(e) => set("execution_mode", e.target.checked ? "managed" : "")}
-              className="mt-0.5 accent-[var(--color-accent)]"
+              className="mt-0.5 accent-accent"
             />
             <label htmlFor="wizard-managed-mode" className="text-2xs text-ink-muted leading-relaxed">
               <span className="text-ink font-medium">Conflux 受管执行</span>
@@ -452,7 +465,7 @@ function RuntimeCreateForm({
             <input
               value={form.workdir}
               onChange={(e) => set("workdir", e.target.value)}
-              placeholder="C:\Project folder\项目\xxx"
+              placeholder="/path/to/project"
               className={`${inputCls} flex-1 min-w-0`}
             />
             {canBrowse && (
@@ -558,28 +571,37 @@ function RuntimeCreateForm({
             <div className="text-2xs text-ink-faint px-1">
               定时到点后 headless 唤醒(无窗口):查收件箱、处理待办、简报后退出。
             </div>
-            {/* connectivity test (#agent-improve): verify provider chain before save */}
+            {/* connectivity test: verify provider chain before save */}
             <div className="pt-1">
               <button
+                type="button"
                 onClick={async () => {
+                  testAbortRef.current?.abort();
+                  const controller = new AbortController();
+                  testAbortRef.current = controller;
                   setTestResult(null);
                   setTesting(true);
                   try {
-                    const r = await fetch("/agents/test-provider", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
+                    const result = await api.testProvider(
+                      {
                         provider: form.runtime === "codex" ? "openai" : "anthropic",
                         base_url: form.base_url || undefined,
                         api_key: form.api_key || undefined,
                         model: form.model || undefined,
-                      }),
-                    });
-                    setTestResult(await r.json());
+                      },
+                      controller.signal,
+                    );
+                    if (!controller.signal.aborted) setTestResult(result);
                   } catch (e) {
-                    setTestResult({ ok: false, error: e instanceof Error ? e.message : "network error" });
+                    if (!controller.signal.aborted) {
+                      setTestResult({
+                        ok: false,
+                        error: e instanceof Error ? e.message : "network error",
+                      });
+                    }
                   } finally {
-                    setTesting(false);
+                    if (testAbortRef.current === controller) testAbortRef.current = null;
+                    if (!controller.signal.aborted) setTesting(false);
                   }
                 }}
                 disabled={testing || !form.api_key}
@@ -589,7 +611,7 @@ function RuntimeCreateForm({
                 测试连通性
               </button>
               {testResult && (
-                <div className={`mt-1.5 text-2xs ${testResult.ok ? "text-emerald-600" : "text-red-600"}`}>
+                <div className={`mt-1.5 text-2xs ${testResult.ok ? "text-success" : "text-danger"}`}>
                   {testResult.ok
                     ? `✓ 连通 · ${testResult.model} · "${testResult.response}"`
                     : `✗ ${testResult.error}`}
@@ -617,15 +639,15 @@ function RuntimeCreateForm({
         </button>
       </div>
       {create.isError && (
-        <div className="text-xs text-red-600 px-5 pb-3">{(create.error as Error)?.message}</div>
+        <div className="text-xs text-danger px-5 pb-3">{(create.error as Error)?.message}</div>
       )}
     </>
   );
 }
 
-// ---- Live env preview (#agent-improve): auto-derives env vars from the
-// individual fields above, shows them in cc-switch format, and lets the
-// user add custom vars that get merged on top. -------------------------------
+// ---- Live env preview: auto-derives env vars from the individual fields
+// above, shows them in cc-switch format, and lets the user add custom vars
+// that get merged on top. ---------------------------------------------------
 
 function buildEnvBlock(
   runtime: string,

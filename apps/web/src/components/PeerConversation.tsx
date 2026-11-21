@@ -82,18 +82,18 @@ export function PeerConversation({
               <button
                 type="button"
                 onClick={() => thread.refetch()}
-                className="px-3 py-1.5 rounded-lg bg-accent-soft text-accent text-xs font-medium hover:bg-accent-soft"
+                className="px-3 py-1.5 rounded-lg bg-accent-soft text-accent text-xs font-medium hover:opacity-90"
               >
                 重试
               </button>
             </div>
           )}
           {thread.isError && messages.length > 0 && (
-            <div className="text-2xs text-amber-700 text-center">
+            <div className="text-2xs text-warning text-center">
               连接中断，显示上次获取的内容
             </div>
           )}
-          {!thread.isLoading && messages.length === 0 && (
+          {!thread.isLoading && !thread.isError && messages.length === 0 && (
             <div className="text-xs text-ink-faint text-center py-6">暂无往来消息</div>
           )}
           {messages.map((m) => {
@@ -158,7 +158,7 @@ export function PeerConversation({
           </button>
         </div>
         {offline && (
-          <div className="max-w-3xl mx-auto mt-1 text-2xs text-amber-700">
+          <div className="max-w-3xl mx-auto mt-1 text-2xs text-warning">
             {peerName} 当前{peerNode?.status === "ended" ? "已结束" : "离线"}，发送后将按现有规则尝试唤醒
           </div>
         )}

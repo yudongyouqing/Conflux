@@ -4,7 +4,6 @@ import { MentionComposer } from "./MentionComposer";
 import {
   PLACEHOLDER_DESCRIPTIONS,
   WEB_CONSOLE_ID,
-  type Message,
   type GraphNode,
   type SessionStatus,
 } from "@conflux/shared";
@@ -13,7 +12,6 @@ import { useWakeStream } from "../use-wake-stream";
 import { MarkdownText } from "./MarkdownText";
 import {
   FileText,
-  Clock,
   ArrowRight,
   FolderOpen,
   Send,
@@ -25,7 +23,6 @@ import {
 
 interface DetailPanelProps {
   session: GraphNode | null;
-  message: Message | null;
   edge: { id: number; from: string; to: string } | null;
   sessionNameLookup: (id: string) => string | undefined;
   sessionStatusLookup: (id: string) => SessionStatus | undefined;
@@ -35,7 +32,6 @@ interface DetailPanelProps {
 
 export function DetailPanel({
   session,
-  message,
   edge,
   sessionNameLookup,
   sessionStatusLookup,
@@ -45,67 +41,23 @@ export function DetailPanel({
 
   if (session) {
     return (
-      <SessionDetail session={session} contextEntries={contextEntries} onOpenEdge={onOpenEdge} />
+      <SessionDetail
+        key={session.id}
+        session={session}
+        contextEntries={contextEntries}
+        onOpenEdge={onOpenEdge}
+      />
     );
   }
 
   if (edge) {
     return (
       <EdgeFlowView
+        key={edge.id}
         edge={edge}
         sessionNameLookup={sessionNameLookup}
         sessionStatusLookup={sessionStatusLookup}
       />
-    );
-  }
-
-  if (message) {
-    return (
-      <div className="p-5 space-y-4 overflow-y-auto h-full">
-        <div className="flex items-center gap-2 text-xs">
-          <span className="text-ink font-medium">
-            {sessionNameLookup(message.from_session) ?? message.from_session.slice(0, 8)}
-          </span>
-          <ArrowRight size={12} className="text-ink-faint" />
-          <span className="text-ink font-medium">
-            {sessionNameLookup(message.to_session) ?? message.to_session.slice(0, 8)}
-          </span>
-          <span
-            className={`ml-auto px-1.5 py-0.5 rounded-md text-2xs font-medium ${
-              message.status === "pending"
-                ? "bg-amber-50 text-amber-700 border border-amber-200"
-                : message.status === "seen"
-                  ? "bg-violet-50 text-violet-700 border border-violet-200"
-                  : message.status === "replied"
-                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                    : "bg-accent-soft text-accent-deep border border-accent/30"
-            }`}
-          >
-            {message.status}
-          </span>
-        </div>
-
-        <div>
-          <div className="text-2xs text-ink-faint mb-1.5 flex items-center gap-1">
-            <Clock size={10} /> {new Date(message.created_at).toLocaleString()}
-          </div>
-          <div className="bg-surface p-3 rounded-2xl border border-line shadow-sm">
-            {message.question}
-          </div>
-        </div>
-
-        {message.reply && (
-          <div>
-            <div className="text-2xs text-ink-faint mb-1.5">
-              回复
-              {message.replied_at && ` · ${new Date(message.replied_at).toLocaleString()}`}
-            </div>
-            <div className="bg-surface p-3 rounded-2xl border border-emerald-200 shadow-sm relative">
-              {message.reply}
-            </div>
-          </div>
-        )}
-      </div>
     );
   }
 
@@ -117,7 +69,7 @@ export function DetailPanel({
         </div>
         <div className="text-sm text-ink-muted font-medium">选择一个对象查看详情</div>
         <div className="text-xs text-ink-faint mt-1">
-          点击图节点、图谱连线或消息条目，详情会显示在这里
+          点击图节点或图谱连线，详情会显示在这里
         </div>
       </div>
     </div>
@@ -147,7 +99,7 @@ function EdgeFlowView({
   const nameOf = (id: string) => sessionNameLookup(id) ?? id.slice(0, 8);
   // every channel is speakable — the UI continues it on the initiator's behalf
   const targetOffline = sessionStatusLookup(to) && sessionStatusLookup(to) !== "active";
-  // #102 live: tail the target's wake log while the panel is open
+  // tail the target's wake log live while the panel is open
   const wake = useWakeStream(to);
 
   const send = () => {
@@ -183,7 +135,7 @@ function EdgeFlowView({
             <div className="flex items-center gap-1.5 text-2xs text-ink-muted mb-1">
               {wake.live ? (
                 <>
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
                   唤醒直播中 · {nameOf(to)} 的无头运行 stdout
                 </>
               ) : (
@@ -199,7 +151,7 @@ function EdgeFlowView({
 
       <div>
         {targetOffline && (
-          <div className="text-2xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mb-1.5">
+          <div className="text-2xs text-warning bg-warning-soft border border-warning/30 rounded-md px-2 py-1 mb-1.5">
             ⚠ {nameOf(to)} 当前离线。发送后将自动 headless 唤醒它回复(若可恢复)。
           </div>
         )}
@@ -223,7 +175,7 @@ function EdgeFlowView({
           </button>
         </div>
         {ask.isError && (
-          <p className="text-2xs text-red-500 mt-1">{(ask.error as Error).message}</p>
+          <p className="text-2xs text-danger mt-1">{(ask.error as Error).message}</p>
         )}
       </div>
 
@@ -240,7 +192,7 @@ function EdgeFlowView({
                   {new Date(m.created_at).toLocaleString()}
                 </div>
                 <div
-                  className={`p-3 rounded-2xl border max-w-[95%] shadow-sm ${
+                  className={`p-3 rounded-2xl border max-w-[95%] shadow-card ${
                     outgoing
                       ? "bg-accent border-accent text-on-accent"
                       : "bg-surface border-line text-ink"
@@ -249,10 +201,10 @@ function EdgeFlowView({
                   <MarkdownText tone={outgoing ? "blue" : "light"}>{m.question}</MarkdownText>
                 </div>
                 {m.status === "pending" ? (
-                  <div className="text-2xs text-amber-600 mt-0.5">等待回复…</div>
+                  <div className="text-2xs text-warning mt-0.5">等待回复…</div>
                 ) : m.reply ? (
-                  <div className="p-3 rounded-2xl border bg-surface border-emerald-200 text-ink max-w-[95%] mt-1 shadow-sm relative">
-                    <div className="absolute -top-2 left-3 text-2xs font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-full px-1.5">
+                  <div className="p-3 rounded-2xl border bg-surface border-success/30 text-ink max-w-[95%] mt-1 shadow-card relative">
+                    <div className="absolute -top-2 left-3 text-2xs font-semibold text-success bg-success-soft border border-success/30 rounded-full px-1.5">
                       回复
                     </div>
                     <MarkdownText>{m.reply}</MarkdownText>
@@ -341,7 +293,7 @@ function SessionDetail({
         </div>
         <div>
           <span className="text-ink-faint">待处理</span>
-          <div className="text-amber-600 font-medium mt-0.5">{session.pending_inbox}</div>
+          <div className="text-warning font-medium mt-0.5">{session.pending_inbox}</div>
         </div>
         <div>
           <span className="text-ink-faint">类型</span>
@@ -356,7 +308,7 @@ function SessionDetail({
           <button
             onClick={handleOpenTerminal}
             disabled={openTerminal.isPending}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 text-white text-xs hover:bg-gray-700 disabled:opacity-50"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-ink text-surface text-xs hover:opacity-90 disabled:opacity-50"
             title="在新终端窗口 resume 这个对话"
           >
             {openTerminal.isPending ? (
@@ -419,7 +371,7 @@ function InitiateConversation({
         <ArrowRight size={12} /> 发起对话通道
       </h3>
       {session.status !== "active" && (
-        <div className="text-2xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mb-2">
+        <div className="text-2xs text-warning bg-warning-soft border border-warning/30 rounded-md px-2 py-1 mb-2">
           ⚠ 对方当前{session.status === "ended" ? "已结束" : "离线"}。发送后将尝试自动唤醒它回复。
         </div>
       )}

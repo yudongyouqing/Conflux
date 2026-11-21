@@ -1,8 +1,8 @@
-import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
+import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { FileText, Inbox, Bot, MessageSquare, Globe, Terminal } from "lucide-react";
 import type { ElementType } from "react";
 import { ClaudeIcon, OpenAIIcon } from "./brand-icons";
-import { PLACEHOLDER_DESCRIPTIONS, WEB_CONSOLE_ID } from "@conflux/shared";
+import { PLACEHOLDER_DESCRIPTIONS, WEB_CONSOLE_ID, type SessionPriority } from "@conflux/shared";
 import { sessionStatusAppearance } from "./StatusDot";
 
 export interface SessionNodeData {
@@ -17,6 +17,7 @@ export interface SessionNodeData {
   description?: string | null;
   project_dir?: string | null;
   runtime?: string | null;
+  priority?: SessionPriority;
   /** Agent Card skills (capability self-description). */
   skills?: string[];
   /** Endpoint of the currently selected edge. */
@@ -47,15 +48,13 @@ const RUNTIME_SKIN: Record<string, NodeSkin> = {
 };
 const AGENT_SKIN: NodeSkin = { icon: Bot, block: "bg-indigo-600", accent: "bg-indigo-500" };
 const WEB_SKIN: NodeSkin = { icon: Globe, block: "bg-accent", accent: "bg-accent" };
-const DEFAULT_SKIN: NodeSkin = { icon: Terminal, block: "bg-gray-500", accent: "bg-gray-400" };
+const DEFAULT_SKIN: NodeSkin = { icon: Terminal, block: "bg-neutral", accent: "bg-neutral" };
 
 function skinFor(d: SessionNodeData, isAgent: boolean, isWeb: boolean): NodeSkin {
   if (isAgent) return AGENT_SKIN;
   if (isWeb) return WEB_SKIN;
   return (d.runtime && RUNTIME_SKIN[d.runtime]) || DEFAULT_SKIN;
 }
-
-export type SessionNodeType = Node<SessionNodeData>;
 
 export function SessionNode({ id, data, selected, dragging }: NodeProps) {
   const d = data as SessionNodeData;
@@ -80,13 +79,13 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
       className={`group relative w-[176px] rounded-xl bg-surface overflow-hidden transition-all duration-200 ease-out cursor-grab active:cursor-grabbing ${
         d.status !== "active" ? "saturate-50 border-0 shadow-none " : ""}${
         dragging
-          ? "shadow-[0_12px_28px_rgba(16,24,40,0.18)] scale-[1.02] ring-2 ring-accent/30 ring-2 ring-accent/20"
+          ? "shadow-[0_12px_28px_rgba(16,24,40,0.18)] scale-[1.02] ring-2 ring-accent/30"
           : selected
             ? "shadow-[0_4px_16px_rgba(37,99,235,0.16)] ring-2 ring-accent"
             : "shadow-[0_1px_2px_rgba(16,24,40,0.05),0_4px_12px_rgba(16,24,40,0.06)] hover:shadow-[0_8px_24px_rgba(16,24,40,0.12)] hover:-translate-y-0.5"
       } ${d.highlighted ? "ring-2 ring-info/80" : ""}`}
     >
-      {/* signature accent: left vertical strip (#node-ui) */}
+      {/* signature accent: left vertical strip */}
       <div className={`absolute left-0 top-0 bottom-0 w-[3px] ${skin.accent} rounded-l-xl`} />
 
       <Handle
@@ -99,7 +98,7 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
         {/* header: icon block + name + status */}
         <div className="flex items-center gap-2">
           <div
-            className={`w-6 h-6 rounded-[7px] ${skin.block} flex items-center justify-center flex-shrink-0 shadow-sm`}
+            className={`w-6 h-6 rounded-[7px] ${skin.block} flex items-center justify-center flex-shrink-0 shadow-card`}
           >
             <Icon size={12} className={isWeb && !isAgent ? "text-on-accent" : "text-white"} />
           </div>

@@ -118,6 +118,24 @@ test("buildDirsView: 6-card cap + hiddenCount, orphan archive frame", () => {
   assert.equal((archive!.data as { key: string }).key, ARCHIVE_KEY);
 });
 
+test("buildDirsView drops edges whose endpoints are hidden in collapsed or capped frames", () => {
+  const data = {
+    nodes: [
+      node({ id: "a1", project_dir: "C:\\projA", last_heartbeat_at: "2026-01-03" }),
+      node({ id: "a2", project_dir: "C:\\projA", last_heartbeat_at: "2026-01-02" }),
+      node({ id: "b1", project_dir: "C:\\projB", last_heartbeat_at: "2026-01-01" }),
+    ],
+    edges: [edge("a1", "a2"), edge("a1", "b1")],
+  };
+  const collapsed = buildDirsView({ data, onSelectEdge: noop, expandedKey: null });
+  assert.equal(collapsed.edges.length, 0, "no dangling edges when all frames are collapsed");
+
+  const openA = buildDirsView({ data, onSelectEdge: noop, expandedKey: "dir:C:\\projA" });
+  assert.equal(openA.edges.length, 1, "keeps edge between visible children, drops edge to collapsed frame");
+  assert.equal(openA.edges[0].source, "a1");
+  assert.equal(openA.edges[0].target, "a2");
+});
+
 test("applyEdgeOffsets: lens for reciprocal pairs, fan for parallel siblings", () => {
   const mk = (from: string, to: string): Edge =>
     ({ id: `${from}>${to}`, source: from, target: to, data: { from, to } }) as Edge;

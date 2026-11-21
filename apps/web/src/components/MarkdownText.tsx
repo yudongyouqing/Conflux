@@ -1,4 +1,4 @@
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { cloneElement, isValidElement, type ReactNode } from "react";
@@ -19,18 +19,26 @@ interface MarkdownTextProps {
   className?: string;
 }
 
-export function MarkdownText({ children, tone = "light", className }: MarkdownTextProps) {
-  const onBlue = tone === "blue";
-  // named so `pre` can cloneElement its fence child (an unlabeled fence has
-  // no language-/hljs marker for Code to detect block context on its own)
-  const Code = ({ className, children }: { className?: string; children?: ReactNode }) => {
+const REMARK_PLUGINS = [remarkGfm];
+const REHYPE_PLUGINS = [rehypeHighlight];
+
+function makeCodeComponent(onBlue: boolean) {
+  return function MarkdownCode({
+    className,
+    children,
+  }: {
+    className?: string;
+    children?: ReactNode;
+  }) {
     const isBlock = /language-|(^|\s)hljs(\s|$)/.test(className ?? "");
     if (isBlock) {
       // rehype-highlight decorates className with "language-x hljs" and wraps
       // the content in hljs token spans; keep those classes (token colors) but
       // let the surrounding pre own the background
       return (
-        <code className={`hljs bg-transparent font-mono text-xs block overflow-x-auto ${className ?? ""}`}>
+        <code
+          className={`hljs bg-transparent font-mono text-xs block overflow-x-auto ${className ?? ""}`}
+        >
           {children}
         </code>
       );
@@ -45,127 +53,138 @@ export function MarkdownText({ children, tone = "light", className }: MarkdownTe
       </code>
     );
   };
+}
+
+function buildComponents(onBlue: boolean): Components {
+  const Code = makeCodeComponent(onBlue);
+  return {
+    p: ({ children }) => <p className="my-1.5 first:mt-0 last:mb-0">{children}</p>,
+    strong: ({ children }) => (
+      <strong className={onBlue ? "text-on-accent font-semibold" : "text-ink font-semibold"}>
+        {children}
+      </strong>
+    ),
+    em: ({ children }) => (
+      <em className={onBlue ? "text-on-accent" : "text-ink-muted"}>{children}</em>
+    ),
+    ul: ({ children }) => (
+      <ul
+        className={`list-disc pl-5 my-1.5 space-y-0.5 ${onBlue ? "marker:text-on-accent" : "marker:text-ink-faint"}`}
+      >
+        {children}
+      </ul>
+    ),
+    ol: ({ children }) => (
+      <ol
+        className={`list-decimal pl-5 my-1.5 space-y-0.5 ${onBlue ? "marker:text-on-accent" : "marker:text-ink-faint"}`}
+      >
+        {children}
+      </ol>
+    ),
+    li: ({ children }) => <li className="leading-snug">{children}</li>,
+    a: ({ href, children }) => (
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        className={
+          onBlue
+            ? "text-on-accent underline underline-offset-2"
+            : "text-accent hover:underline underline-offset-2"
+        }
+      >
+        {children}
+      </a>
+    ),
+    blockquote: ({ children }) => (
+      <blockquote
+        className={`my-1.5 pl-3 border-l-2 italic ${onBlue ? "border-accent/60" : "border-line-strong text-ink-muted"}`}
+      >
+        {children}
+      </blockquote>
+    ),
+    hr: () => <hr className={`my-2 ${onBlue ? "border-accent/50" : "border-line"}`} />,
+    h1: ({ children }) => <h1 className="my-1.5 text-base font-bold">{children}</h1>,
+    h2: ({ children }) => <h2 className="my-1.5 text-sm font-bold">{children}</h2>,
+    h3: ({ children }) => <h3 className="my-1 text-sm font-semibold">{children}</h3>,
+    code: Code,
+    pre: ({ children, node }) => {
+      // fenced block language from the child <code>'s className
+      const child = node?.children?.[0];
+      const raw: unknown =
+        child && "properties" in child
+          ? (child.properties as { className?: unknown })?.className
+          : undefined;
+      const classes: unknown[] = Array.isArray(raw) ? raw : raw ? [raw] : [];
+      const langClass = classes.find(
+        (c) => typeof c === "string" && c.startsWith("language-"),
+      ) as string | undefined;
+      const lang = langClass ? langClass.slice("language-".length) : "code";
+      // the fence child is MarkdownCode, but an unlabeled fence has no
+      // language-/hljs marker for it to detect — force block styling here
+      const body =
+        isValidElement<{ className?: string }>(children) && children.type === Code
+          ? cloneElement(children, {
+              className: `hljs bg-transparent font-mono text-xs block overflow-x-auto ${
+                langClass ?? ""
+              }`,
+            })
+          : children;
+      return (
+        <div className="relative my-2">
+          <span
+            className={`absolute top-1.5 right-2 text-2xs font-mono select-none pointer-events-none ${
+              onBlue ? "text-on-accent/60" : "text-ink-muted"
+            }`}
+          >
+            {lang}
+          </span>
+          <pre
+            className={`p-2.5 rounded-lg overflow-x-auto text-xs leading-snug ${
+              onBlue ? "bg-black/20 border border-accent/30" : "bg-gray-900 text-gray-100"
+            }`}
+          >
+            {body}
+          </pre>
+        </div>
+      );
+    },
+    table: ({ children }) => (
+      <div className="my-2 overflow-x-auto">
+        <table className={`text-xs border-collapse ${onBlue ? "" : "text-ink"}`}>{children}</table>
+      </div>
+    ),
+    th: ({ children }) => (
+      <th
+        className={`border px-2 py-1 text-left font-semibold ${
+          onBlue ? "border-accent/50" : "border-line-strong bg-paper"
+        }`}
+      >
+        {children}
+      </th>
+    ),
+    td: ({ children }) => (
+      <td className={`border px-2 py-1 ${onBlue ? "border-accent/50" : "border-line"}`}>
+        {children}
+      </td>
+    ),
+  };
+}
+
+const COMPONENTS_BY_TONE: Record<"light" | "blue", Components> = {
+  light: buildComponents(false),
+  blue: buildComponents(true),
+};
+
+export function MarkdownText({ children, tone = "light", className }: MarkdownTextProps) {
   return (
     <div
       className={`text-sm leading-relaxed [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 ${className ?? ""}`}
     >
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeHighlight]}
-        components={{
-          p: ({ children }) => <p className="my-1.5 first:mt-0 last:mb-0">{children}</p>,
-          strong: ({ children }) => (
-            <strong className={onBlue ? "text-on-accent font-semibold" : "text-ink font-semibold"}>
-              {children}
-            </strong>
-          ),
-          em: ({ children }) => (
-            <em className={onBlue ? "text-on-accent" : "text-ink-muted"}>{children}</em>
-          ),
-          ul: ({ children }) => (
-            <ul
-              className={`list-disc pl-5 my-1.5 space-y-0.5 ${onBlue ? "marker:text-on-accent" : "marker:text-ink-faint"}`}
-            >
-              {children}
-            </ul>
-          ),
-          ol: ({ children }) => (
-            <ol
-              className={`list-decimal pl-5 my-1.5 space-y-0.5 ${onBlue ? "marker:text-on-accent" : "marker:text-ink-faint"}`}
-            >
-              {children}
-            </ol>
-          ),
-          li: ({ children }) => <li className="leading-snug">{children}</li>,
-          a: ({ href, children }) => (
-            <a
-              href={href}
-              target="_blank"
-              rel="noreferrer"
-              className={
-                onBlue
-                  ? "text-on-accent underline underline-offset-2"
-                  : "text-accent hover:underline underline-offset-2"
-              }
-            >
-              {children}
-            </a>
-          ),
-          blockquote: ({ children }) => (
-            <blockquote
-              className={`my-1.5 pl-3 border-l-2 italic ${onBlue ? "border-accent/60" : "border-gray-300 text-ink-muted"}`}
-            >
-              {children}
-            </blockquote>
-          ),
-          hr: () => <hr className={`my-2 ${onBlue ? "border-accent/50" : "border-line"}`} />,
-          h1: ({ children }) => <h1 className="my-1.5 text-base font-bold">{children}</h1>,
-          h2: ({ children }) => <h2 className="my-1.5 text-sm font-bold">{children}</h2>,
-          h3: ({ children }) => <h3 className="my-1 text-sm font-semibold">{children}</h3>,
-          code: Code,
-          pre: ({ children, node }) => {
-            // fenced block language from the child <code>'s className
-            const child = node?.children?.[0];
-            const raw: unknown =
-              child && "properties" in child
-                ? (child.properties as { className?: unknown })?.className
-                : undefined;
-            const classes: unknown[] = Array.isArray(raw) ? raw : raw ? [raw] : [];
-            const langClass = classes.find(
-              (c) => typeof c === "string" && c.startsWith("language-"),
-            ) as string | undefined;
-            const lang = langClass ? langClass.slice("language-".length) : "code";
-            // the fence child is MarkdownCode, but an unlabeled fence has no
-            // language-/hljs marker for it to detect — force block styling here
-            const body =
-              isValidElement(children) && children.type === Code
-                ? cloneElement(children, {
-                    className: `hljs bg-transparent font-mono text-xs block overflow-x-auto ${
-                      langClass ?? ""
-                    }`,
-                  })
-                : children;
-            return (
-              <div className="relative my-2">
-                <span
-                  className={`absolute top-1.5 right-2 text-2xs font-mono uppercase tracking-wide select-none pointer-events-none ${
-                    onBlue ? "text-blue-300/60" : "text-ink-muted"
-                  }`}
-                >
-                  {lang}
-                </span>
-                <pre
-                  className={`p-2.5 rounded-lg overflow-x-auto text-xs leading-snug ${
-                    onBlue ? "bg-black/20 border border-accent/30" : "bg-gray-900 text-gray-100"
-                  }`}
-                >
-                  {body}
-                </pre>
-              </div>
-            );
-          },
-          table: ({ children }) => (
-            <div className="my-2 overflow-x-auto">
-              <table className={`text-xs border-collapse ${onBlue ? "" : "text-ink"}`}>
-                {children}
-              </table>
-            </div>
-          ),
-          th: ({ children }) => (
-            <th
-              className={`border px-2 py-1 text-left font-semibold ${
-                onBlue ? "border-accent/50" : "border-gray-300 bg-paper"
-              }`}
-            >
-              {children}
-            </th>
-          ),
-          td: ({ children }) => (
-            <td className={`border px-2 py-1 ${onBlue ? "border-accent/50" : "border-line"}`}>
-              {children}
-            </td>
-          ),
-        }}
+        remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={REHYPE_PLUGINS}
+        components={COMPONENTS_BY_TONE[tone]}
       >
         {children}
       </ReactMarkdown>

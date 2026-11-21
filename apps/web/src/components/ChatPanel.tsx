@@ -1,6 +1,6 @@
 import { useSmoothText } from "../use-smooth-text";
 import { useState, useRef, useCallback, useEffect } from "react";
-import { ArrowLeft, Send, Bot, User, Wrench, Loader2 } from "lucide-react";
+import { ArrowLeft, Send, Bot, User, Wrench, Loader2, Plus } from "lucide-react";
 import { api } from "../api";
 import { MarkdownText } from "./MarkdownText";
 import type { Agent } from "@conflux/shared";
@@ -18,11 +18,11 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
   const [conversationId, setConversationId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const streamRef = useRef<AbortController | null>(null);
-  useEffect(() => () => { streamRef.current?.abort(); }, [agent.id]);
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
@@ -30,6 +30,56 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
         scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
       }
     });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    streamRef.current?.abort();
+    streamRef.current = null;
+    setMessages([]);
+    setConversationId(null);
+    setError(null);
+    setIsStreaming(false);
+    setLoadingHistory(true);
+
+    api
+      .getConversations(agent.id)
+      .then(async ({ conversations }) => {
+        if (cancelled) return;
+        const latest = conversations[0];
+        if (!latest) return;
+        const { turns } = await api.getTurns(latest.id);
+        if (cancelled) return;
+        setConversationId(latest.id);
+        setMessages(
+          turns
+            .filter((t): t is typeof t & { role: "user" | "assistant" } =>
+              t.role === "user" || t.role === "assistant",
+            )
+            .map((t) => ({ kind: "chat" as const, role: t.role, content: t.content })),
+        );
+        scrollToBottom();
+      })
+      .catch(() => {
+        // Fresh chat still works even if history lookup fails
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingHistory(false);
+      });
+
+    return () => {
+      cancelled = true;
+      streamRef.current?.abort();
+    };
+  }, [agent.id, scrollToBottom]);
+
+  const handleNewChat = useCallback(() => {
+    streamRef.current?.abort();
+    streamRef.current = null;
+    setIsStreaming(false);
+    setConversationId(null);
+    setMessages([]);
+    setError(null);
   }, []);
 
   const handleSend = useCallback(async () => {
@@ -157,15 +207,32 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
           </div>
           <span className="text-sm text-ink font-medium">{agent.name}</span>
         </div>
-        <span className="ml-auto text-2xs px-2 py-1 rounded-md bg-paper text-ink-muted border border-line">
-          {agent.model_config.provider}/{agent.model_config.model}
-        </span>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleNewChat}
+            disabled={isStreaming && messages.length === 0}
+            className="flex items-center gap-1 px-2 py-1 rounded-md text-2xs text-ink-muted hover:text-ink hover:bg-tile-hover border border-line transition-colors"
+            title="开启新对话"
+          >
+            <Plus size={12} /> 新对话
+          </button>
+          <span className="text-2xs px-2 py-1 rounded-md bg-paper text-ink-muted border border-line">
+            {agent.model_config.provider}/{agent.model_config.model}
+          </span>
+        </div>
       </div>
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
         <div className="max-w-2xl mx-auto space-y-4">
-          {messages.length === 0 && !error && (
+          {loadingHistory && messages.length === 0 && (
+            <div className="text-center text-ink-faint text-sm mt-12">
+              <Loader2 size={14} className="inline-block animate-spin mr-1.5" />
+              加载历史对话…
+            </div>
+          )}
+          {!loadingHistory && messages.length === 0 && !error && (
             <div className="text-center text-ink-faint text-sm mt-12">
               向 {agent.name} 发送一条消息开始对话
             </div>
@@ -192,7 +259,7 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
             );
           })}
           {error && (
-            <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl p-3">
+            <div className="text-xs text-danger bg-danger-soft border border-danger/30 rounded-xl p-3">
               {error}
             </div>
           )}
@@ -209,13 +276,15 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
             placeholder={isStreaming ? "等待回复..." : `跟 ${agent.name} 聊天...`}
             disabled={isStreaming}
             rows={1}
-            className="flex-1 bg-surface text-ink text-sm rounded-xl px-4 py-2.5 border border-line placeholder-gray-400 outline-none focus:border-accent resize-none disabled:bg-paper disabled:opacity-60 shadow-sm"
+            className="flex-1 bg-surface text-ink text-sm rounded-xl px-4 py-2.5 border border-line placeholder-ink-faint outline-none focus:border-accent resize-none disabled:bg-paper disabled:opacity-60 shadow-card"
             style={{ minHeight: "42px", maxHeight: "120px" }}
           />
           <button
+            type="button"
+            aria-label="发送消息"
             onClick={handleSend}
             disabled={!input.trim() || isStreaming}
-            className="flex items-center justify-center w-10 h-10 rounded-xl bg-accent hover:bg-accent-deep disabled:bg-line disabled:text-ink-faint text-on-accent transition-colors flex-shrink-0 shadow-sm"
+            className="flex items-center justify-center w-10 h-10 rounded-xl bg-accent hover:bg-accent-deep disabled:bg-line disabled:text-ink-faint text-on-accent transition-colors flex-shrink-0 shadow-card"
           >
             <Send size={16} />
           </button>
@@ -235,7 +304,7 @@ function MessageBubble({
   streaming?: boolean;
 }) {
   const isUser = role === "user";
-  // streaming assistant text runs through the typewriter pacer (#111)
+  // streaming assistant text runs through the typewriter pacer
   const paced = useSmoothText(content, { active: !!streaming && !isUser });
 
   if (!content && streaming) {
@@ -250,7 +319,7 @@ function MessageBubble({
             <Bot size={13} className="text-ink-muted" />
           )}
         </div>
-        <div className="px-4 py-2.5 rounded-xl bg-surface border border-line shadow-sm">
+        <div className="px-4 py-2.5 rounded-xl bg-surface border border-line shadow-card">
           <Loader2 size={14} className="text-ink-faint animate-spin" />
         </div>
       </div>
@@ -269,7 +338,7 @@ function MessageBubble({
         )}
       </div>
       <div
-        className={`max-w-[75%] px-4 py-2.5 rounded-xl shadow-sm ${
+        className={`max-w-[75%] px-4 py-2.5 rounded-xl shadow-card ${
           isUser ? "bg-accent text-on-accent" : "bg-surface text-ink border border-line"
         }`}
       >
@@ -291,25 +360,26 @@ function ToolCard({
   result?: unknown;
   loading: boolean;
 }) {
-  const inputStr = JSON.stringify(input);
-  const resultSummary = result
-    ? typeof result === "object" && result !== null && Array.isArray(result)
+  const inputStr = JSON.stringify(input) ?? "";
+  const hasResult = result !== undefined && result !== null;
+  const resultSummary = hasResult
+    ? Array.isArray(result)
       ? `${result.length} items`
-      : typeof result === "object" && result !== null
+      : typeof result === "object"
         ? "✓"
         : String(result).slice(0, 60)
     : null;
 
   return (
-    <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-amber-50/60 border border-amber-200/60 text-xs mx-10">
-      <Wrench size={11} className="text-amber-600 flex-shrink-0" />
+    <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-warning-soft/60 border border-warning/30 text-xs mx-10">
+      <Wrench size={11} className="text-warning flex-shrink-0" />
       <span className="text-ink font-mono font-medium">{name}</span>
       <span className="text-ink-faint truncate">
         {inputStr.length > 80 ? inputStr.slice(0, 80) + "..." : inputStr}
       </span>
       {loading && <Loader2 size={10} className="animate-spin text-ink-faint flex-shrink-0" />}
-      {!loading && resultSummary && (
-        <span className="text-emerald-600 flex-shrink-0">{resultSummary}</span>
+      {!loading && resultSummary !== null && (
+        <span className="text-success flex-shrink-0">{resultSummary}</span>
       )}
     </div>
   );

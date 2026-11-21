@@ -91,7 +91,7 @@ body {
 }
 
 /* React Flow 默认底色（--xy-background-color 默认 #E2E2E2）会盖出"画布比
-   侧栏/内容深一截"的色差（#95）——统一钉到 paper 令牌 */
+   侧栏/内容深一截"的色差——统一钉到 paper 令牌 */
 .react-flow {
   --xy-background-color: rgb(var(--tk-paper));
   background-color: rgb(var(--tk-paper));
@@ -155,7 +155,7 @@ html[data-theme="dark"] .font-normal { font-weight: 500; }
 html[data-theme="dark"] .font-medium { font-weight: 600; }
 
 
-/* ---- Motion tokens（#111）: durations/easings live in tailwind config as
+/* ---- Motion tokens: durations/easings live in tailwind config as
    DEFAULTS so every transition-* shares one beat. Reduced motion gets out
    of the way entirely. ---------------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
@@ -164,10 +164,11 @@ html[data-theme="dark"] .font-medium { font-weight: 600; }
   *::after {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }
 
-/* 毛玻璃侧栏（#111 darwin vibrancy）：透出窗口材质，色相跟色板走 */
+/* 毛玻璃侧栏（darwin vibrancy）：透出窗口材质，色相跟色板走 */
 .glass-sidebar {
   background: rgb(var(--tk-paper) / 0.72);
 }
@@ -178,7 +179,7 @@ html[data-theme="dark"] .font-medium { font-weight: 600; }
   -webkit-app-region: no-drag;
 }
 
-/* 流式打字机末尾光标（#111）：跟在最后一个块级内容之后呼吸 */
+/* 流式打字机末尾光标：跟在最后一个块级内容之后呼吸 */
 .smooth-caret {
   display: inline-block;
   width: 2px;
@@ -200,7 +201,7 @@ html[data-theme="dark"] .font-medium { font-weight: 600; }
   }
 }
 
-/* ---- Tab keep-alive (#107): views stay mounted so viewport/scroll state
+/* ---- Tab keep-alive: views stay mounted so viewport/scroll state
    survives switching; hidden views skip paint and hit-testing. ---------- */
 .tab-surface {
   position: absolute;

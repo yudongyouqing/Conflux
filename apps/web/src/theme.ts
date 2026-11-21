@@ -8,11 +8,10 @@ function syncNativeChrome(mode: "dark" | "light"): void {
   bridge?.setNativeTheme?.(mode);
 }
 
-/** 启动即按激活色板落令牌（bootstrap 随后会再走一次 refresh，幂等）。
- *  旧 system/light/dark 偏好与媒体查询监听随三段钮一起移除（#95）。 */
+/** 启动即按激活色板落令牌（幂等）。 */
 export function installTheme(win: Window = window): () => void { refreshTokenApplication(win.localStorage, win.document.documentElement); return () => {}; }
 
-// ---- 自定义主题（#71）：令牌色板可导入/可切换 ------------------------------
+// ---- 自定义主题：令牌色板可导入/可切换 -------------------------------------
 
 export interface ThemeColors {
   ink: string;
@@ -140,15 +139,27 @@ export function listCustomThemes(storage: Storage = window.localStorage): Custom
 
 export function saveCustomTheme(theme: CustomTheme, storage: Storage = window.localStorage): void {
   const rest = listCustomThemes(storage).filter((t) => t.name !== theme.name);
-  storage.setItem(CUSTOM_THEMES_KEY, JSON.stringify([...rest, theme]));
+  try {
+    storage.setItem(CUSTOM_THEMES_KEY, JSON.stringify([...rest, theme]));
+  } catch {
+    /* quota exceeded or private mode */
+  }
 }
 
 export function deleteCustomTheme(name: string, storage: Storage = window.localStorage): void {
-  storage.setItem(CUSTOM_THEMES_KEY, JSON.stringify(listCustomThemes(storage).filter((t) => t.name !== name)));
+  try {
+    storage.setItem(CUSTOM_THEMES_KEY, JSON.stringify(listCustomThemes(storage).filter((t) => t.name !== name)));
+  } catch {
+    /* storage unavailable */
+  }
 }
 
 export function getActiveCustomThemeName(storage: Storage = window.localStorage): string | null {
-  return storage.getItem(ACTIVE_CUSTOM_THEME_KEY);
+  try {
+    return storage.getItem(ACTIVE_CUSTOM_THEME_KEY);
+  } catch {
+    return null;
+  }
 }
 
 /** 激活某个主题（写偏好并立即应用）；null 回到默认汇流蓝。
@@ -157,14 +168,22 @@ export function setActiveCustomTheme(name: string | null, storage: Storage = win
   if (name !== null) {
     const theme = listCustomThemes(storage).find((t) => t.name === name) ?? BUILTIN_THEMES.find((t) => t.name === name);
     if (!theme) return;
-    storage.setItem(ACTIVE_CUSTOM_THEME_KEY, name);
+    try {
+      storage.setItem(ACTIVE_CUSTOM_THEME_KEY, name);
+    } catch {
+      /* still apply in-memory for this session */
+    }
     const mode = isDarkPaper(theme.colors) ? "dark" : "light";
     root.dataset.theme = mode;
     syncNativeChrome(mode);
     applyThemeColors(root, theme.colors);
     return;
   }
-  storage.removeItem(ACTIVE_CUSTOM_THEME_KEY);
+  try {
+    storage.removeItem(ACTIVE_CUSTOM_THEME_KEY);
+  } catch {
+    /* ignore */
+  }
   refreshTokenApplication(storage, root);
 }
 
@@ -174,7 +193,7 @@ export function applySavedCustomTheme(storage: Storage = window.localStorage, ro
 }
 
 /**
- * 令牌应用的唯一入口：色板是明暗的唯一真相源（issue #95 起）。
+ * 令牌应用的唯一入口：色板是明暗的唯一真相源。
  * - 激活深色色板 → 内联令牌 + data-theme=dark（原生控件跟随）
  * - 激活浅色色板 → 内联令牌 + data-theme=light
  * - 无激活色板 → 清内联走默认浅色；旧 conflux.theme 偏好不再读取

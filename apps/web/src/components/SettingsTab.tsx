@@ -222,7 +222,7 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
 
   if (error)
     return (
-      <div className="flex items-center justify-center h-full text-red-500 text-sm">
+      <div className="flex items-center justify-center h-full text-danger text-sm">
         连接失败: {(error as Error).message}
       </div>
     );
@@ -317,7 +317,7 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
           </div>
         </div>
 
-        <div className="bg-surface border border-line rounded-xl p-4 space-y-4 shadow-sm">
+        <div className="bg-surface border border-line rounded-xl p-4 space-y-4 shadow-card">
           <label className="block">
             <span className="block text-xs font-medium text-ink mb-1.5">终端打开方式</span>
             <select
@@ -365,7 +365,7 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
             {notice ? (
               <span
                 className={`text-xs ${
-                  notice.startsWith("保存失败") ? "text-red-600" : "text-emerald-600"
+                  notice.startsWith("保存失败") ? "text-danger" : "text-success"
                 } flex items-center gap-1`}
               >
                 {notice === "已保存" && <Check size={12} />}
@@ -386,7 +386,7 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
         </div>
 
         {/* Wake concurrency control: caps simultaneous headless wakes */}
-        <div className="bg-surface border border-line rounded-xl p-4 space-y-4 shadow-sm">
+        <div className="bg-surface border border-line rounded-xl p-4 space-y-4 shadow-card">
           <div>
             <h3 className="text-ink font-medium text-sm">唤醒控制</h3>
             <p className="text-2xs text-ink-faint mt-0.5">
@@ -394,14 +394,14 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
             </p>
           </div>
 
-          <label className="flex items-center justify-between gap-3">
+          <label className="flex items-center justify-between gap-3 cursor-pointer">
             <div>
               <span className="text-xs text-ink">自动唤醒</span>
               <p className="text-2xs text-ink-faint mt-0.5">
                 关闭后消息将保持 pending 状态，需手动打开会话处理
               </p>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
+            <span className="relative inline-flex items-center">
               <input
                 type="checkbox"
                 checked={autoWake}
@@ -409,7 +409,7 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
                 className="sr-only peer"
               />
               <div className="w-9 h-5 bg-line peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-accent/30 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-line after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-accent"></div>
-            </label>
+            </span>
           </label>
 
           <label className="block">
@@ -438,9 +438,33 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
               </span>
             </div>
           </label>
+
+          <div className="flex items-center justify-between pt-1">
+            {notice ? (
+              <span
+                className={`text-xs ${
+                  notice.startsWith("保存失败") ? "text-danger" : "text-success"
+                } flex items-center gap-1`}
+              >
+                {notice === "已保存" && <Check size={12} />}
+                {notice}
+              </span>
+            ) : (
+              <span />
+            )}
+            <button
+              type="button"
+              onClick={submit}
+              disabled={save.isPending}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-accent text-on-accent text-xs hover:bg-accent-deep disabled:opacity-50"
+            >
+              {save.isPending && <Loader2 size={12} className="animate-spin" />}
+              保存
+            </button>
+          </div>
         </div>
 
-        <div className="bg-surface border border-line rounded-xl p-4 space-y-3 shadow-sm">
+        <div className="bg-surface border border-line rounded-xl p-4 space-y-3 shadow-card">
           <div className="flex items-center justify-between gap-3">
             <div>
               <h3 className="text-ink font-medium text-sm">数据备份</h3>
@@ -500,8 +524,8 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
             <span
               className={`text-xs ${
                 transferNotice.startsWith("导入失败") || transferNotice.startsWith("导出失败")
-                  ? "text-red-600"
-                  : "text-emerald-600"
+                  ? "text-danger"
+                  : "text-success"
               } flex items-center gap-1`}
             >
               {!transferNotice.startsWith("导入失败") && !transferNotice.startsWith("导出失败") && (
@@ -512,7 +536,7 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
           )}
         </div>
 
-        <div className="bg-surface border border-line rounded-xl p-4 space-y-3 shadow-sm">
+        <div className="bg-surface border border-line rounded-xl p-4 space-y-3 shadow-card">
           <div>
             <h3 className="text-ink font-medium text-sm">数据清除</h3>
             <p className="text-2xs text-ink-faint mt-0.5">
@@ -541,7 +565,7 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
                   onClick={() => runClear(key, label)}
                   disabled={clearPending || !clearCounts || countOf(key) === 0}
                   title={`清除${label}`}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-300 text-red-600 text-xs hover:bg-red-50 disabled:opacity-40"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-danger/40 text-danger text-xs hover:bg-danger-soft disabled:opacity-40"
                 >
                   {clearPending ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
                   清除
@@ -552,7 +576,7 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
           {clearNotice && (
             <span
               className={`text-xs ${
-                clearNotice.startsWith("清除失败") ? "text-red-600" : "text-emerald-600"
+                clearNotice.startsWith("清除失败") ? "text-danger" : "text-success"
               } flex items-center gap-1`}
             >
               {!clearNotice.startsWith("清除失败") && <Check size={12} />}

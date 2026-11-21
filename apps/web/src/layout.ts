@@ -60,7 +60,14 @@ function aspectScore(bbox: BBox): number {
 function wrapSnake(nodes: Node[], edges: Edge[]): Node[] {
   // adjacency
   const adj = new Map<string, string[]>();
-  const add = (a: string, b: string) => adj.set(a, [...(adj.get(a) ?? []), b]);
+  const add = (a: string, b: string) => {
+    let list = adj.get(a);
+    if (!list) {
+      list = [];
+      adj.set(a, list);
+    }
+    list.push(b);
+  };
   edges.forEach((e) => {
     add(e.source, e.target);
     add(e.target, e.source);
@@ -76,8 +83,9 @@ function wrapSnake(nodes: Node[], edges: Edge[]): Node[] {
   const seen = new Set<string>();
   const queue = [start];
   seen.add(start);
-  while (queue.length) {
-    const cur = queue.shift()!;
+  let head = 0;
+  while (head < queue.length) {
+    const cur = queue[head++]!;
     order.push(cur);
     for (const nb of adj.get(cur) ?? []) {
       if (!seen.has(nb)) {

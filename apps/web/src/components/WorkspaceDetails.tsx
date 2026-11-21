@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { AlertCircle, CheckCircle2, Loader2, Plus, Trash2, UserPlus, Users, X } from "lucide-react";
-import type { ChatRoom, GraphNode } from "@conflux/shared";
+import { WEB_CONSOLE_ID, type ChatRoom, type GraphNode } from "@conflux/shared";
 import { useDeleteRoom, useJoinRoom, useLeaveRoom, useRoomTasks } from "../room-hooks";
 import type { ConversationTarget } from "../workspace-state";
 import { DetailPanel } from "./DetailPanel";
@@ -44,8 +44,8 @@ export function WorkspaceDetails({
 }: WorkspaceDetailsProps) {
   if (inspectedSession) {
     return (
-      <div className="h-full overflow-y-auto">
-        <div className="sticky top-0 z-10 bg-surface border-b border-line px-4 py-3 flex items-center gap-2">
+      <div className="h-full flex flex-col min-h-0">
+        <div className="bg-surface border-b border-line px-4 py-3 flex items-center gap-2 flex-shrink-0">
           <span className="text-ink font-medium text-xs truncate">查看：{inspectedSession.name}</span>
           <button
             type="button"
@@ -57,7 +57,7 @@ export function WorkspaceDetails({
           </button>
         </div>
         {/* selection is details-only: starting a conversation is explicit */}
-        <div className="p-3 border-b border-line">
+        <div className="p-3 border-b border-line flex-shrink-0">
           <button
             type="button"
             onClick={() => onConverseWith?.(inspectedSession.id)}
@@ -66,14 +66,15 @@ export function WorkspaceDetails({
             与此会话对话
           </button>
         </div>
-        <DetailPanel
-          session={inspectedSession}
-          message={null}
-          edge={null}
-          sessionNameLookup={(id) => sessions.find((s) => s.id === id)?.name}
-          sessionStatusLookup={(id) => sessions.find((s) => s.id === id)?.status}
-          onOpenEdge={onOpenGraphEdge}
-        />
+        <div className="flex-1 min-h-0">
+          <DetailPanel
+            session={inspectedSession}
+            edge={null}
+            sessionNameLookup={(id) => sessions.find((s) => s.id === id)?.name}
+            sessionStatusLookup={(id) => sessions.find((s) => s.id === id)?.status}
+            onOpenEdge={onOpenGraphEdge}
+          />
+        </div>
       </div>
     );
   }
@@ -86,6 +87,7 @@ export function WorkspaceDetails({
     }
     return (
       <RoomDetails
+        key={room.id}
         room={room}
         rooms={rooms}
         sessions={sessions}
@@ -102,14 +104,28 @@ export function WorkspaceDetails({
       return <div className="p-5 text-xs text-ink-faint">会话已不可用</div>;
     }
     return (
-      <DetailPanel
-        session={node}
-        message={null}
-        edge={null}
-        sessionNameLookup={(id) => sessions.find((s) => s.id === id)?.name}
-        sessionStatusLookup={(id) => sessions.find((s) => s.id === id)?.status}
-        onOpenEdge={onOpenGraphEdge}
-      />
+      <div className="h-full flex flex-col min-h-0">
+        <div className="bg-surface border-b border-line px-4 py-3 flex items-center gap-2 flex-shrink-0">
+          <span className="text-ink font-medium text-xs truncate">{node.name}</span>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="关闭详情面板"
+            className="ml-auto p-1.5 rounded-lg text-ink-faint hover:bg-tile-hover hover:text-ink flex-shrink-0"
+          >
+            <X size={13} />
+          </button>
+        </div>
+        <div className="flex-1 min-h-0">
+          <DetailPanel
+            session={node}
+            edge={null}
+            sessionNameLookup={(id) => sessions.find((s) => s.id === id)?.name}
+            sessionStatusLookup={(id) => sessions.find((s) => s.id === id)?.status}
+            onOpenEdge={onOpenGraphEdge}
+          />
+        </div>
+      </div>
     );
   }
 
@@ -151,9 +167,13 @@ function RoomDetails({
   const candidates = useMemo(
     () =>
       sessions.filter(
-        (s) => s.type === "session" && s.id !== "web-console" && !roomedIds.has(s.id),
+        (s) => s.type === "session" && s.id !== WEB_CONSOLE_ID && !roomedIds.has(s.id),
       ),
     [sessions, roomedIds],
+  );
+  const missingMemberCount = useMemo(
+    () => members.filter((mid) => !sessions.some((s) => s.id === mid)).length,
+    [members, sessions],
   );
 
   const tasks = tasksQuery.data?.tasks ?? [];
@@ -248,12 +268,13 @@ function RoomDetails({
                     <span className="flex items-center gap-1 text-2xs">
                       <button
                         type="button"
+                        disabled={leave.isPending}
                         onClick={() =>
                           leave.mutate(mid, {
                             onSuccess: () => setConfirmingLeave(null),
                           })
                         }
-                        className="px-2 py-0.5 rounded-md bg-red-500 text-white"
+                        className="px-2 py-0.5 rounded-md bg-danger text-white disabled:opacity-50"
                       >
                         确认移出
                       </button>
@@ -271,7 +292,7 @@ function RoomDetails({
                       onClick={() => setConfirmingLeave(mid)}
                       aria-label={`移出成员 ${memberName(mid)}`}
                       title="移出"
-                      className="p-1 rounded text-ink-faint hover:text-red-500"
+                      className="p-1 rounded text-ink-faint hover:text-danger"
                     >
                       <X size={11} />
                     </button>
@@ -282,9 +303,9 @@ function RoomDetails({
             {members.length === 0 && (
               <div className="text-2xs text-ink-faint px-2 py-2">房间还没有成员</div>
             )}
-            {members.filter((mid) => !sessions.some((s) => s.id === mid)).length > 0 && (
-              <div className="text-2xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">
-                {members.filter((mid) => !sessions.some((s) => s.id === mid)).length} 位成员暂无法加载（会话未出现在图谱中）
+            {missingMemberCount > 0 && (
+              <div className="text-2xs text-warning bg-warning-soft border border-warning/30 rounded-md px-2 py-1">
+                {missingMemberCount} 位成员暂无法加载（会话未出现在图谱中）
               </div>
             )}
           </div>
@@ -307,7 +328,7 @@ function RoomDetails({
           ) : (
             <div className="text-2xs text-ink-muted flex items-center gap-3">
               <span className="inline-flex items-center gap-1">
-                <CheckCircle2 size={11} className="text-emerald-500" /> {done} 完成
+                <CheckCircle2 size={11} className="text-success" /> {done} 完成
               </span>
               <span className="inline-flex items-center gap-1">
                 <AlertCircle size={11} className="text-ink-faint" /> 共 {tasks.length} 个
@@ -335,7 +356,7 @@ function RoomDetails({
                       },
                     })
                   }
-                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-500 text-white text-2xs font-medium disabled:opacity-50"
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-danger text-white text-2xs font-medium disabled:opacity-50"
                 >
                   {remove.isPending ? <Loader2 size={11} className="animate-spin" /> : null}
                   确认删除
@@ -353,7 +374,7 @@ function RoomDetails({
             <button
               type="button"
               onClick={() => setConfirmingDelete(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line text-2xs text-ink-faint hover:text-red-500 hover:border-red-300"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line text-2xs text-ink-faint hover:text-danger hover:border-danger/40"
             >
               <Trash2 size={11} /> 删除房间
             </button>

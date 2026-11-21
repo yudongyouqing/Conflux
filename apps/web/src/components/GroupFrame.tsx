@@ -1,4 +1,4 @@
-import type { NodeProps, Node } from "@xyflow/react";
+import type { NodeProps } from "@xyflow/react";
 import { Folder, Ghost, ChevronDown, ChevronRight } from "lucide-react";
 
 export interface GroupFrameData {
@@ -18,8 +18,6 @@ export interface GroupFrameData {
   height: number;
   [key: string]: unknown;
 }
-
-export type GroupFrameNodeType = Node<GroupFrameData>;
 
 /**
  * Progressive-disclosure group tile (Google-Maps-cluster / Linear-drill-in
@@ -85,7 +83,7 @@ export function GroupFrame({ data }: NodeProps) {
             {d.runtimeDots!.map((c, i) => (
               <span
                 key={i}
-                className={`w-2 h-2 rounded-full border border-surface shadow-sm ${c}`}
+                className={`w-2 h-2 rounded-full border border-surface shadow-card ${c}`}
               />
             ))}
           </span>

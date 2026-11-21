@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { Loader2, Send, Square } from "lucide-react";
 import { api } from "../api";
 import {
@@ -59,7 +59,6 @@ export function ManagedCodexPanel({
   const [question, setQuestion] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
-  const eventsRef = useRef<HTMLDivElement>(null);
 
   const status = statusQuery.data;
   const binding = status?.binding ?? null;
@@ -70,7 +69,7 @@ export function ManagedCodexPanel({
 
   const sendQuestion = async () => {
     const text = question.trim();
-    if (!text || !binding) return;
+    if (!text || !binding || sending) return;
     setSending(true);
     setSendError(null);
     try {
@@ -274,7 +273,7 @@ export function ManagedCodexPanel({
           <div className="px-3 py-2 border-b border-line text-2xs text-ink-faint">
             执行进展（文本 / 工具 / 状态 · 按序号增量）
           </div>
-          <div ref={eventsRef} className="p-3 space-y-1.5 max-h-80 overflow-y-auto">
+          <div className="p-3 space-y-1.5 max-h-80 overflow-y-auto">
             {events.length === 0 && (
               <p className="text-2xs text-ink-faint">暂无事件。发送任务后进展会显示在这里。</p>
             )}

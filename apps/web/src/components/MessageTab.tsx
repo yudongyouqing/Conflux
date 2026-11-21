@@ -1,17 +1,15 @@
 import { useMemo, useState } from "react";
-import { useMessages, useGraph, useSessions, useEdgeMessages, useEdgeAsk } from "../hooks";
+import { useMessages, useGraph, useEdgeMessages, useEdgeAsk } from "../hooks";
 import { MentionComposer } from "./MentionComposer";
 import { MessageCard } from "./MessageCard";
 import { MarkdownText } from "./MarkdownText";
 import { StatusDot } from "./StatusDot";
 import { ArrowLeft, Send, Loader2 } from "lucide-react";
-import { WEB_CONSOLE_ID, type Message } from "@conflux/shared";
+import { WEB_CONSOLE_ID } from "@conflux/shared";
 
 interface MessageTabProps {
   /** the activity view only polls (and runs its inbox side effect) while visible */
   active: boolean;
-  onSelectMessage: (msg: Message | null) => void;
-  selectedMessageId: number | null;
   /** a feed entry with a clear peer continues in the workspace conversation */
   onOpenPeerConversation: (sessionId: string) => void;
 }
@@ -26,8 +24,6 @@ interface MessageTabProps {
  */
 export function MessageTab({
   active,
-  onSelectMessage,
-  selectedMessageId,
   onOpenPeerConversation,
 }: MessageTabProps) {
   const [statusFilter, setStatusFilter] = useState("all");
@@ -37,21 +33,22 @@ export function MessageTab({
   const [conv, setConv] = useState<{ edgeId: number; from: string; to: string } | null>(null);
   const [draft, setDraft] = useState("");
 
-  const { data, isLoading } = useMessages({ status: statusFilter }, active);
+  const { data, isLoading, isError, error } = useMessages({ status: statusFilter }, active);
   const graph = useGraph();
-  const sessions = useSessions("active", active);
   const channel = conv;
   const channelMsgs = useEdgeMessages(channel?.edgeId ?? null, active);
   const edgeAsk = useEdgeAsk();
 
-  const { nameMap, statusMap } = useMemo(() => {
+  const { nameMap, statusMap, nodeMap } = useMemo(() => {
     const names = new Map<string, string>();
     const statuses = new Map<string, string>();
+    const nodes = new Map<string, NonNullable<typeof graph.data>["nodes"][number]>();
     graph.data?.nodes.forEach((n) => {
       names.set(n.id, n.name);
       statuses.set(n.id, n.status);
+      nodes.set(n.id, n);
     });
-    return { nameMap: names, statusMap: statuses };
+    return { nameMap: names, statusMap: statuses, nodeMap: nodes };
   }, [graph.data]);
 
   const messages = data?.messages ?? [];
@@ -69,10 +66,9 @@ export function MessageTab({
   );
 
   const nameOf = (id: string) => nameMap.get(id) ?? id.slice(0, 8);
-  // edge endpoint list arrives newest-first (EdgeFlowView contract); the
-  // bubble stream wants chronological order
-  const channelList = (channelMsgs.data?.messages ?? []).slice().reverse();
-  const fromSession = sessions.data?.sessions?.find((s) => s.id === channel?.from);
+  // listEdgeMessages already returns chronological (oldest-first) order.
+  const channelList = channelMsgs.data?.messages ?? [];
+  const fromSession = channel ? nodeMap.get(channel.from) : undefined;
 
   const sendDraft = () => {
     const question = draft.trim();
@@ -108,7 +104,12 @@ export function MessageTab({
                 <Loader2 size={16} className="text-ink-faint animate-spin" />
               </div>
             )}
-            {channelList.length === 0 && !channelMsgs.isLoading && (
+            {channelMsgs.isError && channelList.length === 0 && (
+              <div role="alert" className="text-xs text-danger text-center py-6">
+                加载通道消息失败：{(channelMsgs.error as Error).message}
+              </div>
+            )}
+            {channelList.length === 0 && !channelMsgs.isLoading && !channelMsgs.isError && (
               <div className="text-xs text-ink-faint text-center py-6">暂无往来消息</div>
             )}
             {channelList.map((m) => {
@@ -224,7 +225,12 @@ export function MessageTab({
       <div className="flex-1 overflow-y-auto p-4">
         <div className="max-w-3xl mx-auto space-y-2">
           {isLoading && <div className="text-ink-faint text-sm text-center mt-8">加载中...</div>}
-          {!isLoading && filtered.length === 0 && (
+          {isError && filtered.length === 0 && (
+            <div role="alert" className="text-danger text-xs text-center mt-8">
+              加载消息失败：{(error as Error).message}
+            </div>
+          )}
+          {!isLoading && !isError && filtered.length === 0 && (
             <div className="text-ink-faint text-sm text-center mt-8">
               {search ? "无匹配消息" : "暂无消息"}
             </div>
@@ -237,12 +243,9 @@ export function MessageTab({
               toName={nameMap.get(msg.to_session)}
               toStatus={statusMap.get(msg.to_session)}
               onClick={() => {
-                // The full-height channel view IS the detail view — the
-                // side DetailPanel must not light up next to it. External
-                // A↔B channels keep their edge view here; anything with the
-                // web console as an endpoint continues in the workspace's
-                // peer conversation on the message's full session id.
-                onSelectMessage(null);
+                // External A↔B channels open their edge view here; anything
+                // with the web console as an endpoint continues in the
+                // workspace's peer conversation on the message's full session id.
                 const externalChannel =
                   msg.edge_id != null &&
                   msg.from_session !== WEB_CONSOLE_ID &&
@@ -259,7 +262,6 @@ export function MessageTab({
                   );
                 }
               }}
-              selected={msg.id === selectedMessageId}
             />
           ))}
         </div>

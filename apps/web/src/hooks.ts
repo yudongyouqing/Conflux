@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { ManagedEventPayload } from "@conflux/shared";
 import { api } from "./api";
 
-export type ManagedEvent = ManagedEventPayload;
+type ManagedEvent = ManagedEventPayload;
 
 export function useGraph() {
   return useQuery({
@@ -64,7 +64,7 @@ export function useRetryMessage() {
 export function useDaemonHealth() {
   return useQuery({
     queryKey: ["health"],
-    queryFn: () => api.health(),
+    queryFn: ({ signal }) => api.health(signal),
     refetchInterval: 10000,
   });
 }
@@ -98,20 +98,22 @@ export function useEdgeMessages(edgeId: number | null, enabled = true) {
   });
 }
 
-/** Speak on a web-console channel. */
+/** Speak on a conversation channel. */
 export function useEdgeAsk() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ edgeId, question }: { edgeId: number; question: string }) =>
       api.edgeAsk(edgeId, question),
-    onSuccess: (_d, vars) => {
-      qc.invalidateQueries({ queryKey: ["edge-messages", vars.edgeId] });
-      qc.invalidateQueries({ queryKey: ["graph"] });
-    },
+    onSuccess: (_d, vars) =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ["edge-messages", vars.edgeId] }),
+        qc.invalidateQueries({ queryKey: ["messages"] }),
+        qc.invalidateQueries({ queryKey: ["graph"] }),
+      ]),
   });
 }
 
-/** Two-way message flow between any two sessions (graph edge click). */
+/** Configured API-backed model agents. */
 export function useAgents(enabled = true) {
   return useQuery({
     queryKey: ["agents"],
@@ -172,6 +174,8 @@ export function useStartRuntimeAgent() {
       Promise.all([
         qc.invalidateQueries({ queryKey: ["runtimes"] }),
         qc.invalidateQueries({ queryKey: ["runtime-instances"] }),
+        qc.invalidateQueries({ queryKey: ["sessions"] }),
+        qc.invalidateQueries({ queryKey: ["graph"] }),
       ]),
   });
 }
@@ -268,10 +272,11 @@ export function useInterruptManagedTurn() {
       instanceId: string;
       expectedTurnId?: string | null;
     }) => api.interruptManagedTurn(instanceId, expectedTurnId),
-    onSuccess: (_d, vars) => {
-      qc.invalidateQueries({ queryKey: ["managed-status", vars.instanceId] });
-      qc.invalidateQueries({ queryKey: ["managed-events", vars.instanceId] });
-    },
+    onSuccess: (_d, vars) =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ["managed-status", vars.instanceId] }),
+        qc.invalidateQueries({ queryKey: ["managed-events", vars.instanceId] }),
+      ]),
   });
 }
 
@@ -287,10 +292,11 @@ export function useResolveManagedApproval() {
       approvalId: number;
       decision: "accept" | "decline" | "cancel";
     }) => api.resolveManagedApproval(instanceId, approvalId, decision),
-    onSuccess: (_d, vars) => {
-      qc.invalidateQueries({ queryKey: ["managed-status", vars.instanceId] });
-      qc.invalidateQueries({ queryKey: ["managed-events", vars.instanceId] });
-    },
+    onSuccess: (_d, vars) =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ["managed-status", vars.instanceId] }),
+        qc.invalidateQueries({ queryKey: ["managed-events", vars.instanceId] }),
+      ]),
   });
 }
 
@@ -299,7 +305,7 @@ export function useResolveManagedApproval() {
 export function useTerminalSettings(enabled = true) {
   return useQuery({
     queryKey: ["terminal-settings"],
-    queryFn: () => api.getTerminalSettings(),
+    queryFn: ({ signal }) => api.getTerminalSettings(signal),
     enabled,
   });
 }

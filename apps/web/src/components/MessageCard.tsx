@@ -10,6 +10,13 @@ const STATUS_COLORS: Record<string, string> = {
   read: "bg-neutral-soft text-neutral border border-neutral/30",
 };
 
+const STATUS_LABELS: Record<string, string> = {
+  pending: "待处理",
+  seen: "已查看",
+  replied: "已回复",
+  read: "已读",
+};
+
 interface MessageCardProps {
   msg: Message;
   fromName?: string;
@@ -17,7 +24,7 @@ interface MessageCardProps {
   /** Graph status of the target session, separate from message read state. */
   toStatus?: string;
   onClick: () => void;
-  selected: boolean;
+  selected?: boolean;
 }
 
 export function MessageCard({
@@ -26,7 +33,7 @@ export function MessageCard({
   toName,
   toStatus,
   onClick,
-  selected,
+  selected = false,
 }: MessageCardProps) {
   const deadLetter = msg.status === "pending" && toStatus && toStatus !== "active";
   return (
@@ -55,7 +62,7 @@ export function MessageCard({
             STATUS_COLORS[msg.status] ?? "bg-paper text-ink-muted border border-line"
           }`}
         >
-          {msg.status}
+          {STATUS_LABELS[msg.status] ?? msg.status}
         </span>
       </div>
       <div className="text-sm text-ink truncate">

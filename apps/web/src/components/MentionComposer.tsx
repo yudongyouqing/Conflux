@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useGraph } from "../hooks";
 import { api } from "../api";
@@ -15,8 +15,8 @@ export interface ComposerTarget {
 
 function targetBadge(s: ComposerTarget): { text: string; color: string } {
   if (s.status !== "active") return { text: "离线 · 异步投递", color: "text-ink-faint" };
-  if (s.busy) return { text: "在线 · 正在回复", color: "text-amber-600" };
-  return { text: "在线", color: "text-emerald-600" };
+  if (s.busy) return { text: "在线 · 正在回复", color: "text-warning" };
+  return { text: "在线", color: "text-success" };
 }
 
 interface MentionComposerProps {
@@ -41,6 +41,13 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
   const [target, setTarget] = useState<ComposerTarget | null>(null);
   const [needTarget, setNeedTarget] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const needTargetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (needTargetTimerRef.current) clearTimeout(needTargetTimerRef.current);
+    },
+    [],
+  );
 
   // typing "@..." → mention picker; a new @ REPLACES the current target,
   // so a send can never carry zero or multiple mentions
@@ -66,7 +73,7 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
       .filter(
         (s) =>
           s.id !== WEB_CONSOLE_ID &&
-          !s.id.startsWith("agent-") &&
+          s.type === "session" &&
           s.status === "active" &&
           matches(s),
       )
@@ -74,18 +81,26 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
   }, [graph.data, mentionQuery]);
 
   const ask = useMutation({
-    mutationFn: (body: { to_session: string; question: string }) => api.webAsk(body),
+    mutationFn: (vars: {
+      to_session: string;
+      question: string;
+      from_session?: string;
+      sentTarget: ComposerTarget;
+    }) =>
+      api.webAsk({
+        to_session: vars.to_session,
+        question: vars.question,
+        ...(vars.from_session ? { from_session: vars.from_session } : {}),
+      }),
     onSuccess: (data, vars) => {
-      const sent = target;
       const message = (data as { message?: Message } | undefined)?.message ?? null;
-      setText("");
-      setTarget(null);
+      setText((prev) => (prev.trim() === vars.question ? "" : prev));
+      setTarget((prev) => (prev?.id === vars.sentTarget.id ? null : prev));
       inputRef.current?.focus();
       queryClient.invalidateQueries({ queryKey: ["peer-messages"] });
       queryClient.invalidateQueries({ queryKey: ["messages"] });
       queryClient.invalidateQueries({ queryKey: ["graph"] });
-      if (sent) onSent?.(sent, message);
-      void vars;
+      onSent?.(vars.sentTarget, message);
     },
   });
 
@@ -100,19 +115,24 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
     if (ask.isPending) return;
     if (!target) {
       setNeedTarget(true); // zero mentions — reject with a visible hint
-      setTimeout(() => setNeedTarget(false), 2500);
+      if (needTargetTimerRef.current) clearTimeout(needTargetTimerRef.current);
+      needTargetTimerRef.current = setTimeout(() => {
+        needTargetTimerRef.current = null;
+        setNeedTarget(false);
+      }, 2500);
       return;
     }
     if (!question) return;
     ask.mutate({
       to_session: target.id,
       question,
+      sentTarget: target,
       ...(sender && sender.id !== WEB_CONSOLE_ID ? { from_session: sender.id } : {}),
     });
   };
 
   return (
-    <div className={`p-3 bg-surface border border-line rounded-lg shadow-sm ${className ?? ""}`}>
+    <div className={`p-3 bg-surface border border-line rounded-lg shadow-card ${className ?? ""}`}>
       <div className="flex items-center gap-2">
         {sender && sender.id !== WEB_CONSOLE_ID && (
           <span
@@ -127,7 +147,8 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
             <StatusDot status={target.status} busy={target.busy} />
             <span className="max-w-40 truncate">{target.name}</span>
             <button
-              className="text-blue-400 hover:text-accent-deep px-1"
+              type="button"
+              className="text-accent hover:text-accent-deep px-1"
               onClick={() => setTarget(null)}
               title="移除目标"
             >
@@ -169,10 +190,10 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
               else setText("");
             }
           }}
-          className="w-full bg-surface text-ink text-sm rounded-lg px-3 py-2 border border-line placeholder-gray-400 outline-none focus:border-accent"
+          className="w-full bg-surface text-ink text-sm rounded-lg px-3 py-2 border border-line placeholder-ink-faint outline-none focus:border-accent"
         />
         {mentionQuery !== null && candidates.length > 0 && (
-          <div className="absolute z-10 left-0 right-0 top-full mt-1 bg-surface border border-line rounded-lg shadow-lg overflow-hidden">
+          <div className="absolute z-10 left-0 right-0 top-full mt-1 bg-surface border border-line rounded-lg shadow-popover overflow-hidden">
             {candidates.map((s) => (
               <button
                 key={s.id}
@@ -207,12 +228,12 @@ export function MentionComposer({ onSent, className, sender }: MentionComposerPr
         )}
       </div>
       {needTarget && (
-        <div className="text-xs text-amber-600 mt-1">
+        <div className="text-xs text-warning mt-1">
           请先 @ 选择一个目标会话（每次对话只能有一个目标）
         </div>
       )}
       {ask.isError && (
-        <div className="text-xs text-red-500 mt-1">发送失败: {(ask.error as Error).message}</div>
+        <div className="text-xs text-danger mt-1">发送失败: {(ask.error as Error).message}</div>
       )}
     </div>
   );
