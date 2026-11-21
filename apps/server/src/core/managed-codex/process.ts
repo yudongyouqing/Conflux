@@ -1,9 +1,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 
 import { logger } from "../../log.js";
-import { ManagedRpcConnection, type RpcHandlers } from "./rpc.js";
+import { ManagedRpcConnection, RpcClosedError, type RpcHandlers } from "./rpc.js";
 
 /**
  * Process adapter for the managed Codex executor: turn a configured
@@ -76,18 +76,33 @@ function cmdShimPlan(shimPath: string, args: string[]): LaunchPlan {
   );
 }
 
+function isRegularFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
 /** PATHEXT-aware PATH lookup for a bare command name on Windows. cmd.exe
  *  never executes extensionless files (an adjacent sh script with the same
  *  name is for Git Bash, not for us), so only PATHEXT extensions count. */
 function resolveOnPathWindows(command: string): string | null {
-  const pathDirs = (process.env.PATH ?? "").split(";");
   const exts = (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean);
   const candidates = exts.map((ext) => `${command}${ext}`);
+  if (/[\\/]/.test(command)) {
+    for (const candidate of candidates) {
+      const full = resolve(candidate);
+      if (isRegularFile(full)) return full;
+    }
+    return null;
+  }
+  const pathDirs = (process.env.PATH ?? "").split(";");
   for (const dir of pathDirs) {
     if (!dir) continue;
     for (const candidate of candidates) {
       const full = resolve(dir, candidate);
-      if (existsSync(full)) return full;
+      if (isRegularFile(full)) return full;
     }
   }
   return null;
@@ -157,16 +172,20 @@ export function spawnAppServer(opts: SpawnAppServerOptions): AppServerProcess {
   });
 
   const stderrChunks: string[] = [];
+  let stderrLen = 0;
   const STDERR_CAP = 16 * 1024;
   child.stderr?.setEncoding("utf8");
   child.stderr?.on("data", (chunk: string) => {
     // Keep the newest bytes within the cap; diagnostics only, never logged
     // verbatim (app-server stderr may contain environment details).
     stderrChunks.push(chunk);
-    const overflow = stderrChunks.join("").length - STDERR_CAP;
-    if (overflow > 0) {
-      let dropped = 0;
-      while (dropped < overflow && stderrChunks.length > 1) dropped += stderrChunks.shift()!.length;
+    stderrLen += chunk.length;
+    while (stderrLen > STDERR_CAP && stderrChunks.length > 1) {
+      stderrLen -= stderrChunks.shift()!.length;
+    }
+    if (stderrChunks.length === 1 && stderrLen > STDERR_CAP) {
+      stderrChunks[0] = stderrChunks[0].slice(-STDERR_CAP);
+      stderrLen = stderrChunks[0].length;
     }
   });
 
@@ -178,12 +197,14 @@ export function spawnAppServer(opts: SpawnAppServerOptions): AppServerProcess {
   const conn = new ManagedRpcConnection(
     {
       write: (frame) => {
-        if (!child.stdin?.writable) return;
+        if (!child.stdin?.writable) {
+          throw new RpcClosedError("app-server stdin is not writable");
+        }
         child.stdin.write(frame);
       },
       close: () => {
         // Fail-safe teardown of the pipes; the child gets a chance to exit
-        // on its own, then the exit handler finalizes.
+        // on its own, then the close handler finalizes.
         try {
           child.stdin?.end();
         } catch {
@@ -200,10 +221,13 @@ export function spawnAppServer(opts: SpawnAppServerOptions): AppServerProcess {
   child.stdout?.on("end", () => conn.handleEnd());
   child.stdout?.on("error", () => conn.handleEnd());
   child.stdin?.on("error", () => {
-    /* EPIPE when the child died first — exit/close handlers take over */
+    /* EPIPE when the child died first — close handler takes over */
   });
 
+  let finalized = false;
   const finalize = (code: number | null, signal: NodeJS.Signals | null) => {
+    if (finalized) return;
+    finalized = true;
     conn.close(
       Object.assign(new Error(`app-server exited (code ${code ?? "null"}, signal ${signal ?? "null"})`), {
         name: "RpcClosedError",
@@ -215,7 +239,9 @@ export function spawnAppServer(opts: SpawnAppServerOptions): AppServerProcess {
       "managed codex app-server process exited",
     );
   };
-  child.once("exit", finalize);
+  // Use "close" (not "exit") so any buffered stdout frames flush through
+  // conn.handleChunk / conn.handleEnd before conn.close tears down RPC.
+  child.once("close", finalize);
   child.once("error", (err) => {
     logger.warn({ err: err.message }, "managed codex app-server spawn error");
     finalize(null, null);
@@ -237,14 +263,4 @@ export function spawnAppServer(opts: SpawnAppServerOptions): AppServerProcess {
       }
     },
   };
-}
-
-/** Convenience for tests/tools: the argv for an app-server subprocess. */
-export function appServerArgv(extra: string[] = []): string[] {
-  return ["app-server", ...extra];
-}
-
-/** Join with the shim log directory convention (exposed for tests). */
-export function shimLogPath(dir: string): string {
-  return join(dir, "shim-rpc.log");
 }

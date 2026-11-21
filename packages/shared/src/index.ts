@@ -209,11 +209,13 @@ export interface TerminalOption {
 export interface RuntimeAgent {
   id: number;
   name: string;
-  runtime: RuntimeId;
+  runtime: string;
   workdir: string | null;
   model: string | null;
   base_url: string | null;
   api_key: string | null;
+  /** Derived on HTTP responses so credentials are never echoed in plaintext. */
+  api_key_configured?: boolean;
   /** JSON object string of extra environment variables. */
   extra_env: string | null;
   instructions: string | null;
@@ -370,13 +372,7 @@ export const PLACEHOLDER_DESCRIPTIONS = [
   WEB_CONSOLE_DESCRIPTION,
 ] as const;
 
-// ---- Chat Rooms: structured collaboration workflows ----
-
-export interface TopologyStep {
-  from: string;
-  to: string;
-  order: number;
-}
+// ---- Chat Rooms: structured collaboration scopes ----
 
 export interface ChatRoom {
   id: number;

@@ -8,8 +8,13 @@ import { STALE_AFTER_MS } from "../config.js";
 import { logger } from "../log.js";
 import type { RuntimeAgent, RuntimeId, RuntimeInstance } from "@conflux/shared";
 import { cleanTerminalEnv, posixQuote, openInTerminal } from "./terminal.js";
-import { RUNTIME_IDS, RUNTIME_REGISTRY, runtimeDescriptor } from "./runtime-registry.js";
-import { HEADLESS_ALLOWED_TOOLS, projectHasConfluxMcp } from "./wake/commands.js";
+import {
+  RUNTIME_IDS,
+  RUNTIME_REGISTRY,
+  isPresetRuntime,
+  runtimeDescriptor,
+} from "./runtime-registry.js";
+import { HEADLESS_ALLOWED_TOOLS } from "./wake/commands.js";
 import { ensureWakeMcpConfig, pinnedMcpLaunch } from "./wake/launcher.js";
 import { getTerminalSettings } from "./app-settings.js";
 import {
@@ -18,9 +23,6 @@ import {
   refreshRuntimeInstances,
 } from "./runtime-instances.js";
 import { getManagedCodexManager } from "./managed-codex/manager.js";
-
-// moved to terminal.ts; re-exported for existing importers
-export { cleanTerminalEnv } from "./terminal.js";
 
 // ---- runtime catalog (AgentRecall-style: static definitions per CLI) ------
 
@@ -60,8 +62,37 @@ interface RuntimeAgentRow {
 function toAgent(row: RuntimeAgentRow): RuntimeAgent {
   return {
     ...row,
-    runtime: row.runtime as RuntimeId,
     execution_mode: row.execution_mode === "managed" ? "managed" : "terminal",
+  };
+}
+
+const SECRET_ENV_KEY_RE = /(?:key|token|secret|password|auth|credential)/i;
+
+/**
+ * Strip plaintext credentials before returning a runtime agent over HTTP.
+ * Internal callers (launch/resume) still read the unredacted SQLite row.
+ */
+export function redactRuntimeAgent(agent: RuntimeAgent): RuntimeAgent {
+  let redactedExtraEnv = agent.extra_env;
+  if (agent.extra_env) {
+    try {
+      const parsed = JSON.parse(agent.extra_env) as Record<string, unknown>;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const masked: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(parsed)) {
+          masked[k] = SECRET_ENV_KEY_RE.test(k) && v ? "••••" : v;
+        }
+        redactedExtraEnv = JSON.stringify(masked);
+      }
+    } catch {
+      redactedExtraEnv = null;
+    }
+  }
+  return {
+    ...agent,
+    api_key: null,
+    api_key_configured: Boolean(agent.api_key),
+    extra_env: redactedExtraEnv,
   };
 }
 
@@ -80,9 +111,14 @@ export function createRuntimeAgent(
     execution_mode?: "terminal" | "managed";
   },
 ): RuntimeAgent {
-  if (!input.name?.trim()) throw new Error("name is required");
-  if (!isRuntimeId(input.runtime)) {
-    throw new Error(`unknown runtime: ${input.runtime} (expected claude | codex)`);
+  if (!input.name?.trim()) {
+    throw Object.assign(new Error("name is required"), { statusCode: 400 });
+  }
+  if (!isPresetRuntime(input.runtime)) {
+    throw Object.assign(
+      new Error(`unknown runtime: ${input.runtime} (expected ${RUNTIME_IDS.join(" | ")})`),
+      { statusCode: 400 },
+    );
   }
   const execution_mode = input.execution_mode ?? "terminal";
   if (execution_mode === "managed" && input.runtime !== "codex") {
@@ -98,15 +134,35 @@ export function createRuntimeAgent(
         throw new Error("not an object");
       }
     } catch {
-      throw new Error('extra_env must be a JSON object, e.g. {"FOO":"bar"}');
+      throw Object.assign(
+        new Error('extra_env must be a JSON object, e.g. {"FOO":"bar"}'),
+        { statusCode: 400 },
+      );
     }
+  }
+  if (
+    input.interval_min !== undefined &&
+    input.interval_min !== null &&
+    !Number.isFinite(input.interval_min)
+  ) {
+    throw Object.assign(new Error("interval_min must be 1..10080 minutes (a week)"), {
+      statusCode: 400,
+    });
   }
   const interval =
     input.interval_min === undefined || input.interval_min === null
       ? null
       : Math.floor(input.interval_min);
   if (interval !== null && (interval < 1 || interval > 10080)) {
-    throw new Error("interval_min must be 1..10080 minutes (a week)");
+    throw Object.assign(new Error("interval_min must be 1..10080 minutes (a week)"), {
+      statusCode: 400,
+    });
+  }
+  if (interval !== null && !runtimeDescriptor(input.runtime).headlessArgs) {
+    throw Object.assign(
+      new Error(`runtime "${input.runtime}" does not support scheduled headless runs`),
+      { statusCode: 400 },
+    );
   }
   const now = nowIso();
   const res = db
@@ -318,7 +374,9 @@ export async function startRuntimeAgent(
     );
   }
   if (agent.workdir && !existsSync(agent.workdir)) {
-    throw new Error(`workdir does not exist: ${agent.workdir}`);
+    throw Object.assign(new Error(`workdir does not exist: ${agent.workdir}`), {
+      statusCode: 400,
+    });
   }
 
   const settings = getTerminalSettings(db);
@@ -351,7 +409,7 @@ export async function startRuntimeAgent(
     );
   const command = buildManagedRuntimeCommand(executable, args, env, platform);
   const envPrefix = Object.entries(env)
-    .filter(([k]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k))
+    .filter(([k, v]) => v !== undefined && /^[A-Za-z_][A-Za-z0-9_]*$/.test(k))
     .map(([k, v]) => `${k}=${posixQuote(String(v))}`)
     .join(" ");
   const fullCommand = envPrefix ? `env ${envPrefix} ${command}` : command;
@@ -377,7 +435,7 @@ export async function startRuntimeAgent(
       execFileSync("tmux", ["new-window", "-t", sessionName, "-n", `attach-${agent.name}`], {
         timeout: 3000,
         stdio: "ignore",
-      }).toString();
+      });
       logger.info({ agentId: id, sessionName }, "runtime agent launched in tmux (injectable)");
       return { started: true, instance };
     } catch {
@@ -542,7 +600,9 @@ export function runScheduledAgent(
     throw new Error(`unsupported platform: ${platform}`);
   }
   if (agent.workdir && !existsSync(agent.workdir)) {
-    throw new Error(`workdir does not exist: ${agent.workdir}`);
+    throw Object.assign(new Error(`workdir does not exist: ${agent.workdir}`), {
+      statusCode: 400,
+    });
   }
 
   const settings = getTerminalSettings(db);
@@ -569,30 +629,32 @@ export function runScheduledAgent(
     agent.runtime === "codex"
       ? [...buildCodexManagedMcpArgs(env, db), ...headlessArgs]
       : [
-          ...(!projectHasConfluxMcp(agent.workdir)
-            ? [
-                "--mcp-config",
-                ensureWakeMcpConfig(dirname(db.name), undefined, managedMcpLaunch(db)),
-              ]
-            : []),
+          "--mcp-config",
+          ensureWakeMcpConfig(dirname(db.name), undefined, managedMcpLaunch(db)),
           ...headlessArgs,
         ];
   const command = buildManagedRuntimeCommand(executable, args, env, platform);
-  const child = spawn(
-    platform === "win32" ? (process.env.comspec ?? "cmd.exe") : "/bin/sh",
-    [...(platform === "win32" ? ["/d", "/s", "/c"] : ["-c"]), command],
-    {
-      // NOT detached: DETACHED_PROCESS children die silently with the spawner
-      // on Windows. windowsHide gives the child its own invisible console —
-      // proven working for headless claude runs.
-      detached: process.platform !== "win32",
-      stdio: "ignore",
-      env,
-      cwd: agent.workdir || undefined,
-      windowsVerbatimArguments: process.platform === "win32",
-      windowsHide: true,
-    },
-  );
+  let child;
+  try {
+    child = spawn(
+      platform === "win32" ? (process.env.comspec ?? "cmd.exe") : "/bin/sh",
+      [...(platform === "win32" ? ["/d", "/s", "/c"] : ["-c"]), command],
+      {
+        // NOT detached: DETACHED_PROCESS children die silently with the spawner
+        // on Windows. windowsHide gives the child its own invisible console —
+        // proven working for headless claude runs.
+        detached: platform !== "win32",
+        stdio: "ignore",
+        env,
+        cwd: agent.workdir || undefined,
+        windowsVerbatimArguments: platform === "win32",
+        windowsHide: true,
+      },
+    );
+  } catch (error) {
+    failRuntimeInstance(db, instance.id);
+    throw error;
+  }
   child.unref();
   const writeCompletion = (write: () => void) => {
     void retryOnBusy(db, () => { if (db.open) write(); }).catch((error) => {
@@ -605,7 +667,7 @@ export function runScheduledAgent(
   child.once("exit", () => {
     writeCompletion(() => {
       db.prepare(
-        "UPDATE runtime_instances SET state = 'ended', ended_at = ?, updated_at = ? WHERE id = ?",
+        "UPDATE runtime_instances SET state = 'ended', ended_at = ?, updated_at = ? WHERE id = ? AND state != 'failed'",
       ).run(nowIso(), nowIso(), instance.id);
     });
   });

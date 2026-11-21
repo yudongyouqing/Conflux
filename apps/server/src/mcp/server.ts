@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import type { RuntimeId } from "@conflux/shared";
 
 import { resolveConfig, type Scope } from "../config.js";
-import { isLockError, openDb, publicError, type DB } from "../core/db.js";
+import { isLockError, openDb, publicError, stopWalCheckpoint, type DB } from "../core/db.js";
 import {
   registerSession,
   listSessions,
@@ -203,6 +203,7 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
       // transient sqlite lock contention must not prevent database cleanup
     }
     try {
+      stopWalCheckpoint(db);
       if (db.open) db.close();
     } catch {
       // the database may already be closed by an outer shutdown path
@@ -333,13 +334,17 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
         return { ok: false, error: publicError(err).message };
       }
       const message = err instanceof Error ? err.message : String(err);
-      logAudit(db, {
-        caller_session: sessionId,
-        interface: "mcp",
-        action,
-        args,
-        result: { error: message },
-      });
+      try {
+        logAudit(db, {
+          caller_session: sessionId,
+          interface: "mcp",
+          action,
+          args,
+          result: { error: message },
+        });
+      } catch (auditErr) {
+        logger.warn({ err: auditErr, action, session: sessionId }, "failed to audit MCP error");
+      }
       return { ok: false, error: message };
     }
   }
@@ -382,23 +387,26 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
       },
     },
     async ({ name, description, skills, priority }) => {
-      const r = await withAudit("register_session", { name, description, skills, priority }, () => {
-        const session = registerSession(db, {
-          id: sessionId,
-          name,
-          description: description ?? null,
-          project_dir: projectDir,
-          priority: priority ?? null,
-        });
-        // Merge (not replace) so hook metadata (claude_pid, named, …) survives.
-        if (skills && skills.length > 0) {
-          mergeSessionMeta(db, sessionId, { agent_card: { skills } });
-        }
-        // An explicitly chosen name is user intent — protect it from the
-        // hook's directory naming on the next prompt (#103).
-        mergeSessionMeta(db, sessionId, { user_named: true });
-        return session;
-      });
+      const r = await withAudit("register_session", { name, description, skills, priority }, () =>
+        db
+          .transaction(() => {
+            const session = registerSession(db, {
+              id: sessionId,
+              name,
+              description: description ?? null,
+              project_dir: projectDir,
+              priority: priority ?? null,
+            });
+            // Merge (not replace) so hook metadata (claude_pid, named, …) survives,
+            // and protect the explicitly chosen name from directory auto-naming.
+            mergeSessionMeta(db, sessionId, {
+              ...(skills && skills.length > 0 ? { agent_card: { skills } } : {}),
+              user_named: true,
+            });
+            return getSession(db, sessionId) ?? session;
+          })
+          .immediate(),
+      );
       return json(r.ok ? { session_id: sessionId, session: r.result } : { error: r.error });
     },
   );
@@ -634,7 +642,7 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
     },
   );
 
-  // 8b. ask_session_sync — synchronous variant (#102): wait in-turn for the
+  // 8b. ask_session_sync — synchronous variant: wait in-turn for the
   //  reply. The asking AI gets the answer as the tool result of the SAME
   //  turn; on timeout the message stays delivered and the async layers
   //  (hook push / OS notification / check_replies) take over.
@@ -681,7 +689,7 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
     },
   );
 
-  // 8c. Room orchestration tools (#152) — agents coordinate through rooms
+  // 8c. Room orchestration tools — agents coordinate through rooms
   server.registerTool(
     "room_write",
     {

@@ -32,23 +32,53 @@ export function registerWakeStreamRoutes(app: FastifyInstance, ctx: ServerContex
 
     let offset = 0;
     let decoder = new StringDecoder("utf8");
-    const timer = setInterval(() => {
+    let tail = "";
+    let closed = false;
+    let timer: NodeJS.Timeout | undefined;
+    let hb: NodeJS.Timeout | undefined;
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      if (timer) clearInterval(timer);
+      if (hb) clearInterval(hb);
+    };
+    const safeWrite = (payload: string): boolean => {
+      if (closed || reply.raw.writableEnded) return false;
+      try {
+        reply.raw.write(payload);
+        return true;
+      } catch {
+        cleanup();
+        return false;
+      }
+    };
+
+    timer = setInterval(() => {
+      if (closed) return;
       try {
         if (!existsSync(logPath)) return;
         const size = statSync(logPath).size;
-        if (size < offset) { offset = 0; decoder = new StringDecoder("utf8"); }
+        if (size < offset) {
+          offset = 0;
+          decoder = new StringDecoder("utf8");
+          tail = "";
+        }
         if (size === offset) return;
         const fd = openSync(logPath, "r");
         const buf = Buffer.alloc(Math.min(size - offset, 64 * 1024));
         let count: number;
-        try { count = readSync(fd, buf, 0, buf.length, offset); }
-        finally { closeSync(fd); }
+        try {
+          count = readSync(fd, buf, 0, buf.length, offset);
+        } finally {
+          closeSync(fd);
+        }
         offset += count;
         // SSE data lines must not contain raw newlines — encode as JSON
-        const chunk = JSON.stringify(decoder.write(buf.subarray(0, count)));
-        reply.raw.write(`event: chunk\ndata: ${chunk}\n\n`);
-        if (/\[wake ended [^\]]+\]\s*$/.test(buf.subarray(0, count).toString("utf8"))) {
-          reply.raw.write(`event: ended\ndata: {}\n\n`);
+        const decoded = decoder.write(buf.subarray(0, count));
+        if (!safeWrite(`event: chunk\ndata: ${JSON.stringify(decoded)}\n\n`)) return;
+        tail = (tail + decoded).slice(-128);
+        if (/\[wake ended [^\]]+\]\s*$/.test(tail)) {
+          safeWrite(`event: ended\ndata: {}\n\n`);
         }
       } catch {
         // file rotated / deleted — next tick will recover
@@ -56,12 +86,11 @@ export function registerWakeStreamRoutes(app: FastifyInstance, ctx: ServerContex
     }, 1000);
 
     // heartbeat keeps intermediaries from timing out
-    const hb = setInterval(() => reply.raw.write(`: hb\n\n`), 15_000);
+    hb = setInterval(() => {
+      safeWrite(`: hb\n\n`);
+    }, 15_000);
 
-    reply.raw.on("close", () => {
-      clearInterval(timer);
-      clearInterval(hb);
-    });
+    reply.raw.on("close", cleanup);
   });
 
   // convenience: return the log file content as JSON (for non-SSE consumers)

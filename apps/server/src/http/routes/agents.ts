@@ -153,7 +153,7 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: ServerContext): v
   // DELETE /agents/:id
   app.delete<{ Params: { id: string } }>("/agents/:id", {}, async (req, reply) => {
     try {
-      const ok = deleteAgent(db, resourceId(req.params.id));
+      const ok = await write(() => deleteAgent(db, resourceId(req.params.id)));
       if (!ok) return sendHttpError(reply, 404, "agent not found");
       return reply.send({ deleted: true });
     } catch (err) {
@@ -197,7 +197,9 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: ServerContext): v
       let conv;
       if (req.body.conversation_id) {
         conv = getConversation(db, req.body.conversation_id);
-        if (!conv) return sendHttpError(reply, 404, "conversation not found");
+        if (!conv || conv.agent_id !== agentId) {
+          return sendHttpError(reply, 404, "conversation not found");
+        }
       } else {
         conv = await write(() =>
           createConversation(db, {
@@ -221,6 +223,7 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: ServerContext): v
       }));
 
       // SSE headers
+      reply.hijack();
       reply.raw.writeHead(200, {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
@@ -228,8 +231,17 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: ServerContext): v
       });
       reply.raw.setTimeout(0); // disable request timeout for long streams
 
+      let clientClosed = false;
+      reply.raw.on("close", () => {
+        clientClosed = true;
+      });
       const sse = (data: unknown) => {
-        reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
+        if (clientClosed || reply.raw.writableEnded) return;
+        try {
+          reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
+        } catch {
+          clientClosed = true;
+        }
       };
 
       sse({ type: "start", conversation_id: conv.id });
@@ -238,6 +250,7 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: ServerContext): v
         let fullResponse = "";
 
         for await (const event of runAgentChat(db, agent, llmMessages)) {
+          if (clientClosed) break;
           switch (event.type) {
             case "text":
               fullResponse += event.content;
@@ -252,25 +265,27 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: ServerContext): v
           }
         }
 
-        const assistantTurn = await write(() =>
-          addTurn(db, {
-            conversation_id: conv.id,
-            role: "assistant",
-            content: fullResponse || "(no response)",
-          }),
-        );
+        if (!clientClosed) {
+          const assistantTurn = await write(() =>
+            addTurn(db, {
+              conversation_id: conv.id,
+              role: "assistant",
+              content: fullResponse || "(no response)",
+            }),
+          );
 
-        sse({ type: "done", conversation_id: conv.id, turn_id: assistantTurn.id });
-        logger.info(
-          { agentId, convId: conv.id, responseLen: fullResponse.length },
-          "chat completed",
-        );
+          sse({ type: "done", conversation_id: conv.id, turn_id: assistantTurn.id });
+          logger.info(
+            { agentId, convId: conv.id, responseLen: fullResponse.length },
+            "chat completed",
+          );
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         logger.error({ err, agentId }, "LLM stream error");
         sse({ type: "error", message: msg });
       } finally {
-        reply.raw.end();
+        if (!reply.raw.writableEnded) reply.raw.end();
       }
     },
   );
@@ -298,7 +313,7 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: ServerContext): v
   // DELETE /conversations/:id
   app.delete<{ Params: { id: string } }>("/conversations/:id", {}, async (req, reply) => {
     try {
-      const ok = deleteConversation(db, resourceId(req.params.id));
+      const ok = await write(() => deleteConversation(db, resourceId(req.params.id)));
       if (!ok) return sendHttpError(reply, 404, "conversation not found");
       return reply.send({ deleted: true });
     } catch (err) {

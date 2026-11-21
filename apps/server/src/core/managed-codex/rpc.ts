@@ -122,11 +122,17 @@ export class ManagedRpcConnection {
   /** Send a client request; resolves with the peer's `result`. */
   request<T = unknown>(method: string, params?: unknown, options: RequestOptions = {}): Promise<T> {
     if (this.closed) return Promise.reject(new RpcClosedError());
+    if (options.signal?.aborted) {
+      return Promise.reject(
+        Object.assign(new Error(`request aborted: ${method}`), { name: "AbortError" }),
+      );
+    }
     if (this.pending.size >= this.maxInFlight) {
       return Promise.reject(new RpcInFlightLimitError(this.maxInFlight));
     }
     const id = this.nextId++;
     const timeoutMs = options.timeoutMs ?? this.requestTimeoutMs;
+    const wire = JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n";
     return new Promise<T>((resolve, reject) => {
       const entry: PendingEntry = {
         method,
@@ -136,6 +142,7 @@ export class ManagedRpcConnection {
       if (timeoutMs > 0) {
         entry.timer = setTimeout(() => {
           this.pending.delete(id);
+          detachAbort(entry);
           reject(new RpcTimeoutError(method, timeoutMs));
         }, timeoutMs);
       }
@@ -148,14 +155,17 @@ export class ManagedRpcConnection {
           if (entry.timer) clearTimeout(entry.timer);
           reject(Object.assign(new Error(`request aborted: ${method}`), { name: "AbortError" }));
         };
-        if (signal.aborted) {
-          entry.onAbort();
-          return;
-        }
         signal.addEventListener("abort", entry.onAbort, { once: true });
       }
       this.pending.set(id, entry);
-      this.transport.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+      try {
+        this.transport.write(wire);
+      } catch (err) {
+        this.pending.delete(id);
+        if (entry.timer) clearTimeout(entry.timer);
+        detachAbort(entry);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
     });
   }
 
@@ -165,22 +175,37 @@ export class ManagedRpcConnection {
     this.transport.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n");
   }
 
+  /** Reject a server-initiated request with a standard JSON-RPC 2.0 error frame. */
+  respondError(id: number | string, code: number, message: string, data?: unknown): void {
+    if (this.closed) return;
+    const error = data !== undefined ? { code, message, data } : { code, message };
+    this.transport.write(JSON.stringify({ jsonrpc: "2.0", id, error }) + "\n");
+  }
+
   /** Feed raw bytes from the peer's stdout. */
   handleChunk(chunk: string | Buffer): void {
     if (this.closed) return;
     const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
     this.buffer += text;
-    let newline = this.buffer.indexOf("\n");
+    let start = 0;
+    let newline = this.buffer.indexOf("\n", start);
     while (newline !== -1) {
-      const line = this.buffer.slice(0, newline);
-      this.buffer = this.buffer.slice(newline + 1);
+      const line = this.buffer.slice(start, newline);
+      start = newline + 1;
       this.handleLine(line.replace(/\r$/, ""));
       if (this.closed) return;
-      newline = this.buffer.indexOf("\n");
+      newline = this.buffer.indexOf("\n", start);
     }
-    if (this.buffer.length > this.maxFrameBytes) {
+    if (start > 0) this.buffer = this.buffer.slice(start);
+    if (this.exceedsFrameLimit(this.buffer)) {
       this.failAll(new RpcFrameError(`frame exceeds ${this.maxFrameBytes} bytes`));
     }
+  }
+
+  private exceedsFrameLimit(text: string): boolean {
+    if (text.length > this.maxFrameBytes) return true;
+    if (text.length * 3 <= this.maxFrameBytes) return false;
+    return Buffer.byteLength(text, "utf8") > this.maxFrameBytes;
   }
 
   /** The peer's stdout ended without more bytes. */
@@ -196,7 +221,7 @@ export class ManagedRpcConnection {
 
   private handleLine(line: string): void {
     if (line.trim().length === 0) return;
-    if (line.length > this.maxFrameBytes) {
+    if (this.exceedsFrameLimit(line)) {
       this.failAll(new RpcFrameError(`frame exceeds ${this.maxFrameBytes} bytes`));
       return;
     }

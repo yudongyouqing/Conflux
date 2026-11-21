@@ -19,6 +19,23 @@ export const RUNTIME_TOKENS: Record<"claude" | "codex", string[]> = {
   codex: ["codex", "codex.exe", "codex.cmd", "@openai/codex", "codex-cli"],
 };
 
+const COMPILED_TOKENS: Record<"claude" | "codex", Array<{ candidate: string; regex: RegExp | null }>> = {
+  claude: RUNTIME_TOKENS.claude.map((candidate) => ({
+    candidate,
+    regex:
+      candidate.includes("/") || candidate.includes("-")
+        ? new RegExp("(?:^|/)" + candidate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?:/|$)")
+        : null,
+  })),
+  codex: RUNTIME_TOKENS.codex.map((candidate) => ({
+    candidate,
+    regex:
+      candidate.includes("/") || candidate.includes("-")
+        ? new RegExp("(?:^|/)" + candidate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?:/|$)")
+        : null,
+  })),
+};
+
 /** Does this command line belong to the selected runtime process? */
 export function isRuntimeCommand(command: string, runtime: RuntimeId): boolean {
   const tokens = command.match(/"[^"]+"|\S+/g) ?? [];
@@ -26,13 +43,12 @@ export function isRuntimeCommand(command: string, runtime: RuntimeId): boolean {
     const token = t.toLowerCase().replace(/^"|"$/g, "");
     const normalized = token.replace(/\\/g, "/");
     const basename = normalized.split("/").pop() ?? "";
-    return RUNTIME_TOKENS[runtime].some((candidate) => {
-      if (candidate.includes("/") || candidate.includes("-")) {
+    return COMPILED_TOKENS[runtime].some(({ candidate, regex }) => {
+      if (regex) {
         // path-shaped tokens (@openai/codex) AND dashed package names
         // (codex-cli) match as a bounded path segment, never as a
         // substring — my-codex-notes.md is not a Codex process
-        const re = new RegExp("(?:^|/)" + candidate + "(?:/|$)");
-        return re.test(normalized);
+        return regex.test(normalized);
       }
       // bare names match only as the command's basename
       return basename === candidate;

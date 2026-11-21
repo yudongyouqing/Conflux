@@ -78,13 +78,17 @@ export function registerSessionDirectory(
     async ({ query, project_dir, runtime }) => {
       opts.beforeRead();
       const result = findSessionCandidates(opts.db, query, { project_dir, runtime });
-      logAudit(opts.db, {
-        caller_session: opts.currentSessionId(),
-        interface: "mcp",
-        action: "find_session_candidates",
-        args: { query_length: query.length },
-        result: { count: result.candidates.length, match: result.match },
-      });
+      try {
+        logAudit(opts.db, {
+          caller_session: opts.currentSessionId(),
+          interface: "mcp",
+          action: "find_session_candidates",
+          args: { query_length: query.length },
+          result: { count: result.candidates.length, match: result.match },
+        });
+      } catch (auditErr) {
+        logger.warn({ err: auditErr }, "failed to audit find_session_candidates");
+      }
       return {
         content: [{ type: "text", text: JSON.stringify(result) }],
         structuredContent: result,
@@ -113,13 +117,17 @@ export function registerSessionDirectory(
   const read = (action: string, status: Status = "all") => {
     opts.beforeRead();
     const sessions = readSessionDirectory(opts.db, opts.currentSessionId(), status);
-    logAudit(opts.db, {
-      caller_session: opts.currentSessionId(),
-      interface: "mcp",
-      action,
-      args: { status },
-      result: { count: sessions.length },
-    });
+    try {
+      logAudit(opts.db, {
+        caller_session: opts.currentSessionId(),
+        interface: "mcp",
+        action,
+        args: { status },
+        result: { count: sessions.length },
+      });
+    } catch (auditErr) {
+      logger.warn({ err: auditErr, action }, "failed to audit session directory read");
+    }
     return sessions;
   };
 

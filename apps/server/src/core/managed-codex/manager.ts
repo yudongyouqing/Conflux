@@ -1,11 +1,9 @@
 import type { DB } from "../db.js";
-import type { RuntimeAgent } from "@conflux/shared";
 import {
   ManagedExecutor,
   type ManagedManagerOptions,
 } from "../managed/executor.js";
-import type { ManagedLaunchConfig } from "../managed/adapter.js";
-import { codexAdapter, defaultCodexLaunch } from "./adapter.js";
+import { codexAdapter } from "./adapter.js";
 
 /**
  * The managed Codex executor. All scheduling, state and recovery semantics
@@ -21,11 +19,6 @@ export class ManagedCodexManager extends ManagedExecutor {
   constructor(db: DB, opts: ManagedManagerOptions = {}) {
     super(db, { ...opts, adapter: codexAdapter });
   }
-}
-
-/** Resolve the default app-server launch from settings/env, terminal-safe. */
-export function defaultLaunch(db: DB, agent: RuntimeAgent): ManagedLaunchConfig {
-  return defaultCodexLaunch(db, agent);
 }
 
 // ---- process singleton ----
