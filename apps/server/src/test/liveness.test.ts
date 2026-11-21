@@ -7,10 +7,6 @@ import {
   runtimePidsFrom,
   probeRuntimePids,
   reconcileRuntimeLiveness,
-  isClaudeCommand,
-  claudePidsFrom,
-  probeClaudePids,
-  reconcileLiveness,
 } from "../core/liveness.js";
 import { claimMcpConnection, createMcpLeaseMetadata } from "../core/mcp-liveness.js";
 import { registerSession, endSession } from "../core/sessions.js";
@@ -35,18 +31,19 @@ test("parseProcessLines reads both Get-CimInstance and ps formats", () => {
   assert.equal(posix[0].pid, 789);
 });
 
-test("isClaudeCommand matches claude invocation shapes, rejects lookalikes", () => {
-  assert.ok(isClaudeCommand("cmd /c claude"));
+test("isRuntimeCommand matches claude invocation shapes, rejects lookalikes", () => {
+  assert.ok(isRuntimeCommand("cmd /c claude", "claude"));
   assert.ok(
-    isClaudeCommand(
+    isRuntimeCommand(
       '"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\x\\node_modules\\@anthropic-ai\\claude-code\\cli.js"',
+      "claude",
     ),
   );
-  assert.ok(isClaudeCommand("C:\\tools\\claude.exe --resume 123"));
-  assert.ok(isClaudeCommand("/usr/local/bin/claude"));
-  assert.ok(!isClaudeCommand("node server.js"));
-  assert.ok(!isClaudeCommand("vim my-claude-notes.md"), "similar filename ≠ claude process");
-  assert.ok(!isClaudeCommand("powershell -Command Get-CimInstance"));
+  assert.ok(isRuntimeCommand("C:\\tools\\claude.exe --resume 123", "claude"));
+  assert.ok(isRuntimeCommand("/usr/local/bin/claude", "claude"));
+  assert.ok(!isRuntimeCommand("node server.js", "claude"));
+  assert.ok(!isRuntimeCommand("vim my-claude-notes.md", "claude"), "similar filename ≠ claude process");
+  assert.ok(!isRuntimeCommand("powershell -Command Get-CimInstance", "claude"));
 });
 
 test("isRuntimeCommand matches Codex invocation shapes, rejects lookalikes", () => {
@@ -90,28 +87,31 @@ test("probeRuntimePids returns both runtime PID sets", async () => {
   assert.deepEqual([...pids!.codex].sort(), [20, 30]);
 });
 
-test("claudePidsFrom dedups pids across entries", () => {
-  const pids = claudePidsFrom([
-    { pid: 1, command: "cmd /c claude" },
-    { pid: 1, command: "cmd /c claude --resume x" },
-    { pid: 2, command: "node app.js" },
-    { pid: 3, command: "/usr/bin/claude" },
-  ]);
+test("runtimePidsFrom dedups pids across entries", () => {
+  const pids = runtimePidsFrom(
+    [
+      { pid: 1, command: "cmd /c claude" },
+      { pid: 1, command: "cmd /c claude --resume x" },
+      { pid: 2, command: "node app.js" },
+      { pid: 3, command: "/usr/bin/claude" },
+    ],
+    "claude",
+  );
   assert.deepEqual([...pids].sort(), [1, 3]);
 });
 
-test("probeClaudePids returns null on runner failure (TTL fallback stays in charge)", async () => {
+test("probeRuntimePids returns null on runner failure (TTL fallback stays in charge)", async () => {
   const failing = async () => {
     throw new Error("powershell unavailable");
   };
-  assert.equal(await probeClaudePids(failing, "win32"), null);
+  assert.equal(await probeRuntimePids(failing, "win32"), null);
 
   const fake = async () => "10 cmd /c claude\n20 node x.js";
-  const pids = await probeClaudePids(fake as never, "win32");
-  assert.deepEqual([...pids!], [10]);
+  const pids = await probeRuntimePids(fake as never, "win32");
+  assert.deepEqual([...pids!.claude], [10]);
 });
 
-test("reconcileLiveness: live pid stays active + refreshed; dead pid reaped immediately; pidless rows untouched", () => {
+test("reconcileRuntimeLiveness: live pid stays active + refreshed; dead pid reaped immediately; pidless rows untouched", () => {
   const mk = (id: string, pid: number | null) =>
     registerSession(db, {
       id,
@@ -131,7 +131,10 @@ test("reconcileLiveness: live pid stays active + refreshed; dead pid reaped imme
     `UPDATE sessions SET last_heartbeat_at = ?, status = 'active' WHERE id != 'already-stale'`,
   ).run(new Date(Date.now() - 3600_000).toISOString());
 
-  const { refreshed, reaped } = reconcileLiveness(db, new Set([100]));
+  const { refreshed, reaped } = reconcileRuntimeLiveness(db, {
+    claude: new Set([100]),
+    codex: new Set(),
+  });
   assert.ok(refreshed >= 1);
   assert.ok(reaped >= 1);
 
@@ -280,10 +283,10 @@ test("reconcileRuntimeLiveness does not overwrite leases claimed after the PID s
   assert.equal(row(sessionIds[1]).last_heartbeat_at, claimAt.toISOString());
 });
 
-test("reconcileLiveness never touches the web console", () => {
+test("reconcileRuntimeLiveness never touches the web console", () => {
   registerSession(db, { id: "web-console", name: "Web 控制台", description: "x", metadata: null });
   endSession(db, "web-console");
-  reconcileLiveness(db, new Set()); // would reap everything pid-tagged & active
+  reconcileRuntimeLiveness(db, { claude: new Set(), codex: new Set() }); // would reap everything pid-tagged & active
   assert.equal(
     (db.prepare(`SELECT status FROM sessions WHERE id = 'web-console'`).get() as { status: string })
       .status,

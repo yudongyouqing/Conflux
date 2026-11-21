@@ -255,14 +255,18 @@ export async function runtimeProcInfo(pid: number): Promise<RuntimeProcInfo | nu
   let cwd: string | null = null;
   let startedAtMs: number | null = null;
   try {
-    const { stdout } = await execFileAsync("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"]);
+    const { stdout } = await execFileAsync("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"], {
+      timeout: 5_000,
+    });
     const line = stdout.split("\n").find((l) => l.startsWith("n/"));
     if (line) cwd = line.slice(1);
   } catch {
     // lsof failed — cwd unknown
   }
   try {
-    const { stdout } = await execFileAsync("/bin/ps", ["-o", "lstart=", "-p", String(pid)]);
+    const { stdout } = await execFileAsync("/bin/ps", ["-o", "lstart=", "-p", String(pid)], {
+      timeout: 5_000,
+    });
     const t = Date.parse(stdout.trim());
     if (!Number.isNaN(t)) startedAtMs = t;
   } catch {

@@ -62,10 +62,10 @@ export async function askAndReplySync(db: DB, input: SyncAskInput): Promise<Sync
   const wake = r.wake;
 
   const stmt = db.prepare(`SELECT reply FROM messages WHERE id = ?`);
-  while (Date.now() - started < timeoutMs) {
-    await sleep(pollMs);
+  while (true) {
     const row = stmt.get(messageId) as { reply: string | null } | undefined;
-    if (row?.reply) {
+    if (!row) break;
+    if (row.reply !== null) {
       return {
         status: "replied",
         message_id: messageId,
@@ -74,6 +74,8 @@ export async function askAndReplySync(db: DB, input: SyncAskInput): Promise<Sync
         wake,
       };
     }
+    if (Date.now() - started >= timeoutMs) break;
+    await sleep(pollMs);
   }
   return {
     status: "timeout",

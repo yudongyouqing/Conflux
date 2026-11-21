@@ -15,13 +15,28 @@ export function tmuxSessionName(agentId: number | string): string {
   return `conflux/agent-${agentId}`;
 }
 
+const TMUX_AVAIL_TTL_MS = 30_000;
+let tmuxAvailCache: { value: boolean; at: number } | null = null;
+
 export function tmuxAvailable(): boolean {
+  const now = Date.now();
+  if (tmuxAvailCache && now - tmuxAvailCache.at < TMUX_AVAIL_TTL_MS) {
+    return tmuxAvailCache.value;
+  }
+  let ok: boolean;
   try {
     execFileSync("tmux", ["-V"], { timeout: 1000, stdio: "ignore" });
-    return true;
+    ok = true;
   } catch {
-    return false;
+    ok = false;
   }
+  tmuxAvailCache = { value: ok, at: now };
+  return ok;
+}
+
+/** Prefix bare session names with `=` so tmux performs exact matching (never prefix). */
+function exactTarget(target: string): string {
+  return target.startsWith("%") || target.startsWith("=") ? target : `=${target}`;
 }
 
 // ---- typed delivery IO --------------------------------------------------
@@ -81,7 +96,10 @@ export const realTmuxIO: TmuxIO = {
   available: tmuxAvailable,
   alive: (name) => {
     try {
-      execFileSync("tmux", ["has-session", "-t", name], { timeout: 1000, stdio: "ignore" });
+      execFileSync("tmux", ["has-session", "-t", exactTarget(name)], {
+        timeout: 1000,
+        stdio: "ignore",
+      });
       return true;
     } catch {
       return false;
@@ -89,13 +107,13 @@ export const realTmuxIO: TmuxIO = {
   },
   paneForPid(pid) {
     try {
-      const tty = execFileSync("ps", ["-o", "tty=", "-p", String(pid)], { timeout: 1000 })
+      const psOut = execFileSync("ps", ["-o", "tty=,comm=", "-p", String(pid)], { timeout: 1000 })
         .toString()
         .trim();
+      const match = /^(\S+)\s+(.+)$/.exec(psOut);
+      if (!match) return null;
+      const [, tty, comm] = match;
       if (!tty || tty === "?" || tty === "??") return null;
-      const comm = execFileSync("ps", ["-o", "comm=", "-p", String(pid)], { timeout: 1000 })
-        .toString()
-        .trim();
       const list = execFileSync(
         "tmux",
         ["list-panes", "-a", "-F", "#{pane_id} #{pane_tty} #{pane_current_command}"],
@@ -109,11 +127,12 @@ export const realTmuxIO: TmuxIO = {
   },
   send: (target, text) => {
     try {
-      execFileSync("tmux", ["send-keys", "-t", target, "-l", text], {
+      const exact = exactTarget(target);
+      execFileSync("tmux", ["send-keys", "-t", exact, "-l", "--", text], {
         timeout: 1000,
         stdio: "ignore",
       });
-      execFileSync("tmux", ["send-keys", "-t", target, "Enter"], {
+      execFileSync("tmux", ["send-keys", "-t", exact, "Enter"], {
         timeout: 1000,
         stdio: "ignore",
       });
@@ -141,7 +160,7 @@ export const realTmuxIO: TmuxIO = {
   },
   capture: (target) => {
     try {
-      return execFileSync("tmux", ["capture-pane", "-p", "-t", target], {
+      return execFileSync("tmux", ["capture-pane", "-p", "-t", exactTarget(target)], {
         timeout: 1000,
       }).toString();
     } catch {
@@ -151,11 +170,6 @@ export const realTmuxIO: TmuxIO = {
 };
 
 // ---- legacy helper forms over the IO layer -------------------------------------
-
-/** Alive check by Conflux session id (agent id). */
-export function tmuxSessionAlive(sessionId: string): boolean {
-  return realTmuxIO.alive(tmuxSessionName(sessionId));
-}
 
 /**
  * Type a prompt into a Conflux-managed tmux session (by agent id) —

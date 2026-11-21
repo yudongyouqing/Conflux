@@ -44,11 +44,6 @@ export function parseProcessLines(output: string): ProcessEntry[] {
 // re-exported here for the existing importers
 export { isRuntimeCommand } from "./runtime-identity.js";
 
-/** Does this command line belong to Claude Code? (compatibility wrapper) */
-export function isClaudeCommand(command: string): boolean {
-  return isRuntimeCommand(command, "claude");
-}
-
 export function runtimePidsFrom(entries: ProcessEntry[], runtime: RuntimeId): Set<number> {
   const pids = new Set<number>();
   for (const e of entries) {
@@ -57,14 +52,14 @@ export function runtimePidsFrom(entries: ProcessEntry[], runtime: RuntimeId): Se
   return pids;
 }
 
-export function claudePidsFrom(entries: ProcessEntry[]): Set<number> {
-  return runtimePidsFrom(entries, "claude");
-}
-
 export type ProcessRunner = (command: string, args: string[]) => Promise<string>;
 
 const defaultRunner: ProcessRunner = (command, args) =>
-  execFileAsync(command, args).then((r) => r.stdout);
+  execFileAsync(command, args, {
+    timeout: 10_000,
+    maxBuffer: 16 * 1024 * 1024,
+    windowsHide: true,
+  }).then((r) => r.stdout);
 
 /** Snapshot of live Claude/Codex pids, or null when the probe itself failed. */
 export async function probeRuntimePids(
@@ -89,15 +84,6 @@ export async function probeRuntimePids(
     logger.warn({ err: err instanceof Error ? err.message : String(err) }, "liveness probe failed");
     return null;
   }
-}
-
-/** Snapshot of live Claude pids (compatibility wrapper). */
-export async function probeClaudePids(
-  runner: ProcessRunner = defaultRunner,
-  platform: NodeJS.Platform = process.platform,
-): Promise<Set<number> | null> {
-  const snapshot = await probeRuntimePids(runner, platform);
-  return snapshot?.claude ?? null;
 }
 
 function metadataRuntimePid(
@@ -129,10 +115,18 @@ export function reconcileRuntimeLiveness(
 ): { refreshed: number; reaped: number } {
   const rows = db
     .prepare(
-      `SELECT id, status, metadata FROM sessions
-       WHERE metadata LIKE '%"runtime_pid":%' OR metadata LIKE '%"claude_pid":%'`,
+      `SELECT id, status, runtime, runtime_pid, metadata FROM sessions
+       WHERE runtime_pid IS NOT NULL
+          OR metadata LIKE '%"runtime_pid":%'
+          OR metadata LIKE '%"claude_pid":%'`,
     )
-    .all() as { id: string; status: string; metadata: string | null }[];
+    .all() as {
+    id: string;
+    status: string;
+    runtime: string | null;
+    runtime_pid: number | null;
+    metadata: string | null;
+  }[];
 
   let refreshed = 0;
   let reaped = 0;
@@ -140,13 +134,13 @@ export function reconcileRuntimeLiveness(
   const refresh = db.prepare(
     `UPDATE sessions
      SET status = 'active', last_heartbeat_at = ?
-     WHERE id = ? AND metadata NOT LIKE '%"mcp_connection_id"%'`,
+     WHERE id = ? AND COALESCE(metadata, '') NOT LIKE '%"mcp_connection_id"%'`,
   );
   const reap = db.prepare(
     `UPDATE sessions
      SET status = 'stale'
      WHERE id = ? AND status = 'active'
-       AND metadata NOT LIKE '%"mcp_connection_id"%'`,
+       AND COALESCE(metadata, '') NOT LIKE '%"mcp_connection_id"%'`,
   );
 
   for (const row of rows) {
@@ -157,7 +151,12 @@ export function reconcileRuntimeLiveness(
       const metadata = parsed as Record<string, unknown>;
       // MCP lease sessions are managed by MCP heartbeats and lease TTL, not PID probing.
       if (hasMcpConnection(metadata)) continue;
-      const identity = metadataRuntimePid(metadata);
+      const colRuntime: RuntimeId | null =
+        row.runtime === "codex" || row.runtime === "claude" ? row.runtime : null;
+      const identity =
+        colRuntime && typeof row.runtime_pid === "number" && Number.isSafeInteger(row.runtime_pid) && row.runtime_pid > 0
+          ? { runtime: colRuntime, pid: row.runtime_pid }
+          : metadataRuntimePid(metadata);
       if (!identity) continue;
       if (livePids[identity.runtime].has(identity.pid)) {
         const result = refresh.run(nowIso, row.id);
@@ -172,13 +171,4 @@ export function reconcileRuntimeLiveness(
     }
   }
   return { refreshed, reaped };
-}
-
-/** Reconcile only the legacy Claude pid set (compatibility wrapper). */
-export function reconcileLiveness(
-  db: DB,
-  livePids: Set<number>,
-  now: Date = new Date(),
-): { refreshed: number; reaped: number } {
-  return reconcileRuntimeLiveness(db, { claude: livePids, codex: new Set<number>() }, now);
 }

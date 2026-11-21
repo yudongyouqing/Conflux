@@ -1,5 +1,6 @@
 import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { WEB_CONSOLE_ID } from "@conflux/shared";
 import type { DB } from "./db.js";
 import { exportData } from "./data-transfer.js";
 
@@ -36,13 +37,13 @@ export interface ClearResult {
 /** How many clear-backup-*.json files to keep in the backup dir. */
 export const CLEAR_BACKUP_KEEP = 5;
 
-function count(db: DB, sql: string): number {
-  return (db.prepare(sql).get() as { n: number }).n;
+function count(db: DB, sql: string, ...params: unknown[]): number {
+  return (db.prepare(sql).get(...params) as { n: number }).n;
 }
 
 export function getClearableCounts(db: DB): ClearableCounts {
   return {
-    sessions: count(db, "SELECT COUNT(*) AS n FROM sessions WHERE id != 'web-console'"),
+    sessions: count(db, "SELECT COUNT(*) AS n FROM sessions WHERE id != ?", WEB_CONSOLE_ID),
     messages: count(db, "SELECT COUNT(*) AS n FROM messages"),
     contextEntries: count(db, "SELECT COUNT(*) AS n FROM context_entries"),
   };
@@ -146,13 +147,19 @@ function applyDeletes(db: DB, categories: ClearCategories): void {
   if (categories.sessions) {
     // FK cascade (foreign_keys = ON) wipes each session's messages and
     // context entries; edges carry no FK, so orphaned ones go manually.
-    db.prepare("DELETE FROM sessions WHERE id != 'web-console'").run();
+    db.prepare("DELETE FROM sessions WHERE id != ?").run(WEB_CONSOLE_ID);
     db.prepare(
       `DELETE FROM edges WHERE from_session NOT IN (SELECT id FROM sessions)
         OR to_session NOT IN (SELECT id FROM sessions)`,
     ).run();
-    // pid → conversation markers now point at nothing
+    // pid → conversation markers and managed/runtime references now point at nothing
     db.prepare(`DELETE FROM managed_codex_bindings WHERE session_id NOT IN (SELECT id FROM sessions)`).run();
+    db.prepare(
+      `DELETE FROM managed_codex_events WHERE instance_id NOT IN (SELECT instance_id FROM managed_codex_bindings)`,
+    ).run();
+    db.prepare(
+      `UPDATE runtime_instances SET session_id = NULL WHERE session_id IS NOT NULL AND session_id NOT IN (SELECT id FROM sessions)`,
+    ).run();
     db.prepare(`DELETE FROM room_tasks WHERE initiator_session_id NOT IN (SELECT id FROM sessions)
       OR executor_session_id NOT IN (SELECT id FROM sessions)`).run();
     db.prepare(`DELETE FROM app_settings WHERE key LIKE 'claude-current:%'

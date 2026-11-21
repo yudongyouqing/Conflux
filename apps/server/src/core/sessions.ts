@@ -188,7 +188,10 @@ export function listSessions(
        ORDER BY s.last_heartbeat_at DESC`,
     )
     .all(...params) as Record<string, unknown>[];
-  return rows.map((row) => normalizeSession(row) as SessionSummary);
+  return rows.map((row) => ({
+    ...(normalizeSession(row) as SessionSummary),
+    busy: sessionBusy((row as { metadata?: string | null }).metadata ?? null),
+  }));
 }
 
 export function endSession(db: DB, id: string): void {
@@ -223,29 +226,34 @@ export function searchSessions(
 ): Session[] {
   const trimmed = query.trim().toLowerCase();
   if (trimmed.length === 0) return [];
-  const needle = `%${trimmed}%`;
+  if (opts.activeOnly) markStaleSessions(db);
+  const escaped = trimmed.replace(/[\\%_]/g, "\\$&");
+  const needle = `%${escaped}%`;
+  const filters = [
+    `(lower(name) LIKE ? ESCAPE '\\' OR lower(COALESCE(description, '')) LIKE ? ESCAPE '\\' OR lower(COALESCE(metadata, '')) LIKE ? ESCAPE '\\')`,
+  ];
+  const params: string[] = [needle, needle, needle];
+  if (opts.activeOnly) filters.push(`status = 'active'`);
+  if (opts.askableFrom) {
+    filters.push(`id != ?`);
+    params.push(opts.askableFrom);
+  }
   const rows = db
     .prepare(
       `SELECT * FROM sessions
-       WHERE lower(name) LIKE ?
-          OR lower(COALESCE(description, '')) LIKE ?
-          OR lower(COALESCE(metadata, '')) LIKE ?
-       ORDER BY last_heartbeat_at DESC
-       LIMIT 20`,
+       WHERE ${filters.join(" AND ")}
+       ORDER BY last_heartbeat_at DESC`,
     )
-    .all(needle, needle, needle) as Record<string, unknown>[];
+    .all(...params) as Record<string, unknown>[];
   let out = rows.map((row) => normalizeSession(row));
-  if (opts.activeOnly) out = out.filter((s) => s.status === "active");
   if (opts.askableFrom) {
     const caller = getSession(db, opts.askableFrom);
     const callerRank = PRIORITY_RANK[sessionPriority(caller?.metadata ?? null)] ?? 1;
     out = out.filter(
-      (s) =>
-        s.id !== opts.askableFrom &&
-        (PRIORITY_RANK[sessionPriority(s.metadata)] ?? 1) >= callerRank,
+      (s) => (PRIORITY_RANK[sessionPriority(s.metadata)] ?? 1) >= callerRank,
     );
   }
-  return out;
+  return out.slice(0, 20);
 }
 
 // ---- zero-turn session reaping ---------------------------------------------
@@ -286,6 +294,12 @@ export function pruneAbandonedSessions(
     )
     .all(...PLACEHOLDER_DESCRIPTIONS) as { id: string; status: string; metadata: string | null }[];
 
+  const deleteStmt = db.prepare(
+    `DELETE FROM sessions WHERE id = ?
+     AND (SELECT COUNT(*) FROM messages WHERE from_session = ? OR to_session = ?) = 0
+     AND (SELECT COUNT(*) FROM edges WHERE from_session = ? OR to_session = ?) = 0
+     AND (SELECT COUNT(*) FROM context_entries WHERE session_id = ?) = 0`,
+  );
   let deleted = 0;
   for (const row of candidates) {
     if (row.id === WEB_CONSOLE_ID || row.id === opts.keepId) continue;
@@ -301,14 +315,7 @@ export function pruneAbandonedSessions(
       continue;
     }
     // references re-checked at delete time (guarded, races lose harmlessly)
-    const res = db
-      .prepare(
-        `DELETE FROM sessions WHERE id = ?
-         AND (SELECT COUNT(*) FROM messages WHERE from_session = ? OR to_session = ?) = 0
-         AND (SELECT COUNT(*) FROM edges WHERE from_session = ? OR to_session = ?) = 0
-         AND (SELECT COUNT(*) FROM context_entries WHERE session_id = ?) = 0`,
-      )
-      .run(row.id, row.id, row.id, row.id, row.id, row.id);
+    const res = deleteStmt.run(row.id, row.id, row.id, row.id, row.id, row.id);
     deleted += res.changes;
   }
   return deleted;
@@ -316,17 +323,38 @@ export function pruneAbandonedSessions(
 
 /** Merge keys into a session's metadata JSON (in place, no full rewrite). */
 export function mergeSessionMeta(db: DB, id: string, patch: Record<string, unknown>): void {
-  const row = db.prepare(`SELECT metadata FROM sessions WHERE id = ?`).get(id) as
-    { metadata: string | null } | undefined;
-  if (!row) return;
-  let meta: Record<string, unknown> = {};
-  try {
-    meta = row.metadata ? (JSON.parse(row.metadata) as Record<string, unknown>) : {};
-  } catch {
-    // corrupted metadata — start fresh rather than losing the patch
-  }
-  db.prepare(`UPDATE sessions SET metadata = ? WHERE id = ?`).run(
-    JSON.stringify({ ...meta, ...patch }),
-    id,
-  );
+  db.transaction(() => {
+    const row = db
+      .prepare(`SELECT metadata, runtime, identity_source, runtime_pid FROM sessions WHERE id = ?`)
+      .get(id) as
+      | {
+          metadata: string | null;
+          runtime: string | null;
+          identity_source: string | null;
+          runtime_pid: number | null;
+        }
+      | undefined;
+    if (!row) return;
+    let meta: Record<string, unknown> = {};
+    try {
+      meta = row.metadata ? (JSON.parse(row.metadata) as Record<string, unknown>) : {};
+    } catch {
+      // corrupted metadata — start fresh rather than losing the patch
+    }
+    const merged = { ...meta, ...patch };
+    const explicitRuntime = parseSessionRuntime(patch.runtime);
+    const existingRuntime = parseSessionRuntime(row.runtime);
+    const runtime =
+      explicitRuntime ??
+      existingRuntime ??
+      (parseRuntimePid(patch.claude_pid) !== null ? "claude" : null);
+    const identitySource =
+      parseIdentitySource(patch.identity_source) ?? parseIdentitySource(row.identity_source);
+    const explicitRuntimePid = parseRuntimePid(patch.runtime_pid);
+    const legacyClaudePid = runtime === "claude" ? parseRuntimePid(patch.claude_pid) : null;
+    const runtimePid = explicitRuntimePid ?? legacyClaudePid ?? parseRuntimePid(row.runtime_pid);
+    db.prepare(
+      `UPDATE sessions SET metadata = ?, runtime = ?, identity_source = ?, runtime_pid = ? WHERE id = ?`,
+    ).run(JSON.stringify(merged), runtime, identitySource, runtimePid, id);
+  }).immediate();
 }

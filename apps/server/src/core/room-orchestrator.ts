@@ -1,5 +1,6 @@
 import type { DB } from "./db.js";
-import { nowIso } from "./db.js";
+import { isLockError, nowIso } from "./db.js";
+import { WEB_CONSOLE_ID } from "@conflux/shared";
 import { getSession } from "./sessions.js";
 import { logger } from "../log.js";
 import { launchWakeRun } from "./wake/launcher.js";
@@ -160,37 +161,49 @@ export function writeResult(
   db: DB,
   input: { task_id: number; task_token: string; result: string },
 ): { task: RoomTask; allDone: boolean; summonedInitiator: boolean } {
-  const task = getTask(db, input.task_id);
-  if (!task) throw new Error(`task not found: ${input.task_id}`);
-  if (task.task_token !== input.task_token) {
-    throw new Error("invalid task token");
-  }
+  const { updated, allDone } = db
+    .transaction(() => {
+      const task = getTask(db, input.task_id);
+      if (!task) {
+        throw Object.assign(new Error(`task not found: ${input.task_id}`), { statusCode: 404 });
+      }
+      if (task.task_token !== input.task_token) {
+        throw Object.assign(new Error("invalid task token"), { statusCode: 403 });
+      }
+      if (task.status === "done" || task.status === "failed") {
+        throw Object.assign(new Error(`task already finalized: ${task.status}`), {
+          statusCode: 409,
+        });
+      }
 
-  db.prepare(
-    `UPDATE room_tasks SET status = 'done', result = ?, completed_at = ? WHERE id = ?`,
-  ).run(input.result, nowIso(), input.task_id);
+      const res = db
+        .prepare(
+          `UPDATE room_tasks SET status = 'done', result = ?, completed_at = ?
+           WHERE id = ? AND status IN ('pending', 'running')`,
+        )
+        .run(input.result, nowIso(), input.task_id);
+      if (res.changes === 0) {
+        throw Object.assign(new Error("task already finalized"), { statusCode: 409 });
+      }
 
-  const updated = getTask(db, input.task_id)!;
+      const doneTask = getTask(db, input.task_id)!;
 
-  // Check completion: all tasks in this room initiated by this initiator
-  const pending = db
-    .prepare(
-      `SELECT COUNT(*) AS n FROM room_tasks
-       WHERE room_id = ? AND initiator_session_id = ? AND status IN ('pending', 'running')`,
-    )
-    .get(task.room_id, task.initiator_session_id) as { n: number };
+      // Check completion: all tasks in this room initiated by this initiator
+      const pending = db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM room_tasks
+           WHERE room_id = ? AND initiator_session_id = ? AND status IN ('pending', 'running')`,
+        )
+        .get(doneTask.room_id, doneTask.initiator_session_id) as { n: number };
 
-  const allDone = pending.n === 0;
+      return { updated: doneTask, allDone: pending.n === 0 };
+    })
+    .immediate();
+
   let summonedInitiator = false;
-
   if (allDone) {
-    // Summon the initiator to read results
-    summonedInitiator = notifyInitiator(
-      db,
-      task.room_id,
-      task.initiator_session_id,
-      input.task_id,
-    );
+    // Summon the initiator to read results (external I/O strictly after commit)
+    summonedInitiator = notifyInitiator(db, updated.room_id, updated.initiator_session_id);
   }
 
   return { task: updated, allDone, summonedInitiator };
@@ -260,36 +273,51 @@ export function prepareBroadcast(
   db: DB,
   input: { room_id: number; sender_session_id: string; prompt: string },
 ): BroadcastPrepared {
-  const room = getChatRoom(db, input.room_id);
-  if (!room) throw new Error(`room not found: ${input.room_id}`);
+  return db
+    .transaction(() => {
+      const room = getChatRoom(db, input.room_id);
+      if (!room) {
+        throw Object.assign(new Error(`room not found: ${input.room_id}`), { statusCode: 404 });
+      }
 
-  const members = roomMembers(db, input.room_id).filter((m) => m !== input.sender_session_id);
-  // self-select clause: silence must be an explicitly allowed answer, or
-  // every member burns a turn replying "not me"
-  const question =
-    `${input.prompt}（聊天室「${room.name}」广播：适合你回答就用 Conflux 的 ` +
-    `reply_ask 回复本条消息，回复会进房间共享线程；不适合则保持沉默，不要做其他事）`;
+      const candidates = roomMembers(db, input.room_id).filter(
+        (m) => m !== input.sender_session_id,
+      );
+      // self-select clause: silence must be an explicitly allowed answer, or
+      // every member burns a turn replying "not me"
+      const question =
+        `${input.prompt}（聊天室「${room.name}」广播：适合你回答就用 Conflux 的 ` +
+        `reply_ask 回复本条消息，回复会进房间共享线程；不适合则保持沉默，不要做其他事）`;
 
-  const prepared: AskPrepared[] = [];
-  for (const member of members) {
-    try {
-      prepared.push(
-        prepareAsk(db, {
-          from_session: input.sender_session_id,
-          to_session: member,
-          question,
-          room_id: input.room_id,
-        }),
-      );
-    } catch (err) {
-      // one unreachable member must not block the rest (priority gate etc.)
-      logger.warn(
-        { room: input.room_id, member, err: err instanceof Error ? err.message : String(err) },
-        "broadcast: member skipped",
-      );
-    }
-  }
-  return { members, question, prepared };
+      const addressedMembers: string[] = [];
+      const prepared: AskPrepared[] = [];
+      for (const member of candidates) {
+        try {
+          prepared.push(
+            prepareAsk(db, {
+              from_session: input.sender_session_id,
+              to_session: member,
+              question,
+              room_id: input.room_id,
+            }),
+          );
+          addressedMembers.push(member);
+        } catch (err) {
+          if (isLockError(err)) throw err;
+          // one unreachable member must not block the rest (priority gate etc.)
+          logger.warn(
+            {
+              room: input.room_id,
+              member,
+              err: err instanceof Error ? err.message : String(err),
+            },
+            "broadcast: member skipped",
+          );
+        }
+      }
+      return { members: addressedMembers, question, prepared };
+    })
+    .immediate();
 }
 
 /**
@@ -301,10 +329,13 @@ export async function completeBroadcast(
   input: { room_id: number; sender_session_id: string; prompt: string },
   preparedBroadcast: BroadcastPrepared,
 ): Promise<BroadcastResult> {
+  const members: string[] = [];
   const message_ids: number[] = [];
   for (const prepared of preparedBroadcast.prepared) {
     try {
-      message_ids.push((await completeAsk(db, prepared)).message.id);
+      const outcome = await completeAsk(db, prepared);
+      members.push(prepared.message.to_session);
+      message_ids.push(outcome.message.id);
     } catch (err) {
       logger.warn(
         { room: input.room_id, member: prepared.message.to_session, err: err instanceof Error ? err.message : String(err) },
@@ -313,10 +344,10 @@ export async function completeBroadcast(
     }
   }
   logger.info(
-    { room: input.room_id, sender: input.sender_session_id, addressed: preparedBroadcast.members.length },
+    { room: input.room_id, sender: input.sender_session_id, addressed: members.length },
     "room broadcast sent",
   );
-  return { room_id: input.room_id, members: preparedBroadcast.members, message_ids };
+  return { room_id: input.room_id, members, message_ids };
 }
 
 /**
@@ -462,9 +493,8 @@ function notifyInitiator(
   db: DB,
   roomId: number,
   initiatorSessionId: string,
-  _lastTaskId: number,
 ): boolean {
-  if (initiatorSessionId === "web-console") {
+  if (initiatorSessionId === WEB_CONSOLE_ID) {
     // Human initiator — OS notification handles this
     return true;
   }

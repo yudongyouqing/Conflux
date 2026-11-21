@@ -185,7 +185,7 @@ const bundleSchema = z
 type SessionRow = Session;
 type ContextRow = Omit<ContextEntry, "tags"> & { tags: string | null };
 type AgentRow = Omit<Agent, "model_config"> & { model_config: string };
-type RuntimeAgentRow = Omit<RuntimeAgent, "runtime" | "live" | "last_seen"> & {
+type RuntimeAgentRow = Omit<RuntimeAgent, "runtime" | "live" | "last_seen" | "api_key_configured"> & {
   runtime: string;
 };
 
@@ -199,35 +199,50 @@ export function exportData(db: DB, options: ExportDataOptions = {}): ConfluxData
       ? allSessions.filter((session) => isProjectSession(session, options.projectDir))
       : allSessions;
   const sessionIds = new Set(sessionRows.map((session) => session.id));
-  const placeholders = [...sessionIds].map(() => "?").join(",");
+  const sessionIdList = [...sessionIds];
 
-  const contexts = placeholders
-    ? (db
-        .prepare(
-          `SELECT * FROM context_entries WHERE session_id IN (${placeholders}) ORDER BY id ASC`,
+  const contexts: ContextRow[] =
+    scope === "global"
+      ? (db.prepare(`SELECT * FROM context_entries ORDER BY id ASC`).all() as ContextRow[])
+      : queryChunkedIn<ContextRow>(
+          db,
+          sessionIdList,
+          (ph) => `SELECT * FROM context_entries WHERE session_id IN (${ph}) ORDER BY id ASC`,
+        ).sort((a, b) => a.id - b.id);
+
+  const messages: Message[] =
+    scope === "global"
+      ? (db.prepare(`SELECT * FROM messages ORDER BY id ASC`).all() as Message[])
+      : queryChunkedIn<Message>(
+          db,
+          sessionIdList,
+          (ph) => `SELECT * FROM messages WHERE from_session IN (${ph}) ORDER BY id ASC`,
         )
-        .all(...sessionIds) as ContextRow[])
-    : [];
-  const messages = placeholders
-    ? (db
-        .prepare(
-          `SELECT * FROM messages
-           WHERE from_session IN (${placeholders}) AND to_session IN (${placeholders})
-           ORDER BY id ASC`,
+          .filter((m) => sessionIds.has(m.to_session))
+          .sort((a, b) => a.id - b.id);
+
+  const edges: GraphEdge[] =
+    scope === "global"
+      ? (db
+          .prepare(
+            `SELECT rowid AS id, from_session AS "from", to_session AS "to",
+               weight, last_interact_at
+             FROM edges
+             ORDER BY rowid ASC`,
+          )
+          .all() as GraphEdge[])
+      : queryChunkedIn<GraphEdge>(
+          db,
+          sessionIdList,
+          (ph) =>
+            `SELECT rowid AS id, from_session AS "from", to_session AS "to",
+               weight, last_interact_at
+             FROM edges
+             WHERE from_session IN (${ph})
+             ORDER BY rowid ASC`,
         )
-        .all(...sessionIds, ...sessionIds) as Message[])
-    : [];
-  const edges = placeholders
-    ? (db
-        .prepare(
-          `SELECT rowid AS id, from_session AS "from", to_session AS "to",
-             weight, last_interact_at
-           FROM edges
-           WHERE from_session IN (${placeholders}) AND to_session IN (${placeholders})
-           ORDER BY rowid ASC`,
-        )
-        .all(...sessionIds, ...sessionIds) as GraphEdge[])
-    : [];
+          .filter((e) => sessionIds.has(e.to))
+          .sort((a, b) => a.id - b.id);
 
   const allConversations = db
     .prepare("SELECT * FROM conversations ORDER BY id ASC")
@@ -239,24 +254,23 @@ export function exportData(db: DB, options: ExportDataOptions = {}): ConfluxData
             conversation.initiated_by !== null && sessionIds.has(conversation.initiated_by),
         )
       : allConversations;
-  const conversationIds = new Set(conversations.map((conversation) => conversation.id));
-  const turns = conversationIds.size
-    ? (db
-        .prepare(
-          `SELECT * FROM turns WHERE conversation_id IN (${[...conversationIds].map(() => "?").join(",")}) ORDER BY id ASC`,
-        )
-        .all(...conversationIds) as Turn[])
-    : [];
-  const agentIds = new Set(conversations.map((conversation) => conversation.agent_id));
-  const agents =
+  const conversationIdList = conversations.map((conversation) => conversation.id);
+  const turns: Turn[] =
+    scope === "global"
+      ? (db.prepare("SELECT * FROM turns ORDER BY id ASC").all() as Turn[])
+      : queryChunkedIn<Turn>(
+          db,
+          conversationIdList,
+          (ph) => `SELECT * FROM turns WHERE conversation_id IN (${ph}) ORDER BY id ASC`,
+        ).sort((a, b) => a.id - b.id);
+  const agentIdList = [...new Set(conversations.map((conversation) => conversation.agent_id))];
+  const agents: AgentRow[] =
     scope === "project"
-      ? agentIds.size
-        ? (db
-            .prepare(
-              `SELECT * FROM agents WHERE id IN (${[...agentIds].map(() => "?").join(",")}) ORDER BY id ASC`,
-            )
-            .all(...agentIds) as AgentRow[])
-        : []
+      ? queryChunkedIn<AgentRow>(
+          db,
+          agentIdList,
+          (ph) => `SELECT * FROM agents WHERE id IN (${ph}) ORDER BY id ASC`,
+        ).sort((a, b) => a.id - b.id)
       : (db.prepare("SELECT * FROM agents ORDER BY id ASC").all() as AgentRow[]);
   const runtimeRows = db
     .prepare(
@@ -425,8 +439,7 @@ function importSessions(
     if (!existing) {
       insertSession(db, row, targetId);
       map.set(row.id, targetId);
-      if (conflict === "copy") result.copied++;
-      else result.imported++;
+      result.imported++;
       continue;
     }
     if (conflict === "skip") {
@@ -1045,6 +1058,21 @@ function isProjectPath(value: string | null | undefined, projectDir?: string): b
   return normalizePath(value) === normalizePath(target);
 }
 
+function queryChunkedIn<T>(
+  db: DB,
+  values: (string | number)[],
+  sqlForPlaceholders: (placeholders: string) => string,
+): T[] {
+  if (values.length === 0) return [];
+  const out: T[] = [];
+  for (let offset = 0; offset < values.length; offset += 500) {
+    const chunk = values.slice(offset, offset + 500);
+    const ph = chunk.map(() => "?").join(",");
+    out.push(...(db.prepare(sqlForPlaceholders(ph)).all(...chunk) as T[]));
+  }
+  return out;
+}
+
 function normalizePath(value: string): string {
-  return value.replace(/[\\/]+$/, "").toLowerCase();
+  return value.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 }

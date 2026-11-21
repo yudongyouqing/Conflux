@@ -232,7 +232,11 @@ export function launchWakeRun(req: LaunchRequest): LaunchResult {
   // overridden: a server on a custom home wakes executors onto THAT home —
   // deriving from config again here is exactly how the split-database
   // regressions happened (room tasks invisible to their own executors).
-  const dataDir = req.dataDir ?? dirname(req.db.name);
+  const dataDir =
+    req.dataDir ??
+    (req.db.name && req.db.name !== ":memory:"
+      ? dirname(req.db.name)
+      : resolveConfig("global").dataDir);
   // env first: the codex suffix writes its placeholder variables here
   // (leaf content survives cmd delayed expansion verbatim — the only
   // %-expansion-proof way to pass argv on Windows)
@@ -306,7 +310,30 @@ export function launchWakeRun(req: LaunchRequest): LaunchResult {
     pinCodexDescendants(req.db, child.pid, req.sessionId);
   }
   logger.info({ sessionId: req.sessionId, wakePid: child.pid }, "auto-wake launched");
-  return { ok: true, command: req.command };
+  return { ok: true, command: literalLine };
+}
+
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException)?.code === "EPERM";
+  }
+}
+
+/** Remove stale codex-current:<pid> rows whose processes have already exited. */
+function pruneDeadCodexPins(db: DB): void {
+  const rows = db
+    .prepare(`SELECT key FROM app_settings WHERE key LIKE 'codex-current:%'`)
+    .all() as { key: string }[];
+  const del = db.prepare(`DELETE FROM app_settings WHERE key = ?`);
+  for (const row of rows) {
+    const pid = Number(row.key.slice("codex-current:".length));
+    if (!Number.isInteger(pid) || pid <= 0 || !isPidAlive(pid)) {
+      del.run(row.key);
+    }
+  }
 }
 
 /**
@@ -324,6 +351,7 @@ export function pinCodexDescendants(db: DB, launcherPid: number, sessionId: stri
     void retryOnBusy(db, () => {
       if (!db.open) return;
       db.transaction(() => {
+        pruneDeadCodexPins(db);
         for (const pid of pids) setSetting(db, `codex-current:${pid}`, sessionId);
       }).immediate();
     }).catch((error) => logger.warn({ sessionId, error }, "codex wake pid pinning failed"));
@@ -343,24 +371,32 @@ export function pinCodexDescendants(db: DB, launcherPid: number, sessionId: stri
           for (const row of rows) if (descendants.has(row.ppid)) descendants.add(row.pid);
         }
         const pids = rows.filter((row) => descendants.has(row.pid) && row.pid !== launcherPid && isRuntimeCommand(row.command, "codex")).map((row) => row.pid);
-        if (pids.length > 0) persist(pids);
-        else if (Date.now() < deadline) setTimeout(probe, 300).unref();
+        if (pids.length > 0) {
+          persist(pids);
+          logger.info({ sessionId, pids }, "codex wake pid(s) pinned");
+        } else if (Date.now() < deadline) {
+          setTimeout(probe, 300).unref();
+        }
       });
     };
     probe();
     return;
   }
+  // Single Win32_Process snapshot per poll instead of per-PID WMI queries.
   const ps = [
     "$ErrorActionPreference='SilentlyContinue'",
     "$deadline=(Get-Date).AddSeconds(12)",
     "$all=@()",
     "while((Get-Date) -lt $deadline -and $all.Count -eq 0){",
+    "  $procs=@(Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine)",
+    "  $byParent=@{}",
+    "  foreach($p in $procs){ if(-not $byParent.ContainsKey($p.ParentProcessId)){ $byParent[$p.ParentProcessId]=@() }; $byParent[$p.ParentProcessId]+=$p }",
     "  $frontier=@(LAUNCHER_PID)",
     "  foreach($i in 1..6){",
-    '    $kids=@($frontier | ForEach-Object { Get-CimInstance Win32_Process -Filter "ParentProcessId=$_" })',
+    "    $kids=@(); foreach($f in $frontier){ if($byParent.ContainsKey($f)){ $kids+=$byParent[$f] } }",
     "    if($kids.Count -eq 0){ break }",
-    "$all+=@($kids | Where-Object { __RUNTIME_MATCH__ })",
-    "    $frontier=@($kids.ProcessId)",
+    "    $all+=@($kids | Where-Object { __RUNTIME_MATCH__ })",
+    "    $frontier=@($kids | ForEach-Object { $_.ProcessId })",
     "  }",
     "  if($all.Count -eq 0){ Start-Sleep -Milliseconds 300 }",
     "}",
@@ -391,29 +427,38 @@ function pipeWakeLog(child: ReturnType<typeof spawn>, dataDir: string, sessionId
   try {
     const dir = join(dataDir, "wake-logs");
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    const fd = openSync(join(dir, `${sessionId}.log`), "a");
+    const safeSessionId = sessionId.replace(/[^A-Za-z0-9._-]/g, "_") || "wake";
+    const fd = openSync(join(dir, `${safeSessionId}.log`), "a");
+    let closed = false;
+    const closeOnce = () => {
+      if (closed) return;
+      closed = true;
+      try {
+        closeSync(fd);
+      } catch {
+        // already closed
+      }
+    };
     child.stdout?.on("data", (chunk: Buffer) => {
+      if (closed) return;
       try {
         writeSync(fd, chunk);
       } catch {
         // disk full — the wake already succeeded
       }
     });
-    child.stdout?.on("end", () => {
-      try {
-        writeSync(fd, `\n[wake ended ${new Date().toISOString()}]\n`);
-        closeSync(fd);
-      } catch {
-        // already closed
+    child.stdout?.once("end", () => {
+      if (!closed) {
+        try {
+          writeSync(fd, `\n[wake ended ${new Date().toISOString()}]\n`);
+        } catch {
+          // disk full or closed
+        }
       }
+      closeOnce();
     });
-    child.on("error", () => {
-      try {
-        closeSync(fd);
-      } catch {
-        // already closed
-      }
-    });
+    child.stdout?.once("close", closeOnce);
+    child.once("error", closeOnce);
   } catch (err) {
     logger.warn({ err: err instanceof Error ? err.message : err }, "wake log open failed");
   }

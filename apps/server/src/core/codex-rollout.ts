@@ -89,14 +89,18 @@ function dayKeysBetween(fromMs: number, toMs: number): string[] {
   return [...keys];
 }
 
+const rolloutHeaderCache = new Map<string, { mtimeMs: number; size: number; rollout: CodexRollout | null }>();
+const rolloutPromptsCache = new Map<string, { mtimeMs: number; size: number; prompts: string[] }>();
+
 /**
  * Rollouts whose day-dir falls in the window (2 days of slack for clock
- * skew). Only the first line of each file is parsed, so this stays cheap
- * even with months of history on disk.
+ * skew). Only the first line of each file is parsed, cached by (mtime, size)
+ * so periodic 30s ticks only stat unchanged history files.
  */
 export function listCodexRollouts(codexHome: string, sinceMs: number): CodexRollout[] {
   const root = join(codexHome, "sessions");
   if (!existsSync(root)) return [];
+  if (rolloutHeaderCache.size > 2000) rolloutHeaderCache.clear();
   const rollouts: CodexRollout[] = [];
   for (const key of dayKeysBetween(sinceMs - 2 * 86_400_000, Date.now())) {
     const dir = join(root, key);
@@ -109,14 +113,31 @@ export function listCodexRollouts(codexHome: string, sinceMs: number): CodexRoll
     for (const f of files) {
       if (!f.startsWith("rollout-") || !f.endsWith(".jsonl")) continue;
       const path = join(dir, f);
+      let stat: { mtimeMs: number; size: number };
+      try {
+        stat = statSync(path);
+      } catch {
+        continue;
+      }
+      const cached = rolloutHeaderCache.get(path);
+      if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+        if (cached.rollout) rollouts.push(cached.rollout);
+        continue;
+      }
       const line = readFirstLine(path);
-      if (!line) continue;
+      if (!line) {
+        rolloutHeaderCache.set(path, { mtimeMs: stat.mtimeMs, size: stat.size, rollout: null });
+        continue;
+      }
       try {
         const j = JSON.parse(line) as {
           type?: string;
           payload?: { id?: unknown; session_id?: unknown; cwd?: unknown; timestamp?: unknown };
         };
-        if (j.type !== "session_meta" || !j.payload) continue;
+        if (j.type !== "session_meta" || !j.payload) {
+          rolloutHeaderCache.set(path, { mtimeMs: stat.mtimeMs, size: stat.size, rollout: null });
+          continue;
+        }
         const id =
           typeof j.payload.id === "string"
             ? j.payload.id
@@ -124,14 +145,17 @@ export function listCodexRollouts(codexHome: string, sinceMs: number): CodexRoll
               ? j.payload.session_id
               : null;
         const ts = typeof j.payload.timestamp === "string" ? Date.parse(j.payload.timestamp) : NaN;
-        rollouts.push({
+        const rollout: CodexRollout = {
           path,
           codexSessionId: id,
           cwd: typeof j.payload.cwd === "string" ? j.payload.cwd : null,
           startedAtMs: Number.isFinite(ts) ? ts : null,
-          mtimeMs: statSync(path).mtimeMs,
-        });
+          mtimeMs: stat.mtimeMs,
+        };
+        rolloutHeaderCache.set(path, { mtimeMs: stat.mtimeMs, size: stat.size, rollout });
+        rollouts.push(rollout);
       } catch {
+        rolloutHeaderCache.set(path, { mtimeMs: stat.mtimeMs, size: stat.size, rollout: null });
         continue; // malformed meta line — skip the file
       }
     }
@@ -141,6 +165,17 @@ export function listCodexRollouts(codexHome: string, sinceMs: number): CodexRoll
 
 /** All human-authored user prompts in a rollout, synthetic blobs filtered out. */
 export function readCodexUserPrompts(rolloutPath: string): string[] {
+  if (rolloutPromptsCache.size > 500) rolloutPromptsCache.clear();
+  let stat: { mtimeMs: number; size: number };
+  try {
+    stat = statSync(rolloutPath);
+  } catch {
+    return [];
+  }
+  const cached = rolloutPromptsCache.get(rolloutPath);
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+    return cached.prompts;
+  }
   let text: string;
   try {
     text = readFileSync(rolloutPath, "utf8");
@@ -176,6 +211,7 @@ export function readCodexUserPrompts(rolloutPath: string): string[] {
       continue; // malformed line — keep scanning
     }
   }
+  rolloutPromptsCache.set(rolloutPath, { mtimeMs: stat.mtimeMs, size: stat.size, prompts });
   return prompts;
 }
 
@@ -251,8 +287,9 @@ export function codexRolloutDigest(rolloutPath: string, maxChars = 1500): string
 export function findCodexRolloutPath(codexSessionId: string): string {
   try {
     const root = join(process.env.CODEX_HOME || join(process.env.USERPROFILE || process.env.HOME || ".", ".codex"), "sessions");
-    // day dirs from 30d back to today; the filename embeds the uuid
-    for (let t = Date.now() - 30 * 86_400_000; t <= Date.now() + 86_400_000; t += 86_400_000) {
+    // scan newest-first from tomorrow (timezone skew) back 30d; the filename embeds the uuid
+    const now = Date.now();
+    for (let t = now + 86_400_000; t >= now - 30 * 86_400_000; t -= 86_400_000) {
       const d = new Date(t);
       const p2 = (n: number) => String(n).padStart(2, "0");
       const dir = join(root, String(d.getFullYear()), p2(d.getMonth() + 1), p2(d.getDate()));

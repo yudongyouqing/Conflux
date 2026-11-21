@@ -70,6 +70,15 @@ export function askSession(
   if (!db.prepare(`SELECT id FROM sessions WHERE id = ?`).get(input.from_session)) {
     throw Object.assign(new Error(`source session not found: ${input.from_session}`), { statusCode: 404 });
   }
+  // target row may have been pruned (e.g. offline cleanup) — fail with a
+  // clear error instead of a raw FOREIGN KEY violation (and before priority
+  // gating, so a nonexistent target reports 404 rather than priority blocked)
+  const target = db.prepare(`SELECT id FROM sessions WHERE id = ?`).get(input.to_session);
+  if (!target) {
+    throw Object.assign(new Error(`target session not found: ${input.to_session}`), {
+      statusCode: 404,
+    });
+  }
   // Priority gate: a lower-priority session may not interrupt a higher one.
   // The human web console (from === WEB_CONSOLE_ID) is exempt — people can
   // ask anything; session→session automation respects the tiers.
@@ -77,17 +86,14 @@ export function askSession(
     const fromP = sessionPriority(metadataOf(db, input.from_session));
     const toP = sessionPriority(metadataOf(db, input.to_session));
     if ((PRIORITY_RANK[fromP] ?? 1) > (PRIORITY_RANK[toP] ?? 1)) {
-      throw new Error(
-        `ASK_PRIORITY_BLOCKED: ${fromP} session "${input.from_session}" cannot ask ` +
-          `${toP} session "${input.to_session}" — raise the asker's priority or ask a peer`,
+      throw Object.assign(
+        new Error(
+          `ASK_PRIORITY_BLOCKED: ${fromP} session "${input.from_session}" cannot ask ` +
+            `${toP} session "${input.to_session}" — raise the asker's priority or ask a peer`,
+        ),
+        { statusCode: 403 },
       );
     }
-  }
-  // target row may have been pruned (e.g. offline cleanup) — fail with a
-  // clear error instead of a raw FOREIGN KEY violation
-  const target = db.prepare(`SELECT id FROM sessions WHERE id = ?`).get(input.to_session);
-  if (!target) {
-    throw new Error(`target session not found: ${input.to_session}`);
   }
   const now = nowIso();
   // the channel edge (from→to) IS the conversation: questions travel on it
@@ -114,11 +120,9 @@ export function replyAsk(db: DB, id: number, replierSessionId: string, reply: st
     throw new Error("not the addressee of this message");
   }
   const now = nowIso();
-  db.prepare(`UPDATE messages SET reply = ?, status = 'replied', replied_at = ? WHERE id = ?`).run(
-    reply,
-    now,
-    id,
-  );
+  db.prepare(
+    `UPDATE messages SET reply = ?, status = 'replied', replied_at = ?, reply_seen_at = NULL WHERE id = ?`,
+  ).run(reply, now, id);
   // the reply stays ON the channel — no reverse edge (direction is fixed:
   // the channel's from asked, its to answered)
   if (msg.edge_id !== null && msg.edge_id !== undefined) {
@@ -161,15 +165,25 @@ export function checkReplies(db: DB, sessionId: string, since?: string): Message
        ORDER BY replied_at DESC`,
     )
     .all(...params) as MessageRow[];
-  // Mark as read for next call.
-  if (rows.length > 0) {
-    const ids = rows.map((r) => r.id);
-    const placeholders = ids.map(() => "?").join(",");
-    db.prepare(
-      `UPDATE messages SET status = 'read' WHERE status = 'replied' AND id IN (${placeholders})`,
-    ).run(...ids);
+  // Mark unread replies as read and seen so hooks/tmux do not re-push them.
+  const unread = rows.filter((r) => r.status === "replied");
+  const seenAt = unread.length > 0 ? nowIso() : null;
+  if (unread.length > 0 && seenAt) {
+    for (let offset = 0; offset < unread.length; offset += 500) {
+      const chunk = unread.slice(offset, offset + 500);
+      const placeholders = chunk.map(() => "?").join(",");
+      db.prepare(
+        `UPDATE messages
+         SET status = 'read', reply_seen_at = COALESCE(reply_seen_at, ?)
+         WHERE status = 'replied' AND id IN (${placeholders})`,
+      ).run(seenAt, ...chunk.map((r) => r.id));
+    }
   }
-  return toMessages(db, rows);
+  return toMessages(db, rows).map((row) =>
+    row.status === "replied"
+      ? { ...row, status: "read" as const, reply_seen_at: row.reply_seen_at ?? seenAt }
+      : row,
+  );
 }
 
 /**
@@ -296,14 +310,42 @@ export function forwardInboxFromPid(db: DB, claudePid: number, successorId: stri
     })
     .map((r) => r.id);
   if (ids.length === 0) return 0;
-  const placeholders = ids.map(() => "?").join(",");
-  const res = db
-    .prepare(
-      `UPDATE messages SET to_session = ?
-       WHERE status IN ('pending','seen') AND to_session IN (${placeholders})`,
-    )
-    .run(successorId, ...ids);
-  return res.changes;
+  return forwardPendingMessagesToSuccessor(db, ids, successorId);
+}
+
+/**
+ * Re-address pending/seen messages from predecessor session ids to `successorId`,
+ * excluding self-addressed rows and updating `edge_id` to the successor's channel.
+ */
+export function forwardPendingMessagesToSuccessor(
+  db: DB,
+  fromSessionIds: string[],
+  successorId: string,
+): number {
+  if (fromSessionIds.length === 0) return 0;
+  const placeholders = fromSessionIds.map(() => "?").join(",");
+  return db
+    .transaction(() => {
+      const pending = db
+        .prepare(
+          `SELECT id, from_session FROM messages
+           WHERE status IN ('pending','seen') AND to_session IN (${placeholders}) AND from_session != ?`,
+        )
+        .all(...fromSessionIds, successorId) as { id: number; from_session: string }[];
+      if (pending.length === 0) return 0;
+      const update = db.prepare(`UPDATE messages SET to_session = ?, edge_id = ? WHERE id = ?`);
+      const edgeCache = new Map<string, number>();
+      for (const msg of pending) {
+        let edgeId = edgeCache.get(msg.from_session);
+        if (edgeId === undefined) {
+          edgeId = recordEdge(db, msg.from_session, successorId);
+          edgeCache.set(msg.from_session, edgeId);
+        }
+        update.run(successorId, edgeId, msg.id);
+      }
+      return pending.length;
+    })
+    .immediate();
 }
 
 // ---- undelivered mail: one gather for two renderers --------------------
@@ -339,7 +381,7 @@ export function gatherUnseenMail(db: DB, sessionId: string): MailItem[] {
     .prepare(
       `SELECT m.id, m.edge_id, m.reply, s.name, substr(m.to_session, 1, 8) AS sid8
        FROM messages m LEFT JOIN sessions s ON s.id = m.to_session
-       WHERE m.from_session = ? AND m.reply IS NOT NULL AND m.reply_seen_at IS NULL
+       WHERE m.from_session = ? AND m.reply IS NOT NULL AND m.reply_seen_at IS NULL AND m.status != 'read'
        ORDER BY m.id ASC LIMIT 3`,
     )
     .all(sessionId) as { id: number; edge_id: number | null; reply: string; name: string | null; sid8: string }[];

@@ -4,7 +4,7 @@ import type { TerminalChoice, TerminalSettings } from "@conflux/shared";
 const TERMINAL_KEY = "terminal";
 
 export const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
-  terminal: process.platform === "darwin" ? "terminal" : "wt",
+  terminal: process.platform === "darwin" ? "terminal" : process.platform === "win32" ? "wt" : "tmux",
   claude_path: "claude",
   codex_path: "codex",
 };
@@ -61,7 +61,12 @@ export function saveTerminalSettings(db: DB, input: Partial<TerminalSettings>): 
   const merged = getTerminalSettings(db);
   if (input.terminal !== undefined) {
     if (!TERMINAL_CHOICES.includes(input.terminal)) {
-      throw new Error(`unknown terminal: ${input.terminal} (expected wt | cmd | wezterm)`);
+      throw Object.assign(
+        new Error(
+          `unknown terminal: ${input.terminal} (expected ${TERMINAL_CHOICES.join(" | ")})`,
+        ),
+        { statusCode: 400 },
+      );
     }
     merged.terminal = input.terminal;
   }
@@ -93,5 +98,6 @@ export function getWakeMaxConcurrent(db: DB): number {
 }
 
 export function setWakeMaxConcurrent(db: DB, max: number): void {
-  setSetting(db, "wake_max_concurrent", String(Math.max(0, max)));
+  const safe = Number.isFinite(max) ? Math.max(0, Math.floor(max)) : 3;
+  setSetting(db, "wake_max_concurrent", String(safe));
 }

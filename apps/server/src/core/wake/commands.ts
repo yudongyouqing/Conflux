@@ -1,7 +1,12 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { cmdQuote, resumeCommand } from "../terminal.js";
+import { cmdQuote, posixQuote, resumeCommand } from "../terminal.js";
 import { flattenOneLine } from "../inject-format.js";
+
+/** Quote one argument for the shell that will execute the wake command. */
+export function shellQuote(value: string, platform: NodeJS.Platform = process.platform): string {
+  return platform === "win32" ? cmdQuote(value) : posixQuote(value);
+}
 
 /**
  * Wake commands and prompts, per runtime.
@@ -52,10 +57,14 @@ export function buildWakePrompt(digest?: string | null): string {
  * makes resuming the real conversation impossible (codex refuses with
  * "already has an active writer"). Prompt comes via stdin.
  */
-export function freshWakeCommand(runtime: "claude" | "codex", executable: string): string {
-  const exe = cmdQuote(executable);
+export function freshWakeCommand(
+  runtime: "claude" | "codex",
+  executable: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const exe = shellQuote(executable, platform);
   if (runtime === "codex") return `${exe} exec ${CODEX_WAKE_FLAGS} -`;
-  return `${exe} -p --allowedTools ${cmdQuote(HEADLESS_ALLOWED_TOOLS)}`;
+  return `${exe} -p --allowedTools ${shellQuote(HEADLESS_ALLOWED_TOOLS, platform)}`;
 }
 
 /**
@@ -67,15 +76,18 @@ export function wakeCommand(
   sessionId: string,
   executable: string,
   mcpConfigPath?: string | null,
+  platform: NodeJS.Platform = process.platform,
 ): string {
   if (runtime === "codex") {
-    return `${cmdQuote(executable)} exec resume ${sessionId} ${CODEX_WAKE_FLAGS} -`;
+    return `${shellQuote(executable, platform)} exec resume ${shellQuote(sessionId, platform)} ${CODEX_WAKE_FLAGS} -`;
   }
   return withMcpConfig(
-    `${resumeCommand("claude", sessionId, executable)} --allowedTools ${cmdQuote(
+    `${resumeCommand("claude", sessionId, executable)} --allowedTools ${shellQuote(
       HEADLESS_ALLOWED_TOOLS,
+      platform,
     )} -p`,
     mcpConfigPath,
+    platform,
   );
 }
 
@@ -85,9 +97,13 @@ export function wakeCommand(
  * own .mcp.json (a woken session without check_inbox/reply_ask
  * can never answer). Optional — omitted when no config file is provided.
  */
-export function withMcpConfig(command: string, mcpConfigPath?: string | null): string {
+export function withMcpConfig(
+  command: string,
+  mcpConfigPath?: string | null,
+  platform: NodeJS.Platform = process.platform,
+): string {
   if (!mcpConfigPath) return command;
-  return `${command} --mcp-config ${cmdQuote(mcpConfigPath)}`;
+  return `${command} --mcp-config ${shellQuote(mcpConfigPath, platform)}`;
 }
 
 /**
@@ -125,12 +141,13 @@ export function tmuxWakeCommand(
   executable: string,
   mcpConfigPath?: string | null,
 ): string {
-  // the project may never have mounted Conflux — without the config
-  // mount the woken TUI cannot reply_ask, and nobody is watching to notice
+  // tmux always runs under a POSIX shell — quote with posixQuote so `*` in
+  // HEADLESS_ALLOWED_TOOLS is never glob-expanded by /bin/sh.
   return withMcpConfig(
-    `${resumeCommand("claude", sessionId, executable)} --allowedTools ${cmdQuote(
+    `${resumeCommand("claude", sessionId, executable)} --allowedTools ${posixQuote(
       HEADLESS_ALLOWED_TOOLS,
     )}`,
     mcpConfigPath,
+    "linux",
   );
 }
