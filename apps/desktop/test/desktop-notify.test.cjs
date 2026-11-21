@@ -48,6 +48,7 @@ test("runner: first poll is silent (watermark), new ids notify once", async () =
   const stop = startMessageNotifications({
     baseUrl: "http://x",
     fetchFn,
+    immediate: false,
     onNotify: (n) => seen.push(n),
     setIntervalFn: (callback) => {
       poll = callback;
@@ -67,12 +68,38 @@ test("runner: first poll is silent (watermark), new ids notify once", async () =
   );
 });
 
+test("runner polls immediately on startup with limit=100 to establish watermark", async () => {
+  const urls = [];
+  const seen = [];
+  let poll;
+  const fetchFn = async (url) => {
+    urls.push(url);
+    if (urls.length === 1) {
+      return { ok: true, json: async () => ({ messages: [{ id: 4, from_session: "a", to_session: "b", question: "old", reply: null }] }) };
+    }
+    return { ok: true, json: async () => ({ messages: [{ id: 5, from_session: "a", to_session: "b", question: "new", reply: null }] }) };
+  };
+  const stop = startMessageNotifications({
+    baseUrl: "http://x",
+    fetchFn,
+    onNotify: (n) => seen.push(n),
+    setIntervalFn: (cb) => { poll = cb; return 1; },
+    clearIntervalFn: () => {},
+  });
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(urls, ["http://x/messages?limit=100"]);
+  assert.deepEqual(seen, [], "initial immediate poll is silent watermark");
+  await poll();
+  stop();
+  assert.deepEqual(seen.map((n) => n.id), [5]);
+});
+
 
 test("runner notifies once when a previously seen question receives a reply", async () => {
   let poll;
   let messages = [{ id: 9, from_name: "Asker", to_name: "Replier", question: "q", reply: null }];
   const notifications = [];
-  const stop = startMessageNotifications({ baseUrl: "http://x", fetchFn: async () => ({ ok: true, json: async () => ({ messages }) }), onNotify: n => notifications.push(n), setIntervalFn: cb => { poll = cb; return 1; }, clearIntervalFn: () => {} });
+  const stop = startMessageNotifications({ baseUrl: "http://x", immediate: false, fetchFn: async () => ({ ok: true, json: async () => ({ messages }) }), onNotify: n => notifications.push(n), setIntervalFn: cb => { poll = cb; return 1; }, clearIntervalFn: () => {} });
   await poll();
   messages = [{ ...messages[0], reply: "answer", replied_at: "2026-11-18T00:00:00Z" }];
   await poll(); await poll(); stop();
@@ -83,7 +110,7 @@ test("runner notifies once when a previously seen question receives a reply", as
 test("runner does not notify if stopped during an in-flight request", async () => {
   let poll; let finish; let calls = 0;
   const notifications = [];
-  const stop = startMessageNotifications({ baseUrl: "http://x", fetchFn: async () => ({ ok: true, json: async () => ++calls === 1 ? { messages: [] } : new Promise(r => { finish = r; }) }), onNotify: n => notifications.push(n), setIntervalFn: cb => { poll = cb; return 1; }, clearIntervalFn: () => {} });
+  const stop = startMessageNotifications({ baseUrl: "http://x", immediate: false, fetchFn: async () => ({ ok: true, json: async () => ++calls === 1 ? { messages: [] } : new Promise(r => { finish = r; }) }), onNotify: n => notifications.push(n), setIntervalFn: cb => { poll = cb; return 1; }, clearIntervalFn: () => {} });
   await poll(); const pending = poll(); await new Promise(r => setImmediate(r)); stop();
   finish({ messages: [{ id: 1, question: "q" }] }); await pending;
   assert.equal(notifications.length, 0);
@@ -98,6 +125,7 @@ test("runner times out a stalled response body so later polls recover", async ()
   const notifications = [];
   const stop = startMessageNotifications({
     baseUrl: "http://x",
+    immediate: false,
     requestTimeoutMs: 40,
     fetchFn: async (_url, { signal }) => {
       requests++;
@@ -150,6 +178,7 @@ test("stopping notifications aborts the active request", async () => {
   let finish;
   const stop = startMessageNotifications({
     baseUrl: "http://x",
+    immediate: false,
     fetchFn: async (_url, options) => {
       signal = options?.signal;
       return new Promise(resolve => {

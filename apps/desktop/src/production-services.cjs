@@ -134,7 +134,7 @@ async function startProductionService(paths, options = {}) {
     await waitForProductionService(spec, child, { timeoutMs, intervalMs, signal });
     return { spec, child };
   } catch (error) {
-    stopChild(child);
+    await stopChild(child);
     throw error;
   }
 }

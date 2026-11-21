@@ -50,6 +50,7 @@ function startMessageNotifications({
   fetchFn = globalThis.fetch,
   intervalMs = 10_000,
   requestTimeoutMs = 8_000,
+  immediate = true,
   onNotify,
   setIntervalFn = setInterval,
   clearIntervalFn = clearInterval,
@@ -59,7 +60,7 @@ function startMessageNotifications({
   let polling = false;
   let activeRequest = null;
   const replies = new Map();
-  const timer = setIntervalFn(async () => {
+  const poll = async () => {
     if (stopped || polling) return;
     polling = true;
     const controller = new AbortController();
@@ -68,7 +69,7 @@ function startMessageNotifications({
     // polling lock indefinitely while the service itself remains healthy.
     const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
     try {
-      const res = await fetchFn(`${baseUrl}/messages?limit=500`, { signal: controller.signal });
+      const res = await fetchFn(`${baseUrl}/messages?limit=100`, { signal: controller.signal });
       if (!res || !res.ok) return;
       const data = await res.json();
       if (stopped) return;
@@ -93,8 +94,10 @@ function startMessageNotifications({
       if (activeRequest === controller) activeRequest = null;
       polling = false;
     }
-  }, intervalMs);
+  };
+  const timer = setIntervalFn(poll, intervalMs);
   if (timer?.unref) timer.unref();
+  if (immediate) void poll();
   return () => {
     stopped = true;
     clearIntervalFn(timer);
