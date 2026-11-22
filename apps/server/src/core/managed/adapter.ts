@@ -1,18 +1,32 @@
 import type { RuntimeAgent } from "@conflux/shared";
+import type { RpcHandlers, RpcOptions, RpcTransport } from "../managed-codex/rpc.js";
 
 /**
  * The runtime contract a managed executor speaks. Everything protocol-shaped
  * (method names, parameter fields, frame normalization, history parsing,
  * handshake gating) lives behind this interface so the executor core in
  * executor.ts stays runtime-agnostic: the Codex app-server is one adapter,
- * a future Claude SDK endpoint is another.
+ * the Claude stream-json SDK endpoint is another.
  */
 
-/** Structural slice of the stdio JSON-RPC connection an adapter drives. */
+/** Structural slice of the stdio connection an adapter drives. */
 export interface AdapterConnection {
   request(method: string, params?: unknown): Promise<unknown>;
   respond(id: number | string, result: unknown): void;
   respondError?(id: number | string, code: number, message: string, data?: unknown): void;
+}
+
+/** Full stdio connection contract managed by spawnAppServer. */
+export interface ManagedConnection extends AdapterConnection {
+  readonly generation: number;
+  handleChunk(chunk: string): void;
+  handleEnd(): void;
+  close(error?: Error): void;
+}
+
+export interface ManagedLaunchOptions {
+  /** Present when spawning a child to rejoin a saved thread/session. */
+  resumeThreadId?: string;
 }
 
 /** Launch description for the runtime's app-server-shaped child. */
@@ -75,7 +89,14 @@ export interface RuntimeAdapter {
   readonly label: string;
 
   /** The default child launch when no test/injector overrides it. */
-  defaultLaunch(db: unknown, agent: RuntimeAgent): ManagedLaunchConfig;
+  defaultLaunch(db: unknown, agent: RuntimeAgent, opts?: ManagedLaunchOptions): ManagedLaunchConfig;
+
+  /** Optional custom stdio connection factory (defaults to JSON-RPC 2.0). */
+  createConnection?(
+    transport: RpcTransport,
+    handlers: RpcHandlers,
+    options?: RpcOptions,
+  ): ManagedConnection;
 
   /** Handshake: initialize + compatibility gate. Throws on refusal. */
   initialize(conn: AdapterConnection): Promise<void>;

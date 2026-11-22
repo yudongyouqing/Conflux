@@ -5,7 +5,7 @@ import { WEB_CONSOLE_ID } from "@conflux/shared";
 import { randomUUID } from "node:crypto";
 import { nowIso, retryOnBusy, isLockError } from "./db.js";
 import { logger } from "../log.js";
-import { getManagedCodexManager } from "./managed-codex/manager.js";
+import { getManagedExecutorForInstance } from "./managed/registry.js";
 import { enqueueManagedTask, getManagedBindingBySession } from "./managed-codex/store.js";
 
 /**
@@ -110,7 +110,7 @@ export async function completeAsk(
       logger.warn({ messageId: message.id }, "managed enqueue stayed locked — message accepted, retry delivery after claim expiry");
       return { message: getMessage(db, message.id) ?? message, wake: { woke: false, disposition: "queued", reason: "managed dispatch is locked; message accepted for delivery retry" } };
     }
-    getManagedCodexManager()?.kick(managedBinding.instance_id);
+    getManagedExecutorForInstance(db, managedBinding.instance_id)?.kick(managedBinding.instance_id);
     try {
     await retryOnBusy(db, () =>
       db

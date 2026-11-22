@@ -3,7 +3,8 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 import { logger } from "../../log.js";
-import { ManagedRpcConnection, RpcClosedError, type RpcHandlers } from "./rpc.js";
+import type { ManagedConnection } from "../managed/adapter.js";
+import { ManagedRpcConnection, RpcClosedError, type RpcHandlers, type RpcOptions, type RpcTransport } from "./rpc.js";
 
 /**
  * Process adapter for the managed Codex executor: turn a configured
@@ -69,10 +70,15 @@ export function resolveLaunchPlan(
 }
 
 function cmdShimPlan(shimPath: string, args: string[]): LaunchPlan {
-  const script = scriptBehindCmdShim(shimPath);
-  if (script) return { command: process.execPath, args: [script, ...args] };
+  const target = targetBehindCmdShim(shimPath);
+  if (target) {
+    if (target.toLowerCase().endsWith(".exe")) {
+      return { command: target, args };
+    }
+    return { command: process.execPath, args: [target, ...args] };
+  }
   throw new Error(
-    `cannot resolve npm cmd shim to a node script: ${shimPath} — configure the codex executable directly`,
+    `cannot resolve npm cmd shim to an executable or node script: ${shimPath} — configure the CLI executable directly`,
   );
 }
 
@@ -109,11 +115,12 @@ function resolveOnPathWindows(command: string): string | null {
 }
 
 /**
- * Extract the node script an npm cmd shim forwards to. Shims reference the
- * package script as `%~dp0\...\foo.js` (relative to the shim directory) or
- * via quoted absolute paths; the first existing script file wins.
+ * Extract the node script or native .exe an npm cmd shim forwards to. Shims
+ * reference the package target as `%~dp0\...\foo.js` / `%dp0%\...\foo.exe`
+ * (relative to the shim directory) or via quoted absolute paths; the first
+ * existing file wins.
  */
-function scriptBehindCmdShim(shimPath: string): string | null {
+function targetBehindCmdShim(shimPath: string): string | null {
   let content: string;
   try {
     content = readFileSync(shimPath, "utf8");
@@ -121,16 +128,11 @@ function scriptBehindCmdShim(shimPath: string): string | null {
     return null;
   }
   const dir = dirname(shimPath);
-  // Shims reference the script either via %~dp0\... (direct expansion) or
-  // SET dp0 + %dp0%\... (npm's variable form) — both resolve relative to
-  // the shim's own directory. The captured tail uses Windows separators;
-  // normalize them so the lookup also works when CONFLUX runs on POSIX
-  // (resolving a .cmd shim a Windows install left behind, and the tests).
-  for (const match of content.matchAll(/(?:%~dp0|%dp0%)\\([^"'\r\n]+?\.(?:js|mjs|cjs))/g)) {
+  for (const match of content.matchAll(/(?:%~dp0|%dp0%)\\([^"'\r\n]+?\.(?:js|mjs|cjs|exe))/gi)) {
     const candidate = resolve(dir, match[1].replace(/\\/g, "/"));
     if (existsSync(candidate)) return candidate;
   }
-  for (const match of content.matchAll(/"([A-Za-z]:[^"'\r\n]+?\.(?:js|mjs|cjs))"/g)) {
+  for (const match of content.matchAll(/"([A-Za-z]:[^"'\r\n]+?\.(?:js|mjs|cjs|exe))"/gi)) {
     if (existsSync(match[1])) return resolve(match[1]);
   }
   return null;
@@ -142,12 +144,17 @@ export interface SpawnAppServerOptions {
   cwd: string;
   env: NodeJS.ProcessEnv;
   handlers?: RpcHandlers;
-  rpcOptions?: ConstructorParameters<typeof ManagedRpcConnection>[2];
+  rpcOptions?: RpcOptions;
+  createConnection?: (
+    transport: RpcTransport,
+    handlers: RpcHandlers,
+    options?: RpcOptions,
+  ) => ManagedConnection;
 }
 
 export interface AppServerProcess {
   child: ChildProcess;
-  conn: ManagedRpcConnection;
+  conn: ManagedConnection;
   /** Resolves when the child exits; rejects nothing — check code/signal. */
   exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
   /** Stderr tail (bounded) for diagnostics. */
@@ -194,27 +201,26 @@ export function spawnAppServer(opts: SpawnAppServerOptions): AppServerProcess {
     exitedResolve = res;
   });
 
-  const conn = new ManagedRpcConnection(
-    {
-      write: (frame) => {
-        if (!child.stdin?.writable) {
-          throw new RpcClosedError("app-server stdin is not writable");
-        }
-        child.stdin.write(frame);
-      },
-      close: () => {
-        // Fail-safe teardown of the pipes; the child gets a chance to exit
-        // on its own, then the close handler finalizes.
-        try {
-          child.stdin?.end();
-        } catch {
-          // already gone
-        }
-      },
+  const transport: RpcTransport = {
+    write: (frame) => {
+      if (!child.stdin?.writable) {
+        throw new RpcClosedError("app-server stdin is not writable");
+      }
+      child.stdin.write(frame);
     },
-    opts.handlers,
-    opts.rpcOptions,
-  );
+    close: () => {
+      // Fail-safe teardown of the pipes; the child gets a chance to exit
+      // on its own, then the close handler finalizes.
+      try {
+        child.stdin?.end();
+      } catch {
+        // already gone
+      }
+    },
+  };
+  const conn: ManagedConnection = opts.createConnection
+    ? opts.createConnection(transport, opts.handlers ?? {}, opts.rpcOptions)
+    : new ManagedRpcConnection(transport, opts.handlers, opts.rpcOptions);
 
   child.stdout?.setEncoding("utf8");
   child.stdout?.on("data", (chunk: string) => conn.handleChunk(chunk));

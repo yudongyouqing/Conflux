@@ -44,6 +44,11 @@ import {
   getManagedCodexManager,
   setManagedCodexManager,
 } from "../core/managed-codex/manager.js";
+import {
+  ManagedClaudeManager,
+  getManagedClaudeManager,
+  setManagedClaudeManager,
+} from "../core/managed-claude/manager.js";
 
 export interface HttpServerOptions {
   host?: string;
@@ -179,6 +184,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   });
 
   let managedManager: ManagedCodexManager | null = null;
+  let managedClaudeManager: ManagedClaudeManager | null = null;
   const closeResources = async () => {
     clearInterval(consoleBeat);
     clearInterval(abandonedSweep);
@@ -188,6 +194,13 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
       const manager = managedManager;
       managedManager = null;
       if (getManagedCodexManager() === manager) setManagedCodexManager(null);
+      manager.stopQueuePolling();
+      await manager.shutdown();
+    }
+    if (managedClaudeManager) {
+      const manager = managedClaudeManager;
+      managedClaudeManager = null;
+      if (getManagedClaudeManager() === manager) setManagedClaudeManager(null);
       manager.stopQueuePolling();
       await manager.shutdown();
     }
@@ -258,6 +271,9 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   managedManager = new ManagedCodexManager(db);
   setManagedCodexManager(managedManager);
   managedManager.startQueuePolling();
+  managedClaudeManager = new ManagedClaudeManager(db);
+  setManagedClaudeManager(managedClaudeManager);
+  managedClaudeManager.startQueuePolling();
   registerManagedCodexRoutes(app, ctx);
 
   try {
