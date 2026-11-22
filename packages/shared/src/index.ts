@@ -400,14 +400,3 @@ export interface NativeCliProviderState {
   api_key_configured: boolean;
   env_keys: string[];
 }
-
-export interface ProviderPreset {
-  id: string;
-  name: string;
-  runtime: RuntimeId;
-  base_url: string | null;
-  model: string | null;
-  api_key_configured: boolean;
-  extra_env: string | null;
-  updated_at: string;
-}

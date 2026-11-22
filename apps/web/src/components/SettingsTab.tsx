@@ -1,10 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  useApplyCliProvider,
   useCliProviders,
-  useDeleteCliProviderPreset,
-  useSaveCliProviderPreset,
   useSaveTerminalSettings,
   useTerminalSettings,
 } from "../hooks";
@@ -17,7 +14,6 @@ import {
   Upload,
   Trash2,
   RefreshCw,
-  Plus,
 } from "lucide-react";
 import {
   BUILTIN_THEMES,
@@ -40,9 +36,6 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
   } = useTerminalSettings(active);
   const save = useSaveTerminalSettings();
   const cliProviders = useCliProviders(active);
-  const savePreset = useSaveCliProviderPreset();
-  const deletePreset = useDeleteCliProviderPreset();
-  const applyProvider = useApplyCliProvider();
   const queryClient = useQueryClient();
   const importInput = useRef<HTMLInputElement>(null);
 
@@ -55,23 +48,6 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
   const [wakeActiveCount, setWakeActiveCount] = useState(0);
   const [terminalNotice, setTerminalNotice] = useState<string | null>(null);
   const [wakeNotice, setWakeNotice] = useState<string | null>(null);
-  const [providerNotice, setProviderNotice] = useState<string | null>(null);
-  const [addingPreset, setAddingPreset] = useState(false);
-  const [presetForm, setPresetForm] = useState<{
-    name: string;
-    runtime: RuntimeId;
-    base_url: string;
-    model: string;
-    api_key: string;
-    extra_env: string;
-  }>({
-    name: "",
-    runtime: "claude",
-    base_url: "",
-    model: "",
-    api_key: "",
-    extra_env: "",
-  });
   const [transferNotice, setTransferNotice] = useState<string | null>(null);
   const [transferPending, setTransferPending] = useState(false);
   const [importConflict, setImportConflict] = useState<"skip" | "overwrite" | "copy">("skip");
@@ -302,52 +278,6 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
   const selectedTerminal = options.find((o) => o.value === terminal);
   const binaries = data?.binaries ?? [];
   const nativeProviders = cliProviders.data?.native ?? [];
-  const providerPresets = cliProviders.data?.presets ?? [];
-
-  const handleSavePreset = (andApply: boolean) => {
-    const name = presetForm.name.trim();
-    if (!name || savePreset.isPending || applyProvider.isPending) return;
-    setProviderNotice(null);
-    const trimmedKey = presetForm.api_key.trim() || null;
-    savePreset.mutate(
-      {
-        name,
-        runtime: presetForm.runtime,
-        base_url: presetForm.base_url.trim() || null,
-        model: presetForm.model.trim() || null,
-        api_key: trimmedKey,
-        extra_env: presetForm.extra_env.trim() || null,
-      },
-      {
-        onSuccess: ({ preset }) => {
-          setPresetForm({
-            name: "",
-            runtime: presetForm.runtime,
-            base_url: "",
-            model: "",
-            api_key: "",
-            extra_env: "",
-          });
-          setAddingPreset(false);
-          if (andApply) {
-            applyProvider.mutate(
-              { preset_id: preset.id },
-              {
-                onSuccess: (res) =>
-                  setProviderNotice(
-                    `已写入 ${res.config_path}${res.backup_path ? "（已备份）" : ""}`,
-                  ),
-                onError: (e) => setProviderNotice(`写入失败: ${(e as Error).message}`),
-              },
-            );
-          } else {
-            setProviderNotice(`已保存预设「${preset.name}」`);
-          }
-        },
-        onError: (e) => setProviderNotice(`保存失败: ${(e as Error).message}`),
-      },
-    );
-  };
 
   return (
     <div className="h-full overflow-y-auto bg-surface px-5 py-6 sm:px-8 sm:py-8">
@@ -607,49 +537,29 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
           </div>
         </section>
 
-        {/* 模型渠道 */}
-        <section className="py-5 space-y-2">
-          <div className="flex items-center justify-between gap-3 pb-1">
-            <div className="flex items-center gap-2 min-w-0">
-              <h3 className={sectionTitleCls}>模型渠道</h3>
-              {providerNotice && (
-                <span
-                  className={`text-2xs truncate ${
-                    providerNotice.includes("失败") ? "text-danger" : "text-success"
-                  }`}
-                >
-                  {providerNotice}
-                </span>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={() => setAddingPreset((v) => !v)}
-              className={quietBtnCls}
-            >
-              <Plus size={12} />
-              {addingPreset ? "收起" : "新建预设"}
-            </button>
+        {/* 本机 CLI 配置（只读展示，渠道切换交由 CC-Switch 等工具管理） */}
+        <section className="py-5 space-y-1">
+          <div className="flex items-center justify-between gap-3 pb-1.5">
+            <h3 className={sectionTitleCls}>本机 CLI 配置</h3>
+            <span className="text-2xs text-ink-faint">只读 · 由本机配置 / CC-Switch 管理</span>
           </div>
 
           <div className="divide-y divide-line/50">
             {nativeProviders.map((n) => (
               <div key={n.runtime} className="flex items-center justify-between gap-4 py-2.5">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span
-                      aria-hidden="true"
-                      className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                        n.api_key_configured ? "bg-success" : "bg-ink-faint/40"
-                      }`}
-                    />
-                    <span className="text-xs font-medium text-ink">
-                      {n.runtime === "claude" ? "Claude" : "Codex"}
-                    </span>
-                    <span className="text-2xs text-ink-muted truncate">
-                      {[n.model || "默认模型", n.base_url].filter(Boolean).join(" · ")}
-                    </span>
-                  </div>
+                <div className="min-w-0 flex-1 flex items-center gap-2">
+                  <span
+                    aria-hidden="true"
+                    className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                      n.api_key_configured ? "bg-success" : "bg-ink-faint/40"
+                    }`}
+                  />
+                  <span className="text-xs font-medium text-ink">
+                    {n.runtime === "claude" ? "Claude" : "Codex"}
+                  </span>
+                  <span className="text-2xs text-ink-muted truncate">
+                    {[n.model || "默认模型", n.base_url].filter(Boolean).join(" · ")}
+                  </span>
                 </div>
                 <span
                   className="text-2xs font-mono text-ink-faint truncate max-w-[190px] flex-shrink-0"
@@ -659,127 +569,7 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
                 </span>
               </div>
             ))}
-
-            {providerPresets.map((p) => (
-              <div key={p.id} className="flex items-center justify-between gap-3 py-2.5">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-medium text-ink truncate">{p.name}</span>
-                    <span className="text-2xs font-mono text-ink-faint">{p.runtime}</span>
-                  </div>
-                  <p className="text-2xs font-mono text-ink-faint truncate mt-0.5">
-                    {[p.model, p.base_url].filter(Boolean).join(" · ") || "仅环境变量"}
-                  </p>
-                </div>
-                <div className="flex items-center gap-1.5 flex-shrink-0">
-                  <button
-                    type="button"
-                    disabled={applyProvider.isPending}
-                    onClick={() => {
-                      setProviderNotice(null);
-                      applyProvider.mutate(
-                        { preset_id: p.id },
-                        {
-                          onSuccess: (res) =>
-                            setProviderNotice(
-                              `已写入 ${res.config_path}${res.backup_path ? "（已备份）" : ""}`,
-                            ),
-                          onError: (e) => setProviderNotice(`写入失败: ${(e as Error).message}`),
-                        },
-                      );
-                    }}
-                    className={outlineBtnCls}
-                  >
-                    应用
-                  </button>
-                  <button
-                    type="button"
-                    disabled={deletePreset.isPending}
-                    onClick={() => deletePreset.mutate(p.id)}
-                    title="删除预设"
-                    className="p-1.5 rounded-md text-ink-faint hover:text-danger hover:bg-danger-soft transition-colors"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              </div>
-            ))}
           </div>
-
-          {addingPreset && (
-            <div className="rounded-lg border border-line/80 bg-paper/50 p-3 space-y-2.5 mt-2">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <input
-                  value={presetForm.name}
-                  onChange={(e) => setPresetForm((f) => ({ ...f, name: e.target.value }))}
-                  placeholder="预设名称（如：公司中转）"
-                  className={inputCls}
-                />
-                <select
-                  value={presetForm.runtime}
-                  onChange={(e) =>
-                    setPresetForm((f) => ({ ...f, runtime: e.target.value as RuntimeId }))
-                  }
-                  className={selectCls}
-                >
-                  <option value="claude">Claude Code</option>
-                  <option value="codex">Codex</option>
-                </select>
-                <input
-                  value={presetForm.base_url}
-                  onChange={(e) => setPresetForm((f) => ({ ...f, base_url: e.target.value }))}
-                  placeholder="Base URL（可选）"
-                  className={`${inputCls} font-mono`}
-                />
-                <input
-                  value={presetForm.model}
-                  onChange={(e) => setPresetForm((f) => ({ ...f, model: e.target.value }))}
-                  placeholder={presetForm.runtime === "claude" ? "claude-sonnet-4-5" : "gpt-5-codex"}
-                  className={`${inputCls} font-mono`}
-                />
-              </div>
-              <input
-                type="password"
-                value={presetForm.api_key}
-                onChange={(e) => setPresetForm((f) => ({ ...f, api_key: e.target.value }))}
-                placeholder="API Key（可选，本地存储且响应脱敏）"
-                className={`${inputCls} font-mono`}
-              />
-              {presetForm.runtime === "claude" && (
-                <input
-                  value={presetForm.extra_env}
-                  onChange={(e) => setPresetForm((f) => ({ ...f, extra_env: e.target.value }))}
-                  placeholder='额外 env JSON（可选，如 {"HTTP_PROXY":"http://127.0.0.1:7890"}）'
-                  className={`${inputCls} font-mono`}
-                />
-              )}
-              <div className="flex items-center justify-end gap-2 pt-0.5">
-                <button
-                  type="button"
-                  onClick={() => setAddingPreset(false)}
-                  className={quietBtnCls}
-                >
-                  取消
-                </button>
-                <button
-                  type="button"
-                  disabled={!presetForm.name.trim() || savePreset.isPending}
-                  onClick={() => handleSavePreset(false)}
-                  className={outlineBtnCls}
-                >
-                  保存
-                </button>
-                <button
-                  type="button"
-                  disabled={!presetForm.name.trim() || savePreset.isPending || applyProvider.isPending}
-                  onClick={() => handleSavePreset(true)}
-                  className="px-2.5 py-1 rounded-md bg-accent text-on-accent text-2xs font-medium hover:bg-accent-deep disabled:opacity-40 transition-colors"
-                >
-                  保存并应用
-                </button>
-              </div>
-            </div>
-          )}
         </section>
 
         {/* 唤醒控制 */}

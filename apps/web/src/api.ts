@@ -12,9 +12,7 @@ import type {
   MessageStatus,
   ModelConfig,
   NativeCliProviderState,
-  ProviderPreset,
   RuntimeAgent,
-  RuntimeId,
   RuntimeInstance,
   SessionSummary,
   TerminalOption,
@@ -238,42 +236,7 @@ export const api = {
   getCliProviders: (signal?: AbortSignal) =>
     get<{
       native: NativeCliProviderState[];
-      presets: ProviderPreset[];
     }>("/settings/cli-providers", undefined, signal),
-
-  saveCliProviderPreset: (body: {
-    id?: string;
-    name: string;
-    runtime: RuntimeId;
-    base_url?: string | null;
-    model?: string | null;
-    api_key?: string | null;
-    extra_env?: string | null;
-  }) =>
-    post<{ preset: ProviderPreset; presets: ProviderPreset[] }>(
-      "/settings/cli-providers/presets",
-      body,
-    ),
-
-  deleteCliProviderPreset: (id: string) =>
-    del<{ ok: boolean; presets: ProviderPreset[] }>(
-      `/settings/cli-providers/presets/${encodeURIComponent(id)}`,
-    ),
-
-  applyCliProvider: (body: {
-    preset_id?: string;
-    runtime?: RuntimeId;
-    base_url?: string | null;
-    model?: string | null;
-    api_key?: string | null;
-    extra_env?: string | null;
-  }) =>
-    post<{
-      ok: boolean;
-      config_path: string;
-      backup_path: string | null;
-      native: NativeCliProviderState;
-    }>("/settings/cli-providers/apply", body),
 
   webAsk: (body: { to_session: string; question: string; from_session?: string }) =>
     post<{ message: Message }>("/web/ask", body),

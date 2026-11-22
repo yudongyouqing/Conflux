@@ -11,7 +11,6 @@ import {
   Zap,
 } from "lucide-react";
 import {
-  useCliProviders,
   useCreateAgent,
   useCreateRuntimeAgent,
   useRuntimes,
@@ -371,7 +370,6 @@ function RuntimeCreateForm({
   const create = useCreateRuntimeAgent();
   const runtimes = useRuntimes();
   const terminalSettings = useTerminalSettings();
-  const cliProviders = useCliProviders();
   const [form, setForm] = useState(EMPTY_RUNTIME_FORM);
   const [advanced, setAdvanced] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -388,11 +386,6 @@ function RuntimeCreateForm({
     }
     return map;
   }, [terminalSettings.data]);
-
-  const matchingPresets = useMemo(
-    () => (cliProviders.data?.presets ?? []).filter((p) => p.runtime === form.runtime),
-    [cliProviders.data, form.runtime],
-  );
 
   // Runtime choices come from the server's registry-derived catalog — adding
   // a runtime to RUNTIME_REGISTRY makes it appear here automatically.
@@ -556,29 +549,6 @@ function RuntimeCreateForm({
 
         {advanced && (
           <div className="space-y-3 pt-2 border-t border-line/80">
-            {matchingPresets.length > 0 && (
-              <div className="space-y-1">
-                <div className="text-2xs text-ink-faint">从已保存的渠道预设快速填充</div>
-                <div className="flex flex-wrap gap-1.5">
-                  {matchingPresets.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() =>
-                        setForm((f) => ({
-                          ...f,
-                          base_url: p.base_url ?? f.base_url,
-                          model: p.model ?? f.model,
-                        }))
-                      }
-                      className="text-2xs px-2 py-1 rounded-md border border-line bg-paper/60 text-ink-muted hover:border-accent hover:text-accent transition-colors"
-                    >
-                      {p.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
             <div className="grid grid-cols-2 gap-3 pt-1">
               <Field label="模型(可选)">
                 <input
