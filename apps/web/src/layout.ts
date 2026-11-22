@@ -20,9 +20,21 @@ function bboxOf(nodes: Node[]): BBox {
   };
 }
 
-function layoutOnce(nodes: Node[], edges: Edge[], direction: "LR" | "TB"): Node[] {
+function layoutOnce(
+  nodes: Node[],
+  edges: Edge[],
+  direction: "LR" | "TB",
+  ranker?: "network-simplex" | "longest-path",
+): Node[] {
   const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir: direction, ranksep: 90, nodesep: 80, marginx: 40, marginy: 40 });
+  g.setGraph({
+    rankdir: direction,
+    ranksep: 90,
+    nodesep: 80,
+    marginx: 40,
+    marginy: 40,
+    ...(ranker ? { ranker } : {}),
+  });
   g.setDefaultEdgeLabel(() => ({}));
   nodes.forEach((node) => g.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT }));
   edges.forEach((edge) => {
@@ -154,6 +166,25 @@ export function layoutGraph(
       },
     }));
     return { nodes: layoutedNodes, edges };
+  }
+
+  // Dense cyclic/mesh graphs (avg degree >= 4, i.e. >= 2n directed edges)
+  // stall Dagre's layered crossing-minimization for seconds without improving
+  // readability. Place BFS neighborhoods on a compact serpentine grid instead.
+  if (nodes.length >= 40 && edges.length >= nodes.length * 2) {
+    return { nodes: wrapSnake(nodes, edges), edges };
+  }
+
+  // Large sparse graphs: single-pass longest-path Dagre avoids paying twice
+  // for network-simplex while preserving hierarchy.
+  if (nodes.length >= 100) {
+    const laid = layoutOnce(nodes, edges, direction, "longest-path");
+    const bb = bboxOf(laid);
+    const slim = Math.min(bb.width, bb.height) || 1;
+    if (Math.max(bb.width, bb.height) / slim > 6) {
+      return { nodes: wrapSnake(nodes, edges), edges };
+    }
+    return { nodes: laid, edges };
   }
 
   // Run BOTH directions and keep the one whose aspect ratio is closer to
