@@ -55,9 +55,11 @@ test("declares the server workspace as a root production dependency", () => {
 
 test("resolves the Builder config from the desktop project directory", () => {
   const packageJson = JSON.parse(fs.readFileSync(ROOT_PACKAGE_PATH, "utf8"));
+  assert.match(packageJson.scripts?.["package:desktop"] ?? "", /node scripts\/package-desktop\.cjs/);
 
-  assert.match(
-    packageJson.scripts?.["package:desktop"] ?? "",
-    /electron-builder --projectDir apps\/desktop --config electron-builder\.yml/
+  const scriptSource = fs.readFileSync(
+    path.join(path.dirname(ROOT_PACKAGE_PATH), "scripts", "package-desktop.cjs"),
+    "utf8",
   );
+  assert.match(scriptSource, /"--projectDir",\s*"apps\/desktop",\s*"--config",\s*"electron-builder\.yml"/);
 });
