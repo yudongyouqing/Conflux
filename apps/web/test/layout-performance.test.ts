@@ -50,3 +50,57 @@ test("cycles and branching graphs continue through the general layout", (t) => {
   }
   assert.equal(layout.mock.callCount(), 6);
 });
+
+test("fixed-degree mesh graphs bypass Dagre while preserving node/edge identity and non-overlapping positions", (t) => {
+  const layout = t.mock.method(dagre, "layout", () => {
+    throw new Error("Dense mesh should bypass Dagre");
+  });
+  const meshNodes = Array.from({ length: 300 }, (_, i) => ({
+    id: `m${i}`,
+    position: { x: 0, y: 0 },
+  })) as Node[];
+  const meshEdges: Edge[] = [];
+  let nextId = 1;
+  for (let i = 0; i < meshNodes.length; i++) {
+    for (const k of [1, 2, 5]) {
+      const j = (i + k) % meshNodes.length;
+      meshEdges.push({ id: `me${nextId++}`, source: `m${i}`, target: `m${j}` });
+    }
+  }
+
+  const result = layoutGraph(meshNodes, meshEdges);
+  assert.equal(layout.mock.callCount(), 0);
+  assert.equal(result.edges, meshEdges);
+  assert.equal(result.nodes.length, 300);
+
+  const ids = new Set(result.nodes.map((n) => n.id));
+  assert.equal(ids.size, 300);
+  const coords = new Set(result.nodes.map((n) => `${n.position.x},${n.position.y}`));
+  assert.equal(coords.size, 300, "every node gets a distinct non-overlapping position");
+  assert.ok(
+    result.nodes.every((n) => Number.isFinite(n.position.x) && Number.isFinite(n.position.y)),
+  );
+});
+
+test("large sparse trees run single-pass Dagre instead of double-running both directions", (t) => {
+  const original = dagre.layout;
+  const layout = t.mock.method(dagre, "layout", (...args: Parameters<typeof original>) =>
+    original(...args),
+  );
+  const treeNodes = Array.from({ length: 120 }, (_, i) => ({
+    id: `t${i}`,
+    position: { x: 0, y: 0 },
+  })) as Node[];
+  const treeEdges = Array.from({ length: 119 }, (_, i) => ({
+    id: `te${i}`,
+    source: `t${Math.floor(i / 2)}`,
+    target: `t${i + 1}`,
+  })) as Edge[];
+
+  const result = layoutGraph(treeNodes, treeEdges);
+  assert.equal(layout.mock.callCount(), 1);
+  assert.equal(result.nodes.length, 120);
+  assert.ok(
+    result.nodes.every((n) => Number.isFinite(n.position.x) && Number.isFinite(n.position.y)),
+  );
+});
