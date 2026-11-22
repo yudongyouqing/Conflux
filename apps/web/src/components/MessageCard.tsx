@@ -39,13 +39,13 @@ export function MessageCard({
   return (
     <div
       onClick={onClick}
-      className={`p-3 rounded-xl border cursor-pointer transition-all ${
+      className={`px-3.5 py-3 rounded-xl border cursor-pointer transition-colors ${
         selected
-          ? "border-accent bg-accent-soft/50 shadow-card"
-          : "border-line bg-surface hover:border-line-strong hover:shadow-card"
+          ? "border-accent/60 bg-accent-soft/40"
+          : "border-line/80 bg-surface hover:border-line-strong hover:bg-tile/50"
       }`}
     >
-      <div className="flex flex-wrap items-center gap-2 text-xs mb-1">
+      <div className="flex flex-wrap items-center gap-2 text-xs mb-1.5">
         <span className="text-ink font-medium">{fromName ?? msg.from_session.slice(0, 8)}</span>
         <ArrowRight size={12} className="text-ink-faint" />
         <span className="text-ink font-medium">{toName ?? msg.to_session.slice(0, 8)}</span>
@@ -65,7 +65,7 @@ export function MessageCard({
           {STATUS_LABELS[msg.status] ?? msg.status}
         </span>
       </div>
-      <div className="text-sm text-ink truncate">
+      <div className="text-md-plus text-ink truncate leading-relaxed">
         <InlineMarkdown>{msg.question}</InlineMarkdown>
       </div>
       {msg.reply && (

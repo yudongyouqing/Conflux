@@ -74,6 +74,8 @@ export default {
         sans: [
           '"IBM Plex Sans"',
           '"PingFang SC"',
+          '"HarmonyOS Sans SC"',
+          '"Segoe UI"',
           '"Microsoft YaHei UI"',
           '"Microsoft YaHei"',
           "system-ui",
@@ -84,9 +86,9 @@ export default {
       },
       /** 阴影只给浮起物：卡片静态无影或极浅，浮层/拖拽/选中才升级 */
       boxShadow: {
-        card: "0 1px 2px rgba(24, 34, 52, 0.05)",
-        raised: "0 4px 16px rgba(24, 34, 52, 0.10), 0 1px 3px rgba(24, 34, 52, 0.06)",
-        overlay: "0 12px 32px rgba(24, 34, 52, 0.18)",
+        card: "0 1px 2px rgba(17, 24, 39, 0.04)",
+        raised: "0 6px 20px rgba(17, 24, 39, 0.08), 0 1px 3px rgba(17, 24, 39, 0.05)",
+        overlay: "0 16px 40px rgba(17, 24, 39, 0.18), 0 2px 6px rgba(17, 24, 39, 0.08)",
       },
     },
   },

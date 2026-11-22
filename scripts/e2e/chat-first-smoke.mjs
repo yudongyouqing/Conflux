@@ -203,7 +203,8 @@ try {
 
   // ---- 4. broadcast + directed summon through the real endpoints --------
   const composer = page.locator(".room-composer");
-  await composer.locator("input").fill("全员周报：P1 验收广播");
+  const composerField = composer.locator("textarea, input");
+  await composerField.fill("全员周报：P1 验收广播");
   await page.getByRole("button", { name: "广播" }).click();
   // one broadcast row per member on the shared thread
   await page.getByText("全员周报：P1 验收广播").first().waitFor();
@@ -212,7 +213,7 @@ try {
   assert.equal(thread.some((m) => m.question.includes("全员周报：P1 验收广播")), true);
   ok("broadcast sent and persisted on the room thread");
 
-  await composer.locator("input").fill("@验收会话");
+  await composerField.fill("@验收会话");
   // same display name twice: the picker must disambiguate by id hint
   const dupRows = composer.getByRole("button", { name: /验收会话/ });
   await dupRows.nth(1).waitFor({ timeout: 10_000 });
@@ -222,7 +223,7 @@ try {
   assert.notEqual(hintA, hintB, "duplicate names need distinct id hints");
   await page.screenshot({ path: join(ARTIFACTS, "mention-dup-1440.png"), fullPage: true });
   await dupRows.nth(0).click();
-  await composer.locator("input").fill("@验收会话 检查构建");
+  await composerField.fill("@验收会话 检查构建");
   await page.getByRole("button", { name: "召唤" }).click();
   await page.getByText("检查构建").first().waitFor();
   let tasks = (await apiGet(`/chat-rooms/${rooms[0].id}/orchestrate`)).tasks;
@@ -330,7 +331,7 @@ try {
   // narrow chat: composer and send button stay visible and usable
   await page.getByRole("button", { name: /P1 验收房/ }).click({ force: true });
   await page.getByRole("heading", { name: "P1 验收房" }).waitFor();
-  await page.locator(".room-composer input").waitFor();
+  await page.locator(".room-composer textarea, .room-composer input").waitFor();
   await page.setViewportSize({ width: 320, height: 740 });
   await page.screenshot({ path: join(ARTIFACTS, "chat-320.png"), fullPage: true });
   const overflow = await page.evaluate(

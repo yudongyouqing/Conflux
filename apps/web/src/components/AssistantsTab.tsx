@@ -125,35 +125,37 @@ export function AssistantsTab({ active, onOpenSession }: AssistantsTabProps) {
   const isLoading = runtimesQuery.isLoading || agentsQuery.isLoading;
 
   return (
-    <div className="h-full overflow-y-auto p-3 sm:p-6">
-      <div className="max-w-2xl mx-auto space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="h-full overflow-y-auto bg-surface p-4 sm:p-7">
+      <div className="max-w-3xl mx-auto space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-line/80">
           <div className="min-w-0">
-            <h2 className="text-ink font-semibold text-base flex items-center gap-2">
-              <Bot size={16} className="text-ink-muted" /> 助手
+            <h2 className="text-ink font-semibold text-base-plus tracking-[-0.015em] flex items-center gap-2">
+              <Bot size={16} className="text-accent" /> 助手
             </h2>
-            <p className="text-xs text-ink-muted mt-0.5">
+            <p className="text-xs text-ink-muted mt-1">
               编码助手 = CLI 启动配置与运行实例；模型助手 = 独立 API 对话。名称相同仍是不同对象。
             </p>
           </div>
           <button
+            type="button"
             onClick={() => setWizardOpen(true)}
-            className="flex shrink-0 items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent text-on-accent text-xs hover:bg-accent-deep transition-colors"
+            className="flex shrink-0 items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-accent text-on-accent text-xs font-medium hover:bg-accent-deep transition-colors shadow-card"
           >
             <Plus size={13} /> 创建{CATEGORY_LABELS[category]}
           </button>
         </div>
 
-        <div className="flex bg-surface border border-line rounded-lg overflow-hidden text-xs w-fit">
+        <div className="flex bg-tile p-0.5 border border-line/70 rounded-lg text-xs w-fit">
           {(Object.keys(CATEGORY_LABELS) as Category[]).map((c) => (
             <button
               key={c}
+              type="button"
               onClick={() => setCategory(c)}
               aria-pressed={category === c}
-              className={`px-3.5 py-1.5 transition-colors ${
+              className={`px-3.5 py-1 rounded-md font-medium transition-colors ${
                 category === c
-                  ? "bg-accent text-on-accent"
-                  : "text-ink-muted hover:bg-tile-hover hover:text-ink"
+                  ? "bg-surface text-ink shadow-card"
+                  : "text-ink-muted hover:text-ink"
               }`}
             >
               {CATEGORY_LABELS[c]}
@@ -377,7 +379,7 @@ function CodingCard({
       </div>
 
       {expanded && (
-        <div className="px-3 pb-3 space-y-3 border-t border-line pt-3">
+        <div className="px-3.5 pb-3.5 space-y-3 border-t border-line/80 bg-paper/50 pt-3">
           {/* only REAL session bindings appear here — a starting instance
               without a session id offers no conversation entry */}
           {sessions.length > 0 && (
@@ -445,8 +447,8 @@ function ModelCard({
           setExpanded(!expanded);
         }}
       >
-        <div className="w-9 h-9 rounded-lg bg-indigo-600 flex items-center justify-center flex-shrink-0">
-          <Bot size={17} className="text-white" />
+        <div className="w-8 h-8 rounded-lg bg-accent-soft text-accent flex items-center justify-center flex-shrink-0">
+          <Bot size={16} />
         </div>
         <div className="flex-1 min-w-0">
           <div className="text-sm text-ink font-medium truncate">{agent.name}</div>

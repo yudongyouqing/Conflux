@@ -249,41 +249,53 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
   const selected = options.find((o) => o.value === terminal);
 
   return (
-    <div className="h-full overflow-y-auto p-6">
-      <div className="max-w-xl mx-auto space-y-5">
-        <div>
-          <h2 className="text-ink font-semibold text-base flex items-center gap-2">
-            <Settings size={16} className="text-ink-muted" /> 设置
+    <div className="h-full overflow-y-auto bg-surface p-4 sm:p-7">
+      <div className="max-w-2xl mx-auto divide-y divide-line/80">
+        <div className="pb-5">
+          <h2 className="text-ink font-semibold text-base-plus tracking-[-0.015em] flex items-center gap-2">
+            <Settings size={16} className="text-accent" /> 设置
           </h2>
-          <p className="text-xs text-ink-muted mt-0.5">
-            「在终端打开」和运行时 agent 启动使用的终端与可执行文件。
+          <p className="text-xs text-ink-muted mt-1">
+            主题外观、终端启动方式、自动唤醒并发控制与本地数据管理。
           </p>
         </div>
-        <div className="bg-surface border border-line rounded-xl p-4 space-y-3">
-          <h3 className="text-ink font-medium text-sm">主题</h3>
+
+        <section className="py-6 space-y-3.5">
           <div>
-            <p className="text-2xs text-ink-muted mb-2">明暗随色板切换，状态颜色保持一致。</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+            <h3 className="text-ink font-semibold text-sm tracking-[-0.01em]">外观与主题</h3>
+            <p className="text-2xs text-ink-muted mt-0.5">明暗随色板切换，状态颜色保持 AA 对比度。</p>
+          </div>
+          <div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {allThemes.map((t) => {
                 const active = (activeCustom ?? BUILTIN_THEMES[0].name) === t.name;
                 const custom = !BUILTIN_THEMES.some((b) => b.name === t.name);
                 return (
                   <div
                     key={t.name}
-                    className={`flex items-center rounded-lg border ${active ? "border-accent bg-accent-soft" : "border-line"}`}
+                    className={`flex items-center rounded-xl border transition-colors ${
+                      active
+                        ? "border-accent bg-accent-soft/60"
+                        : "border-line/80 hover:border-line-strong bg-paper/40"
+                    }`}
                   >
                     <button
                       type="button"
                       aria-pressed={active}
                       onClick={() => { setActiveCustomTheme(t.name); setActiveCustom(t.name); }}
-                      className={`flex min-w-0 flex-1 items-center gap-2 px-2 py-2 rounded-lg text-xs transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent ${
-                        active ? "text-ink" : "text-ink-muted hover:bg-tile-hover"
+                      className={`flex min-w-0 flex-1 items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent ${
+                        active ? "text-ink font-medium" : "text-ink-muted hover:text-ink"
                       }`}
                     >
-                      <span aria-hidden="true" className="flex gap-0.5 flex-shrink-0">
-                        {[t.colors.accent, t.colors.paper, t.colors.line].map((c, i) => (
-                          <span key={i} className="w-2.5 h-2.5 rounded-full border border-line" style={{ background: c }} />
-                        ))}
+                      <span
+                        aria-hidden="true"
+                        className="w-7 h-5 rounded-md border flex overflow-hidden flex-shrink-0"
+                        style={{ background: t.colors.paper, borderColor: t.colors.line }}
+                      >
+                        <span className="w-2 h-full" style={{ background: t.colors.paper }} />
+                        <span className="flex-1 h-full flex items-end p-0.5" style={{ background: t.colors.surface }}>
+                          <span className="w-full h-1 rounded-full" style={{ background: t.colors.accent }} />
+                        </span>
                       </span>
                       <span className="truncate text-left flex-1">{t.name}</span>
                       {active && <Check size={14} aria-hidden="true" className="text-accent shrink-0" />}
@@ -298,7 +310,7 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
                           setCustomThemes(listCustomThemes());
                           if (activeCustom === t.name) { setActiveCustomTheme(null); setActiveCustom(null); }
                         }}
-                        className="text-ink-muted hover:text-danger hover:bg-danger-soft rounded-md p-2 mr-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+                        className="text-ink-muted hover:text-danger hover:bg-danger-soft rounded-md p-2 mr-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
                       >
                         <Trash2 size={13} aria-hidden="true" />
                       </button>
@@ -307,7 +319,7 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
                 );
               })}
             </div>
-            <div className="mt-2.5">
+            <div className="mt-3.5">
               <label htmlFor="theme-import" className="block text-xs text-ink-muted mb-1.5">导入自定义主题</label>
               <textarea
                 id="theme-import"
@@ -316,15 +328,15 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
                 value={importText}
                 onChange={(e) => setImportText(e.target.value)}
                 rows={3}
-                placeholder='导入主题 JSON：{"name":"我的主题","colors":{"ink":"#182234","paper":"#f6f7f9","line":"#e4e8ef","accent":"#2563eb",…}（8 键）}'
-                className="w-full bg-surface text-ink text-xs rounded-lg px-2.5 py-2 border border-line placeholder-ink-faint outline-none focus:border-accent resize-y font-mono"
+                placeholder='导入主题 JSON：{"name":"我的主题","colors":{"ink":"#111827","paper":"#f7f8fa","surface":"#ffffff","line":"#e6e8ee",…}（8 键）}'
+                className="w-full bg-paper/50 text-ink text-xs rounded-lg px-3 py-2 border border-line placeholder-ink-faint outline-none focus:border-accent resize-y font-mono"
               />
               {importError && <div id="theme-import-error" role="alert" className="text-xs text-danger mt-1">{importError}</div>}
               <button
                 type="button"
                 onClick={applyImport}
                 disabled={!importText.trim()}
-                className="mt-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border border-line text-ink hover:border-accent hover:text-accent disabled:opacity-50 disabled:cursor-not-allowed"
+                className="mt-2 px-3 py-1.5 rounded-lg text-xs font-medium border border-line text-ink hover:border-accent hover:text-accent disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 导入主题
               </button>
@@ -333,9 +345,13 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
               </span>
             </div>
           </div>
-        </div>
+        </section>
 
-        <div className="bg-surface border border-line rounded-xl p-4 space-y-4 shadow-card">
+        <section className="py-6 space-y-4">
+          <div>
+            <h3 className="text-ink font-semibold text-sm tracking-[-0.01em]">终端与可执行文件</h3>
+            <p className="text-2xs text-ink-faint mt-0.5">「在终端打开」与编码助手启动时使用的终端和 CLI 路径。</p>
+          </div>
           <label className="block">
             <span className="block text-xs font-medium text-ink mb-1.5">终端打开方式</span>
             <select
@@ -358,7 +374,7 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
             )}
           </label>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="block">
               <span className="block text-2xs text-ink-muted mb-1">claude 可执行文件</span>
               <input
@@ -396,18 +412,18 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
               type="button"
               onClick={submitTerminal}
               disabled={save.isPending}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-accent text-on-accent text-xs hover:bg-accent-deep disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-accent text-on-accent text-xs font-medium hover:bg-accent-deep disabled:opacity-50 transition-colors"
             >
               {savingSection === "terminal" && <Loader2 size={12} className="animate-spin" />}
               保存
             </button>
           </div>
-        </div>
+        </section>
 
         {/* Wake concurrency control: caps simultaneous headless wakes */}
-        <div className="bg-surface border border-line rounded-xl p-4 space-y-4 shadow-card">
+        <section className="py-6 space-y-4">
           <div>
-            <h3 className="text-ink font-medium text-sm">唤醒控制</h3>
+            <h3 className="text-ink font-semibold text-sm tracking-[-0.01em]">唤醒控制</h3>
             <p className="text-2xs text-ink-faint mt-0.5">
               自动唤醒会话响应消息，限制并发数量防止资源耗尽
             </p>
@@ -415,9 +431,9 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
 
           <label className="flex items-center justify-between gap-3 cursor-pointer">
             <div>
-              <span className="text-xs text-ink">自动唤醒</span>
+              <span className="text-xs font-medium text-ink">自动唤醒</span>
               <p className="text-2xs text-ink-faint mt-0.5">
-                关闭后消息将保持 pending 状态，需手动打开会话处理
+                关闭后消息将保持待处理状态，需手动打开会话处理
               </p>
             </div>
             <span className="relative inline-flex items-center">
@@ -433,8 +449,8 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
 
           <label className="block">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs text-ink">最大并发唤醒数</span>
-              <span className="text-xs text-ink-muted tabular-nums">
+              <span className="text-xs font-medium text-ink">最大并发唤醒数</span>
+              <span className="text-xs text-ink-muted font-mono tabular-nums">
                 {wakeMaxConcurrent === 0 ? "无限制" : wakeMaxConcurrent}
               </span>
             </div>
@@ -446,10 +462,10 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
               value={wakeMaxConcurrent}
               onChange={(e) => setWakeMaxConcurrent(Number(e.target.value))}
               disabled={!autoWake}
-              className="w-full h-2 bg-line rounded-lg appearance-none cursor-pointer accent-accent disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full h-1.5 bg-line rounded-lg appearance-none cursor-pointer accent-accent disabled:opacity-50 disabled:cursor-not-allowed"
             />
             <div className="flex items-center justify-between mt-1.5">
-              <span className="text-2xs text-ink-faint">
+              <span className="text-2xs text-ink-faint tabular-nums">
                 0 = 无限制 · 当前活跃：{wakeActiveCount}
               </span>
               <span className="text-2xs text-ink-faint">
@@ -475,19 +491,19 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
               type="button"
               onClick={submitWake}
               disabled={save.isPending}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-accent text-on-accent text-xs hover:bg-accent-deep disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-accent text-on-accent text-xs font-medium hover:bg-accent-deep disabled:opacity-50 transition-colors"
             >
               {savingSection === "wake" && <Loader2 size={12} className="animate-spin" />}
               保存
             </button>
           </div>
-        </div>
+        </section>
 
-        <div className="bg-surface border border-line rounded-xl p-4 space-y-3 shadow-card">
+        <section className="py-6 space-y-3.5">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-ink font-medium text-sm">数据备份</h3>
-              <p className="text-2xs text-ink-faint mt-0.5">导出不包含 API key</p>
+              <h3 className="text-ink font-semibold text-sm tracking-[-0.01em]">数据备份</h3>
+              <p className="text-2xs text-ink-faint mt-0.5">导出不包含 API key 与敏感环境变量</p>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -495,7 +511,7 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
                 onClick={exportWorkspace}
                 disabled={transferPending}
                 title="导出数据"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line text-ink text-xs hover:bg-tile-hover disabled:opacity-50"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line text-ink text-xs hover:bg-tile-hover disabled:opacity-50 transition-colors"
               >
                 {transferPending ? (
                   <Loader2 size={13} className="animate-spin" />
@@ -509,7 +525,7 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
                 onClick={() => importInput.current?.click()}
                 disabled={transferPending}
                 title="导入 JSON 数据"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line text-ink text-xs hover:bg-tile-hover disabled:opacity-50"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line text-ink text-xs hover:bg-tile-hover disabled:opacity-50 transition-colors"
               >
                 <Upload size={13} />
                 导入 JSON
@@ -553,11 +569,11 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
               {transferNotice}
             </span>
           )}
-        </div>
+        </section>
 
-        <div className="bg-surface border border-line rounded-xl p-4 space-y-3 shadow-card">
+        <section className="py-6 space-y-3">
           <div>
-            <h3 className="text-ink font-medium text-sm">数据清除</h3>
+            <h3 className="text-ink font-semibold text-sm tracking-[-0.01em]">数据清除</h3>
             <p className="text-2xs text-ink-faint mt-0.5">
               这些都是原会话上下文的本地副本。清除前自动备份全量数据（服务端保留最近 5
               份），可用上方「导入 JSON」恢复
@@ -570,13 +586,13 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
               ["context", "上下文笔记", "已发布的共享上下文"],
             ] as const
           ).map(([key, label, desc]) => (
-            <div key={key} className="flex items-center justify-between gap-3">
+            <div key={key} className="flex items-center justify-between gap-3 py-1">
               <div className="min-w-0">
-                <span className="text-xs text-ink">{label}</span>
+                <span className="text-xs font-medium text-ink">{label}</span>
                 <span className="text-2xs text-ink-faint ml-2 hidden sm:inline">{desc}</span>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <span className="text-2xs text-ink-faint tabular-nums">
+              <div className="flex items-center gap-2.5 shrink-0">
+                <span className="text-2xs font-mono text-ink-faint tabular-nums">
                   {clearCounts ? countOf(key) : "—"}
                 </span>
                 <button
@@ -584,7 +600,7 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
                   onClick={() => runClear(key, label)}
                   disabled={clearPending || !clearCounts || countOf(key) === 0}
                   title={`清除${label}`}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-danger/40 text-danger text-xs hover:bg-danger-soft disabled:opacity-40"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-danger/40 text-danger text-xs hover:bg-danger-soft disabled:opacity-40 transition-colors"
                 >
                   {clearPending ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
                   清除
@@ -602,10 +618,10 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
               {clearNotice}
             </span>
           )}
-        </div>
+        </section>
 
-        <p className="text-2xs text-ink-faint">
-          提示:可执行文件留空使用默认值(从 PATH 解析)。点击图上任意会话 →
+        <p className="pt-5 text-2xs text-ink-faint">
+          提示：可执行文件留空使用默认值（从 PATH 解析）。点击图上任意会话 →
           右侧面板「在终端打开」即可在新终端窗口 resume 该对话。
         </p>
       </div>

@@ -191,24 +191,24 @@ export function WorkspaceTab({
       .map((id) => sessions.find((s) => s.id === id))
       .filter((s): s is GraphNode => !!s);
     return (
-      <div className="flex flex-col h-full min-h-0">
-        <div className="room-chat-header flex items-center gap-2 px-4 py-3 border-b border-line flex-shrink-0">
+      <div className="flex flex-col h-full min-h-0 bg-surface">
+        <div className="room-chat-header flex items-center gap-2.5 h-12 px-4 border-b border-line/80 flex-shrink-0">
           <Users size={14} className="text-accent flex-shrink-0" />
-          <h2 className="text-ink font-medium text-sm truncate">{room.name}</h2>
-          <span className="text-2xs text-ink-faint flex-shrink-0">{members.length} 成员</span>
+          <h2 className="text-ink font-semibold text-sm tracking-[-0.015em] truncate">{room.name}</h2>
+          <span className="text-2xs text-ink-faint tabular-nums flex-shrink-0">{members.length} 成员</span>
           {/* 聊天/图谱 are two views of the SAME room — the toggle never
               touches the target, drafts or members */}
-          <div className="flex bg-surface border border-line rounded-lg overflow-hidden text-2xs flex-shrink-0 ml-1">
+          <div className="flex bg-tile p-0.5 border border-line/70 rounded-lg text-2xs flex-shrink-0 ml-1">
             {(["chat", "graph"] as const).map((v) => (
               <button
                 key={v}
                 type="button"
                 onClick={() => setView(v)}
                 aria-pressed={view === v}
-                className={`px-2.5 py-1 transition-colors ${
+                className={`px-2.5 py-0.5 rounded-md font-medium transition-colors ${
                   view === v
-                    ? "bg-accent text-on-accent"
-                    : "text-ink-muted hover:bg-tile-hover hover:text-ink"
+                    ? "bg-surface text-ink shadow-card"
+                    : "text-ink-muted hover:text-ink"
                 }`}
               >
                 {v === "chat" ? "聊天" : "图谱"}
@@ -219,7 +219,7 @@ export function WorkspaceTab({
             <button
               type="button"
               onClick={() => setGraphScope((s) => (s === "room" ? "global" : "room"))}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-2xs flex-shrink-0 text-ink-muted hover:bg-tile-hover hover:text-ink"
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-2xs flex-shrink-0 text-ink-muted hover:bg-tile-hover hover:text-ink transition-colors"
               title={graphScope === "room" ? "切换为全局图谱" : "返回当前房间的成员图"}
             >
               <Globe size={12} />
@@ -233,7 +233,7 @@ export function WorkspaceTab({
             aria-pressed={detailsOpen}
             aria-label="详情"
             title="房间详情"
-            className={`ml-auto p-1.5 rounded-lg transition-colors flex-shrink-0 ${
+            className={`ml-auto p-1.5 rounded-md transition-colors flex-shrink-0 ${
               detailsOpen
                 ? "bg-accent-soft text-accent"
                 : "text-ink-faint hover:bg-tile-hover hover:text-ink"
@@ -283,16 +283,18 @@ export function WorkspaceTab({
   const roomOf =
     node?.chat_room_id != null ? rooms.find((r) => r.id === node.chat_room_id) : undefined;
   return (
-    <div className="flex flex-col h-full min-h-0">
-      <div className="room-chat-header flex items-center gap-2 px-4 py-3 border-b border-line flex-shrink-0">
+    <div className="flex flex-col h-full min-h-0 bg-surface">
+      <div className="room-chat-header flex items-center gap-2.5 h-12 px-4 border-b border-line/80 flex-shrink-0">
         <MessageSquare size={14} className="text-accent flex-shrink-0" />
-        <h2 className="text-ink font-medium text-sm truncate">与 {peerName} 的对话</h2>
+        <h2 className="text-ink font-semibold text-sm tracking-[-0.015em] truncate">
+          与 {peerName} 的对话
+        </h2>
         <div className="ml-auto flex items-center gap-1 flex-shrink-0">
           {roomOf && (
             <button
               type="button"
               onClick={() => onSelectTarget({ kind: "room", id: roomOf.id })}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-2xs text-ink-muted hover:bg-tile-hover hover:text-ink"
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-2xs text-ink-muted hover:bg-tile-hover hover:text-ink transition-colors"
               title={`进入 ${roomOf.name}`}
             >
               <Users size={12} /> 进入所属聊天室
@@ -301,7 +303,7 @@ export function WorkspaceTab({
           <button
             type="button"
             onClick={() => onInspectSession(target.id)}
-            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-2xs text-ink-muted hover:bg-tile-hover hover:text-ink"
+            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-2xs text-ink-muted hover:bg-tile-hover hover:text-ink transition-colors"
             title="在全局图谱中查看"
           >
             <Network size={12} /> 全局图谱
@@ -313,7 +315,7 @@ export function WorkspaceTab({
             aria-pressed={detailsOpen}
             aria-label="详情"
             title="会话详情"
-            className={`p-1.5 rounded-lg transition-colors ${
+            className={`p-1.5 rounded-md transition-colors ${
               detailsOpen
                 ? "bg-accent-soft text-accent"
                 : "text-ink-faint hover:bg-tile-hover hover:text-ink"
