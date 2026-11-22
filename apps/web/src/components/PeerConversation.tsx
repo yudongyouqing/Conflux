@@ -68,9 +68,9 @@ export function PeerConversation({
   const messages = thread.data?.messages ?? [];
 
   return (
-    <div className="flex flex-col h-full min-h-0">
-      <div className="flex-1 overflow-y-auto p-4 min-h-0">
-        <div className="max-w-3xl mx-auto space-y-2">
+    <div className="flex flex-col h-full min-h-0 bg-surface">
+      <div className="flex-1 overflow-y-auto px-5 py-5 min-h-0">
+        <div className="max-w-3xl mx-auto space-y-3">
           {thread.isLoading && messages.length === 0 && (
             <div className="flex justify-center py-8">
               <Loader2 size={16} className="text-ink-faint animate-spin" />
@@ -94,7 +94,7 @@ export function PeerConversation({
             </div>
           )}
           {!thread.isLoading && !thread.isError && messages.length === 0 && (
-            <div className="text-xs text-ink-faint text-center py-6">暂无往来消息</div>
+            <div className="text-xs text-ink-faint text-center py-12">暂无往来消息</div>
           )}
           {messages.map((m) => {
             // Ask and answer are SEPARATE bubbles: the question rides the
@@ -102,12 +102,14 @@ export function PeerConversation({
             // a Q/A card.
             const mine = m.from_session === WEB_CONSOLE_ID;
             return (
-              <div key={m.id} className="space-y-2">
+              <div key={m.id} className="space-y-2.5">
                 <div className={`flex ${mine ? "justify-end" : "justify-start"}`}>
-                  <div className="max-w-[85%] sm:max-w-[68%] min-w-0">
+                  <div className="max-w-[85%] sm:max-w-[72%] min-w-0">
                     <div
-                      className={`rounded-xl px-3 py-2 text-xs ${
-                        mine ? "bg-accent text-on-accent" : "bg-paper text-ink border border-line"
+                      className={`rounded-xl px-3.5 py-2.5 text-md-plus leading-relaxed ${
+                        mine
+                          ? "bg-accent text-on-accent"
+                          : "bg-paper/70 text-ink border border-line/80"
                       }`}
                     >
                       <MarkdownText tone={mine ? "blue" : "light"}>{m.question}</MarkdownText>
@@ -120,7 +122,7 @@ export function PeerConversation({
                 </div>
                 {m.reply && (
                   <div className={`flex ${mine ? "justify-start" : "justify-end"}`}>
-                    <div className="max-w-[68%] rounded-xl px-3 py-2 text-xs bg-paper text-ink border border-line">
+                    <div className="max-w-[72%] rounded-xl px-3.5 py-2.5 text-md-plus leading-relaxed bg-paper/70 text-ink border border-line/80">
                       <MarkdownText>{m.reply}</MarkdownText>
                     </div>
                   </div>
@@ -131,42 +133,51 @@ export function PeerConversation({
         </div>
       </div>
 
-      <div className="p-3 bg-surface border-t border-line">
-        <div className="flex items-center gap-2 max-w-3xl mx-auto">
-          <input
-            type="text"
-            aria-label={`向 ${peerName} 提问`}
-            placeholder={`向 ${peerName} 提问…（回车发送）`}
-            value={draft.text}
-            onChange={(e) => onDraftChange(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                send();
-              }
-            }}
-            className="flex-1 min-w-0 bg-surface text-ink text-sm rounded-lg px-3 py-2 border border-line placeholder-ink-faint outline-none focus:border-accent"
-          />
-          <button
-            type="button"
-            onClick={send}
-            disabled={!draft.text.trim() || ask.isPending}
-            className="inline-flex items-center gap-1.5 text-sm text-on-accent bg-accent hover:bg-accent-deep rounded-lg px-3 py-2 disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
-          >
-            {ask.isPending ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
-            发送
-          </button>
+      <div className="px-4 pb-4 pt-2 flex-shrink-0">
+        <div className="max-w-3xl mx-auto">
+          <div className="rounded-xl border border-line bg-surface shadow-card focus-within:border-accent/60 focus-within:ring-2 focus-within:ring-accent/15 transition-all">
+            <div className="px-3.5 pt-2.5 pb-1.5">
+              <textarea
+                aria-label={`向 ${peerName} 提问`}
+                rows={2}
+                placeholder={`向 ${peerName} 提问…（Enter 发送，Shift+Enter 换行）`}
+                value={draft.text}
+                onChange={(e) => onDraftChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    send();
+                  }
+                }}
+                className="w-full min-w-0 bg-transparent text-ink text-md-plus placeholder-ink-faint outline-none resize-none leading-relaxed"
+                style={{ maxHeight: "140px" }}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-2 px-3 py-2 border-t border-line/60">
+              {offline ? (
+                <span className="text-2xs text-warning truncate">
+                  {peerName} 当前{peerNode?.status === "ended" ? "已结束" : "离线"}，发送后将尝试唤醒
+                </span>
+              ) : (
+                <span className="text-2xs text-ink-faint">Enter 发送 · Shift+Enter 换行</span>
+              )}
+              <button
+                type="button"
+                onClick={send}
+                disabled={!draft.text.trim() || ask.isPending}
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-on-accent bg-accent hover:bg-accent-deep rounded-lg px-3 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0 transition-colors"
+              >
+                {ask.isPending ? <Loader2 size={13} className="animate-spin" /> : <Send size={12} />}
+                发送
+              </button>
+            </div>
+          </div>
+          {ask.isError && (
+            <div role="alert" className="text-xs text-danger mt-1.5 px-1">
+              发送失败：{(ask.error as Error).message}。草稿已保留，请核对记录后重试
+            </div>
+          )}
         </div>
-        {offline && (
-          <div className="max-w-3xl mx-auto mt-1 text-2xs text-warning">
-            {peerName} 当前{peerNode?.status === "ended" ? "已结束" : "离线"}，发送后将按现有规则尝试唤醒
-          </div>
-        )}
-        {ask.isError && (
-          <div role="alert" className="max-w-3xl mx-auto text-xs text-danger mt-1">
-            发送失败：{(ask.error as Error).message}。草稿已保留，请核对记录后重试
-          </div>
-        )}
       </div>
     </div>
   );

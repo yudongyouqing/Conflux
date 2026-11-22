@@ -400,15 +400,16 @@ export function GraphTab({
       className="bg-paper"
     >
       {scope === "global" && (
-        <Panel position="top-left" className="!m-2">
-          <div className="flex bg-surface border border-line rounded-lg shadow-[0_2px_10px_rgba(16,24,40,0.08)] overflow-hidden text-xs">
+        <Panel position="top-left" className="!m-3">
+          <div className="flex bg-surface/90 backdrop-blur-md border border-line rounded-lg p-0.5 shadow-raised text-xs">
             {(Object.keys(VIEW_LABELS) as ViewMode[]).map((m) => (
               <button
                 key={m}
+                type="button"
                 onClick={() => setViewMode(m)}
-                className={`px-3 py-1.5 transition-colors duration-200 ${
+                className={`px-2.5 py-1 rounded-md font-medium transition-colors duration-200 ${
                   viewMode === m
-                    ? "bg-accent text-on-accent"
+                    ? "bg-accent text-on-accent shadow-card"
                     : "text-ink-muted hover:bg-tile-hover hover:text-ink"
                 }`}
               >
@@ -421,7 +422,7 @@ export function GraphTab({
       {/* no edges in view: say WHY instead of looking like a broken graph */}
       {edges.length === 0 && nodes.length > 0 && (
         <Panel position="bottom-center" className="!mb-4">
-          <div className="text-2xs text-ink-faint bg-surface/90 backdrop-blur-sm border border-line rounded-full px-3 py-1 shadow-[0_2px_10px_rgba(16,24,40,0.08)]">
+          <div className="text-2xs text-ink-muted bg-surface/90 backdrop-blur-md border border-line rounded-full px-3.5 py-1.5 shadow-raised">
             {viewMode === "dirs" && (graph?.edges.length ?? 0) > 0
               ? "展开目录卡片查看目录内连线，或切换「仅活跃 / 全部」查看跨目录通道"
               : "当前视图暂无会话间消息通道 —— 发起一次对话即可建立连线"}
@@ -429,16 +430,16 @@ export function GraphTab({
         </Panel>
       )}
       <Background color="rgb(var(--tk-line))" gap={22} size={1.2} />
-      <Controls className="!bg-surface !border !border-line !rounded-lg !shadow-[0_2px_10px_rgba(16,24,40,0.1)] !overflow-hidden [&_button]:!bg-surface [&_button]:!border-line [&_button]:!text-ink-muted [&_button:hover]:!bg-paper [&_button:hover]:!text-ink" />
+      <Controls className="!bg-surface/90 !backdrop-blur-md !border !border-line !rounded-lg !shadow-raised !overflow-hidden [&_button]:!bg-transparent [&_button]:!border-line [&_button]:!text-ink-muted [&_button:hover]:!bg-tile-hover [&_button:hover]:!text-ink" />
 
       <MiniMap
         pannable
         zoomable
         bgColor="rgb(var(--tk-paper))"
-        nodeColor="#CBD5E1"
-        nodeStrokeColor="#94A3B8"
-        maskColor="rgb(var(--tk-paper) / 0.7)"
-        className="!border !border-line !rounded-lg !shadow-[0_2px_10px_rgba(16,24,40,0.1)]"
+        nodeColor="rgb(var(--tk-line-strong))"
+        nodeStrokeColor="rgb(var(--tk-ink) / 0.35)"
+        maskColor="rgb(var(--tk-paper) / 0.72)"
+        className="!border !border-line !rounded-lg !shadow-raised"
       />
     </ReactFlow>
   );

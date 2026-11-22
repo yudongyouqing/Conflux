@@ -15,7 +15,7 @@
 
 | 令牌 | 值 | 用途 |
 | --- | --- | --- |
-| `text-ink` | `#182234` | 标题、正文主色（蓝黑，呼应画布 navy） |
+| `text-ink` | `#111827`（浅色）/ `#ECEFF5`（深色） | 标题、正文主色 |
 | `text-ink-muted` | ink / 76% | 次级说明、辅助文字 |
 | `text-ink-faint` | ink / 66% | 提示、占位、时间戳；默认明暗主题在表面与 active 行上达到 4.5:1 |
 
@@ -23,18 +23,18 @@
 
 | 令牌 | 值 | 用途 |
 | --- | --- | --- |
-| `bg-paper` | `#F6F7F9` | 画布底、页面底 |
-| `bg-surface` | `#FFFFFF`（浅色）/ `#172030`（深色） | 卡片、面板面，随主题切换 |
-| `border-line` | `#E4E8EF` | 常规 hairline 边框 |
-| `border-line-strong` | `#CBD3E0` | hover 强调边框、实线分隔 |
+| `bg-paper` | `#F7F8FA`（浅色）/ `#0B0D12`（深色） | 外框壳层、侧栏底、画布底 |
+| `bg-surface` | `#FFFFFF`（浅色）/ `#12151E`（深色） | 嵌框主工作区、卡片、面板面 |
+| `border-line` | `#E6E8EE`（浅色）/ `#1F2432`（深色） | 常规 hairline 边框 |
+| `border-line-strong` | `#CDD2DF`（浅色）/ `#2F374A`（深色） | hover 强调边框、实线分隔 |
 
 ### 强调色（全局唯一）
 
 | 令牌 | 值 | 用途 |
 | --- | --- | --- |
-| `accent` / `bg-accent` | `#2563EB` | 品牌汇流蓝——主操作、选中态、焦点 |
-| `accent-deep` | `#1E4FC4` | hover 加深 |
-| `accent-soft` / `bg-accent-soft` | `#EBF1FE` | 选中底色 |
+| `accent` / `bg-accent` | `#4353FF`（浅色）/ `#7E8CFF`（深色） | 品牌汇流靛蓝——主操作、选中态、焦点 |
+| `accent-deep` | `#3341E0`（浅色）/ `#6978FF`（深色） | hover 加深 |
+| `accent-soft` / `bg-accent-soft` | `#EEF0FF`（浅色）/ `#1B203A`（深色） | 选中底色 |
 | `text-on-accent` | 自动选择白色或深墨色 | `bg-accent hover:bg-accent-deep` 按钮文字；不得固定 `text-white` |
 
 ### 状态色（只表达状态，不参与装饰）

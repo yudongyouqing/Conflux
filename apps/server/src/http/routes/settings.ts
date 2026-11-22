@@ -10,6 +10,7 @@ import {
 } from "../../core/app-settings.js";
 import { getActiveWakeCount } from "../../core/wake/index.js";
 import { terminalOptions } from "../../core/terminal.js";
+import { probeCliBinaries, readNativeCliProviders } from "../../core/cli-providers.js";
 import { logAudit } from "../../core/audit.js";
 import type { TerminalSettings } from "@conflux/shared";
 import type { ServerContext } from "../context.js";
@@ -29,9 +30,11 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: ServerContext)
   // ---- terminal settings (opener used by "open in terminal" + agent start) ----
   app.get("/settings/terminal", {}, async (_req, reply) => {
     try {
+      const terminal = getTerminalSettings(db);
       return reply.send({
-        terminal: getTerminalSettings(db),
+        terminal,
         options: terminalOptions(),
+        binaries: probeCliBinaries(terminal),
         auto_wake: getAutoWake(db),
         wake_max_concurrent: getWakeMaxConcurrent(db),
         wake_active_count: getActiveWakeCount(),
@@ -74,6 +77,7 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: ServerContext)
         });
         return reply.send({
           terminal,
+          binaries: probeCliBinaries(terminal),
           auto_wake: getAutoWake(db),
           wake_max_concurrent: getWakeMaxConcurrent(db),
         });
@@ -82,4 +86,15 @@ export function registerSettingsRoutes(app: FastifyInstance, ctx: ServerContext)
       }
     },
   );
+
+  // ---- Read-only native CLI config inspection (~/.claude/settings.json, ~/.codex/config.toml) ----
+  app.get("/settings/cli-providers", {}, async (_req, reply) => {
+    try {
+      return reply.send({
+        native: readNativeCliProviders(),
+      });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
 }

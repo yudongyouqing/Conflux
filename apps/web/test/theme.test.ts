@@ -114,7 +114,7 @@ test("refreshTokenApplication clears the default palette and reapplies an active
 test("内置主题含终端深色，isDarkPaper 判定深浅", () => {
   const dark = BUILTIN_THEMES.find((t) => t.name === "终端深色");
   assert.ok(dark, "终端深色预设存在");
-  assert.equal(hexToChannels(dark.colors.paper), "13 18 28");
+  assert.equal(hexToChannels(dark.colors.paper), "11 13 18");
 });
 
 test("激活深色色板联动 data-theme=dark，切浅色板联动回 light", () => {
@@ -130,7 +130,7 @@ test("激活深色色板联动 data-theme=dark，切浅色板联动回 light", (
   };
   setActiveCustomTheme("终端深色", storage, root);
   assert.equal(dataset.theme, "dark", "深色色板联动 data-theme");
-  assert.equal(written.get("--tk-paper"), "13 18 28");
+  assert.equal(written.get("--tk-paper"), "11 13 18");
   setActiveCustomTheme("汇流蓝（默认）", storage, root);
   assert.equal(dataset.theme, "light", "浅色色板联动回 light");
 });

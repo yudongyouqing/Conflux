@@ -76,13 +76,13 @@ export function SessionNode({ id, data, selected, dragging }: NodeProps) {
           .filter(Boolean)
           .join(" | ") || undefined
       }
-      className={`group relative w-[176px] rounded-xl bg-surface overflow-hidden transition-all duration-200 ease-out cursor-grab active:cursor-grabbing ${
-        d.status !== "active" ? "saturate-50 border-0 shadow-none " : ""}${
+      className={`group relative w-[180px] rounded-xl bg-surface border border-line/90 overflow-hidden transition-all duration-200 ease-out cursor-grab active:cursor-grabbing ${
+        d.status !== "active" ? "saturate-50 opacity-85 " : ""}${
         dragging
-          ? "shadow-[0_12px_28px_rgba(16,24,40,0.18)] scale-[1.02] ring-2 ring-accent/30"
+          ? "shadow-overlay scale-[1.02] border-accent ring-2 ring-accent/25"
           : selected
-            ? "shadow-[0_4px_16px_rgba(37,99,235,0.16)] ring-2 ring-accent"
-            : "shadow-[0_1px_2px_rgba(16,24,40,0.05),0_4px_12px_rgba(16,24,40,0.06)] hover:shadow-[0_8px_24px_rgba(16,24,40,0.12)] hover:-translate-y-0.5"
+            ? "shadow-raised border-accent ring-2 ring-accent/25"
+            : "shadow-card hover:border-line-strong hover:shadow-raised hover:-translate-y-0.5"
       } ${d.highlighted ? "ring-2 ring-info/80" : ""}`}
     >
       {/* signature accent: left vertical strip */}

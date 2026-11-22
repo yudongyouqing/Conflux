@@ -382,3 +382,21 @@ export interface ChatRoom {
   created_at: string;
   updated_at: string;
 }
+
+export interface CliBinaryStatus {
+  runtime: RuntimeId;
+  label: string;
+  configured: string;
+  resolved_path: string | null;
+  available: boolean;
+}
+
+export interface NativeCliProviderState {
+  runtime: RuntimeId;
+  config_path: string;
+  exists: boolean;
+  base_url: string | null;
+  model: string | null;
+  api_key_configured: boolean;
+  env_keys: string[];
+}

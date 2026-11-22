@@ -1,6 +1,7 @@
 import type {
   Agent,
   ChatRoom,
+  CliBinaryStatus,
   ConfluxDataBundle,
   ContextEntry,
   Conversation,
@@ -10,6 +11,7 @@ import type {
   Message,
   MessageStatus,
   ModelConfig,
+  NativeCliProviderState,
   RuntimeAgent,
   RuntimeInstance,
   SessionSummary,
@@ -212,6 +214,7 @@ export const api = {
     get<{
       terminal: TerminalSettings;
       options: TerminalOption[];
+      binaries?: CliBinaryStatus[];
       auto_wake: boolean;
       wake_max_concurrent: number;
       wake_active_count: number;
@@ -225,9 +228,15 @@ export const api = {
   ) =>
     put<{
       terminal: TerminalSettings;
+      binaries?: CliBinaryStatus[];
       auto_wake: boolean;
       wake_max_concurrent: number;
     }>("/settings/terminal", body),
+
+  getCliProviders: (signal?: AbortSignal) =>
+    get<{
+      native: NativeCliProviderState[];
+    }>("/settings/cli-providers", undefined, signal),
 
   webAsk: (body: { to_session: string; question: string; from_session?: string }) =>
     post<{ message: Message }>("/web/ask", body),

@@ -363,7 +363,8 @@ export default function App() {
         mobileOpen={mobileNavOpen}
         onCloseMobile={() => setMobileNavOpen(false)}
       />
-      <div className="relative flex flex-1 overflow-hidden min-w-0">
+      <div className="relative flex flex-1 overflow-hidden min-w-0 md:p-2 md:pl-0">
+        <div className="workspace-frame relative flex flex-1 overflow-hidden min-w-0 md:rounded-xl md:border md:border-line bg-surface md:shadow-card">
         <main className="relative flex-1 overflow-hidden mobile-main">
           <div className="mobile-topbar">
             <button
@@ -503,6 +504,7 @@ export default function App() {
             />
           </aside>
         )}
+        </div>
       </div>
 
       {wizardOpen && (

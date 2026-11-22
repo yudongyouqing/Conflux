@@ -203,20 +203,21 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
   };
 
   return (
-    <div className="flex flex-col h-full bg-paper">
+    <div className="flex flex-col h-full bg-surface">
       {/* Header */}
-      <div className="flex items-center gap-3 px-4 h-14 bg-surface border-b border-line flex-shrink-0">
+      <div className="flex items-center gap-3 px-4 h-12 bg-surface border-b border-line/80 flex-shrink-0">
         <button
+          type="button"
           onClick={() => { streamRef.current?.abort(); onBack(); }}
           className="flex items-center gap-1 text-xs text-ink-muted hover:text-ink transition-colors"
         >
           <ArrowLeft size={14} /> 返回
         </button>
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center">
-            <Bot size={14} className="text-white" />
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded-md bg-accent-soft text-accent flex items-center justify-center">
+            <Bot size={13} />
           </div>
-          <span className="text-sm text-ink font-medium">{agent.name}</span>
+          <span className="text-sm text-ink font-semibold tracking-[-0.015em]">{agent.name}</span>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <button
@@ -225,20 +226,20 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
             disabled={
               !isStreaming && !loadingHistory && messages.length === 0 && conversationId === null && !error
             }
-            className="flex items-center gap-1 px-2 py-1 rounded-md text-2xs text-ink-muted hover:text-ink hover:bg-tile-hover border border-line transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-1 px-2.5 py-1 rounded-md text-2xs text-ink-muted hover:text-ink hover:bg-tile-hover border border-line transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             title="开启新对话"
           >
             <Plus size={12} /> 新对话
           </button>
-          <span className="text-2xs px-2 py-1 rounded-md bg-paper text-ink-muted border border-line">
+          <span className="text-2xs font-mono px-2 py-1 rounded-md bg-paper text-ink-muted border border-line/80">
             {agent.model_config.provider}/{agent.model_config.model}
           </span>
         </div>
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
-        <div className="max-w-2xl mx-auto space-y-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-6 space-y-4">
+        <div className="max-w-3xl mx-auto space-y-4">
           {loadingHistory && messages.length === 0 && (
             <div className="text-center text-ink-faint text-sm mt-12">
               <Loader2 size={14} className="inline-block animate-spin mr-1.5" />
@@ -279,28 +280,33 @@ export function ChatPanel({ agent, onBack }: ChatPanelProps) {
         </div>
       </div>
 
-      {/* Input */}
-      <div className="p-4 bg-surface border-t border-line flex-shrink-0">
-        <div className="max-w-2xl mx-auto flex items-end gap-2">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={isStreaming ? "等待回复..." : `跟 ${agent.name} 聊天...`}
-            disabled={isStreaming}
-            rows={1}
-            className="flex-1 bg-surface text-ink text-sm rounded-xl px-4 py-2.5 border border-line placeholder-ink-faint outline-none focus:border-accent resize-none disabled:bg-paper disabled:opacity-60 shadow-card"
-            style={{ minHeight: "42px", maxHeight: "120px" }}
-          />
-          <button
-            type="button"
-            aria-label="发送消息"
-            onClick={handleSend}
-            disabled={!input.trim() || isStreaming}
-            className="flex items-center justify-center w-10 h-10 rounded-xl bg-accent hover:bg-accent-deep disabled:bg-line disabled:text-ink-faint text-on-accent transition-colors flex-shrink-0 shadow-card"
-          >
-            <Send size={16} />
-          </button>
+      {/* Linear-style floating docked composer */}
+      <div className="px-4 pb-4 pt-2 flex-shrink-0">
+        <div className="max-w-3xl mx-auto rounded-xl border border-line bg-surface shadow-card focus-within:border-accent/60 focus-within:ring-2 focus-within:ring-accent/15 transition-all">
+          <div className="px-3.5 pt-2.5 pb-1.5">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={isStreaming ? "等待回复..." : `跟 ${agent.name} 聊天…（Enter 发送，Shift+Enter 换行）`}
+              disabled={isStreaming}
+              rows={2}
+              className="w-full bg-transparent text-ink text-md-plus placeholder-ink-faint outline-none resize-none disabled:opacity-60 leading-relaxed"
+              style={{ maxHeight: "140px" }}
+            />
+          </div>
+          <div className="flex items-center justify-between px-3 py-2 border-t border-line/60">
+            <span className="text-2xs text-ink-faint">Enter 发送 · Shift+Enter 换行</span>
+            <button
+              type="button"
+              aria-label="发送消息"
+              onClick={handleSend}
+              disabled={!input.trim() || isStreaming}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent hover:bg-accent-deep disabled:opacity-40 text-on-accent text-xs font-medium transition-colors flex-shrink-0"
+            >
+              <Send size={12} /> 发送
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -323,3 +323,13 @@ export function useOpenSessionTerminal() {
     mutationFn: api.openSessionTerminal,
   });
 }
+
+// ---- Read-only native CLI config inspection ----
+
+export function useCliProviders(enabled = true) {
+  return useQuery({
+    queryKey: ["cli-providers"],
+    queryFn: ({ signal }) => api.getCliProviders(signal),
+    enabled,
+  });
+}

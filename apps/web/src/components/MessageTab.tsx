@@ -79,22 +79,23 @@ export function MessageTab({
   // ---- full-height channel view (replaces the feed) ----
   if (channel) {
     return (
-      <div className="flex flex-col h-full bg-paper">
-        <div className="flex items-center justify-between p-3 bg-surface border-b border-line">
+      <div className="flex flex-col h-full bg-surface">
+        <div className="flex items-center justify-between h-12 px-4 bg-surface border-b border-line/80">
           <div className="flex items-center gap-2 text-xs text-ink-muted">
             <button
-              className="inline-flex items-center gap-1 text-ink-faint hover:text-ink"
+              type="button"
+              className="inline-flex items-center gap-1 text-ink-faint hover:text-ink transition-colors"
               onClick={() => setConv(null)}
               title="返回活动记录"
             >
               <ArrowLeft size={13} /> 返回
             </button>
-            <span className="text-ink-faint">|</span>
+            <span className="text-line-strong">|</span>
             {fromSession && <StatusDot status={fromSession.status} busy={fromSession.busy} />}
-            <span className="font-medium">
+            <span className="font-semibold text-ink tracking-[-0.015em]">
               {nameOf(channel.from)} 与 {nameOf(channel.to)} 的对话
             </span>
-            <span className="text-ink-faint">每 5 秒刷新</span>
+            <span className="text-2xs text-ink-faint">每 5 秒刷新</span>
           </div>
         </div>
         <div className="flex-1 overflow-y-auto p-4">
@@ -189,16 +190,16 @@ export function MessageTab({
   // full-bleed feed leaves empty states stranded left on wide screens and
   // stretches message cards past a readable line length.
   return (
-    <div className="flex flex-col h-full bg-paper">
+    <div className="flex flex-col h-full bg-surface">
       {/* ---- @ composer ---- */}
-      <div className="p-3 bg-surface border-b border-line">
+      <div className="px-4 py-3 bg-surface border-b border-line/80">
         <div className="max-w-3xl mx-auto">
           <MentionComposer onSent={(t) => onOpenPeerConversation(t.id)} />
         </div>
       </div>
 
       {/* ---- list filters ---- */}
-      <div className="p-3 bg-surface border-b border-line">
+      <div className="px-4 py-2.5 bg-paper/40 border-b border-line/80">
         <div className="flex items-center gap-2 max-w-3xl mx-auto">
           <select
             value={statusFilter}
@@ -218,11 +219,11 @@ export function MessageTab({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             aria-label="搜索消息内容"
-            className="flex-1 bg-surface text-ink text-xs rounded-lg px-2.5 py-1.5 border border-line placeholder-ink-faint outline-none focus:border-accent"
+            className="flex-1 bg-surface text-ink text-xs rounded-lg px-3 py-1.5 border border-line placeholder-ink-faint outline-none focus:border-accent"
           />
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto px-4 py-4">
         <div className="max-w-3xl mx-auto space-y-2">
           {isLoading && <div className="text-ink-faint text-sm text-center mt-8">加载中...</div>}
           {isError && filtered.length === 0 && (

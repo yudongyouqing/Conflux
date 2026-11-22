@@ -67,7 +67,7 @@ export function RoomChat({
   const [senderIdentity, setSenderIdentity] = useState<string>(WEB_CONSOLE_ID);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // If the chosen sender member leaves the room, reset to web-console so the
   // submitted identity matches what the <select> displays.
@@ -115,7 +115,7 @@ export function RoomChat({
     inputRef.current?.focus();
   };
 
-  const handleKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     // IME composition Enter confirms the candidate — never hijack it for mentions or submit.
     if (e.nativeEvent.isComposing) return;
     if (mentionQuery !== null && mentionMatches.length > 0) {
@@ -179,9 +179,10 @@ export function RoomChat({
   const noMembers = members.length === 0;
 
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <div className="flex flex-col h-full min-h-0 bg-surface">
       {/* task timeline + broadcast thread */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 min-h-0">
+      <div className="flex-1 overflow-y-auto px-5 py-5 min-h-0">
+        <div className="max-w-3xl mx-auto space-y-4">
         {tasksQuery.isLoading && tasks.length === 0 ? (
           <div className="flex justify-center py-8">
             <Loader2 size={16} className="text-ink-faint animate-spin" />
@@ -209,12 +210,14 @@ export function RoomChat({
             </button>
           </div>
         ) : tasks.length === 0 && thread.length === 0 ? (
-          <div className="text-center py-12 text-ink-faint text-xs">
-            <div>{noMembers ? "房间还没有成员" : "还没有任务"}</div>
-            <div className="mt-1">
+          <div className="text-center py-16 text-ink-faint text-xs">
+            <div className="text-sm font-medium text-ink-muted">
+              {noMembers ? "房间还没有成员" : "还没有任务或讨论"}
+            </div>
+            <div className="mt-1.5">
               {noMembers
-                ? "先在详情里添加成员，才能广播或定向发送"
-                : "在下方选择成员并输入任务，或直接广播给全员"}
+                ? "先在右侧详情添加成员，才能广播或定向发送"
+                : "在下方输入 @成员 定向派发任务，或直接发送广播给全员"}
             </div>
           </div>
         ) : (
@@ -222,7 +225,10 @@ export function RoomChat({
             {tasks.map((task) => {
               const Icon = STATUS_ICON[task.status] ?? Circle;
               return (
-                <div key={task.id} className="rounded-xl bg-surface p-4 shadow-card space-y-2">
+                <div
+                  key={task.id}
+                  className="rounded-xl border border-line/80 bg-paper/50 p-4 space-y-2.5"
+                >
                   <div className="flex items-center gap-2 text-xs">
                     <Icon
                       size={13}
@@ -231,13 +237,15 @@ export function RoomChat({
                     <span className="font-medium text-ink">{nameOf(task.initiator_session_id)}</span>
                     <span className="text-ink-faint">→</span>
                     <span className="font-medium text-ink">{nameOf(task.executor_session_id)}</span>
-                    <span className="text-2xs text-ink-faint ml-auto">#{task.id}</span>
+                    <span className="text-2xs font-mono text-ink-faint tabular-nums ml-auto">
+                      #{task.id}
+                    </span>
                   </div>
-                  <div className="text-xs text-ink-muted bg-tile rounded-lg px-3 py-2">
+                  <div className="text-md-plus text-ink-muted bg-surface border border-line/70 rounded-lg px-3.5 py-2.5 leading-relaxed">
                     <MarkdownText tone="light">{task.prompt}</MarkdownText>
                   </div>
                   {task.result && (
-                    <div className="text-xs text-ink bg-accent-soft rounded-lg px-3 py-2 border-l-2 border-accent">
+                    <div className="text-md-plus text-ink bg-accent-soft/70 rounded-lg px-3.5 py-2.5 border-l-2 border-accent leading-relaxed">
                       <div className="text-2xs text-accent font-medium mb-1">
                         {nameOf(task.executor_session_id)} 的结果：
                       </div>
@@ -249,17 +257,23 @@ export function RoomChat({
             })}
 
             {thread.length > 0 && (
-              <div className="pt-2">
-                <div className="text-2xs text-ink-faint mb-2">广播讨论</div>
+              <div className="pt-3 border-t border-line/70">
+                <div className="text-2xs font-medium text-ink-faint mb-2.5">广播讨论</div>
                 <div className="space-y-3">
                   {thread.map((m) => (
-                    <div key={m.id} className="rounded-xl bg-surface p-3 shadow-card space-y-1.5">
-                      <div className="text-2xs text-ink-faint">
-                        {m.from_name} → {m.to_name} · #{m.id}
+                    <div
+                      key={m.id}
+                      className="rounded-xl border border-line/80 bg-paper/50 p-3.5 space-y-2"
+                    >
+                      <div className="flex items-center gap-1.5 text-2xs text-ink-faint">
+                        <span className="font-medium text-ink">{m.from_name}</span>
+                        <span>→</span>
+                        <span className="font-medium text-ink">{m.to_name}</span>
+                        <span className="font-mono tabular-nums ml-auto">#{m.id}</span>
                       </div>
-                      <div className="text-xs text-ink-muted">{m.question}</div>
+                      <div className="text-md-plus text-ink-muted leading-relaxed">{m.question}</div>
                       {m.reply && (
-                        <div className="text-xs text-ink bg-accent-soft rounded-lg px-3 py-2 border-l-2 border-accent">
+                        <div className="text-md-plus text-ink bg-accent-soft/70 rounded-lg px-3.5 py-2 border-l-2 border-accent leading-relaxed">
                           {m.reply}
                         </div>
                       )}
@@ -273,12 +287,14 @@ export function RoomChat({
         {threadQuery.isError && thread.length > 0 && (
           <div className="text-2xs text-warning text-center">连接中断，显示上次获取的内容</div>
         )}
+        </div>
       </div>
 
-      {/* composer */}
-      <div className="border-t border-line px-4 py-3 space-y-2 flex-shrink-0 relative room-composer">
+      {/* Linear-style floating docked composer */}
+      <div className="px-4 pb-4 pt-2 flex-shrink-0 relative room-composer">
+        <div className="max-w-3xl mx-auto relative">
         {mentionQuery !== null && mentionMatches.length > 0 && (
-          <div className="absolute bottom-full left-4 right-4 mb-1 rounded-xl bg-surface border border-line shadow-raised overflow-hidden z-10 max-h-40 overflow-y-auto">
+          <div className="absolute bottom-full left-0 right-0 mb-2 rounded-xl bg-surface border border-line shadow-raised overflow-hidden z-10 max-h-44 overflow-y-auto">
             {mentionMatches.map((m, i) => (
               <button
                 key={m.id}
@@ -291,37 +307,51 @@ export function RoomChat({
               >
                 <StatusDot status={m.status} busy={m.busy} />
                 <span className="font-medium">{m.name}</span>
-                <span className="text-ink-faint text-2xs ml-auto">{m.id.slice(0, 12)}</span>
+                <span className="text-ink-faint font-mono text-2xs ml-auto">{m.id.slice(0, 12)}</span>
               </button>
             ))}
           </div>
         )}
 
         {noMembers ? (
-          <div className="flex items-center justify-between gap-2 text-xs text-ink-faint">
+          <div className="flex items-center justify-between gap-2 rounded-xl border border-line bg-paper/60 px-3.5 py-2.5 text-xs text-ink-faint">
             <span>房间没有成员，暂无法发送</span>
             <button
               type="button"
               onClick={onManageMembers}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent-soft text-accent font-medium"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent-soft text-accent font-medium hover:opacity-90"
             >
               <UserPlus size={12} /> 添加成员
             </button>
           </div>
         ) : (
-          <>
-            <div className="room-composer-meta flex items-center gap-2 text-2xs">
+          <div className="rounded-xl border border-line bg-surface shadow-card focus-within:border-accent/60 focus-within:ring-2 focus-within:ring-accent/15 transition-all">
+            <div className="room-composer-row px-3.5 pt-2.5 pb-1.5">
+              <textarea
+                ref={inputRef}
+                aria-label="任务输入"
+                rows={2}
+                value={draft.text}
+                onChange={(e) => handleInputChange(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="@某成员 下发任务，或不 @ 广播…（Enter 发送，Shift+Enter 换行）"
+                className="w-full text-md-plus text-ink bg-transparent placeholder-ink-faint outline-none resize-none leading-relaxed"
+                style={{ maxHeight: "140px" }}
+              />
+            </div>
+
+            <div className="room-composer-meta flex items-center gap-2 px-3 py-2 border-t border-line/60 text-2xs">
               <span className="text-ink-faint">发起方</span>
               <select
                 aria-label="发起方身份"
                 value={senderIdentity}
                 onChange={(e) => setSenderIdentity(e.target.value)}
-                className="px-2 py-1 rounded-lg border border-line text-2xs text-ink bg-surface focus:border-accent outline-none"
+                className="px-2 py-1 rounded-md border border-line/80 text-2xs text-ink bg-paper/60 focus:border-accent outline-none"
               >
-                <option value={WEB_CONSOLE_ID}>👤 Web 控制台</option>
+                <option value={WEB_CONSOLE_ID}>Web 控制台</option>
                 {members.map((m) => (
                   <option key={m.id} value={m.id}>
-                    🤖 {m.name}
+                    {m.name}
                   </option>
                 ))}
               </select>
@@ -341,56 +371,44 @@ export function RoomChat({
                     </button>
                   </>
                 ) : (
-                  <>
-                    <span className="text-ink-faint">→</span>
-                    <span className="text-accent font-medium">{nameOf(executorId)}</span>
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-accent-soft text-accent font-medium">
+                    <span>@{nameOf(executorId)}</span>
                     <button
                       type="button"
                       onClick={() => onExecutorChange(null)}
-                      className="text-ink-faint hover:text-ink"
+                      className="text-accent/70 hover:text-accent ml-0.5"
                       title="清除目标"
                     >
                       ×
                     </button>
-                  </>
+                  </span>
                 )
               ) : (
-                <span className="text-ink-faint">发送给当前房间全部成员</span>
+                <span className="text-ink-faint hidden sm:inline">发送给当前房间全部成员</span>
               )}
-            </div>
-
-            <div className="room-composer-row flex items-center gap-2">
-              <input
-                ref={inputRef}
-                aria-label="任务输入"
-                value={draft.text}
-                onChange={(e) => handleInputChange(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="@某成员 下发任务，或不 @ 广播…"
-                className="flex-1 px-3.5 py-2.5 rounded-xl border border-line text-xs text-ink bg-surface placeholder-ink-faint focus:border-accent outline-none"
-              />
               <button
                 type="button"
                 onClick={send}
                 disabled={!draft.text.trim() || sending || executorMissing}
-                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-accent text-on-accent text-xs font-medium hover:bg-accent-deep disabled:opacity-40"
+                className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent text-on-accent text-xs font-medium hover:bg-accent-deep disabled:opacity-40 transition-colors"
               >
                 {sending ? (
-                  <Loader2 size={14} className="animate-spin" />
+                  <Loader2 size={13} className="animate-spin" />
                 ) : (
-                  <Play size={14} />
+                  <Play size={12} />
                 )}
                 {executorId ? "召唤" : "广播"}
               </button>
             </div>
-
-            {sendError && (
-              <div role="alert" className="text-xs text-danger">
-                发送失败：{sendError.message}。草稿已保留，请核对记录后重试
-              </div>
-            )}
-          </>
+          </div>
         )}
+
+        {sendError && (
+          <div role="alert" className="text-xs text-danger mt-1.5 px-1">
+            发送失败：{sendError.message}。草稿已保留，请核对记录后重试
+          </div>
+        )}
+        </div>
       </div>
     </div>
   );

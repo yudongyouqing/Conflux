@@ -55,14 +55,14 @@ body,
  * alpha modifier works and custom themes can override at :root style level.
  * Defaults = the 汇流蓝 baseline; custom themes replace via inline style. */
 :root {
-  --tk-ink: 24 34 52;
-  --tk-paper: 246 247 249;
+  --tk-ink: 17 24 39;
+  --tk-paper: 247 248 250;
   --tk-surface: 255 255 255;
-  --tk-line: 228 232 239;
-  --tk-line-strong: 203 211 224;
-  --tk-accent: 37 99 235;
-  --tk-accent-deep: 30 79 196;
-  --tk-accent-soft: 235 241 254;
+  --tk-line: 230 232 238;
+  --tk-line-strong: 205 210 223;
+  --tk-accent: 67 83 255;
+  --tk-accent-deep: 51 65 224;
+  --tk-accent-soft: 238 240 255;
   --tk-on-accent: 255 255 255;
   --tk-success: 22 115 76;
   --tk-success-soft: 232 244 237;
@@ -81,13 +81,32 @@ body {
   font-family:
     "IBM Plex Sans",
     "PingFang SC",
+    "HarmonyOS Sans SC",
+    "Segoe UI",
     "Microsoft YaHei UI",
     "Microsoft YaHei",
     system-ui,
     sans-serif;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   background: rgb(var(--tk-paper));
   color: rgb(var(--tk-ink));
+}
+
+/* Subtle Linear-style scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--tk-ink) / 0.14);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--tk-ink) / 0.26);
 }
 
 /* React Flow 默认底色（--xy-background-color 默认 #E2E2E2）会盖出"画布比
@@ -129,15 +148,15 @@ body {
  * 自定义主题（导入/预设）在其上再覆写。 */
 html[data-theme="dark"] {
   color-scheme: dark;
-  --tk-ink: 230 234 242;
-  --tk-paper: 13 18 28;
-  --tk-surface: 23 32 48;
-  --tk-line: 44 56 74;
-  --tk-line-strong: 62 76 98;
-  --tk-accent: 96 165 250;
-  --tk-accent-deep: 59 130 246;
-  --tk-accent-soft: 30 58 95;
-  --tk-on-accent: 13 18 28;
+  --tk-ink: 236 239 245;
+  --tk-paper: 11 13 18;
+  --tk-surface: 18 21 30;
+  --tk-line: 31 36 50;
+  --tk-line-strong: 47 55 74;
+  --tk-accent: 126 140 255;
+  --tk-accent-deep: 105 120 255;
+  --tk-accent-soft: 27 32 58;
+  --tk-on-accent: 11 13 18;
   --tk-success: 116 212 165;
   --tk-success-soft: 21 58 43;
   --tk-warning: 237 193 108;
@@ -148,8 +167,10 @@ html[data-theme="dark"] {
   --tk-info-soft: 32 55 80;
   --tk-neutral: 167 179 199;
   --tk-neutral-soft: 41 51 67;
-  /* 深色底下细字看不清——全局提升一档字重 */
   font-weight: 450;
+}
+html[data-theme="dark"] .workspace-frame {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 html[data-theme="dark"] .font-normal { font-weight: 500; }
 html[data-theme="dark"] .font-medium { font-weight: 600; }
@@ -286,7 +307,8 @@ html[data-theme="dark"] .font-medium { font-weight: 600; }
     max-width: min(100%, 220px);
   }
 
-  .room-composer-row input {
+  .room-composer-row input,
+  .room-composer-row textarea {
     min-width: 0;
   }
 
