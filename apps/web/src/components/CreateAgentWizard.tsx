@@ -464,8 +464,7 @@ function RuntimeCreateForm({
                 available={binaryAvailability.get(r.id)}
                 onClick={() => {
                   set("runtime", r.id);
-                  // managed execution is codex-only; switching away clears it
-                  if (r.id !== "codex") set("execution_mode", "");
+                  if (r.id !== "codex" && r.id !== "claude") set("execution_mode", "");
                 }}
                 label={r.label}
                 icon={runtimeGlyph(r.id)}
@@ -474,7 +473,7 @@ function RuntimeCreateForm({
           </div>
         </Field>
 
-        {form.runtime === "codex" && (
+        {(form.runtime === "codex" || form.runtime === "claude") && (
           <div className="flex items-start gap-2 rounded-lg border border-line bg-surface p-2.5">
             <input
               id="wizard-managed-mode"
@@ -486,7 +485,7 @@ function RuntimeCreateForm({
             <label htmlFor="wizard-managed-mode" className="text-2xs text-ink-muted leading-relaxed">
               <span className="text-ink font-medium">Conflux 受管执行</span>
               <br />
-              由服务端持有 app-server 子进程：任务排队执行、审批由你在面板中决定，不再打开终端窗口。
+              由服务端持有 CLI 子进程：任务排队执行、审批由你在面板中决定，不再打开终端窗口。
             </label>
           </div>
         )}

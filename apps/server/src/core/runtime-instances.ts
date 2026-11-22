@@ -8,7 +8,7 @@ import { getSession, endSession } from "./sessions.js";
 import { getSetting } from "./app-settings.js";
 import { isRuntimeCommand } from "./runtime-identity.js";
 import { getRuntimeAgent, startRuntimeAgent, type StartRuntimeOptions } from "./runtime-agents.js";
-import { getManagedCodexManager } from "./managed-codex/manager.js";
+import { getManagedExecutorForInstance } from "./managed/registry.js";
 import { STALE_AFTER_MS } from "../config.js";
 
 export interface ProcessIdentity {
@@ -246,7 +246,7 @@ function toPublic(db: DB, row: InstanceRow, io: RuntimeProcessIO): RuntimeInstan
     .prepare(`SELECT thread_id FROM managed_codex_bindings WHERE instance_id = ?`)
     .get(row.id) as { thread_id: string } | undefined;
   if (managedBinding) {
-    const manager = getManagedCodexManager();
+    const manager = getManagedExecutorForInstance(db, row.id);
     const held = manager?.getLiveInstanceIds().includes(row.id) === true;
     const terminal = ["ended", "stale", "failed"].includes(row.state);
     const presetExists = !!getRuntimeAgent(db, row.preset_id);
@@ -397,7 +397,7 @@ export async function stopRuntimeInstance(
     .prepare(`SELECT thread_id FROM managed_codex_bindings WHERE instance_id = ?`)
     .get(id) as { thread_id: string } | undefined;
   if (managedRow) {
-    const manager = getManagedCodexManager();
+    const manager = getManagedExecutorForInstance(db, id);
     if (!manager || !manager.getLiveInstanceIds().includes(id)) {
       conflict("受管实例由 Conflux 服务进程持有，请通过服务端/Web 停止");
     }
@@ -477,7 +477,7 @@ export async function resumeRuntimeInstance(
     .prepare(`SELECT thread_id FROM managed_codex_bindings WHERE instance_id = ?`)
     .get(id) as { thread_id: string } | undefined;
   if (managedRow) {
-    const manager = getManagedCodexManager();
+    const manager = getManagedExecutorForInstance(db, id);
     if (!manager) {
       conflict("受管实例由 Conflux 服务进程持有，请通过服务端/Web 恢复");
     }

@@ -3,6 +3,7 @@ import {
   ManagedExecutor,
   type ManagedManagerOptions,
 } from "../managed/executor.js";
+import { registerManagedExecutor } from "../managed/registry.js";
 import { codexAdapter } from "./adapter.js";
 
 /**
@@ -27,6 +28,7 @@ let activeManager: ManagedCodexManager | null = null;
 
 export function setManagedCodexManager(manager: ManagedCodexManager | null): void {
   activeManager = manager;
+  registerManagedExecutor("codex", manager);
 }
 
 export function getManagedCodexManager(): ManagedCodexManager | null {

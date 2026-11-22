@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { logAudit } from "../../core/audit.js";
 import { logger } from "../../log.js";
-import { getManagedCodexManager } from "../../core/managed-codex/manager.js";
+import { getManagedExecutorForInstance } from "../../core/managed/registry.js";
 import { listManagedEvents } from "../../core/managed-codex/store.js";
 import { WEB_CONSOLE_ID, type ServerContext } from "../context.js";
 
@@ -15,8 +15,8 @@ import { WEB_CONSOLE_ID, type ServerContext } from "../context.js";
 export function registerManagedCodexRoutes(app: FastifyInstance, ctx: ServerContext): void {
   const { db, sendError } = ctx;
 
-  const requireManager = () => {
-    const manager = getManagedCodexManager();
+  const requireManager = (instanceId: string) => {
+    const manager = getManagedExecutorForInstance(db, instanceId);
     if (!manager)
       throw Object.assign(new Error("managed executor unavailable"), { statusCode: 503 });
     return manager;
@@ -24,7 +24,7 @@ export function registerManagedCodexRoutes(app: FastifyInstance, ctx: ServerCont
 
   app.get<{ Params: { id: string } }>("/runtime-instances/:id/managed", {}, async (req, reply) => {
     try {
-      const manager = requireManager();
+      const manager = requireManager(req.params.id);
       // Persisted view for instances this process does not hold (stopped,
       // crashed, restarted): the panel must still show history and queue —
       // only live control is absent. Null = never was a managed instance.
@@ -67,7 +67,7 @@ export function registerManagedCodexRoutes(app: FastifyInstance, ctx: ServerCont
     "/runtime-instances/:id/managed/events",
     {},
     async (req, reply) => {
-      const manager = getManagedCodexManager();
+      const manager = getManagedExecutorForInstance(db, req.params.id);
       if (!manager) {
         return ctx.sendHttpError(reply, 503, "managed executor unavailable");
       }
@@ -133,7 +133,7 @@ export function registerManagedCodexRoutes(app: FastifyInstance, ctx: ServerCont
     {},
     async (req, reply) => {
       try {
-        const manager = requireManager();
+        const manager = requireManager(req.params.id);
         const result = await manager.interrupt(req.params.id, req.body?.expected_turn_id ?? null);
         try {
           logAudit(db, {
@@ -158,7 +158,7 @@ export function registerManagedCodexRoutes(app: FastifyInstance, ctx: ServerCont
     {},
     async (req, reply) => {
       try {
-        const manager = requireManager();
+        const manager = requireManager(req.params.id);
         const approvalId = Number(req.params.approvalId);
         if (!Number.isInteger(approvalId) || approvalId <= 0) {
           return ctx.sendHttpError(reply, 400, "invalid approval id");

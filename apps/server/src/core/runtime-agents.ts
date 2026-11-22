@@ -22,7 +22,7 @@ import {
   failRuntimeInstance,
   refreshRuntimeInstances,
 } from "./runtime-instances.js";
-import { getManagedCodexManager } from "./managed-codex/manager.js";
+import { getManagedExecutor } from "./managed/registry.js";
 
 // ---- runtime catalog (AgentRecall-style: static definitions per CLI) ------
 
@@ -135,9 +135,9 @@ export function createRuntimeAgent(
     );
   }
   const execution_mode = input.execution_mode ?? "terminal";
-  if (execution_mode === "managed" && input.runtime !== "codex") {
+  if (execution_mode === "managed" && input.runtime !== "codex" && input.runtime !== "claude") {
     throw Object.assign(
-      new Error("managed execution supports codex only in this milestone"),
+      new Error("managed execution supports codex and claude only"),
       { statusCode: 400 },
     );
   }
@@ -373,9 +373,9 @@ export async function startRuntimeAgent(
         { statusCode: 400 },
       );
     }
-    const manager = getManagedCodexManager();
+    const manager = getManagedExecutor(agent.runtime);
     if (!manager) {
-      throw new Error("managed executor unavailable — start the Conflux server first");
+      throw new Error(`managed ${agent.runtime} executor unavailable — start the Conflux server first`);
     }
     const { instance } = await manager.start(agent, opts.instance ? { instance: opts.instance } : {});
     return { started: true, instance };

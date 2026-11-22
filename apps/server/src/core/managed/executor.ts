@@ -59,7 +59,10 @@ import type { RuntimeAdapter } from "./adapter.js";
 
 export interface ManagedManagerOptions {
   /** Resolve the app-server launch; defaults to the adapter's path. */
-  resolveLaunch?: (agent: RuntimeAgent) => import("./adapter.js").ManagedLaunchConfig;
+  resolveLaunch?: (
+    agent: RuntimeAgent,
+    opts?: import("./adapter.js").ManagedLaunchOptions,
+  ) => import("./adapter.js").ManagedLaunchConfig;
   /** RPC limits for the spawned connections (tests shorten the timeout). */
   rpcOptions?: ConstructorParameters<typeof ManagedRpcConnection>[2];
 }
@@ -218,6 +221,7 @@ export class ManagedExecutor {
         env: launch.env,
         handlers,
         rpcOptions: this.opts.rpcOptions ?? { requestTimeoutMs: 30_000 },
+        createConnection: this.opts.adapter.createConnection,
       });
     } catch (err) {
       failRuntimeInstance(this.db, instance.id);
@@ -529,9 +533,10 @@ export class ManagedExecutor {
     const { router, handlers } = this.makeRouter();
     let proc: AppServerProcess;
     try {
+      const launchOpts = { resumeThreadId: binding.thread_id };
       const launch = this.opts.resolveLaunch
-        ? this.opts.resolveLaunch(agent)
-        : this.opts.adapter.defaultLaunch(this.db, agent);
+        ? this.opts.resolveLaunch(agent, launchOpts)
+        : this.opts.adapter.defaultLaunch(this.db, agent, launchOpts);
       proc = spawnAppServer({
         executable: launch.executable,
         args: launch.args,
@@ -539,6 +544,7 @@ export class ManagedExecutor {
         env: launch.env,
         handlers,
         rpcOptions: this.opts.rpcOptions ?? { requestTimeoutMs: 30_000 },
+        createConnection: this.opts.adapter.createConnection,
       });
     } catch (err) {
       failRuntimeInstance(this.db, instance.id);
