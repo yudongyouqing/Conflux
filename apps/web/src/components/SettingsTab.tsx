@@ -1,9 +1,29 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useTerminalSettings, useSaveTerminalSettings } from "../hooks";
+import {
+  useApplyCliProvider,
+  useCliProviders,
+  useDeleteCliProviderPreset,
+  useSaveCliProviderPreset,
+  useSaveTerminalSettings,
+  useTerminalSettings,
+} from "../hooks";
 import { api } from "../api";
-import type { ConfluxDataBundle, TerminalChoice } from "@conflux/shared";
-import { Settings, Loader2, Check, Download, Upload, Trash2 } from "lucide-react";
+import type { ConfluxDataBundle, RuntimeId, TerminalChoice } from "@conflux/shared";
+import {
+  Settings,
+  Loader2,
+  Check,
+  Download,
+  Upload,
+  Trash2,
+  RefreshCw,
+  Terminal,
+  Plus,
+  KeyRound,
+  ArrowUpRight,
+} from "lucide-react";
+import { ClaudeIcon, OpenAIIcon } from "./brand-icons";
 import {
   BUILTIN_THEMES,
   deleteCustomTheme,
@@ -16,20 +36,43 @@ import {
 } from "../theme";
 
 export function SettingsTab({ active = true }: { active?: boolean }) {
-  const { data, isLoading, error } = useTerminalSettings(active);
+  const { data, isLoading, error, refetch: refetchTerminal, isFetching: probingTerminal } =
+    useTerminalSettings(active);
   const save = useSaveTerminalSettings();
+  const cliProviders = useCliProviders(active);
+  const savePreset = useSaveCliProviderPreset();
+  const deletePreset = useDeleteCliProviderPreset();
+  const applyProvider = useApplyCliProvider();
   const queryClient = useQueryClient();
   const importInput = useRef<HTMLInputElement>(null);
 
   const [terminal, setTerminal] = useState<TerminalChoice>("wt");
   const [claudePath, setClaudePath] = useState("");
   const [codexPath, setCodexPath] = useState("");
+  const [editingBinary, setEditingBinary] = useState<RuntimeId | null>(null);
   const [autoWake, setAutoWake] = useState(true);
   const [wakeMaxConcurrent, setWakeMaxConcurrent] = useState(3);
   const [wakeActiveCount, setWakeActiveCount] = useState(0);
   const [terminalNotice, setTerminalNotice] = useState<string | null>(null);
   const [wakeNotice, setWakeNotice] = useState<string | null>(null);
+  const [providerNotice, setProviderNotice] = useState<string | null>(null);
   const [savingSection, setSavingSection] = useState<"terminal" | "wake" | null>(null);
+  const [addingPreset, setAddingPreset] = useState(false);
+  const [presetForm, setPresetForm] = useState<{
+    name: string;
+    runtime: RuntimeId;
+    base_url: string;
+    model: string;
+    api_key: string;
+    extra_env: string;
+  }>({
+    name: "",
+    runtime: "claude",
+    base_url: "",
+    model: "",
+    api_key: "",
+    extra_env: "",
+  });
   const [transferNotice, setTransferNotice] = useState<string | null>(null);
   const [transferPending, setTransferPending] = useState(false);
   const [importConflict, setImportConflict] = useState<"skip" | "overwrite" | "copy">("skip");
@@ -246,7 +289,54 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
     );
 
   const options = data?.options ?? [];
-  const selected = options.find((o) => o.value === terminal);
+  const binaries = data?.binaries ?? [];
+  const nativeProviders = cliProviders.data?.native ?? [];
+  const providerPresets = cliProviders.data?.presets ?? [];
+
+  const handleSavePreset = (andApply: boolean) => {
+    const name = presetForm.name.trim();
+    if (!name || savePreset.isPending || applyProvider.isPending) return;
+    setProviderNotice(null);
+    const trimmedKey = presetForm.api_key.trim() || null;
+    savePreset.mutate(
+      {
+        name,
+        runtime: presetForm.runtime,
+        base_url: presetForm.base_url.trim() || null,
+        model: presetForm.model.trim() || null,
+        api_key: trimmedKey,
+        extra_env: presetForm.extra_env.trim() || null,
+      },
+      {
+        onSuccess: ({ preset }) => {
+          setPresetForm({
+            name: "",
+            runtime: presetForm.runtime,
+            base_url: "",
+            model: "",
+            api_key: "",
+            extra_env: "",
+          });
+          setAddingPreset(false);
+          if (andApply) {
+            applyProvider.mutate(
+              { preset_id: preset.id },
+              {
+                onSuccess: (res) =>
+                  setProviderNotice(
+                    `已写入 ${res.config_path}${res.backup_path ? "（已自动备份原文件）" : ""}`,
+                  ),
+                onError: (e) => setProviderNotice(`写入失败: ${(e as Error).message}`),
+              },
+            );
+          } else {
+            setProviderNotice(`已保存渠道预设「${preset.name}」`);
+          }
+        },
+        onError: (e) => setProviderNotice(`保存失败: ${(e as Error).message}`),
+      },
+    );
+  };
 
   return (
     <div className="h-full overflow-y-auto bg-surface p-4 sm:p-7">
@@ -347,52 +437,145 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
           </div>
         </section>
 
-        <section className="py-6 space-y-4">
-          <div>
-            <h3 className="text-ink font-semibold text-sm tracking-[-0.01em]">终端与可执行文件</h3>
-            <p className="text-2xs text-ink-faint mt-0.5">「在终端打开」与编码助手启动时使用的终端和 CLI 路径。</p>
-          </div>
-          <label className="block">
-            <span className="block text-xs font-medium text-ink mb-1.5">终端打开方式</span>
-            <select
-              value={terminal}
-              onChange={(e) => setTerminal(e.target.value as TerminalChoice)}
-              className={selectCls}
+        <section className="py-6 space-y-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-ink font-semibold text-sm tracking-[-0.01em]">终端与 CLI 环境</h3>
+              <p className="text-2xs text-ink-faint mt-0.5">
+                「在终端打开」与编码助手启动时使用的默认终端和本机 CLI 自动探测结果。
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void refetchTerminal()}
+              disabled={probingTerminal}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-line text-2xs text-ink-muted hover:text-ink hover:bg-tile-hover disabled:opacity-50 transition-colors"
             >
-              {options.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                  {o.available ? "" : "(未安装,将回退)"}
-                </option>
-              ))}
-            </select>
-            {selected && (
-              <span className="block text-2xs text-ink-faint mt-1.5">
-                {selected.hint}
-                {selected.available ? "" : " · 本机未检测到,保存后走回退链"}
-              </span>
-            )}
-          </label>
+              <RefreshCw size={11} className={probingTerminal ? "animate-spin" : ""} />
+              重新检测
+            </button>
+          </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <label className="block">
-              <span className="block text-2xs text-ink-muted mb-1">claude 可执行文件</span>
-              <input
-                value={claudePath}
-                onChange={(e) => setClaudePath(e.target.value)}
-                placeholder="claude"
-                className={inputCls}
-              />
-            </label>
-            <label className="block">
-              <span className="block text-2xs text-ink-muted mb-1">codex 可执行文件</span>
-              <input
-                value={codexPath}
-                onChange={(e) => setCodexPath(e.target.value)}
-                placeholder="codex"
-                className={inputCls}
-              />
-            </label>
+          <div className="space-y-2">
+            <div className="text-xs font-medium text-ink">默认终端</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {options.map((o) => {
+                const picked = terminal === o.value;
+                return (
+                  <button
+                    key={o.value}
+                    type="button"
+                    aria-pressed={picked}
+                    onClick={() => setTerminal(o.value)}
+                    className={`flex items-start gap-2.5 p-3 rounded-xl border text-left transition-colors ${
+                      picked
+                        ? "border-accent bg-accent-soft/60"
+                        : "border-line/80 bg-paper/40 hover:border-line-strong"
+                    }`}
+                  >
+                    <Terminal
+                      size={14}
+                      className={`mt-0.5 flex-shrink-0 ${picked ? "text-accent" : "text-ink-faint"}`}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`text-xs truncate ${picked ? "text-ink font-medium" : "text-ink-muted"}`}>
+                          {o.label}
+                        </span>
+                        <span
+                          className={`ml-auto text-2xs px-1.5 py-px rounded flex-shrink-0 ${
+                            o.available
+                              ? "bg-success-soft text-success"
+                              : "bg-neutral-soft text-neutral"
+                          }`}
+                        >
+                          {o.available ? "已就绪" : "未安装"}
+                        </span>
+                      </div>
+                      <div className="text-2xs text-ink-faint truncate mt-0.5">{o.hint}</div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <div className="text-xs font-medium text-ink">CLI 可执行文件</div>
+            <div className="rounded-xl border border-line/80 divide-y divide-line/80 overflow-hidden bg-paper/30">
+              {(
+                [
+                  {
+                    runtime: "claude" as const,
+                    label: "Claude Code",
+                    Icon: ClaudeIcon,
+                    value: claudePath,
+                    onChange: setClaudePath,
+                    placeholder: "claude",
+                  },
+                  {
+                    runtime: "codex" as const,
+                    label: "Codex",
+                    Icon: OpenAIIcon,
+                    value: codexPath,
+                    onChange: setCodexPath,
+                    placeholder: "codex",
+                  },
+                ] as const
+              ).map(({ runtime, label, Icon, value, onChange, placeholder }) => {
+                const probe = binaries.find((b) => b.runtime === runtime);
+                const isEditing = editingBinary === runtime || (probe !== undefined && !probe.available);
+                return (
+                  <div key={runtime} className="p-3 space-y-2">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-6 h-6 rounded-md bg-surface border border-line flex items-center justify-center flex-shrink-0 text-ink-muted">
+                        <Icon size={13} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-medium text-ink">{label}</span>
+                          {probe && (
+                            <span
+                              className={`text-2xs px-1.5 py-px rounded ${
+                                probe.available
+                                  ? "bg-success-soft text-success"
+                                  : "bg-warning-soft text-warning"
+                              }`}
+                            >
+                              {probe.available ? "已就绪" : "未检测到"}
+                            </span>
+                          )}
+                        </div>
+                        <div
+                          className="text-2xs font-mono text-ink-faint truncate mt-0.5"
+                          title={probe?.resolved_path ?? value ?? placeholder}
+                        >
+                          {probe?.resolved_path ?? (value.trim() || `${placeholder}（从 PATH 解析）`)}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditingBinary((prev) => (prev === runtime ? null : runtime))
+                        }
+                        className="px-2 py-1 rounded-md text-2xs text-ink-muted hover:text-ink hover:bg-tile-hover border border-line/80 transition-colors flex-shrink-0"
+                      >
+                        {editingBinary === runtime ? "收起" : "自定义路径"}
+                      </button>
+                    </div>
+                    {isEditing && (
+                      <input
+                        aria-label={`${runtime} 可执行文件`}
+                        value={value}
+                        onChange={(e) => onChange(e.target.value)}
+                        placeholder={`留空默认从 PATH 解析 (${placeholder})`}
+                        className={`${inputCls} font-mono`}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           <div className="flex items-center justify-between pt-1">
@@ -418,6 +601,238 @@ export function SettingsTab({ active = true }: { active?: boolean }) {
               保存
             </button>
           </div>
+        </section>
+
+        {/* CLI Provider presets & native config (~/.claude/settings.json, ~/.codex/config.toml) */}
+        <section className="py-6 space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-ink font-semibold text-sm tracking-[-0.01em]">
+                模型渠道与本机配置
+              </h3>
+              <p className="text-2xs text-ink-faint mt-0.5">
+                读取或一键写入本机 CLI 原生配置（自动备份原文件，兼容 CC-Switch / Magpie）。
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAddingPreset((v) => !v)}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-line text-2xs text-ink hover:border-accent hover:text-accent transition-colors flex-shrink-0"
+            >
+              <Plus size={12} /> 新建渠道预设
+            </button>
+          </div>
+
+          {nativeProviders.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {nativeProviders.map((n) => (
+                <div
+                  key={n.runtime}
+                  className="rounded-xl border border-line/80 bg-paper/40 p-3 space-y-1.5"
+                >
+                  <div className="flex items-center gap-2">
+                    {n.runtime === "claude" ? (
+                      <ClaudeIcon size={13} className="text-ink-muted" />
+                    ) : (
+                      <OpenAIIcon size={13} className="text-ink-muted" />
+                    )}
+                    <span className="text-xs font-medium text-ink">
+                      {n.runtime === "claude" ? "Claude 原生配置" : "Codex 原生配置"}
+                    </span>
+                    <span
+                      className={`ml-auto text-2xs px-1.5 py-px rounded ${
+                        n.api_key_configured
+                          ? "bg-success-soft text-success"
+                          : "bg-neutral-soft text-neutral"
+                      }`}
+                    >
+                      {n.api_key_configured ? "已配 Key" : n.exists ? "默认登录" : "未创建"}
+                    </span>
+                  </div>
+                  <div className="text-2xs font-mono text-ink-faint truncate" title={n.config_path}>
+                    {n.config_path}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5 text-2xs text-ink-muted">
+                    <span>模型：{n.model || "默认"}</span>
+                    {n.base_url && (
+                      <span className="truncate font-mono text-ink-faint" title={n.base_url}>
+                        · {n.base_url}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {addingPreset && (
+            <div className="rounded-xl border border-line bg-paper/50 p-3.5 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <label className="block">
+                  <span className="block text-2xs text-ink-muted mb-1">预设名称 *</span>
+                  <input
+                    value={presetForm.name}
+                    onChange={(e) => setPresetForm((f) => ({ ...f, name: e.target.value }))}
+                    placeholder="如：公司中转 / Magpie 本地网关"
+                    className={inputCls}
+                  />
+                </label>
+                <label className="block">
+                  <span className="block text-2xs text-ink-muted mb-1">适用 CLI *</span>
+                  <select
+                    value={presetForm.runtime}
+                    onChange={(e) =>
+                      setPresetForm((f) => ({ ...f, runtime: e.target.value as RuntimeId }))
+                    }
+                    className={selectCls}
+                  >
+                    <option value="claude">Claude Code (~/.claude/settings.json)</option>
+                    <option value="codex">Codex (~/.codex/config.toml)</option>
+                  </select>
+                </label>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <label className="block">
+                  <span className="block text-2xs text-ink-muted mb-1">Base URL</span>
+                  <input
+                    value={presetForm.base_url}
+                    onChange={(e) => setPresetForm((f) => ({ ...f, base_url: e.target.value }))}
+                    placeholder="https://relay.example.com"
+                    className={`${inputCls} font-mono`}
+                  />
+                </label>
+                <label className="block">
+                  <span className="block text-2xs text-ink-muted mb-1">默认模型</span>
+                  <input
+                    value={presetForm.model}
+                    onChange={(e) => setPresetForm((f) => ({ ...f, model: e.target.value }))}
+                    placeholder={
+                      presetForm.runtime === "claude" ? "claude-sonnet-4-5" : "gpt-5-codex"
+                    }
+                    className={`${inputCls} font-mono`}
+                  />
+                </label>
+              </div>
+              <label className="block">
+                <span className="block text-2xs text-ink-muted mb-1">API Key（本地安全存储，响应脱敏）</span>
+                <input
+                  type="password"
+                  value={presetForm.api_key}
+                  onChange={(e) => setPresetForm((f) => ({ ...f, api_key: e.target.value }))}
+                  placeholder="sk-..."
+                  className={`${inputCls} font-mono`}
+                />
+              </label>
+              {presetForm.runtime === "claude" && (
+                <label className="block">
+                  <span className="block text-2xs text-ink-muted mb-1">额外 env JSON（可选，兼容 CC-Switch 块）</span>
+                  <textarea
+                    rows={2}
+                    value={presetForm.extra_env}
+                    onChange={(e) => setPresetForm((f) => ({ ...f, extra_env: e.target.value }))}
+                    placeholder='{"HTTP_PROXY":"http://127.0.0.1:7890"}'
+                    className={`${inputCls} font-mono`}
+                  />
+                </label>
+              )}
+              <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setAddingPreset(false)}
+                  className="px-3 py-1.5 rounded-lg text-xs text-ink-muted hover:bg-tile-hover"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  disabled={!presetForm.name.trim() || savePreset.isPending}
+                  onClick={() => handleSavePreset(false)}
+                  className="px-3 py-1.5 rounded-lg border border-line text-xs text-ink hover:bg-tile-hover disabled:opacity-40"
+                >
+                  仅保存预设
+                </button>
+                <button
+                  type="button"
+                  disabled={!presetForm.name.trim() || savePreset.isPending || applyProvider.isPending}
+                  onClick={() => handleSavePreset(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent text-on-accent text-xs font-medium hover:bg-accent-deep disabled:opacity-40"
+                >
+                  <ArrowUpRight size={12} /> 保存并写入本机
+                </button>
+              </div>
+            </div>
+          )}
+
+          {providerPresets.length > 0 && (
+            <div className="rounded-xl border border-line/80 divide-y divide-line/80 overflow-hidden">
+              {providerPresets.map((p) => (
+                <div
+                  key={p.id}
+                  className="flex flex-wrap items-center gap-2.5 px-3 py-2.5 bg-surface hover:bg-tile/40 transition-colors"
+                >
+                  <KeyRound size={13} className="text-ink-faint flex-shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-medium text-ink truncate">{p.name}</span>
+                      <span className="text-2xs font-mono px-1.5 py-px rounded bg-tile text-ink-muted">
+                        {p.runtime}
+                      </span>
+                      {p.api_key_configured && (
+                        <span className="text-2xs px-1.5 py-px rounded bg-success-soft text-success">
+                          Key 已存
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-2xs font-mono text-ink-faint truncate mt-0.5">
+                      {[p.model, p.base_url].filter(Boolean).join(" · ") || "仅环境变量"}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <button
+                      type="button"
+                      disabled={applyProvider.isPending}
+                      onClick={() => {
+                        setProviderNotice(null);
+                        applyProvider.mutate(
+                          { preset_id: p.id },
+                          {
+                            onSuccess: (res) =>
+                              setProviderNotice(
+                                `已写入 ${res.config_path}${res.backup_path ? "（已自动备份）" : ""}`,
+                              ),
+                            onError: (e) => setProviderNotice(`写入失败: ${(e as Error).message}`),
+                          },
+                        );
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-line text-2xs text-ink hover:border-accent hover:text-accent disabled:opacity-40 transition-colors"
+                    >
+                      <ArrowUpRight size={11} /> 写入本机配置
+                    </button>
+                    <button
+                      type="button"
+                      disabled={deletePreset.isPending}
+                      onClick={() => deletePreset.mutate(p.id)}
+                      title="删除预设"
+                      className="p-1 rounded-md text-ink-faint hover:text-danger hover:bg-danger-soft transition-colors"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {providerNotice && (
+            <div
+              className={`text-xs flex items-center gap-1 ${
+                providerNotice.includes("失败") ? "text-danger" : "text-success"
+              }`}
+            >
+              {!providerNotice.includes("失败") && <Check size={12} />}
+              <span className="truncate">{providerNotice}</span>
+            </div>
+          )}
         </section>
 
         {/* Wake concurrency control: caps simultaneous headless wakes */}

@@ -323,3 +323,37 @@ export function useOpenSessionTerminal() {
     mutationFn: api.openSessionTerminal,
   });
 }
+
+// ---- CLI provider presets & native config ----
+
+export function useCliProviders(enabled = true) {
+  return useQuery({
+    queryKey: ["cli-providers"],
+    queryFn: ({ signal }) => api.getCliProviders(signal),
+    enabled,
+  });
+}
+
+export function useSaveCliProviderPreset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.saveCliProviderPreset,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["cli-providers"] }),
+  });
+}
+
+export function useDeleteCliProviderPreset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.deleteCliProviderPreset,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["cli-providers"] }),
+  });
+}
+
+export function useApplyCliProvider() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.applyCliProvider,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["cli-providers"] }),
+  });
+}

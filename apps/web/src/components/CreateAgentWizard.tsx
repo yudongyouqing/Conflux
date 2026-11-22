@@ -10,7 +10,14 @@ import {
   ChevronDown,
   Zap,
 } from "lucide-react";
-import { useCreateAgent, useCreateRuntimeAgent, useRuntimes, useSessions } from "../hooks";
+import {
+  useCliProviders,
+  useCreateAgent,
+  useCreateRuntimeAgent,
+  useRuntimes,
+  useSessions,
+  useTerminalSettings,
+} from "../hooks";
 import { api } from "../api";
 import { ClaudeIcon, OpenAIIcon } from "./brand-icons";
 import type { ComponentType } from "react";
@@ -298,25 +305,40 @@ function RuntimeCard({
   active,
   onClick,
   label,
+  available,
   icon: Glyph,
 }: {
   active: boolean;
   onClick: () => void;
   label: string;
+  available?: boolean;
   icon: ComponentType<{ size?: number; className?: string }>;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`flex flex-col items-center gap-1 py-2 rounded-lg border text-2xs font-medium transition-colors ${
+      className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-xs font-medium transition-colors text-left ${
         active
-          ? "border-accent bg-accent-soft text-accent-deep ring-1 ring-accent/40"
-          : "border-line text-ink-muted hover:border-line-strong"
+          ? "border-accent bg-accent-soft/60 text-ink"
+          : "border-line/80 bg-paper/40 text-ink-muted hover:border-line-strong hover:text-ink"
       }`}
     >
-      <Glyph size={14} />
-      {label}
+      <div
+        className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${
+          active ? "bg-accent text-on-accent" : "bg-surface border border-line text-ink-muted"
+        }`}
+      >
+        <Glyph size={14} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate">{label}</div>
+        {available !== undefined && (
+          <div className={`text-2xs ${available ? "text-success" : "text-ink-faint"}`}>
+            {available ? "● 已就绪" : "○ 未检测到"}
+          </div>
+        )}
+      </div>
     </button>
   );
 }
@@ -348,6 +370,8 @@ function RuntimeCreateForm({
 }) {
   const create = useCreateRuntimeAgent();
   const runtimes = useRuntimes();
+  const terminalSettings = useTerminalSettings();
+  const cliProviders = useCliProviders();
   const [form, setForm] = useState(EMPTY_RUNTIME_FORM);
   const [advanced, setAdvanced] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -356,6 +380,19 @@ function RuntimeCreateForm({
   useEffect(() => () => { testAbortRef.current?.abort(); }, []);
   const knownDirs = useKnownProjectDirs();
   const canBrowse = typeof window.confluxDesktop?.pickDirectory === "function";
+
+  const binaryAvailability = useMemo(() => {
+    const map = new Map<string, boolean>();
+    for (const b of terminalSettings.data?.binaries ?? []) {
+      map.set(b.runtime, b.available);
+    }
+    return map;
+  }, [terminalSettings.data]);
+
+  const matchingPresets = useMemo(
+    () => (cliProviders.data?.presets ?? []).filter((p) => p.runtime === form.runtime),
+    [cliProviders.data, form.runtime],
+  );
 
   // Runtime choices come from the server's registry-derived catalog — adding
   // a runtime to RUNTIME_REGISTRY makes it appear here automatically.
@@ -426,11 +463,12 @@ function RuntimeCreateForm({
           />
         </Field>
         <Field label="运行时 *">
-          <div className="grid grid-cols-2 gap-1.5">
+          <div className="grid grid-cols-2 gap-2">
             {runtimeCatalog.map((r) => (
               <RuntimeCard
                 key={r.id}
                 active={form.runtime === r.id}
+                available={binaryAvailability.get(r.id)}
                 onClick={() => {
                   set("runtime", r.id);
                   // managed execution is codex-only; switching away clears it
@@ -500,7 +538,12 @@ function RuntimeCreateForm({
           )}
         </Field>
 
+        <div className="rounded-lg border border-line/70 bg-paper/50 px-3 py-2 text-2xs text-ink-muted">
+          模型与 API 渠道默认继承本机 CLI / CC-Switch / Magpie 配置，无需重复填写 Key。
+        </div>
+
         <button
+          type="button"
           onClick={() => setAdvanced((v) => !v)}
           className="flex items-center gap-1 text-2xs text-ink-muted hover:text-ink"
         >
@@ -508,11 +551,34 @@ function RuntimeCreateForm({
             size={12}
             className={`transition-transform ${advanced ? "rotate-180" : ""}`}
           />
-          高级选项（模型 / API 渠道 / 定时 / 环境）
+          高级选项（模型 / API 渠道覆盖 / 定时 / 指令）
         </button>
 
         {advanced && (
-          <div className="space-y-3 pt-1 border-t border-line">
+          <div className="space-y-3 pt-2 border-t border-line/80">
+            {matchingPresets.length > 0 && (
+              <div className="space-y-1">
+                <div className="text-2xs text-ink-faint">从已保存的渠道预设快速填充</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {matchingPresets.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() =>
+                        setForm((f) => ({
+                          ...f,
+                          base_url: p.base_url ?? f.base_url,
+                          model: p.model ?? f.model,
+                        }))
+                      }
+                      className="text-2xs px-2 py-1 rounded-md border border-line bg-paper/60 text-ink-muted hover:border-accent hover:text-accent transition-colors"
+                    >
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3 pt-1">
               <Field label="模型(可选)">
                 <input
