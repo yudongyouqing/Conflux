@@ -38,19 +38,19 @@ function assertPackageLayout(packageDir) {
     );
   }
 
-  const nativePath = requiredFile(
-    path.join(
-      packageDir,
-      "resources",
-      "app.asar.unpacked",
-      "node_modules",
-      "better-sqlite3",
-      "build",
-      "Release",
-      "better_sqlite3.node"
-    ),
-    "better-sqlite3 native module"
+  const unpackedSqliteDir = path.join(
+    packageDir,
+    "resources",
+    "app.asar.unpacked",
+    "node_modules",
+    "better-sqlite3",
   );
+  const prebuiltTarget = `${process.platform}-${process.arch}.node`;
+  const prebuiltPath = path.join(unpackedSqliteDir, "prebuilds", prebuiltTarget);
+  const rebuiltPath = path.join(unpackedSqliteDir, "build", "Release", "better_sqlite3.node");
+  const nativePath = fs.existsSync(prebuiltPath)
+    ? prebuiltPath
+    : requiredFile(rebuiltPath, `better-sqlite3 native module (or ${prebuiltPath})`);
 
   return { asarPath, nativePath };
 }
