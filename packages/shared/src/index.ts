@@ -18,7 +18,7 @@ export const DEFAULT_SESSION_PRIORITY: SessionPriority = "P1";
 
 export type NodeType = "session" | "agent";
 
-export type SessionRuntime = "claude" | "codex" | "internal" | "web";
+export type SessionRuntime = "claude" | "codex" | "antigravity" | "acp" | "internal" | "web";
 
 export type IdentitySource = "hook" | "mcp" | "http" | "cli" | "internal";
 
@@ -83,14 +83,115 @@ export interface SessionSummary extends Session {
   busy?: boolean;
 }
 
+export type ContextKind = "note" | "decision" | "artifact" | "handoff";
+
 export interface ContextEntry {
   id: number;
   session_id: string;
   title: string;
   content: string;
   tags: string[] | null;
+  room_id?: number | null;
+  kind?: ContextKind;
+  pinned?: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export type LiveEventType =
+  | "managed.event"
+  | "session.updated"
+  | "room.message"
+  | "room.task"
+  | "workflow.updated"
+  | "context.updated";
+
+export interface LiveEventEnvelope {
+  id: number;
+  type: LiveEventType;
+  room_id?: number | null;
+  session_id?: string | null;
+  instance_id?: string | null;
+  workflow_run_id?: number | null;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export type WorkflowStepKind = "agent" | "human_gate";
+export type WorkflowRunStatus =
+  | "pending"
+  | "running"
+  | "waiting_human"
+  | "completed"
+  | "failed"
+  | "cancelled";
+export type WorkflowStepStatus =
+  | "pending"
+  | "ready"
+  | "running"
+  | "waiting_human"
+  | "done"
+  | "failed"
+  | "skipped";
+
+export interface WorkflowStepDefinition {
+  key: string;
+  title: string;
+  kind: WorkflowStepKind;
+  depends_on: string[];
+  target_session_id?: string | null;
+  prompt_template: string;
+  include_handoff?: boolean;
+}
+
+export interface WorkflowDefinition {
+  id: number;
+  name: string;
+  description: string | null;
+  room_id: number | null;
+  steps: WorkflowStepDefinition[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowStepState {
+  id: number;
+  run_id: number;
+  step_key: string;
+  title: string;
+  kind: WorkflowStepKind;
+  depends_on: string[];
+  target_session_id: string | null;
+  prompt_template: string;
+  include_handoff: boolean;
+  status: WorkflowStepStatus;
+  message_id: number | null;
+  output: string | null;
+  error: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface WorkflowRun {
+  id: number;
+  workflow_id: number;
+  workflow_name?: string;
+  room_id: number | null;
+  status: WorkflowRunStatus;
+  input: string | null;
+  initiated_by: string;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+  steps: WorkflowStepState[];
+}
+
+export interface HandoffResult {
+  context_entry: ContextEntry;
+  message_id: number | null;
+  delivered: boolean;
+  delivery_method: string;
+  summary_chars: number;
 }
 
 export interface ModelConfig {
@@ -110,11 +211,17 @@ export interface Agent {
   updated_at: string;
 }
 
-export type RuntimeId = "claude" | "codex";
+export type RuntimeId = "claude" | "codex" | "antigravity" | "acp";
 
 /** How a runtime preset executes: external terminal window vs a Conflux-held
- *  app-server child (managed is codex-only for now). */
+ *  managed child process (codex / claude / antigravity / acp). */
 export type RuntimeExecutionMode = "terminal" | "managed";
+
+/** How a follow-up prompt is delivered to a busy managed session. */
+export type ManagedDeliveryMode = "queue" | "steer" | "interrupt";
+
+/** Canonical human-decision request categories surfaced from managed runtimes. */
+export type ManagedApprovalKind = "commandExecution" | "fileChange" | "userInput" | "toolCall";
 
 /** Lifecycle of one managed task execution (Conflux-side vocabulary). */
 export type ManagedRunState =
@@ -153,6 +260,8 @@ export interface ManagedStatusResponse {
      *  crashed, restarted elsewhere): history and queue are still served,
      *  live control (interrupt/approvals) is not. */
     live: boolean;
+    runtime?: string;
+    supportsSteer?: boolean;
     threadId: string;
     activeRun: { runId: number; turnId: string; state: ManagedRunState } | null;
     queuedRunIds: number[];
