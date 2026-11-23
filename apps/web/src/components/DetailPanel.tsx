@@ -1,6 +1,15 @@
 import { useState } from "react";
-import { useSessionContext, useEdgeMessages, useEdgeAsk, useOpenSessionTerminal } from "../hooks";
+import {
+  useSessionContext,
+  useEdgeMessages,
+  useEdgeAsk,
+  useOpenSessionTerminal,
+  useRuntimeInstances,
+  useSessions,
+  useHandoffContext,
+} from "../hooks";
 import { MentionComposer } from "./MentionComposer";
+import { ManagedSessionPanel } from "./ManagedCodexPanel";
 import {
   PLACEHOLDER_DESCRIPTIONS,
   WEB_CONSOLE_ID,
@@ -19,6 +28,7 @@ import {
   ArrowLeftRight,
   TerminalSquare,
   MousePointerClick,
+  Share2,
 } from "lucide-react";
 
 interface DetailPanelProps {
@@ -219,7 +229,7 @@ function EdgeFlowView({
   );
 }
 
-/** Session branch: identity + activity + context + web-console conversation. */
+/** Session branch: identity + managed live console + handoff + context + conversation. */
 function SessionDetail({
   session,
   contextEntries,
@@ -231,7 +241,22 @@ function SessionDetail({
 }) {
   const isSession = session.type === "session";
   const openTerminal = useOpenSessionTerminal();
+  const instancesQuery = useRuntimeInstances(isSession);
+  const sessionsQuery = useSessions("all");
+  const handoffMutation = useHandoffContext();
   const [openNote, setOpenNote] = useState<string | null>(null);
+  const [subTab, setSubTab] = useState<"overview" | "managed" | "handoff">("overview");
+  const [handoffTarget, setHandoffTarget] = useState("");
+  const [handoffPrompt, setHandoffPrompt] = useState("");
+  const [handoffNotice, setHandoffNotice] = useState<string | null>(null);
+
+  const managedInstance = (instancesQuery.data?.instances ?? []).find(
+    (inst) => inst.session_id === session.id,
+  );
+  const peerCandidates = (sessionsQuery.data?.sessions ?? []).filter(
+    (s) => s.id !== session.id && s.id !== WEB_CONSOLE_ID,
+  );
+
   const activity =
     session.description &&
     !(PLACEHOLDER_DESCRIPTIONS as readonly string[]).includes(session.description)
@@ -246,13 +271,57 @@ function SessionDetail({
     });
   };
 
+  const handleHandoff = () => {
+    if (!handoffTarget || handoffMutation.isPending) return;
+    setHandoffNotice(null);
+    handoffMutation.mutate(
+      {
+        from_session: session.id,
+        to_session: handoffTarget,
+        room_id: session.chat_room_id ?? null,
+        prompt: handoffPrompt.trim() || undefined,
+      },
+      {
+        onSuccess: (r) => {
+          setHandoffPrompt("");
+          setHandoffNotice(`已生成交接上下文 #${r.context_entry.id}（${r.summary_chars} 字符）并投递`);
+        },
+        onError: (e) => setHandoffNotice(`交接失败：${(e as Error).message}`),
+      },
+    );
+  };
+
   return (
-    <div className="p-5 space-y-5 overflow-y-auto h-full">
+    <div className="p-5 space-y-4 overflow-y-auto h-full">
       <div>
         <div className="flex items-center gap-2 mb-1.5">
           <StatusDot status={session.status} busy={session.busy} />
           <h2 className="text-ink font-semibold text-base-plus break-all">{session.name}</h2>
         </div>
+        {isSession && (
+          <div className="flex bg-tile p-0.5 border border-line/70 rounded-lg text-2xs mb-2.5 w-fit">
+            {(
+              [
+                { id: "overview", label: "概览" },
+                ...(managedInstance ? [{ id: "managed", label: "受管执行" }] : []),
+                { id: "handoff", label: "一键交接" },
+              ] as Array<{ id: "overview" | "managed" | "handoff"; label: string }>
+            ).map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setSubTab(t.id)}
+                className={`px-2.5 py-0.5 rounded-md font-medium transition-colors ${
+                  subTab === t.id
+                    ? "bg-surface text-ink shadow-card"
+                    : "text-ink-muted hover:text-ink"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        )}
         {activity && (
           <div
             className="text-xs text-accent bg-accent-soft border border-accent/20 rounded-lg px-2 py-1 mb-1.5 truncate"
@@ -276,7 +345,7 @@ function SessionDetail({
             {session.skills.map((s) => (
               <span
                 key={s}
-                className="text-2xs px-1.5 py-0.5 rounded-md bg-cyan-50 text-cyan-700 border border-cyan-200"
+                className="text-2xs px-1.5 py-0.5 rounded-md bg-info-soft text-info border border-info/20"
                 title="Agent Card 技能"
               >
                 {s}
@@ -286,73 +355,134 @@ function SessionDetail({
         )}
       </div>
 
-      <div className="flex gap-5 text-xs">
-        <div>
-          <span className="text-ink-faint">上下文</span>
-          <div className="text-ink font-medium mt-0.5">{session.context_count}</div>
-        </div>
-        <div>
-          <span className="text-ink-faint">待处理</span>
-          <div className="text-warning font-medium mt-0.5">{session.pending_inbox}</div>
-        </div>
-        <div>
-          <span className="text-ink-faint">类型</span>
-          <div className="text-ink font-medium mt-0.5">
-            {session.type === "agent" ? "Agent" : "会话"}
+      {subTab === "managed" && managedInstance ? (
+        <ManagedSessionPanel
+          instanceId={managedInstance.id}
+          instanceName={session.name}
+          compact
+        />
+      ) : subTab === "handoff" ? (
+        <div className="rounded-xl bg-paper border border-line p-3 space-y-3">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-ink">
+            <Share2 size={13} className="text-accent" />
+            跨会话 / 跨 Provider 交接上下文
           </div>
-        </div>
-      </div>
-
-      {isSession && (
-        <div>
-          <button
-            onClick={handleOpenTerminal}
-            disabled={openTerminal.isPending}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-ink text-surface text-xs hover:opacity-90 disabled:opacity-50"
-            title="在新终端窗口 resume 这个对话"
+          <p className="text-2xs text-ink-muted leading-relaxed">
+            自动汇总该会话与所属房间的置顶记忆、架构决策和近期回复，保存为交接档案并直接发送给目标会话（支持 Claude / Codex / Antigravity / 外部终端）。
+          </p>
+          <select
+            value={handoffTarget}
+            onChange={(e) => setHandoffTarget(e.target.value)}
+            className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-surface border border-line text-ink"
           >
-            {openTerminal.isPending ? (
-              <Loader2 size={12} className="animate-spin" />
-            ) : (
-              <TerminalSquare size={13} />
-            )}
-            在终端打开
-          </button>
-          {openNote && <div className="text-2xs text-ink-muted mt-1.5">{openNote}</div>}
-        </div>
-      )}
-
-      {isSession && <InitiateConversation session={session} onOpenEdge={onOpenEdge} />}
-
-      <div>
-        <h3 className="text-xs text-ink-muted font-medium mb-2 flex items-center gap-1">
-          <FileText size={12} /> 已发布上下文
-        </h3>
-        {!contextEntries || contextEntries.entries.length === 0 ? (
-          <p className="text-xs text-ink-faint">无</p>
-        ) : (
-          <div className="space-y-2">
-            {contextEntries.entries.map((e) => (
-              <div key={e.id} className="p-3 rounded-xl bg-paper border border-line">
-                <div className="text-xs text-ink font-medium">{e.title}</div>
-                <div className="text-2xs text-ink-muted mt-1 line-clamp-3">{e.content}</div>
-                {e.tags && e.tags.length > 0 && (
-                  <div className="flex gap-1 mt-1.5 flex-wrap">
-                    {e.tags.map((t) => (
-                      <span
-                        key={t}
-                        className="text-2xs px-1.5 py-0.5 rounded-md bg-accent-soft text-accent border border-accent/20"
-                      >
-                        {t}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
+            <option value="">选择接收交接的目标会话…</option>
+            {peerCandidates.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name} ({s.runtime ?? "session"})
+              </option>
             ))}
+          </select>
+          <textarea
+            value={handoffPrompt}
+            onChange={(e) => setHandoffPrompt(e.target.value)}
+            rows={3}
+            placeholder="可选：给接手者的下一步具体要求…"
+            className="w-full px-2.5 py-1.5 text-xs rounded-lg bg-surface border border-line text-ink placeholder:text-ink-faint"
+          />
+          <button
+            type="button"
+            disabled={!handoffTarget || handoffMutation.isPending}
+            onClick={handleHandoff}
+            className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent text-on-accent text-xs font-medium hover:bg-accent-deep disabled:opacity-50"
+          >
+            {handoffMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <Share2 size={12} />}
+            生成交接并投递
+          </button>
+          {handoffNotice && <div className="text-2xs text-ink-muted">{handoffNotice}</div>}
+        </div>
+      ) : (
+        <>
+          <div className="flex gap-5 text-xs">
+            <div>
+              <span className="text-ink-faint">上下文</span>
+              <div className="text-ink font-medium mt-0.5">{session.context_count}</div>
+            </div>
+            <div>
+              <span className="text-ink-faint">待处理</span>
+              <div className="text-warning font-medium mt-0.5">{session.pending_inbox}</div>
+            </div>
+            <div>
+              <span className="text-ink-faint">类型</span>
+              <div className="text-ink font-medium mt-0.5">
+                {managedInstance ? "受管实例" : session.type === "agent" ? "Agent" : "会话"}
+              </div>
+            </div>
           </div>
-        )}
-      </div>
+
+          {isSession && !managedInstance && (
+            <div>
+              <button
+                onClick={handleOpenTerminal}
+                disabled={openTerminal.isPending}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-ink text-surface text-xs hover:opacity-90 disabled:opacity-50"
+                title="在新终端窗口 resume 这个对话"
+              >
+                {openTerminal.isPending ? (
+                  <Loader2 size={12} className="animate-spin" />
+                ) : (
+                  <TerminalSquare size={13} />
+                )}
+                在终端打开
+              </button>
+              {openNote && <div className="text-2xs text-ink-muted mt-1.5">{openNote}</div>}
+            </div>
+          )}
+
+          {isSession && <InitiateConversation session={session} onOpenEdge={onOpenEdge} />}
+
+          <div>
+            <h3 className="text-xs text-ink-muted font-medium mb-2 flex items-center gap-1">
+              <FileText size={12} /> 已发布上下文
+            </h3>
+            {!contextEntries || contextEntries.entries.length === 0 ? (
+              <p className="text-xs text-ink-faint">无</p>
+            ) : (
+              <div className="space-y-2">
+                {contextEntries.entries.map((e) => (
+                  <div key={e.id} className="p-3 rounded-xl bg-paper border border-line">
+                    <div className="flex items-center gap-1.5">
+                      {e.pinned && (
+                        <span className="text-2xs px-1.5 py-0.5 rounded bg-warning-soft text-warning">
+                          置顶
+                        </span>
+                      )}
+                      {e.kind && e.kind !== "note" && (
+                        <span className="text-2xs px-1.5 py-0.5 rounded bg-accent-soft text-accent">
+                          {e.kind}
+                        </span>
+                      )}
+                      <div className="text-xs text-ink font-medium truncate">{e.title}</div>
+                    </div>
+                    <div className="text-2xs text-ink-muted mt-1 line-clamp-3">{e.content}</div>
+                    {e.tags && e.tags.length > 0 && (
+                      <div className="flex gap-1 mt-1.5 flex-wrap">
+                        {e.tags.map((t) => (
+                          <span
+                            key={t}
+                            className="text-2xs px-1.5 py-0.5 rounded-md bg-accent-soft text-accent border border-accent/20"
+                          >
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

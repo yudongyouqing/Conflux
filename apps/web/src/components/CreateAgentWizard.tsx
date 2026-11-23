@@ -464,7 +464,11 @@ function RuntimeCreateForm({
                 available={binaryAvailability.get(r.id)}
                 onClick={() => {
                   set("runtime", r.id);
-                  if (r.id !== "codex" && r.id !== "claude") set("execution_mode", "");
+                  if (r.id === "antigravity" || r.id === "acp") {
+                    set("execution_mode", "managed");
+                  } else if (r.id !== "codex" && r.id !== "claude") {
+                    set("execution_mode", "");
+                  }
                 }}
                 label={r.label}
                 icon={runtimeGlyph(r.id)}
@@ -473,7 +477,10 @@ function RuntimeCreateForm({
           </div>
         </Field>
 
-        {(form.runtime === "codex" || form.runtime === "claude") && (
+        {(form.runtime === "codex" ||
+          form.runtime === "claude" ||
+          form.runtime === "antigravity" ||
+          form.runtime === "acp") && (
           <div className="flex items-start gap-2 rounded-lg border border-line bg-surface p-2.5">
             <input
               id="wizard-managed-mode"
@@ -483,9 +490,9 @@ function RuntimeCreateForm({
               className="mt-0.5 accent-accent"
             />
             <label htmlFor="wizard-managed-mode" className="text-2xs text-ink-muted leading-relaxed">
-              <span className="text-ink font-medium">Conflux 受管执行</span>
+              <span className="text-ink font-medium">Conflux 原生受管接管</span>
               <br />
-              由服务端持有 CLI 子进程：任务排队执行、审批由你在面板中决定，不再打开终端窗口。
+              由服务端直接持有 CLI / ACP 子进程：支持实时流、运行中 Steer 插话、审批/问答卡与自动挂载 Conflux MCP。
             </label>
           </div>
         )}

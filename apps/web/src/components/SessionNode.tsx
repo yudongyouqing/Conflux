@@ -42,6 +42,8 @@ interface NodeSkin {
 const RUNTIME_SKIN: Record<string, NodeSkin> = {
   claude: { icon: ClaudeIcon, block: "bg-orange-600", accent: "bg-orange-500" },
   codex: { icon: OpenAIIcon, block: "bg-slate-700", accent: "bg-slate-500" },
+  antigravity: { icon: Bot, block: "bg-sky-600", accent: "bg-sky-500" },
+  acp: { icon: Terminal, block: "bg-emerald-600", accent: "bg-emerald-500" },
   cursor: { icon: Terminal, block: "bg-violet-600", accent: "bg-violet-500" },
   codebuddy: { icon: Terminal, block: "bg-pink-600", accent: "bg-pink-500" },
   codewiz: { icon: Terminal, block: "bg-teal-600", accent: "bg-teal-500" },

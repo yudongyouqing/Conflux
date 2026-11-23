@@ -16,6 +16,7 @@ import { WorkspaceTab } from "./components/WorkspaceTab";
 import { WorkspaceDetails } from "./components/WorkspaceDetails";
 import { DetailPanel } from "./components/DetailPanel";
 import { useGraph } from "./hooks";
+import { useLiveEvents } from "./use-live-events";
 import { useChatRooms } from "./room-hooks";
 import {
   draftsReducer,
@@ -95,6 +96,7 @@ export default function App() {
   const [graphInspectId, setGraphInspectId] = useState<string | null>(null);
 
   const graph = useGraph();
+  useLiveEvents(true);
   const roomsQuery = useChatRooms();
   const rooms = useMemo(() => roomsQuery.data?.rooms ?? [], [roomsQuery.data]);
   const sessions = useMemo(() => graph.data?.nodes ?? [], [graph.data]);

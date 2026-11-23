@@ -10,6 +10,8 @@ import type { GroupFrameData } from "./components/GroupFrame";
 const RUNTIME_DOT_COLOR: Record<string, string> = {
   claude: "bg-orange-500",
   codex: "bg-slate-600",
+  antigravity: "bg-sky-500",
+  acp: "bg-emerald-500",
   cursor: "bg-violet-500",
   codebuddy: "bg-pink-500",
   codewiz: "bg-teal-500",

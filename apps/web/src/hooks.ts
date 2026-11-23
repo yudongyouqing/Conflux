@@ -280,6 +280,26 @@ export function useInterruptManagedTurn() {
   });
 }
 
+export function useSteerManagedTurn() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      instanceId,
+      text,
+      expectedTurnId,
+    }: {
+      instanceId: string;
+      text: string;
+      expectedTurnId?: string | null;
+    }) => api.steerManagedTurn(instanceId, text, expectedTurnId),
+    onSuccess: (_d, vars) =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ["managed-status", vars.instanceId] }),
+        qc.invalidateQueries({ queryKey: ["managed-events", vars.instanceId] }),
+      ]),
+  });
+}
+
 export function useResolveManagedApproval() {
   const qc = useQueryClient();
   return useMutation({
@@ -287,15 +307,129 @@ export function useResolveManagedApproval() {
       instanceId,
       approvalId,
       decision,
+      option_id,
+      answers,
     }: {
       instanceId: string;
       approvalId: number;
       decision: "accept" | "decline" | "cancel";
-    }) => api.resolveManagedApproval(instanceId, approvalId, decision),
+      option_id?: string;
+      answers?: Record<string, string | string[]>;
+    }) =>
+      api.resolveManagedApproval(instanceId, approvalId, decision, {
+        ...(option_id ? { option_id } : {}),
+        ...(answers ? { answers } : {}),
+      }),
     onSuccess: (_d, vars) =>
       Promise.all([
         qc.invalidateQueries({ queryKey: ["managed-status", vars.instanceId] }),
         qc.invalidateQueries({ queryKey: ["managed-events", vars.instanceId] }),
+      ]),
+  });
+}
+
+// ---- Workflows, Room Memory & Handoff ----
+
+export function useWorkflows(roomId?: number, enabled = true) {
+  return useQuery({
+    queryKey: ["workflows", roomId ?? "all"],
+    queryFn: ({ signal }) => api.workflows.list(roomId, signal),
+    enabled,
+  });
+}
+
+export function useWorkflowRuns(roomId?: number, enabled = true) {
+  return useQuery({
+    queryKey: ["workflow-runs", roomId ?? "all"],
+    queryFn: ({ signal }) => api.workflows.listRuns({ roomId }, signal),
+    enabled,
+    refetchInterval: enabled ? 5000 : false,
+  });
+}
+
+export function useCreateWorkflow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.workflows.create,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["workflows"] }),
+  });
+}
+
+export function useStartWorkflowRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ workflowId, input, room_id }: { workflowId: number; input?: string; room_id?: number | null }) =>
+      api.workflows.startRun(workflowId, { input, room_id }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["workflow-runs"] }),
+  });
+}
+
+export function useApproveWorkflowGate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ stepId, approved, comment }: { stepId: number; approved: boolean; comment?: string }) =>
+      api.workflows.approveGate(stepId, approved, comment),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["workflow-runs"] }),
+  });
+}
+
+export function useCancelWorkflowRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (runId: number) => api.workflows.cancelRun(runId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["workflow-runs"] }),
+  });
+}
+
+export function useRoomContext(roomId: number | null, enabled = true) {
+  return useQuery({
+    queryKey: ["room-context", roomId],
+    queryFn: ({ signal }) => api.getRoomContext(roomId!, signal),
+    enabled: roomId !== null && enabled,
+  });
+}
+
+export function usePublishContext() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.publishContext,
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ["room-context"] }),
+        qc.invalidateQueries({ queryKey: ["context"] }),
+        qc.invalidateQueries({ queryKey: ["graph"] }),
+      ]),
+  });
+}
+
+export function useUpdateContext() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      patch,
+    }: {
+      id: number;
+      patch: { title?: string; content?: string; kind?: "note" | "decision" | "artifact" | "handoff"; pinned?: boolean };
+    }) => api.updateContext(id, patch),
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ["room-context"] }),
+        qc.invalidateQueries({ queryKey: ["context"] }),
+      ]),
+  });
+}
+
+export function useHandoffContext() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.handoff,
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ["room-context"] }),
+        qc.invalidateQueries({ queryKey: ["context"] }),
+        qc.invalidateQueries({ queryKey: ["messages"] }),
+        qc.invalidateQueries({ queryKey: ["graph"] }),
       ]),
   });
 }

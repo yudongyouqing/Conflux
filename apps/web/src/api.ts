@@ -4,8 +4,11 @@ import type {
   CliBinaryStatus,
   ConfluxDataBundle,
   ContextEntry,
+  ContextKind,
   Conversation,
   Graph,
+  HandoffResult,
+  ManagedDeliveryMode,
   ManagedEventPayload,
   ManagedStatusResponse,
   Message,
@@ -18,6 +21,9 @@ import type {
   TerminalOption,
   TerminalSettings,
   Turn,
+  WorkflowDefinition,
+  WorkflowRun,
+  WorkflowStepDefinition,
 } from "@conflux/shared";
 import { WEB_CONSOLE_ID } from "@conflux/shared";
 
@@ -196,14 +202,25 @@ export const api = {
       { expected_turn_id: expectedTurnId ?? undefined },
     ),
 
+  steerManagedTurn: (instanceId: string, text: string, expectedTurnId?: string | null) =>
+    post<{ accepted: boolean; reason?: string }>(
+      `/runtime-instances/${encodeURIComponent(instanceId)}/managed/steer`,
+      { text, expected_turn_id: expectedTurnId ?? undefined },
+    ),
+
   resolveManagedApproval: (
     instanceId: string,
     approvalId: number,
     decision: "accept" | "decline" | "cancel",
+    extra?: { option_id?: string; answers?: Record<string, string | string[]> },
   ) =>
     post<{ ok: boolean }>(
       `/runtime-instances/${encodeURIComponent(instanceId)}/managed/approvals/${approvalId}`,
-      { decision },
+      {
+        decision,
+        ...(extra?.option_id ? { option_id: extra.option_id } : {}),
+        ...(extra?.answers ? { answers: extra.answers } : {}),
+      },
       { "X-Session-Id": WEB_CONSOLE_ID },
     ),
 
@@ -241,12 +258,101 @@ export const api = {
   webAsk: (body: { to_session: string; question: string; from_session?: string }) =>
     post<{ message: Message }>("/web/ask", body),
 
-  getContext: (params?: { query?: string; session_id?: string; limit?: number }, signal?: AbortSignal) => {
+  getContext: (
+    params?: {
+      query?: string;
+      session_id?: string;
+      room_id?: number;
+      kind?: ContextKind;
+      pinned?: boolean;
+      limit?: number;
+    },
+    signal?: AbortSignal,
+  ) => {
     const qs = new URLSearchParams();
     if (params?.query) qs.set("query", params.query);
     if (params?.session_id) qs.set("session_id", params.session_id);
+    if (params?.room_id !== undefined) qs.set("room_id", String(params.room_id));
+    if (params?.kind) qs.set("kind", params.kind);
+    if (params?.pinned !== undefined) qs.set("pinned", String(params.pinned));
     if (params?.limit) qs.set("limit", String(params.limit));
-    return get<{ entries: ContextEntry[] }>(`/context/query?${qs.toString()}`, { "X-Session-Id": WEB_CONSOLE_ID }, signal);
+    return get<{ entries: ContextEntry[] }>(
+      `/context/query?${qs.toString()}`,
+      { "X-Session-Id": WEB_CONSOLE_ID },
+      signal,
+    );
+  },
+
+  publishContext: (body: {
+    title: string;
+    content: string;
+    tags?: string[];
+    room_id?: number | null;
+    kind?: ContextKind;
+    pinned?: boolean;
+  }) => post<{ entry: ContextEntry }>("/context", body, { "X-Session-Id": WEB_CONSOLE_ID }),
+
+  updateContext: (
+    id: number,
+    patch: { title?: string; content?: string; kind?: ContextKind; pinned?: boolean },
+  ) =>
+    fetch(`/context/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", "X-Session-Id": WEB_CONSOLE_ID },
+      body: JSON.stringify(patch),
+    }).then(async (res) => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => res.statusText)}`);
+      return res.json() as Promise<{ entry: ContextEntry }>;
+    }),
+
+  getRoomContext: (roomId: number, signal?: AbortSignal) =>
+    get<{ entries: ContextEntry[] }>(`/chat-rooms/${roomId}/context`, undefined, signal),
+
+  handoff: (body: {
+    from_session?: string;
+    from_sessions?: string[];
+    to_session: string;
+    room_id?: number | null;
+    title?: string;
+    note?: string;
+    prompt?: string;
+    delivery_mode?: ManagedDeliveryMode;
+    deliver?: boolean;
+  }) => post<HandoffResult>("/handoff", body, { "X-Session-Id": WEB_CONSOLE_ID }),
+
+  workflows: {
+    list: (roomId?: number, signal?: AbortSignal) =>
+      get<{ workflows: WorkflowDefinition[] }>(
+        roomId !== undefined ? `/workflows?room_id=${roomId}` : "/workflows",
+        undefined,
+        signal,
+      ),
+    create: (body: {
+      name: string;
+      description?: string;
+      room_id?: number | null;
+      steps: WorkflowStepDefinition[];
+    }) => post<{ workflow: WorkflowDefinition }>("/workflows", body),
+    delete: (id: number) => del<{ ok: boolean }>(`/workflows/${id}`),
+    startRun: (workflowId: number, body: { input?: string; room_id?: number | null } = {}) =>
+      post<{ run: WorkflowRun }>(
+        `/workflows/${workflowId}/runs`,
+        body,
+        { "X-Session-Id": WEB_CONSOLE_ID },
+      ),
+    listRuns: (params?: { roomId?: number; workflowId?: number }, signal?: AbortSignal) => {
+      const qs = new URLSearchParams();
+      if (params?.roomId !== undefined) qs.set("room_id", String(params.roomId));
+      if (params?.workflowId !== undefined) qs.set("workflow_id", String(params.workflowId));
+      return get<{ runs: WorkflowRun[] }>(`/workflow-runs?${qs.toString()}`, undefined, signal);
+    },
+    cancelRun: (runId: number) => post<{ run: WorkflowRun }>(`/workflow-runs/${runId}/cancel`, {}),
+    approveGate: (stepId: number, approved: boolean, comment?: string) =>
+      post<{ run: WorkflowRun }>(
+        `/workflow-steps/${stepId}/approve`,
+        { approved, comment },
+        { "X-Session-Id": WEB_CONSOLE_ID },
+      ),
   },
 
   getAgents: (signal?: AbortSignal) => get<{ agents: Agent[] }>("/agents", undefined, signal),

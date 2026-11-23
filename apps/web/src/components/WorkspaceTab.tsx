@@ -7,6 +7,7 @@ import { scopeGraphToRoom } from "../graph-scope";
 import type { TabId } from "./Sidebar";
 import { RoomChat } from "./RoomChat";
 import { PeerConversation } from "./PeerConversation";
+import { WorkflowView } from "./WorkflowView";
 
 // Same lazy chunk the main graph tab uses — a chat-first cold start never
 // pulls the React Flow renderer.
@@ -77,7 +78,7 @@ export function WorkspaceTab({
   // The graph is a per-workspace view of the SAME target: switching between
   // chat and graph must not touch the target, drafts or members. Session
   // targets have no room graph, so they always land back on chat.
-  const [view, setView] = useState<"chat" | "graph">("chat");
+  const [view, setView] = useState<"chat" | "graph" | "workflow">("chat");
   const [graphScope, setGraphScope] = useState<"room" | "global">("room");
   useEffect(() => {
     if (target?.kind !== "room") {
@@ -199,7 +200,7 @@ export function WorkspaceTab({
           {/* 聊天/图谱 are two views of the SAME room — the toggle never
               touches the target, drafts or members */}
           <div className="flex bg-tile p-0.5 border border-line/70 rounded-lg text-2xs flex-shrink-0 ml-1">
-            {(["chat", "graph"] as const).map((v) => (
+            {(["chat", "graph", "workflow"] as const).map((v) => (
               <button
                 key={v}
                 type="button"
@@ -211,7 +212,7 @@ export function WorkspaceTab({
                     : "text-ink-muted hover:text-ink"
                 }`}
               >
-                {v === "chat" ? "聊天" : "图谱"}
+                {v === "chat" ? "聊天" : v === "graph" ? "图谱" : "工作流"}
               </button>
             ))}
           </div>
@@ -258,6 +259,8 @@ export function WorkspaceTab({
                 selectedEdge={null}
               />
             </Suspense>
+          ) : view === "workflow" ? (
+            <WorkflowView room={room} members={members} active={active} />
           ) : (
             <RoomChat
               key={room.id}
