@@ -9,6 +9,7 @@ import { getTerminalSettings } from "../app-settings.js";
 import { buildRuntimeEnv } from "../runtime-agents.js";
 import { runtimeDescriptor } from "../runtime-registry.js";
 import { cleanTerminalEnv } from "../terminal.js";
+import { ensureWakeMcpConfig, pinnedMcpLaunch } from "../wake/launcher.js";
 import type {
   AdapterConnection,
   CanonicalApprovalKind,
@@ -28,6 +29,7 @@ import { ClaudeStreamConnection } from "./stream-connection.js";
  */
 
 const COMMAND_TOOLS = new Set(["Bash", "Shell", "Terminal", "KillShell", "bash", "shell"]);
+const USER_INPUT_TOOLS = new Set(["AskUserQuestion", "ask_user_question", "ask_user"]);
 const TEXT_CAP = 2000;
 
 function trimCap(value: unknown, cap = TEXT_CAP): string | undefined {
@@ -40,6 +42,14 @@ function sanitizeClaudeApproval(
   toolName: string,
   input: Record<string, unknown>,
 ): Record<string, unknown> {
+  if (kind === "userInput") {
+    return {
+      toolName,
+      ...(Array.isArray(input.questions) ? { questions: input.questions } : {}),
+      ...(trimCap(input.question) ? { question: trimCap(input.question) } : {}),
+      ...(trimCap(input.prompt) ? { prompt: trimCap(input.prompt) } : {}),
+    };
+  }
   if (kind === "commandExecution") {
     return {
       toolName,
@@ -135,6 +145,17 @@ export function defaultClaudeLaunch(
   if (agent.instructions?.trim()) {
     args.push("--append-system-prompt", agent.instructions.trim());
   }
+  if (db.name && db.name !== ":memory:") {
+    try {
+      const dataDir = dirname(db.name);
+      args.push("--mcp-config", ensureWakeMcpConfig(dataDir, undefined, pinnedMcpLaunch(dataDir)));
+    } catch (err) {
+      logger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        "managed claude: failed to write pinned MCP config",
+      );
+    }
+  }
 
   return {
     executable,
@@ -198,6 +219,16 @@ export const claudeAdapter: RuntimeAdapter = {
     return turnId;
   },
 
+  async steerTurn(conn, threadId, turnId, input) {
+    const res = (await conn.request("turn/steer", {
+      threadId,
+      turnId,
+      text: input.text,
+      clientMessageId: input.clientMessageId,
+    })) as { accepted?: boolean; reason?: string };
+    return { accepted: res?.accepted === true, reason: res?.reason };
+  },
+
   async interrupt(conn, threadId, turnId) {
     await conn.request("turn/interrupt", { threadId, turnId });
   },
@@ -223,9 +254,11 @@ export const claudeAdapter: RuntimeAdapter = {
       p.input && typeof p.input === "object" && !Array.isArray(p.input)
         ? (p.input as Record<string, unknown>)
         : {};
-    const approvalKind: CanonicalApprovalKind = COMMAND_TOOLS.has(toolName)
-      ? "commandExecution"
-      : "fileChange";
+    const approvalKind: CanonicalApprovalKind = USER_INPUT_TOOLS.has(toolName)
+      ? "userInput"
+      : COMMAND_TOOLS.has(toolName)
+        ? "commandExecution"
+        : "fileChange";
     return {
       kind: "approval",
       approvalKind,

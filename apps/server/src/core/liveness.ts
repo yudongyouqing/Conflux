@@ -79,6 +79,8 @@ export async function probeRuntimePids(
     return {
       claude: runtimePidsFrom(entries, "claude"),
       codex: runtimePidsFrom(entries, "codex"),
+      antigravity: runtimePidsFrom(entries, "antigravity"),
+      acp: runtimePidsFrom(entries, "acp"),
     };
   } catch (err) {
     logger.warn({ err: err instanceof Error ? err.message : String(err) }, "liveness probe failed");

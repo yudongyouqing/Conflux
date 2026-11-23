@@ -153,7 +153,45 @@ export function registerManagedCodexRoutes(app: FastifyInstance, ctx: ServerCont
     },
   );
 
-  app.post<{ Params: { id: string; approvalId: string }; Body: { decision?: unknown } }>(
+  app.post<{
+    Params: { id: string };
+    Body: { text?: string; expected_turn_id?: string | null };
+  }>(
+    "/runtime-instances/:id/managed/steer",
+    {},
+    async (req, reply) => {
+      try {
+        const manager = requireManager(req.params.id);
+        const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+        if (!text) {
+          return ctx.sendHttpError(reply, 400, "text is required");
+        }
+        const result = await manager.steer(req.params.id, {
+          text,
+          expectedTurnId: req.body?.expected_turn_id ?? null,
+        });
+        try {
+          logAudit(db, {
+            interface: "http",
+            caller_session: WEB_CONSOLE_ID,
+            action: "managed_steer",
+            args: { id: req.params.id, expected_turn_id: req.body?.expected_turn_id ?? null },
+            result,
+          });
+        } catch (auditErr) {
+          logger.warn({ err: auditErr, id: req.params.id }, "failed to audit managed steer");
+        }
+        reply.send(result);
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
+  app.post<{
+    Params: { id: string; approvalId: string };
+    Body: { decision?: unknown; option_id?: string; answers?: Record<string, string | string[]> };
+  }>(
     "/runtime-instances/:id/managed/approvals/:approvalId",
     {},
     async (req, reply) => {
@@ -169,7 +207,21 @@ export function registerManagedCodexRoutes(app: FastifyInstance, ctx: ServerCont
         if (sid !== WEB_CONSOLE_ID) {
           return ctx.sendHttpError(reply, 403, "approvals are answered by the user console only");
         }
-        const result = await manager.resolveApproval(req.params.id, approvalId, req.body?.decision);
+        const extra =
+          req.body?.option_id || req.body?.answers
+            ? {
+                ...(typeof req.body.option_id === "string" ? { optionId: req.body.option_id } : {}),
+                ...(req.body.answers && typeof req.body.answers === "object"
+                  ? { answers: req.body.answers }
+                  : {}),
+              }
+            : undefined;
+        const result = await manager.resolveApproval(
+          req.params.id,
+          approvalId,
+          req.body?.decision,
+          extra,
+        );
         if (!result.ok) {
           return ctx.sendHttpError(reply, result.status, result.reason);
         }
@@ -178,7 +230,12 @@ export function registerManagedCodexRoutes(app: FastifyInstance, ctx: ServerCont
             interface: "http",
             caller_session: sid,
             action: "managed_codex_approval",
-            args: { id: req.params.id, approvalId, decision: req.body?.decision },
+            args: {
+              id: req.params.id,
+              approvalId,
+              decision: req.body?.decision,
+              ...(extra?.optionId ? { option_id: extra.optionId } : {}),
+            },
           });
         } catch (auditErr) {
           logger.warn({ err: auditErr, id: req.params.id, approvalId }, "failed to audit managed approval");

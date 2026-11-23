@@ -14,26 +14,28 @@ import type { RuntimeId } from "@conflux/shared";
  *    discovery (codex wake pid pinning).
  */
 
-export const RUNTIME_TOKENS: Record<"claude" | "codex", string[]> = {
+export const RUNTIME_TOKENS: Record<RuntimeId, string[]> = {
   claude: ["claude", "claude.exe", "claude.cmd", "@anthropic-ai/claude-code", "claude-code"],
   codex: ["codex", "codex.exe", "codex.cmd", "@openai/codex", "codex-cli"],
+  antigravity: ["agy", "agy.exe", "agy.cmd", "antigravity"],
+  acp: ["agy", "agy.exe", "copilot", "cursor-agent", "kiro"],
 };
 
-const COMPILED_TOKENS: Record<"claude" | "codex", Array<{ candidate: string; regex: RegExp | null }>> = {
-  claude: RUNTIME_TOKENS.claude.map((candidate) => ({
+function compileTokens(list: string[]): Array<{ candidate: string; regex: RegExp | null }> {
+  return list.map((candidate) => ({
     candidate,
     regex:
       candidate.includes("/") || candidate.includes("-")
         ? new RegExp("(?:^|/)" + candidate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?:/|$)")
         : null,
-  })),
-  codex: RUNTIME_TOKENS.codex.map((candidate) => ({
-    candidate,
-    regex:
-      candidate.includes("/") || candidate.includes("-")
-        ? new RegExp("(?:^|/)" + candidate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?:/|$)")
-        : null,
-  })),
+  }));
+}
+
+const COMPILED_TOKENS: Record<RuntimeId, Array<{ candidate: string; regex: RegExp | null }>> = {
+  claude: compileTokens(RUNTIME_TOKENS.claude),
+  codex: compileTokens(RUNTIME_TOKENS.codex),
+  antigravity: compileTokens(RUNTIME_TOKENS.antigravity),
+  acp: compileTokens(RUNTIME_TOKENS.acp),
 };
 
 /** Does this command line belong to the selected runtime process? */

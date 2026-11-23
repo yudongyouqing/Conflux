@@ -13,7 +13,7 @@
  * with session stores readable by codex-titles-style IO in the future.
  */
 
-export type RuntimeFamily = "claude" | "codex" | "other";
+export type RuntimeFamily = "claude" | "codex" | "acp" | "other";
 
 export interface RuntimeDescriptor {
   /** preset id persisted in runtime_agents.runtime */
@@ -37,6 +37,8 @@ export interface RuntimeDescriptor {
   sessionHome: string;
   /** process-identity tokens for liveness (claude/codex only today) */
   wakeCapable: boolean;
+  /** whether this runtime has a native managed executor adapter */
+  managedCapable?: boolean;
 }
 
 const home = () => process.env.USERPROFILE || process.env.HOME || ".";
@@ -63,6 +65,7 @@ export const RUNTIME_REGISTRY: Record<string, RuntimeDescriptor> = {
     envBinding: "anthropic",
     sessionHome: `${home()}/.claude`,
     wakeCapable: true,
+    managedCapable: true,
   },
   codex: {
     id: "codex",
@@ -76,6 +79,33 @@ export const RUNTIME_REGISTRY: Record<string, RuntimeDescriptor> = {
     envBinding: "openai",
     sessionHome: `${home()}/.codex`,
     wakeCapable: true,
+    managedCapable: true,
+  },
+  antigravity: {
+    id: "antigravity",
+    label: "Antigravity (agy)",
+    family: "acp",
+    executable: "agy",
+    executableEnv: "ANTIGRAVITY_PATH",
+    resumeArgs: () => [],
+    headlessArgs: null,
+    envBinding: null,
+    sessionHome: `${home()}/.gemini`,
+    wakeCapable: false,
+    managedCapable: true,
+  },
+  acp: {
+    id: "acp",
+    label: "ACP Agent",
+    family: "acp",
+    executable: "agy",
+    executableEnv: "ACP_AGENT_PATH",
+    resumeArgs: () => [],
+    headlessArgs: null,
+    envBinding: null,
+    sessionHome: `${home()}/.acp`,
+    wakeCapable: false,
+    managedCapable: true,
   },
   // ---- any-local-agent tier (launchable presets; no wake/liveness yet) ----
   cursor: {

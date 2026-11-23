@@ -12,7 +12,12 @@ import { nowIso } from "../db.js";
  */
 
 export type ApprovalDecision = "accept" | "decline" | "cancel";
-export type ApprovalKind = "commandExecution" | "fileChange";
+export type ApprovalKind = "commandExecution" | "fileChange" | "userInput" | "toolCall";
+
+export interface ApprovalResponseExtra {
+  optionId?: string;
+  answers?: Record<string, string | string[]>;
+}
 
 export interface ApprovalRow {
   id: number;
@@ -47,6 +52,9 @@ export function sanitizeApprovalPayload(
       reason: typeof params.reason === "string" ? params.reason : null,
       itemId: typeof params.itemId === "string" ? params.itemId : null,
     };
+  }
+  if (kind === "userInput" || kind === "toolCall") {
+    return { ...params };
   }
   return {
     reason: typeof params.reason === "string" ? params.reason : null,
@@ -102,7 +110,7 @@ export type ApprovalResolveOutcome =
  */
 export function resolveApproval(
   db: DB,
-  input: { approvalId: number; decision: ApprovalDecision },
+  input: { approvalId: number; decision: ApprovalDecision; extra?: ApprovalResponseExtra },
 ): ApprovalResolveOutcome {
   const row = getApproval(db, input.approvalId);
   if (!row) return { ok: false, status: 404, reason: "approval not found" };
@@ -114,7 +122,12 @@ export function resolveApproval(
   try {
     const parsed = JSON.parse(row.payload) as Record<string, unknown>;
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      updatedPayload = JSON.stringify({ ...parsed, decision: input.decision });
+      updatedPayload = JSON.stringify({
+        ...parsed,
+        decision: input.decision,
+        ...(input.extra?.optionId ? { optionId: input.extra.optionId } : {}),
+        ...(input.extra?.answers ? { answers: input.extra.answers } : {}),
+      });
     }
   } catch {
     // keep existing payload if malformed

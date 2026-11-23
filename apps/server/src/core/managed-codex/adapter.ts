@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import { logger } from "../../log.js";
 import type { RuntimeAgent } from "@conflux/shared";
 import { cleanTerminalEnv } from "../terminal.js";
-import { buildRuntimeEnv } from "../runtime-agents.js";
+import { buildCodexManagedMcpArgs, buildRuntimeEnv } from "../runtime-agents.js";
 import { runtimeDescriptor } from "../runtime-registry.js";
 import { getTerminalSettings } from "../app-settings.js";
 import type {
@@ -43,10 +43,14 @@ export function defaultCodexLaunch(db: DB, agent: RuntimeAgent): ManagedLaunchCo
   const defaultExe = def.settingsKey ? settings[def.settingsKey] : def.executable;
   const executable = process.env[def.executableEnv] || defaultExe;
   const env = buildRuntimeEnv(agent, cleanTerminalEnv());
-  if (db.name && db.name !== ":memory:") env.CONFLUX_HOME = dirname(db.name);
+  const args = ["app-server"];
+  if (db.name && db.name !== ":memory:") {
+    env.CONFLUX_HOME = dirname(db.name);
+    args.push(...buildCodexManagedMcpArgs(env, db));
+  }
   return {
     executable,
-    args: ["app-server"],
+    args,
     env,
     cwd: agent.workdir || process.cwd(),
   };
@@ -129,6 +133,20 @@ export const codexAdapter: RuntimeAdapter = {
     return turnId;
   },
 
+  async steerTurn(conn, threadId, turnId, input) {
+    try {
+      await conn.request("turn/steer", {
+        threadId,
+        expectedTurnId: turnId,
+        input: [{ type: "text", text: input.text, text_elements: [] }],
+        ...(input.clientMessageId ? { clientUserMessageId: input.clientMessageId } : {}),
+      });
+      return { accepted: true };
+    } catch (err) {
+      return { accepted: false, reason: err instanceof Error ? err.message : String(err) };
+    }
+  },
+
   async interrupt(conn, threadId, turnId) {
     await conn.request("turn/interrupt", { threadId, turnId });
   },
@@ -143,7 +161,9 @@ export const codexAdapter: RuntimeAdapter = {
         ? "commandExecution"
         : method === "item/fileChange/requestApproval"
           ? "fileChange"
-          : null;
+          : method === "item/userInput/request" || method === "requestUserInput"
+            ? "userInput"
+            : null;
     if (!kind) {
       logger.warn({ method }, "unhandled app-server request declined");
       return { kind: "refuse", reason: `conflux does not handle ${method}` };

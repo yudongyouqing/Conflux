@@ -169,6 +169,14 @@ export class ManagedRpcConnection {
     });
   }
 
+  /** Send a JSON-RPC 2.0 notification (no id, no response expected). */
+  notify(method: string, params?: unknown): void {
+    if (this.closed) return;
+    this.transport.write(
+      JSON.stringify(params === undefined ? { jsonrpc: "2.0", method } : { jsonrpc: "2.0", method, params }) + "\n",
+    );
+  }
+
   /** Answer a server-initiated request with a result object. */
   respond(id: number | string, result: unknown): void {
     if (this.closed) return;

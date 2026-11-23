@@ -137,6 +137,21 @@ export class ClaudeStreamConnection implements ManagedConnection {
       return { turnId };
     }
 
+    if (method === "turn/steer") {
+      if (!this.activeTurnId) {
+        return { accepted: false, reason: "no active turn" };
+      }
+      const text = typeof p.text === "string" ? p.text : "";
+      this.sendFrame({
+        type: "user",
+        message: { role: "user", content: text },
+        priority: "next",
+        ...(this.observedSessionId ? { session_id: this.observedSessionId } : {}),
+        parent_tool_use_id: null,
+      });
+      return { accepted: true };
+    }
+
     if (method === "turn/interrupt") {
       this.interruptRequested = true;
       await this.sendControlRequest({ subtype: "interrupt" });
@@ -148,14 +163,23 @@ export class ClaudeStreamConnection implements ManagedConnection {
 
   respond(id: number | string, result: unknown): void {
     const requestId = String(id);
-    const payload = (result ?? {}) as { decision?: string; message?: string };
+    const payload = (result ?? {}) as {
+      decision?: string;
+      message?: string;
+      answers?: Record<string, string | string[]>;
+    };
     const decision = payload.decision;
     const originalInput = this.pendingToolInputs.get(requestId) ?? {};
     this.pendingToolInputs.delete(requestId);
 
+    const updatedInput =
+      payload.answers && Object.keys(payload.answers).length > 0
+        ? { ...originalInput, answers: payload.answers }
+        : originalInput;
+
     const responseBody =
       decision === "accept"
-        ? { behavior: "allow", updatedInput: originalInput }
+        ? { behavior: "allow", updatedInput }
         : {
             behavior: "deny",
             message:

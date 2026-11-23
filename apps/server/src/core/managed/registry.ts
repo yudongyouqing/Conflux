@@ -1,22 +1,26 @@
-import type { RuntimeId } from "@conflux/shared";
 import type { DB } from "../db.js";
+import { RUNTIME_REGISTRY } from "../runtime-registry.js";
 import type { ManagedExecutor } from "./executor.js";
 
 /**
- * Process-wide registry of managed executors keyed by runtime ("codex", "claude").
- * Keeps runtime-agnostic callers (HTTP routes, ask routing, instance stop/resume)
- * decoupled from concrete adapter modules while preserving single-runtime helpers.
+ * Process-wide registry of managed executors keyed by runtime id ("codex",
+ * "claude", "antigravity", "acp", ...). Keeps runtime-agnostic callers
+ * (HTTP routes, ask routing, room orchestration, instance stop/resume)
+ * decoupled from concrete adapter modules.
  */
 
-const executors = new Map<RuntimeId, ManagedExecutor>();
+const executors = new Map<string, ManagedExecutor>();
 
-export function registerManagedExecutor(runtime: RuntimeId, executor: ManagedExecutor | null): void {
+export function isManagedRuntime(runtime: string): boolean {
+  return Boolean(RUNTIME_REGISTRY[runtime]?.managedCapable) || executors.has(runtime);
+}
+
+export function registerManagedExecutor(runtime: string, executor: ManagedExecutor | null): void {
   if (executor) executors.set(runtime, executor);
   else executors.delete(runtime);
 }
 
 export function getManagedExecutor(runtime: string): ManagedExecutor | null {
-  if (runtime !== "codex" && runtime !== "claude") return null;
   return executors.get(runtime) ?? null;
 }
 
@@ -28,7 +32,7 @@ export function getManagedExecutorForInstance(db: DB, instanceId: string): Manag
   const row = db
     .prepare(`SELECT runtime FROM runtime_instances WHERE id = ?`)
     .get(instanceId) as { runtime?: string } | undefined;
-  if (row?.runtime === "codex" || row?.runtime === "claude") {
+  if (row?.runtime) {
     const byRuntime = executors.get(row.runtime);
     if (byRuntime) return byRuntime;
   }

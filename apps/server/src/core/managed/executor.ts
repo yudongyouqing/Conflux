@@ -36,9 +36,50 @@ import {
   recordApproval,
   resolveApproval,
   isApprovalDecision,
+  type ApprovalResponseExtra,
 } from "../managed-codex/approvals.js";
 import type { ManagedTaskInput } from "../managed-codex/types.js";
 import type { RuntimeAdapter } from "./adapter.js";
+
+export interface ManagedLiveEventHookPayload {
+  instanceId: string;
+  sessionId: string | null;
+  sequence: number;
+  run_id: number | null;
+  type: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ManagedTurnFinalizedPayload {
+  db: DB;
+  instanceId: string;
+  sessionId: string;
+  runId: number;
+  messageId: number;
+  state: "completed" | "failed" | "interrupted";
+  finalText: string | null;
+  errorCode: string | null;
+}
+
+const liveEventHooks = new Set<(event: ManagedLiveEventHookPayload) => void>();
+const turnFinalizedHooks = new Set<(info: ManagedTurnFinalizedPayload) => void>();
+
+export function onManagedLiveEvent(fn: (event: ManagedLiveEventHookPayload) => void): () => void {
+  liveEventHooks.add(fn);
+  return () => {
+    liveEventHooks.delete(fn);
+  };
+}
+
+export function onManagedTurnFinalized(
+  fn: (info: ManagedTurnFinalizedPayload) => void,
+): () => void {
+  turnFinalizedHooks.add(fn);
+  return () => {
+    turnFinalizedHooks.delete(fn);
+  };
+}
 
 /**
  * The runtime-agnostic managed executor: one child process + one root thread
@@ -149,20 +190,37 @@ export class ManagedExecutor {
   /** Persist one event and fan it out to live subscribers. */
   private recordEvent(input: Parameters<typeof appendManagedEvent>[1]): void {
     const sequence = appendManagedEvent(this.db, input);
-    const set = this.subscribers.get(input.instanceId);
-    if (!set) return;
+    const created_at = new Date().toISOString();
     const frame = {
       sequence,
       run_id: input.runId ?? null,
       type: input.type,
       payload: input.payload,
-      created_at: new Date().toISOString(),
+      created_at,
     };
-    for (const notify of set) {
-      try {
-        notify(frame);
-      } catch {
-        // a broken stream must not break the executor
+    const set = this.subscribers.get(input.instanceId);
+    if (set) {
+      for (const notify of set) {
+        try {
+          notify(frame);
+        } catch {
+          // a broken stream must not break the executor
+        }
+      }
+    }
+    if (liveEventHooks.size > 0) {
+      const live = this.instances.get(input.instanceId);
+      const hookPayload: ManagedLiveEventHookPayload = {
+        instanceId: input.instanceId,
+        sessionId: live?.sessionId ?? null,
+        ...frame,
+      };
+      for (const hook of liveEventHooks) {
+        try {
+          hook(hookPayload);
+        } catch {
+          // global hooks must not disrupt execution
+        }
       }
     }
   }
@@ -247,7 +305,11 @@ export class ManagedExecutor {
 
     try {
       await this.opts.adapter.initialize(proc.conn);
-      const threadId = await this.opts.adapter.startThread(proc.conn, agent, launch.cwd);
+      const threadId = await this.opts.adapter.startThread(proc.conn, agent, launch.cwd, {
+        db: this.db,
+        instanceId,
+        sessionId,
+      });
       live.threadId = threadId;
 
       registerSession(this.db, {
@@ -320,6 +382,43 @@ export class ManagedExecutor {
     }
     await this.opts.adapter.interrupt(live.proc.conn, live.threadId, live.activeTurn.turnId);
     return { accepted: true };
+  }
+
+  /** Inject a follow-up steering prompt into an ACTIVE turn without interrupting it. */
+  async steer(
+    instanceId: string,
+    input: { text: string; expectedTurnId?: string | null; clientMessageId?: string | number },
+  ): Promise<{ accepted: boolean; reason?: string }> {
+    const live = this.instances.get(instanceId);
+    if (!live) throw Object.assign(new Error("managed instance not running"), { statusCode: 404 });
+    if (!live.activeTurn) {
+      return { accepted: false, reason: "no active turn" };
+    }
+    if (input.expectedTurnId && input.expectedTurnId !== live.activeTurn.turnId) {
+      return { accepted: false, reason: "active turn changed" };
+    }
+    if (!this.opts.adapter.steerTurn) {
+      return { accepted: false, reason: `${this.opts.adapter.label} does not support active-turn steering` };
+    }
+    const result = await this.opts.adapter.steerTurn(
+      live.proc.conn,
+      live.threadId,
+      live.activeTurn.turnId,
+      { text: input.text, clientMessageId: input.clientMessageId },
+    );
+    if (result.accepted) {
+      this.recordEvent({
+        instanceId,
+        runId: live.activeTurn.runId,
+        type: "status",
+        payload: {
+          phase: "steered",
+          turnId: live.activeTurn.turnId,
+          text: input.text.slice(0, 500),
+        },
+      });
+    }
+    return result;
   }
 
   /**
@@ -575,6 +674,7 @@ export class ManagedExecutor {
         proc.conn,
         agent,
         binding.thread_id,
+        { db: this.db, instanceId: newInstanceId, sessionId },
       );
       const threadId = resumed.threadId;
       live.threadId = threadId;
@@ -916,6 +1016,7 @@ export class ManagedExecutor {
     instanceId: string,
     approvalId: number,
     decision: unknown,
+    extra?: ApprovalResponseExtra,
   ): Promise<{ ok: true } | { ok: false; status: number; reason: string }> {
     if (!isApprovalDecision(decision)) {
       return { ok: false, status: 400, reason: "decision must be accept | decline | cancel" };
@@ -936,12 +1037,19 @@ export class ManagedExecutor {
     if (originalId === undefined) {
       return { ok: false, status: 409, reason: "approval is not answerable on this connection" };
     }
+    const wireResponse = this.opts.adapter.formatApprovalResponse
+      ? this.opts.adapter.formatApprovalResponse(decision, extra)
+      : {
+          decision,
+          ...(extra?.optionId ? { optionId: extra.optionId } : {}),
+          ...(extra?.answers ? { answers: extra.answers } : {}),
+        };
     try {
-      this.opts.adapter.respond(live.proc.conn, originalId, { decision });
+      this.opts.adapter.respond(live.proc.conn, originalId, wireResponse);
     } catch {
       return { ok: false, status: 409, reason: "managed instance is not live" };
     }
-    const outcome = resolveApproval(this.db, { approvalId, decision });
+    const outcome = resolveApproval(this.db, { approvalId, decision, extra });
     if (!outcome.ok) return outcome;
     const row = outcome.row;
     live.liveApprovals.delete(approvalId);
@@ -979,11 +1087,15 @@ export class ManagedExecutor {
    */
   instanceStatus(instanceId: string): {
     live: boolean;
+    runtime: string;
+    supportsSteer: boolean;
     threadId: string;
     activeRun: { runId: number; turnId: string; state: ManagedRunState } | null;
     queuedRunIds: number[];
     pendingApprovals: Array<{ id: number; kind: string; payload: Record<string, unknown> }>;
   } | null {
+    const runtime = this.opts.adapter.runtime;
+    const supportsSteer = typeof this.opts.adapter.steerTurn === "function";
     const live = this.instances.get(instanceId);
     if (!live) {
       const binding = getManagedBinding(this.db, instanceId);
@@ -999,6 +1111,8 @@ export class ManagedExecutor {
         .all(instanceId) as { id: number }[];
       return {
         live: false,
+        runtime,
+        supportsSteer,
         threadId: binding?.thread_id ?? "",
         activeRun: null,
         queuedRunIds: queued.map((q) => q.id),
@@ -1016,6 +1130,8 @@ export class ManagedExecutor {
     ).filter((row) => live.liveApprovals.has(row.id));
     return {
       live: true,
+      runtime,
+      supportsSteer,
       threadId: live.threadId,
       // The badge must tell the truth the panel styles exist for: an active
       // turn paused on a human decision reads waiting_approval from the run
@@ -1162,6 +1278,28 @@ export class ManagedExecutor {
       .run(nowIso(), live.instanceId);
     const message = getMessage(this.db, moved.message_id);
     if (message) maybePushReply(this.db, message.from_session);
+    if (turnFinalizedHooks.size > 0) {
+      const hookInfo: ManagedTurnFinalizedPayload = {
+        db: this.db,
+        instanceId: live.instanceId,
+        sessionId: live.sessionId,
+        runId: active.runId,
+        messageId: moved.message_id,
+        state,
+        finalText,
+        errorCode,
+      };
+      for (const hook of turnFinalizedHooks) {
+        try {
+          hook(hookInfo);
+        } catch (hookErr) {
+          logger.warn(
+            { err: hookErr instanceof Error ? hookErr.message : String(hookErr), runId: active.runId },
+            "managed turn finalized hook failed",
+          );
+        }
+      }
+    }
     live.activeTurn = null;
     live.liveApprovals.clear();
     live.agentTexts = [];

@@ -128,14 +128,21 @@ function targetBehindCmdShim(shimPath: string): string | null {
     return null;
   }
   const dir = dirname(shimPath);
+  const candidates: string[] = [];
   for (const match of content.matchAll(/(?:%~dp0|%dp0%)\\([^"'\r\n]+?\.(?:js|mjs|cjs|exe))/gi)) {
     const candidate = resolve(dir, match[1].replace(/\\/g, "/"));
-    if (existsSync(candidate)) return candidate;
+    if (existsSync(candidate)) candidates.push(candidate);
   }
   for (const match of content.matchAll(/"([A-Za-z]:[^"'\r\n]+?\.(?:js|mjs|cjs|exe))"/gi)) {
-    if (existsSync(match[1])) return resolve(match[1]);
+    if (existsSync(match[1])) candidates.push(resolve(match[1]));
   }
-  return null;
+  // npm shims on Windows (e.g. nvm-windows) check `IF EXIST "%dp0%\node.exe"`
+  // before invoking the actual CLI script. Prefer JS entrypoints and ignore
+  // the Node runtime binary itself so we never spawn `node.exe <cli-args>`.
+  const scriptTarget = candidates.find((c) => /\.(?:js|mjs|cjs)$/i.test(c));
+  if (scriptTarget) return scriptTarget;
+  const nonNodeExe = candidates.find((c) => !/[\\/]node\.exe$/i.test(c));
+  return nonNodeExe ?? null;
 }
 
 export interface SpawnAppServerOptions {

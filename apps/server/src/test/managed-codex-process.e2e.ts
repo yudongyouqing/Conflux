@@ -111,6 +111,35 @@ test("resolveLaunchPlan extracts the node script behind an npm cmd shim", () => 
   }
 });
 
+test("resolveLaunchPlan ignores sibling node.exe in nvm-windows style npm cmd shims", () => {
+  const dir = tempDir("managed-codex-shim-nvm-");
+  try {
+    const pkgDir = join(dir, "node_modules", "@openai", "codex", "bin");
+    mkdirSync(pkgDir, { recursive: true });
+    writeFileSync(join(dir, "node.exe"), "fake-node-exe");
+    const script = join(pkgDir, "codex.js");
+    writeFileSync(script, "// fake entry\n");
+    writeFileSync(
+      join(dir, "codex.cmd"),
+      [
+        "@ECHO off",
+        'IF EXIST "%dp0%\\node.exe" (',
+        '  SET "_prog=%dp0%\\node.exe"',
+        ") ELSE (",
+        '  SET "_prog=node"',
+        ")",
+        '"%_prog%" "%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js" %*',
+      ].join("\r\n"),
+    );
+    const plan = resolveLaunchPlan(join(dir, "codex.cmd"), ["app-server"], "win32");
+    assert.equal(plan.command, process.execPath);
+    assert.equal(plan.args[0], resolve(script));
+    assert.deepEqual(plan.args.slice(1), ["app-server"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("resolveLaunchPlan refuses a cmd shim with no resolvable script", () => {
   const dir = tempDir("managed-codex-shim-broken-");
   try {

@@ -1,17 +1,19 @@
 import type { RuntimeAgent } from "@conflux/shared";
 import type { RpcHandlers, RpcOptions, RpcTransport } from "../managed-codex/rpc.js";
+import type { ApprovalDecision, ApprovalKind, ApprovalResponseExtra } from "../managed-codex/approvals.js";
 
 /**
  * The runtime contract a managed executor speaks. Everything protocol-shaped
  * (method names, parameter fields, frame normalization, history parsing,
  * handshake gating) lives behind this interface so the executor core in
- * executor.ts stays runtime-agnostic: the Codex app-server is one adapter,
- * the Claude stream-json SDK endpoint is another.
+ * executor.ts stays runtime-agnostic: Codex app-server, Claude stream-json,
+ * and ACP (Antigravity `agy acp` and any ACP-compliant CLI) all implement it.
  */
 
 /** Structural slice of the stdio connection an adapter drives. */
 export interface AdapterConnection {
   request(method: string, params?: unknown): Promise<unknown>;
+  notify?(method: string, params?: unknown): void;
   respond(id: number | string, result: unknown): void;
   respondError?(id: number | string, code: number, message: string, data?: unknown): void;
 }
@@ -70,7 +72,9 @@ export interface NormalizedNotification {
 /** The executor's human-approval surface. Runtimes map their protocol
  *  requests onto these canonical kinds (identical union to the store's
  *  ApprovalKind so adapters feed it without casts). */
-export type CanonicalApprovalKind = "commandExecution" | "fileChange";
+export type CanonicalApprovalKind = ApprovalKind;
+
+export type { ApprovalDecision, ApprovalResponseExtra };
 
 /** What the executor should do with a server-initiated request. */
 export type ServerRequestClassification =
@@ -82,8 +86,14 @@ export type ServerRequestClassification =
     }
   | { kind: "refuse"; reason: string };
 
+export interface ManagedSessionContext {
+  db?: unknown;
+  instanceId?: string;
+  sessionId?: string;
+}
+
 export interface RuntimeAdapter {
-  /** The preset runtime this adapter drives (e.g. "codex"). */
+  /** The preset runtime this adapter drives (e.g. "codex", "claude", "antigravity", "acp"). */
   readonly runtime: RuntimeAgent["runtime"];
   /** Human label for session descriptions/logs (e.g. "Codex"). */
   readonly label: string;
@@ -102,7 +112,12 @@ export interface RuntimeAdapter {
   initialize(conn: AdapterConnection): Promise<void>;
 
   /** Create the root thread; resolves its protocol thread id. */
-  startThread(conn: AdapterConnection, agent: RuntimeAgent, cwd: string): Promise<string>;
+  startThread(
+    conn: AdapterConnection,
+    agent: RuntimeAgent,
+    cwd: string,
+    ctx?: ManagedSessionContext,
+  ): Promise<string>;
 
   /** Rejoin a saved thread; resolves the thread id and its normalized
    *  history for crash reconciliation. Throws if the server rejoined a
@@ -111,6 +126,7 @@ export interface RuntimeAdapter {
     conn: AdapterConnection,
     agent: RuntimeAgent,
     threadId: string,
+    ctx?: ManagedSessionContext,
   ): Promise<{ threadId: string; turns: NormalizedHistoryTurn[] }>;
 
   /** Start one turn; resolves its protocol turn id. */
@@ -120,8 +136,19 @@ export interface RuntimeAdapter {
     input: { text: string; clientMessageId?: string | number },
   ): Promise<string>;
 
+  /** Optional: inject a steering message into an active turn without interrupting it. */
+  steerTurn?(
+    conn: AdapterConnection,
+    threadId: string,
+    turnId: string,
+    input: { text: string; clientMessageId?: string | number },
+  ): Promise<{ accepted: boolean; reason?: string }>;
+
   /** Interrupt the given turn. */
   interrupt(conn: AdapterConnection, threadId: string, turnId: string): Promise<void>;
+
+  /** Optional: format the human approval decision into the protocol's reply shape. */
+  formatApprovalResponse?(decision: ApprovalDecision, extra?: ApprovalResponseExtra): unknown;
 
   /** Answer a server request on the live connection (decision or error). */
   respond(conn: AdapterConnection, rpcId: number | string, result: unknown): void;

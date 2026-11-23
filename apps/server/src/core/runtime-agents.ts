@@ -22,7 +22,7 @@ import {
   failRuntimeInstance,
   refreshRuntimeInstances,
 } from "./runtime-instances.js";
-import { getManagedExecutor } from "./managed/registry.js";
+import { getManagedExecutor, isManagedRuntime } from "./managed/registry.js";
 
 // ---- runtime catalog (AgentRecall-style: static definitions per CLI) ------
 
@@ -39,7 +39,7 @@ export const RUNTIMES: Record<
 );
 
 export function isRuntimeId(v: unknown): v is RuntimeId {
-  return v === "claude" || v === "codex";
+  return v === "claude" || v === "codex" || v === "antigravity" || v === "acp";
 }
 
 interface RuntimeAgentRow {
@@ -135,9 +135,9 @@ export function createRuntimeAgent(
     );
   }
   const execution_mode = input.execution_mode ?? "terminal";
-  if (execution_mode === "managed" && input.runtime !== "codex" && input.runtime !== "claude") {
+  if (execution_mode === "managed" && !isManagedRuntime(input.runtime)) {
     throw Object.assign(
-      new Error("managed execution supports codex and claude only"),
+      new Error(`runtime "${input.runtime}" does not support managed execution`),
       { statusCode: 400 },
     );
   }

@@ -67,11 +67,15 @@ interface RuntimePidState {
 const runtimePidStates: Record<RuntimeId, RuntimePidState> = {
   claude: { value: null, resolved: false, attempts: 0 },
   codex: { value: null, resolved: false, attempts: 0 },
+  antigravity: { value: null, resolved: false, attempts: 0 },
+  acp: { value: null, resolved: false, attempts: 0 },
 };
 
 const runtimePidEnv: Record<RuntimeId, string> = {
   claude: "CONFLUX_CLAUDE_PID",
   codex: "CONFLUX_CODEX_PID",
+  antigravity: "CONFLUX_ANTIGRAVITY_PID",
+  acp: "CONFLUX_ACP_PID",
 };
 
 /**
