@@ -11,6 +11,8 @@ import {
 import { maybePushReply } from "../../core/mail-push.js";
 import { replyAsk } from "../../core/messages.js";
 import { prepareAsk, prepareRetryDelivery, completeAsk } from "../../core/ask.js";
+import { onWorkflowStepMessageCompleted } from "../../core/workflows.js";
+import { publishLiveEvent } from "../../core/event-bus.js";
 import { getSession, heartbeat } from "../../core/sessions.js";
 import { logAudit } from "../../core/audit.js";
 import { httpError, WEB_CONSOLE_ID, type ServerContext } from "../context.js";
@@ -134,6 +136,18 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: ServerContext):
           return replied;
         });
         maybePushReply(db, msg.from_session);
+        if (msg.room_id) {
+          publishLiveEvent({
+            type: "room.message",
+            room_id: msg.room_id,
+            session_id: msg.to_session,
+            payload: { message_id: msg.id, status: msg.status, replied: true },
+          });
+        }
+        await onWorkflowStepMessageCompleted(db, msg.id, {
+          state: "completed",
+          text: msg.reply,
+        }).catch(() => {});
         return reply.send({ message: msg });
       } catch (err) {
         return sendError(reply, err, sid, "reply_ask");

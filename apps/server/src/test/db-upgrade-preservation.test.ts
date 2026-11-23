@@ -67,7 +67,7 @@ test("v8 database with user data upgrades with every row preserved and searchabl
 
     const upgraded = openDb({ dataDir, dbPath, scope: "global" });
     try {
-      assert.equal(upgraded.pragma("user_version", { simple: true }), 16);
+      assert.equal(upgraded.pragma("user_version", { simple: true }), 17);
 
       const count = (table: string) =>
         (upgraded.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;

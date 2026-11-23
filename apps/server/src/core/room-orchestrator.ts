@@ -1,6 +1,6 @@
 import type { DB } from "./db.js";
 import { isLockError, nowIso } from "./db.js";
-import { WEB_CONSOLE_ID } from "@conflux/shared";
+import { WEB_CONSOLE_ID, type ManagedDeliveryMode } from "@conflux/shared";
 import { getSession } from "./sessions.js";
 import { logger } from "../log.js";
 import { launchWakeRun } from "./wake/launcher.js";
@@ -11,6 +11,12 @@ import { badge, flattenOneLine } from "./inject-format.js";
 import { tmuxInject } from "./wake/tmux-inject.js";
 import { roomMembers, getChatRoom } from "./chat-rooms.js";
 import { prepareAsk, completeAsk, type AskPrepared } from "./ask.js";
+import { askSession } from "./messages.js";
+import { enqueueManagedTask, getManagedBindingBySession } from "./managed-codex/store.js";
+import { getManagedExecutorForInstance } from "./managed/registry.js";
+import { onManagedTurnFinalized } from "./managed/executor.js";
+import { publishLiveEvent } from "./event-bus.js";
+import { onWorkflowStepMessageCompleted } from "./workflows.js";
 
 /**
  * Room orchestration engine: agents coordinate through a shared room
@@ -132,18 +138,90 @@ export function completeSummon(
     initiator_session_id: string;
     executor_session_id: string;
     prompt: string;
+    delivery_mode?: ManagedDeliveryMode;
   },
   task: RoomTask,
 ): { task: RoomTask; injected: boolean; method: string } {
-  // Try live injection first, fall back to headless wake
+  // 1. Native managed executor (Claude / Codex / Antigravity / ACP) takes precedence
+  //    over terminal tmux injection or headless wake so managed & external sessions
+  //    coexist seamlessly in the same room.
+  const managedBinding = getManagedBindingBySession(db, input.executor_session_id);
+  if (managedBinding) {
+    const wrapped = wrapRoomTaskPrompt(input.room_id, task.id, task.task_token, input.prompt);
+    const executor = getManagedExecutorForInstance(db, managedBinding.instance_id);
+    const deliveryMode = input.delivery_mode ?? "queue";
+
+    if (deliveryMode === "steer" && executor) {
+      const status = executor.instanceStatus(managedBinding.instance_id);
+      if (status?.live && status.activeRun) {
+        void executor
+          .steer(managedBinding.instance_id, {
+            text: wrapped,
+            expectedTurnId: status.activeRun.turnId,
+          })
+          .catch(() => {});
+        db.prepare(`UPDATE room_tasks SET status = 'running' WHERE id = ?`).run(task.id);
+        publishLiveEvent({
+          type: "room.task",
+          room_id: input.room_id,
+          session_id: input.executor_session_id,
+          payload: { task_id: task.id, status: "running", method: "managed-steer" },
+        });
+        return { task: getTask(db, task.id) ?? task, injected: true, method: "managed-steer" };
+      }
+    }
+
+    if (deliveryMode === "interrupt" && executor) {
+      const status = executor.instanceStatus(managedBinding.instance_id);
+      if (status?.live && status.activeRun) {
+        void executor.interrupt(managedBinding.instance_id, status.activeRun.turnId).catch(() => {});
+      }
+    }
+
+    const msg = askSession(db, {
+      from_session: input.initiator_session_id,
+      to_session: input.executor_session_id,
+      question: wrapped,
+      room_id: input.room_id,
+    });
+    enqueueManagedTask(db, {
+      messageId: msg.id,
+      instanceId: managedBinding.instance_id,
+      text: wrapped,
+    });
+    db.prepare(`UPDATE room_tasks SET status = 'running', message_id = ? WHERE id = ?`).run(
+      msg.id,
+      task.id,
+    );
+    executor?.kick(managedBinding.instance_id);
+    publishLiveEvent({
+      type: "room.task",
+      room_id: input.room_id,
+      session_id: input.executor_session_id,
+      payload: { task_id: task.id, status: "running", method: "managed", message_id: msg.id },
+    });
+    logger.info(
+      { roomId: input.room_id, taskId: task.id, executor: input.executor_session_id, method: "managed" },
+      "room: managed agent summoned",
+    );
+    return { task: getTask(db, task.id) ?? task, injected: true, method: "managed" };
+  }
+
+  // 2. External terminal session: try live tmux injection, fall back to headless wake.
   const injected = injectIntoProcess(db, input.executor_session_id, input.prompt, task.id, task.task_token, input.room_id);
   let method = injected ? "tmux" : "";
 
   if (!injected) {
-    // Fallback: headless wake the agent to process the task
     const woke = headlessWakeForTask(db, input.executor_session_id, input.prompt, task.id, task.task_token, input.room_id);
     method = woke ? "headless" : "failed";
   }
+
+  publishLiveEvent({
+    type: "room.task",
+    room_id: input.room_id,
+    session_id: input.executor_session_id,
+    payload: { task_id: task.id, status: method === "failed" ? "pending" : "running", method },
+  });
 
   logger.info(
     { roomId: input.room_id, taskId: task.id, executor: input.executor_session_id, method },
@@ -495,10 +573,44 @@ function notifyInitiator(
   initiatorSessionId: string,
 ): boolean {
   if (initiatorSessionId === WEB_CONSOLE_ID) {
-    // Human initiator — OS notification handles this
+    // Human initiator — live event / OS notification handles this
+    publishLiveEvent({
+      type: "room.task",
+      room_id: roomId,
+      session_id: initiatorSessionId,
+      payload: { event: "all_tasks_done", room_id: roomId },
+    });
     return true;
   }
-  // Agent initiator — inject a "come read results" prompt
+  const prompt = `${badge({ label: "任务完成通知" })} 你在聊天室（room_id=${roomId}）的全部任务已完成。用 room_read 读取结果并继续。`;
+
+  // Managed initiator: deliver straight into its managed executor queue.
+  const managedBinding = getManagedBindingBySession(db, initiatorSessionId);
+  if (managedBinding) {
+    try {
+      const msg = askSession(db, {
+        from_session: WEB_CONSOLE_ID,
+        to_session: initiatorSessionId,
+        question: prompt,
+        room_id: roomId,
+      });
+      enqueueManagedTask(db, {
+        messageId: msg.id,
+        instanceId: managedBinding.instance_id,
+        text: prompt,
+      });
+      getManagedExecutorForInstance(db, managedBinding.instance_id)?.kick(managedBinding.instance_id);
+      logger.info({ roomId, initiatorSessionId }, "room: managed initiator notified");
+      return true;
+    } catch (err) {
+      logger.warn(
+        { roomId, initiatorSessionId, err: err instanceof Error ? err.message : String(err) },
+        "room: failed to notify managed initiator",
+      );
+    }
+  }
+
+  // External agent initiator — inject a "come read results" prompt
   const session = getSession(db, initiatorSessionId);
   if (!session) return false;
   let meta: Record<string, unknown> = {};
@@ -506,10 +618,72 @@ function notifyInitiator(
   const agentId = Number(meta.agent_id);
   if (!Number.isFinite(agentId) || agentId <= 0) return false;
 
-  const prompt = `${badge({ label: "任务完成通知" })} 你在聊天室（room_id=${roomId}）的全部任务已完成。用 room_read 读取结果并继续。`;
   if (tmuxInject(String(agentId), prompt, typeof meta.tmux_session === "string" ? meta.tmux_session : undefined)) {
     logger.info({ roomId, initiatorSessionId }, "room: initiator summoned");
     return true;
   }
   return false;
+}
+
+let orchestrationHooksInstalled = false;
+
+/**
+ * Bridge ManagedExecutor terminal turn completions back into room_tasks and
+ * workflow_steps:
+ * - If a managed agent finishes a room_task turn without explicitly calling
+ *   `room_write`, its final text automatically completes the task and wakes
+ *   the initiator when all sibling tasks are done.
+ * - If a managed run corresponds to a running workflow step, it settles that
+ *   step and advances downstream DAG nodes automatically.
+ */
+export function installManagedOrchestrationHooks(): void {
+  if (orchestrationHooksInstalled) return;
+  orchestrationHooksInstalled = true;
+
+  onManagedTurnFinalized((info) => {
+    const { db, messageId, state, finalText, errorCode } = info;
+    try {
+      const linkedTask = db
+        .prepare(
+          `SELECT * FROM room_tasks WHERE message_id = ? AND status IN ('pending', 'running')`,
+        )
+        .get(messageId) as Record<string, unknown> | undefined;
+      if (linkedTask) {
+        const task = toTask(linkedTask);
+        if (state === "completed") {
+          writeResult(db, {
+            task_id: task.id,
+            task_token: task.task_token,
+            result: finalText ?? "(受管任务完成)",
+          });
+        } else {
+          db.prepare(
+            `UPDATE room_tasks SET status = 'failed', result = ?, completed_at = ? WHERE id = ? AND status IN ('pending', 'running')`,
+          ).run(errorCode ?? `任务状态：${state}`, nowIso(), task.id);
+        }
+        publishLiveEvent({
+          type: "room.task",
+          room_id: task.room_id,
+          session_id: task.executor_session_id,
+          payload: { task_id: task.id, status: state === "completed" ? "done" : "failed" },
+        });
+      }
+    } catch (err) {
+      logger.warn(
+        { messageId, err: err instanceof Error ? err.message : String(err) },
+        "room: auto-finalizing managed room_task failed",
+      );
+    }
+
+    void onWorkflowStepMessageCompleted(db, messageId, {
+      state,
+      text: finalText,
+      error: errorCode,
+    }).catch((err) => {
+      logger.warn(
+        { messageId, err: err instanceof Error ? err.message : String(err) },
+        "workflow: auto-advancing step on managed turn completion failed",
+      );
+    });
+  });
 }

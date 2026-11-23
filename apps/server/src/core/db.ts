@@ -140,7 +140,7 @@ function safePublicMessage(value: string, fallback: string): string {
   return message;
 }
 
-const SCHEMA_VERSION = 16; // Add lookup indexes for channels, rooms and managed execution.
+const SCHEMA_VERSION = 17; // Add workflow DAGs, structured room/kind/pinned memory, and room_task message links.
 
 // Keep checkpoint timers tied to their database handles. A process can open
 // more than one temporary database during tests and interface operations.
@@ -172,6 +172,9 @@ CREATE TABLE IF NOT EXISTS context_entries (
   title TEXT NOT NULL,
   content TEXT NOT NULL,
   tags TEXT,
+  room_id INTEGER,
+  kind TEXT NOT NULL DEFAULT 'note',
+  pinned INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
@@ -266,7 +269,49 @@ CREATE TABLE IF NOT EXISTS room_tasks (
   prompt TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
   result TEXT,
+  message_id INTEGER,
   created_at TEXT NOT NULL,
+  completed_at TEXT
+);
+
+-- Multi-agent collaborative DAG workflows (reusable templates or room-scoped).
+CREATE TABLE IF NOT EXISTS workflows (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  description TEXT,
+  room_id INTEGER,
+  steps_json TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS workflow_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  workflow_id INTEGER NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+  room_id INTEGER,
+  status TEXT NOT NULL DEFAULT 'pending',
+  input TEXT,
+  initiated_by TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  completed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS workflow_steps (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id INTEGER NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+  step_key TEXT NOT NULL,
+  title TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'agent',
+  depends_on_json TEXT NOT NULL DEFAULT '[]',
+  target_session_id TEXT,
+  prompt_template TEXT NOT NULL,
+  include_handoff INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'pending',
+  message_id INTEGER,
+  output TEXT,
+  error TEXT,
+  started_at TEXT,
   completed_at TEXT
 );
 
@@ -529,6 +574,19 @@ function migrate(db: DB): void {
     `);
     // v13: one-shot task token to fix split-brain
     ensureColumn("room_tasks", "task_token", "task_token TEXT");
+    // v17: room_tasks → messages link, structured memory columns, workflow DAG indexes
+    ensureColumn("room_tasks", "message_id", "message_id INTEGER");
+    ensureColumn("context_entries", "room_id", "room_id INTEGER");
+    ensureColumn("context_entries", "kind", "kind TEXT NOT NULL DEFAULT 'note'");
+    ensureColumn("context_entries", "pinned", "pinned INTEGER NOT NULL DEFAULT 0");
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_context_room ON context_entries(room_id, pinned DESC, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_room_tasks_message ON room_tasks(message_id);
+      CREATE INDEX IF NOT EXISTS idx_workflows_room ON workflows(room_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_workflow_runs_room ON workflow_runs(room_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_workflow_steps_run ON workflow_steps(run_id, status);
+      CREATE INDEX IF NOT EXISTS idx_workflow_steps_message ON workflow_steps(message_id);
+    `);
     // backfill task_token for existing rows with random tokens
     db.exec(`
       UPDATE room_tasks SET task_token = lower(hex(randomblob(16)))

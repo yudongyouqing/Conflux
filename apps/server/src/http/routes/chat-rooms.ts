@@ -98,15 +98,38 @@ export function registerChatRoomRoutes(app: FastifyInstance, ctx: ServerContext)
 
   // POST /chat-rooms/:id/summon — human initiates an agent task
   app.post<
-    { Params: { id: string }; Body: { executor_session_id: string; prompt: string; sender_session_id?: string } }
-  >("/chat-rooms/:id/summon", { schema: { body: { type: "object", required: ["executor_session_id", "prompt"], properties: { executor_session_id: { type: "string", minLength: 1 }, prompt: { type: "string", minLength: 1 }, sender_session_id: { type: "string" } } } } }, async (req, reply) => {
+    {
+      Params: { id: string };
+      Body: {
+        executor_session_id: string;
+        prompt: string;
+        sender_session_id?: string;
+        delivery_mode?: "queue" | "steer" | "interrupt";
+      };
+    }
+  >(
+    "/chat-rooms/:id/summon",
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["executor_session_id", "prompt"],
+          properties: {
+            executor_session_id: { type: "string", minLength: 1 },
+            prompt: { type: "string", minLength: 1 },
+            sender_session_id: { type: "string" },
+            delivery_mode: { type: "string", enum: ["queue", "steer", "interrupt"] },
+          },
+        },
+      },
+    },
+    async (req, reply) => {
     try {
       const roomId = resourceId(req.params.id);
       const initiatorId = req.body.sender_session_id ?? WEB_CONSOLE_ID;
       // Phase 1 (retryable, database-only): the task row + audit. Phase 2
-      // (terminal injection / headless wake spawn) runs strictly after the
-      // commit — an injected prompt or spawned process cannot be rolled
-      // back, and a retry must never re-run either.
+      // (managed delivery / terminal injection / headless wake spawn) runs
+      // strictly after the commit — external effects cannot be rolled back.
       const task = await write(() => {
         const created = prepareSummon(db, {
           room_id: roomId,
@@ -127,6 +150,7 @@ export function registerChatRoomRoutes(app: FastifyInstance, ctx: ServerContext)
         initiator_session_id: initiatorId,
         executor_session_id: req.body.executor_session_id,
         prompt: req.body.prompt,
+        delivery_mode: req.body.delivery_mode,
       }, task);
       return reply.send({ task_id: result.task.id, injected: result.injected, method: result.method });
     } catch (err) {

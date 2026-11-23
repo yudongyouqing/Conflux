@@ -46,6 +46,14 @@ import {
   type DataBundleScope,
   type ImportConflictStrategy,
 } from "../core/data-transfer.js";
+import {
+  approveHumanGate,
+  getWorkflowRun,
+  listWorkflowRuns,
+  listWorkflows,
+  startWorkflowRun,
+} from "../core/workflows.js";
+import { handoffContext } from "../core/handoff.js";
 
 /**
  * Build the CLI command tree.
@@ -1113,6 +1121,119 @@ export function buildCli(_argv?: string | readonly string[]): Command {
           "hook dispatch failed",
         );
       }
+    });
+
+  // workflow ---------------------------------------------------------
+  const wf = program.command("workflow").description("multi-agent DAG workflow orchestration");
+
+  wf.command("ls")
+    .description("list workflows")
+    .option("--room <id>", "filter by room id")
+    .action(async function (this: Command) {
+      const o = this.optsWithGlobals();
+      const roomId = o.room ? parsePositiveIntId(String(o.room), "room id") : undefined;
+      const res = await runOp(
+        program,
+        () => withDb(openDbFrom(o), (db) => ({ workflows: listWorkflows(db, roomId) })),
+        "GET",
+        roomId !== undefined ? `/workflows?room_id=${roomId}` : "/workflows",
+      );
+      console.log(JSON.stringify(res, null, 2));
+    });
+
+  wf.command("run <workflowId>")
+    .description("start a workflow run")
+    .option("--input <text>", "input prompt for {{input}}")
+    .action(async function (this: Command, workflowIdRaw: string) {
+      const o = this.optsWithGlobals();
+      const workflowId = parsePositiveIntId(workflowIdRaw, "workflow id");
+      const res = await runOp(
+        program,
+        () =>
+          withDb(openDbFrom(o), async (db) => {
+            const sid = resolveCliSessionId(db);
+            return { run: await startWorkflowRun(db, workflowId, { input: o.input, initiated_by: sid }) };
+          }),
+        "POST",
+        `/workflows/${workflowId}/runs`,
+        { input: o.input },
+      );
+      console.log(JSON.stringify(res, null, 2));
+    });
+
+  wf.command("status [runId]")
+    .description("inspect a workflow run or list recent runs")
+    .action(async function (this: Command, runIdRaw?: string) {
+      const o = this.optsWithGlobals();
+      if (runIdRaw) {
+        const runId = parsePositiveIntId(runIdRaw, "run id");
+        const res = await runOp(
+          program,
+          () => withDb(openDbFrom(o), (db) => ({ run: getWorkflowRun(db, runId) })),
+          "GET",
+          `/workflow-runs/${runId}`,
+        );
+        console.log(JSON.stringify(res, null, 2));
+      } else {
+        const res = await runOp(
+          program,
+          () => withDb(openDbFrom(o), (db) => ({ runs: listWorkflowRuns(db) })),
+          "GET",
+          "/workflow-runs",
+        );
+        console.log(JSON.stringify(res, null, 2));
+      }
+    });
+
+  wf.command("approve <stepId>")
+    .description("approve or reject a human_gate workflow step")
+    .option("--reject", "reject instead of approving")
+    .option("--comment <text>", "optional approval comment")
+    .action(async function (this: Command, stepIdRaw: string) {
+      const o = this.optsWithGlobals();
+      const stepId = parsePositiveIntId(stepIdRaw, "step id");
+      const approved = !o.reject;
+      const res = await runOp(
+        program,
+        () =>
+          withDb(openDbFrom(o), async (db) => ({
+            run: await approveHumanGate(db, stepId, { approved, comment: o.comment }),
+          })),
+        "POST",
+        `/workflow-steps/${stepId}/approve`,
+        { approved, comment: o.comment },
+      );
+      console.log(JSON.stringify(res, null, 2));
+    });
+
+  // handoff ----------------------------------------------------------
+  program
+    .command("handoff <toSession>")
+    .description("assemble shared memory and hand off context to another session")
+    .option("--room <id>", "room id for memory collection")
+    .option("--prompt <text>", "next instructions for the target session")
+    .option("--mode <mode>", "delivery mode: queue | steer | interrupt", "queue")
+    .action(async function (this: Command, toSession: string) {
+      const o = this.optsWithGlobals();
+      const roomId = o.room ? parsePositiveIntId(String(o.room), "room id") : null;
+      const res = await runOp(
+        program,
+        () =>
+          withDb(openDbFrom(o), async (db) => {
+            const sid = resolveCliSessionId(db);
+            return handoffContext(db, {
+              from_session: sid,
+              to_session: toSession,
+              room_id: roomId,
+              prompt: o.prompt,
+              delivery_mode: o.mode,
+            });
+          }),
+        "POST",
+        "/handoff",
+        { to_session: toSession, room_id: roomId, prompt: o.prompt, delivery_mode: o.mode },
+      );
+      console.log(JSON.stringify(res, null, 2));
     });
 
   return program;

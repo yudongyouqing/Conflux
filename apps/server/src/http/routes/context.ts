@@ -1,6 +1,13 @@
 import { resourceId } from "../context.js";
 import type { FastifyInstance } from "fastify";
-import { publishContext, updateContext, deleteContext, listMyContext } from "../../core/context.js";
+import type { ContextKind } from "@conflux/shared";
+import {
+  publishContext,
+  updateContext,
+  deleteContext,
+  listMyContext,
+  listRoomContext,
+} from "../../core/context.js";
 import { queryContext } from "../../core/search.js";
 import type { ServerContext } from "../context.js";
 
@@ -8,15 +15,24 @@ interface ContextBody {
   title: string;
   content: string;
   tags?: string[];
+  room_id?: number | null;
+  kind?: ContextKind;
+  pinned?: boolean;
 }
 interface UpdateContextBody {
   title?: string;
   content?: string;
   tags?: string[];
+  room_id?: number | null;
+  kind?: ContextKind;
+  pinned?: boolean;
 }
 interface QueryContextQs {
   query?: string;
   session_id?: string;
+  room_id?: string;
+  kind?: ContextKind;
+  pinned?: string;
   tags?: string;
   limit?: string;
 }
@@ -36,6 +52,9 @@ export function registerContextRoutes(app: FastifyInstance, ctx: ServerContext):
             title: { type: "string", maxLength: 300 },
             content: { type: "string", maxLength: 50000 },
             tags: { type: "array", items: { type: "string" } },
+            room_id: { type: "integer", nullable: true },
+            kind: { type: "string", enum: ["note", "decision", "artifact", "handoff"] },
+            pinned: { type: "boolean" },
           },
         },
       },
@@ -49,6 +68,9 @@ export function registerContextRoutes(app: FastifyInstance, ctx: ServerContext):
             title: req.body.title,
             content: req.body.content,
             tags: req.body.tags ?? null,
+            room_id: req.body.room_id ?? null,
+            kind: req.body.kind,
+            pinned: req.body.pinned,
           });
           audit(
             sid,
@@ -88,6 +110,14 @@ export function registerContextRoutes(app: FastifyInstance, ctx: ServerContext):
         const found = queryContext(db, {
           query: req.query.query,
           session_id: req.query.session_id,
+          room_id: req.query.room_id ? resourceId(req.query.room_id) : undefined,
+          kind: req.query.kind,
+          pinned:
+            req.query.pinned === "true" || req.query.pinned === "1"
+              ? true
+              : req.query.pinned === "false" || req.query.pinned === "0"
+                ? false
+                : undefined,
           tags: req.query.tags ? String(req.query.tags).split(",") : undefined,
           limit: req.query.limit ? Number(req.query.limit) : undefined,
         });
@@ -111,6 +141,9 @@ export function registerContextRoutes(app: FastifyInstance, ctx: ServerContext):
             title: { type: "string", maxLength: 300 },
             content: { type: "string", maxLength: 50000 },
             tags: { type: "array", items: { type: "string" } },
+            room_id: { type: "integer", nullable: true },
+            kind: { type: "string", enum: ["note", "decision", "artifact", "handoff"] },
+            pinned: { type: "boolean" },
           },
         },
       },
@@ -123,6 +156,9 @@ export function registerContextRoutes(app: FastifyInstance, ctx: ServerContext):
             title: req.body.title,
             content: req.body.content,
             tags: req.body.tags,
+            room_id: req.body.room_id,
+            kind: req.body.kind,
+            pinned: req.body.pinned,
           });
           audit(sid, "update_context", { id: req.params.id }, updated ? { id: updated.id } : null);
           return updated;
@@ -150,4 +186,22 @@ export function registerContextRoutes(app: FastifyInstance, ctx: ServerContext):
       return sendError(reply, err, sid, "delete_context");
     }
   });
+
+  // GET /chat-rooms/:id/context — pinned & structured memory for one room
+  app.get<{ Params: { id: string }; Querystring: { limit?: string } }>(
+    "/chat-rooms/:id/context",
+    {},
+    async (req, reply) => {
+      try {
+        const entries = listRoomContext(
+          db,
+          resourceId(req.params.id),
+          req.query.limit ? Number(req.query.limit) : 100,
+        );
+        return reply.send({ entries });
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
 }

@@ -66,7 +66,7 @@ const sessionSchema = z
     created_at: isoTimestamp,
     last_heartbeat_at: isoTimestamp,
     metadata: nullableString,
-    runtime: z.enum(["claude", "codex", "internal", "web"]).nullable(),
+    runtime: z.enum(["claude", "codex", "antigravity", "acp", "internal", "web"]).nullable(),
     identity_source: z.enum(["hook", "mcp", "http", "cli", "internal"]).nullable(),
     runtime_pid: z.number().int().nullable(),
     chat_room_id: z.number().int().nullable().optional(),
@@ -80,6 +80,9 @@ const contextSchema = z
     title: z.string(),
     content: z.string(),
     tags: z.array(z.string()).nullable(),
+    room_id: z.number().int().nullable().optional(),
+    kind: z.enum(["note", "decision", "artifact", "summary", "handoff"]).optional(),
+    pinned: z.union([z.boolean(), z.number().int().min(0).max(1)]).optional(),
     created_at: isoTimestamp,
     updated_at: isoTimestamp,
   })
@@ -149,7 +152,7 @@ const runtimeAgentSchema = z
   .object({
     id: z.number().int().nonnegative(),
     name: z.string(),
-    runtime: z.enum(["claude", "codex"]),
+    runtime: z.enum(["claude", "codex", "antigravity", "acp"]),
     workdir: nullableString,
     model: nullableString,
     base_url: nullableString,
@@ -303,6 +306,9 @@ export function exportData(db: DB, options: ExportDataOptions = {}): ConfluxData
     context_entries: contexts.map((row) => ({
       ...row,
       tags: row.tags ? parseStringArray(row.tags, "context tags") : null,
+      room_id: row.room_id ?? null,
+      kind: row.kind ?? "note",
+      pinned: Boolean(row.pinned),
     })),
     messages,
     edges,
@@ -861,31 +867,37 @@ function insertContext(db: DB, row: ContextEntry, sessionId: string, id?: number
     row.title,
     row.content,
     row.tags === null ? null : JSON.stringify(row.tags),
+    row.room_id ?? null,
+    row.kind ?? "note",
+    row.pinned ? 1 : 0,
     row.created_at,
     row.updated_at,
   ];
   if (id === undefined) {
     db.prepare(
-      `INSERT INTO context_entries (session_id, title, content, tags, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO context_entries (session_id, title, content, tags, room_id, kind, pinned, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(...values);
     return;
   }
   db.prepare(
-    `INSERT INTO context_entries (id, session_id, title, content, tags, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO context_entries (id, session_id, title, content, tags, room_id, kind, pinned, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(id, ...values);
 }
 
 function updateContext(db: DB, row: ContextEntry, id: number, sessionId: string): void {
   db.prepare(
     `UPDATE context_entries SET session_id = ?, title = ?, content = ?, tags = ?,
-       created_at = ?, updated_at = ? WHERE id = ?`,
+       room_id = ?, kind = ?, pinned = ?, created_at = ?, updated_at = ? WHERE id = ?`,
   ).run(
     sessionId,
     row.title,
     row.content,
     row.tags === null ? null : JSON.stringify(row.tags),
+    row.room_id ?? null,
+    row.kind ?? "note",
+    row.pinned ? 1 : 0,
     row.created_at,
     row.updated_at,
     id,

@@ -40,6 +40,13 @@ import {
 } from "../core/runtime-instances.js";
 import { askAndReplySync } from "../core/ask-sync.js";
 import { summonAgent, writeResult, readRoom, roomStatus } from "../core/room-orchestrator.js";
+import {
+  createWorkflow,
+  getWorkflowRun,
+  onWorkflowStepMessageCompleted,
+  startWorkflowRun,
+} from "../core/workflows.js";
+import { handoffContext } from "../core/handoff.js";
 import { refreshCodexSessionTitles } from "../core/codex-titles.js";
 import { logger } from "../log.js";
 import { registerSessionDirectory } from "./session-directory.js";
@@ -805,6 +812,12 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
       const r = await withAudit("reply_ask", { message_id, replyLen: reply.length }, () =>
         replyAskAndPush(db, message_id, sessionId, reply),
       );
+      if (r.ok) {
+        await onWorkflowStepMessageCompleted(db, message_id, {
+          state: "completed",
+          text: reply,
+        }).catch(() => {});
+      }
       return json(r.ok ? { message: r.result } : { error: r.error });
     },
   );
@@ -871,6 +884,105 @@ export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
         getGraph(db, { status: status ?? "active" }),
       );
       return json(r.ok ? { graph: r.result } : { error: r.error });
+    },
+  );
+
+  // 14. handoff_context — structured cross-session / cross-provider handoff
+  server.registerTool(
+    "handoff_context",
+    {
+      description:
+        "Assemble pinned/decision shared memory and recent replies into a bounded handoff dossier, persist it, and deliver it to another session (Claude / Codex / Antigravity / external).",
+      inputSchema: {
+        to_session: z.string().min(1).describe("Target session id to receive the handoff"),
+        room_id: z.number().int().positive().optional().describe("Optional room scope for memory collection"),
+        title: z.string().max(300).optional(),
+        note: z.string().max(4000).optional(),
+        prompt: z.string().max(10000).optional().describe("Next instructions for the target session"),
+        delivery_mode: z.enum(["queue", "steer", "interrupt"]).optional(),
+        deliver: z.boolean().optional().describe("Default true; set false to store handoff only"),
+      },
+    },
+    async ({ to_session, room_id, title, note, prompt, delivery_mode, deliver }) => {
+      const r = await withAudit("handoff_context", { to_session, room_id }, () =>
+        handoffContext(db, {
+          from_session: sessionId,
+          to_session,
+          room_id: room_id ?? null,
+          title,
+          note,
+          prompt,
+          delivery_mode,
+          deliver,
+        }),
+      );
+      return json(r.ok ? r.result : { error: r.error });
+    },
+  );
+
+  // 15. workflow_create / workflow_start / workflow_status
+  server.registerTool(
+    "workflow_create",
+    {
+      description: "Create a multi-agent DAG workflow template (validates dependencies and rejects cycles).",
+      inputSchema: {
+        name: z.string().min(1).max(200),
+        description: z.string().max(2000).optional(),
+        room_id: z.number().int().positive().optional(),
+        steps: z.array(
+          z.object({
+            key: z.string().min(1).max(64),
+            title: z.string().min(1).max(200),
+            kind: z.enum(["agent", "human_gate"]).default("agent"),
+            depends_on: z.array(z.string()).default([]),
+            target_session_id: z.string().optional(),
+            prompt_template: z.string().default(""),
+            include_handoff: z.boolean().optional(),
+          }),
+        ),
+      },
+    },
+    async ({ name, description, room_id, steps }) => {
+      const r = await withAudit("workflow_create", { name, steps: steps.length }, () =>
+        createWorkflow(db, { name, description, room_id: room_id ?? null, steps }),
+      );
+      return json(r.ok ? { workflow: r.result } : { error: r.error });
+    },
+  );
+
+  server.registerTool(
+    "workflow_start",
+    {
+      description: "Start a DAG workflow run and dispatch its root steps immediately.",
+      inputSchema: {
+        workflow_id: z.number().int().positive(),
+        input: z.string().max(10000).optional(),
+        room_id: z.number().int().positive().optional(),
+      },
+    },
+    async ({ workflow_id, input, room_id }) => {
+      const r = await withAudit("workflow_start", { workflow_id }, () =>
+        startWorkflowRun(db, workflow_id, {
+          input,
+          room_id,
+          initiated_by: sessionId,
+        }),
+      );
+      return json(r.ok ? { run: r.result } : { error: r.error });
+    },
+  );
+
+  server.registerTool(
+    "workflow_status",
+    {
+      description: "Inspect a workflow run and the status/output of every step.",
+      inputSchema: {
+        run_id: z.number().int().positive(),
+      },
+    },
+    async ({ run_id }) => {
+      const r = await withAudit("workflow_status", { run_id }, () => getWorkflowRun(db, run_id));
+      return json(r.ok ? { run: r.result } : { error: r.error });
     },
   );
 

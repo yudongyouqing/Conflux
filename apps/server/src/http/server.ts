@@ -39,6 +39,10 @@ import { registerSystemRoutes } from "./routes/system.js";
 import { registerWakeStreamRoutes } from "./routes/wake-stream.js";
 import { registerChatRoomRoutes } from "./routes/chat-rooms.js";
 import { registerManagedCodexRoutes } from "./routes/managed-codex.js";
+import { registerLiveEventsRoutes } from "./routes/live-events.js";
+import { registerWorkflowRoutes } from "./routes/workflows.js";
+import { installManagedLiveEventBridge } from "../core/event-bus.js";
+import { installManagedOrchestrationHooks } from "../core/room-orchestrator.js";
 import {
   ManagedCodexManager,
   getManagedCodexManager,
@@ -49,6 +53,14 @@ import {
   getManagedClaudeManager,
   setManagedClaudeManager,
 } from "../core/managed-claude/manager.js";
+import {
+  ManagedAntigravityManager,
+  ManagedAcpManager,
+  getManagedAntigravityManager,
+  setManagedAntigravityManager,
+  getManagedAcpManager,
+  setManagedAcpManager,
+} from "../core/managed-acp/manager.js";
 
 export interface HttpServerOptions {
   host?: string;
@@ -185,6 +197,8 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
 
   let managedManager: ManagedCodexManager | null = null;
   let managedClaudeManager: ManagedClaudeManager | null = null;
+  let managedAntigravityManager: ManagedAntigravityManager | null = null;
+  let managedAcpManager: ManagedAcpManager | null = null;
   const closeResources = async () => {
     clearInterval(consoleBeat);
     clearInterval(abandonedSweep);
@@ -201,6 +215,20 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
       const manager = managedClaudeManager;
       managedClaudeManager = null;
       if (getManagedClaudeManager() === manager) setManagedClaudeManager(null);
+      manager.stopQueuePolling();
+      await manager.shutdown();
+    }
+    if (managedAntigravityManager) {
+      const manager = managedAntigravityManager;
+      managedAntigravityManager = null;
+      if (getManagedAntigravityManager() === manager) setManagedAntigravityManager(null);
+      manager.stopQueuePolling();
+      await manager.shutdown();
+    }
+    if (managedAcpManager) {
+      const manager = managedAcpManager;
+      managedAcpManager = null;
+      if (getManagedAcpManager() === manager) setManagedAcpManager(null);
       manager.stopQueuePolling();
       await manager.shutdown();
     }
@@ -261,6 +289,10 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   registerWakeStreamRoutes(app, ctx);
 
   registerChatRoomRoutes(app, ctx);
+  registerLiveEventsRoutes(app);
+  registerWorkflowRoutes(app, ctx);
+  installManagedLiveEventBridge();
+  installManagedOrchestrationHooks();
 
   // The managed Codex executor lives for the lifetime of this server: one
   // manager instance owns every app-server child, and shutdown (below)
@@ -274,6 +306,12 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   managedClaudeManager = new ManagedClaudeManager(db);
   setManagedClaudeManager(managedClaudeManager);
   managedClaudeManager.startQueuePolling();
+  managedAntigravityManager = new ManagedAntigravityManager(db);
+  setManagedAntigravityManager(managedAntigravityManager);
+  managedAntigravityManager.startQueuePolling();
+  managedAcpManager = new ManagedAcpManager(db);
+  setManagedAcpManager(managedAcpManager);
+  managedAcpManager.startQueuePolling();
   registerManagedCodexRoutes(app, ctx);
 
   try {

@@ -1,5 +1,5 @@
 import type { DB } from "./db.js";
-import type { ContextEntry } from "./context.js";
+import { normalizeContextKind, type ContextEntry, type ContextKind } from "./context.js";
 import { DEFAULT_LIMIT, MAX_LIMIT } from "../config.js";
 
 interface ContextRow {
@@ -8,68 +8,81 @@ interface ContextRow {
   title: string;
   content: string;
   tags: string | null;
+  room_id?: number | null;
+  kind?: string | null;
+  pinned?: number | null;
   created_at: string;
   updated_at: string;
 }
 
 function toEntry(row: ContextRow): ContextEntry {
   return {
-    ...row,
+    id: row.id,
+    session_id: row.session_id,
+    title: row.title,
+    content: row.content,
     tags: row.tags ? (JSON.parse(row.tags) as string[]) : null,
+    room_id: row.room_id ?? null,
+    kind: normalizeContextKind(row.kind),
+    pinned: Boolean(row.pinned),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
   };
 }
 
 export interface QueryInput {
   session_id?: string;
+  room_id?: number;
+  kind?: ContextKind;
+  pinned?: boolean;
   query?: string;
   tags?: string[];
   limit?: number;
 }
 
 /**
- * FTS5 query with manual tag filtering.
- * An empty query returns the most recently updated entries (useful for browsing).
+ * FTS5 query with structured memory filters (room_id, kind, pinned, tags).
+ * An empty query returns the most recently updated entries (pinned first).
  */
 export function queryContext(db: DB, input: QueryInput): ContextEntry[] {
   const limit = Math.min(Math.max(input.limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT);
   const tags = input.tags && input.tags.length > 0 ? input.tags : null;
   const ftsQuery = input.query ? toFtsQuery(input.query) : null;
 
-  // No FTS query and no tag filter: simple recent-list.
-  if (!ftsQuery && !tags) {
-    const where = input.session_id ? `WHERE session_id = ?` : "";
-    const params: (string | number)[] = input.session_id ? [input.session_id] : [];
-    const rows = db
-      .prepare(`SELECT * FROM context_entries ${where} ORDER BY updated_at DESC LIMIT ?`)
-      .all(...params, limit) as ContextRow[];
-    return rows.map(toEntry);
-  }
+  const clauses: string[] = [];
+  const params: (string | number)[] = [];
 
-  // Compose a query that combines FTS rank + post-filter tags/session.
-  let ftsSql: string;
-  const ftsParams: string[] = [];
   if (ftsQuery) {
-    ftsSql = `
-      JOIN context_fts fts ON context_entries.id = fts.rowid
-      WHERE context_fts MATCH ?
-    `;
-    ftsParams.push(ftsQuery);
-  } else {
-    ftsSql = "WHERE 1=1";
+    clauses.push("context_fts MATCH ?");
+    params.push(ftsQuery);
   }
-
   if (input.session_id) {
-    ftsSql += ` AND context_entries.session_id = ?`;
-    ftsParams.push(input.session_id);
+    clauses.push("context_entries.session_id = ?");
+    params.push(input.session_id);
+  }
+  if (input.room_id !== undefined) {
+    clauses.push("context_entries.room_id = ?");
+    params.push(input.room_id);
+  }
+  if (input.kind) {
+    clauses.push("context_entries.kind = ?");
+    params.push(input.kind);
+  }
+  if (input.pinned !== undefined) {
+    clauses.push("context_entries.pinned = ?");
+    params.push(input.pinned ? 1 : 0);
   }
 
-  const order = ftsQuery ? `ORDER BY rank` : `ORDER BY context_entries.updated_at DESC`;
+  const joinSql = ftsQuery ? "JOIN context_fts fts ON context_entries.id = fts.rowid" : "";
+  const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+  const orderSql = ftsQuery
+    ? "ORDER BY context_entries.pinned DESC, rank"
+    : "ORDER BY context_entries.pinned DESC, context_entries.updated_at DESC";
 
-  // We fetch a larger candidate set then filter tags in JS (tags stored as JSON).
-  const fetchLimit = Math.min(limit * 4, MAX_LIMIT);
+  const fetchLimit = tags ? Math.min(limit * 4, MAX_LIMIT) : limit;
   const candidateRows = db
-    .prepare(`SELECT context_entries.* FROM context_entries ${ftsSql} ${order} LIMIT ?`)
-    .all(...ftsParams, fetchLimit) as ContextRow[];
+    .prepare(`SELECT context_entries.* FROM context_entries ${joinSql} ${whereSql} ${orderSql} LIMIT ?`)
+    .all(...params, fetchLimit) as ContextRow[];
 
   const out: ContextEntry[] = [];
   for (const row of candidateRows) {
@@ -84,11 +97,6 @@ export function queryContext(db: DB, input: QueryInput): ContextEntry[] {
   return out;
 }
 
-/**
- * Build an FTS5 query string. We treat the user input as a list of prefix
- * terms connected by AND, with each term wrapped in quotes so special chars
- * (e.g. parentheses) don't break the parser.
- */
 function toFtsQuery(raw: string): string | null {
   const cleaned = raw.replace(/["*]/g, " ").trim();
   if (cleaned.length === 0) return null;

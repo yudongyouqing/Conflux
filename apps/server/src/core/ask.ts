@@ -1,12 +1,13 @@
 import type { DB } from "./db.js";
 import { askSession, getMessage, type Message } from "./messages.js";
 import { wakeSessionForMail, type WakeResult } from "./wake/index.js";
-import { WEB_CONSOLE_ID } from "@conflux/shared";
+import { WEB_CONSOLE_ID, type ManagedDeliveryMode } from "@conflux/shared";
 import { randomUUID } from "node:crypto";
 import { nowIso, retryOnBusy, isLockError } from "./db.js";
 import { logger } from "../log.js";
 import { getManagedExecutorForInstance } from "./managed/registry.js";
 import { enqueueManagedTask, getManagedBindingBySession } from "./managed-codex/store.js";
+import { publishLiveEvent } from "./event-bus.js";
 
 /**
  * THE ask path: deliver a question and, when the addressee cannot see it
@@ -22,6 +23,8 @@ export interface AskOptions {
   question: string;
   /** chat-room shared thread marker: replies stay visible in the room */
   room_id?: number | null;
+  /** optional managed delivery behavior when the recipient is a live managed instance */
+  delivery_mode?: ManagedDeliveryMode;
 }
 
 export interface AskOutcome {
@@ -31,7 +34,9 @@ export interface AskOutcome {
 }
 
 export async function askAndMaybeWake(db: DB, opts: AskOptions): Promise<AskOutcome> {
-  return completeAsk(db, prepareAsk(db, opts));
+  return completeAsk(db, prepareAsk(db, opts), undefined, {
+    delivery_mode: opts.delivery_mode,
+  });
 }
 
 /** The caller is resolved by the interface, never from a retry request body. */
@@ -87,9 +92,24 @@ export async function completeAsk(
     db: DB,
     sessionId: string,
   ) => WakeResult,
+  opts: { delivery_mode?: ManagedDeliveryMode } = {},
 ): Promise<AskOutcome> {
   const { message, claim } = prepared;
   if (!claim) return { message, wake: { woke: false, reason: "message already received" } };
+
+  if (message.room_id) {
+    publishLiveEvent({
+      type: "room.message",
+      room_id: message.room_id,
+      session_id: message.to_session,
+      payload: {
+        message_id: message.id,
+        from_session: message.from_session,
+        to_session: message.to_session,
+        status: message.status,
+      },
+    });
+  }
 
   // Managed executor targets dispatch to the Conflux-held app-server
   // instead of a terminal wake — no send-keys, no summary stand-in. The
@@ -99,6 +119,50 @@ export async function completeAsk(
   // its polling tick.
   const managedBinding = getManagedBindingBySession(db, message.to_session);
   if (managedBinding) {
+    const executor = getManagedExecutorForInstance(db, managedBinding.instance_id);
+    const deliveryMode = opts.delivery_mode ?? "queue";
+    if (deliveryMode === "steer" && executor) {
+      const status = executor.instanceStatus(managedBinding.instance_id);
+      if (status?.live && status.activeRun) {
+        try {
+          const steered = await executor.steer(managedBinding.instance_id, {
+            text: message.question,
+            expectedTurnId: status.activeRun.turnId,
+            clientMessageId: String(message.id),
+          });
+          if (steered.accepted) {
+            try {
+              await retryOnBusy(db, () =>
+                db
+                  .prepare(
+                    `UPDATE message_deliveries SET state = 'woken', reason = NULL, claim_token = NULL,
+                     claim_expires_at = NULL WHERE message_id = ? AND claim_token = ?`,
+                  )
+                  .run(message.id, claim.token),
+              );
+            } catch {
+              // ignore transient lock
+            }
+            return {
+              message: getMessage(db, message.id) ?? message,
+              wake: { woke: true, command: `managed-steer:${managedBinding.instance_id}` },
+            };
+          }
+        } catch {
+          // fall through to normal queue delivery
+        }
+      }
+    }
+    if (deliveryMode === "interrupt" && executor) {
+      const status = executor.instanceStatus(managedBinding.instance_id);
+      if (status?.live && status.activeRun) {
+        try {
+          await executor.interrupt(managedBinding.instance_id, status.activeRun.turnId);
+        } catch {
+          // best-effort interrupt before enqueue
+        }
+      }
+    }
     try {
       await retryOnBusy(db, () => enqueueManagedTask(db, {
         messageId: message.id,
@@ -110,7 +174,7 @@ export async function completeAsk(
       logger.warn({ messageId: message.id }, "managed enqueue stayed locked — message accepted, retry delivery after claim expiry");
       return { message: getMessage(db, message.id) ?? message, wake: { woke: false, disposition: "queued", reason: "managed dispatch is locked; message accepted for delivery retry" } };
     }
-    getManagedExecutorForInstance(db, managedBinding.instance_id)?.kick(managedBinding.instance_id);
+    executor?.kick(managedBinding.instance_id);
     try {
     await retryOnBusy(db, () =>
       db
@@ -124,9 +188,13 @@ export async function completeAsk(
       if (!isLockError(error)) throw error;
       logger.warn({ messageId: message.id }, "managed delivery status stayed locked — task already accepted");
     }
+    const runtimeRow = db
+      .prepare(`SELECT runtime FROM runtime_instances WHERE id = ?`)
+      .get(managedBinding.instance_id) as { runtime?: string } | undefined;
+    const runtimeTag = runtimeRow?.runtime ?? "codex";
     return {
       message: getMessage(db, message.id) ?? message,
-      wake: { woke: true, command: `managed-codex:${managedBinding.instance_id}` },
+      wake: { woke: true, command: `managed-${runtimeTag}:${managedBinding.instance_id}` },
     };
   }
 
