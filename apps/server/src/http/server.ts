@@ -1,237 +1,70 @@
-import { APP_VERSION } from "../version.js";
-import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
-import swagger from "@fastify/swagger";
-import swaggerUi from "@fastify/swagger-ui";
+import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
-import { existsSync } from "fs";
-import { resolve } from "path";
+import swagger from "@fastify/swagger";
+import swaggerUi from "@fastify/swagger-ui";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 
+import { APP_VERSION } from "../version.js";
 import { resolveConfig, resolveHttpHost, resolveHttpPort, type Scope } from "../config.js";
 import { openDb, stopWalCheckpoint, type DB } from "../core/db.js";
-import {
-  registerSession,
-  heartbeat,
-  markStaleSessions,
-  pruneAbandonedSessions,
-  getSession,
-} from "../core/sessions.js";
-import { getContext } from "../core/context.js";
-import { getMessage } from "../core/messages.js";
-import { tickScheduledAgents } from "../core/runtime-agents.js";
-import {
-  probeRuntimePids,
-  reconcileRuntimeLiveness,
-  type RuntimePidSnapshot,
-} from "../core/liveness.js";
-import { expireMcpLeases } from "../core/mcp-liveness.js";
-import { refreshCodexSessionTitles } from "../core/codex-titles.js";
 import { logger } from "../log.js";
-import { WEB_CONSOLE_DESCRIPTION, WEB_CONSOLE_NAME } from "@conflux/shared";
-import { createServerContext, httpError, WEB_CONSOLE_ID } from "./context.js";
-import { registerSessionRoutes } from "./routes/sessions.js";
-import { registerContextRoutes } from "./routes/context.js";
-import { registerMessageRoutes } from "./routes/messages.js";
-import { registerAgentRoutes } from "./routes/agents.js";
-import { registerRuntimeRoutes } from "./routes/runtimes.js";
-import { registerSettingsRoutes } from "./routes/settings.js";
-import { registerSystemRoutes } from "./routes/system.js";
-import { registerWakeStreamRoutes } from "./routes/wake-stream.js";
-import { registerChatRoomRoutes } from "./routes/chat-rooms.js";
-import { registerManagedCodexRoutes } from "./routes/managed-codex.js";
-import { registerLiveEventsRoutes } from "./routes/live-events.js";
+import { createServerContext, httpError } from "./context.js";
+import { registerProjectRoutes } from "./routes/projects.js";
+import { registerThreadRoutes } from "./routes/threads.js";
+import { registerRoomAndMemoryRoutes } from "./routes/rooms.js";
 import { registerWorkflowRoutes } from "./routes/workflows.js";
-import { installManagedLiveEventBridge } from "../core/event-bus.js";
-import { installManagedOrchestrationHooks } from "../core/room-orchestrator.js";
+import { registerLiveEventsRoutes } from "./routes/live-events.js";
+import { installRoomOrchestrationHooks } from "../core/rooms.js";
+import { installWorkflowHooks } from "../core/workflows.js";
 import {
-  ManagedCodexManager,
-  getManagedCodexManager,
-  setManagedCodexManager,
-} from "../core/managed-codex/manager.js";
-import {
-  ManagedClaudeManager,
-  getManagedClaudeManager,
-  setManagedClaudeManager,
-} from "../core/managed-claude/manager.js";
-import {
-  ManagedAntigravityManager,
-  ManagedAcpManager,
-  getManagedAntigravityManager,
-  setManagedAntigravityManager,
-  getManagedAcpManager,
-  setManagedAcpManager,
-} from "../core/managed-acp/manager.js";
+  ThreadManager,
+  getThreadManager,
+  setThreadManager,
+  type ThreadManagerOptions,
+} from "../core/threads/executor.js";
 
 export interface HttpServerOptions {
   host?: string;
   port?: number;
   scope?: Scope;
   overrideDataDir?: string;
+  threadManagerOptions?: ThreadManagerOptions;
 }
-
-export type RuntimePidProbe = () => Promise<RuntimePidSnapshot | null>;
 
 const LOCAL_CORS_ORIGIN_RE = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i;
 
 export function isAllowedCorsOrigin(origin: string | undefined): boolean {
-  // Non-browser clients (CLI, MCP, Electron main, Node fetch) send no Origin.
   if (!origin) return true;
   return LOCAL_CORS_ORIGIN_RE.test(origin);
-}
-
-export function requestDurationMs(start: number, end: number): number {
-  return Math.max(0, Math.round((end - start) * 100) / 100);
-}
-
-export async function reconcileRuntimeState(
-  db: DB,
-  probe: RuntimePidProbe = probeRuntimePids,
-  now: Date = new Date(),
-): Promise<{ expired: number; refreshed: number; reaped: number }> {
-  const { expired } = expireMcpLeases(db, now);
-  const livePids = await probe();
-  if (!livePids) return { expired, refreshed: 0, reaped: 0 };
-  const { refreshed, reaped } = reconcileRuntimeLiveness(db, livePids, now);
-  return { expired, refreshed, reaped };
 }
 
 export async function startHttpServer(opts: HttpServerOptions = {}): Promise<FastifyInstance> {
   const config = resolveConfig(opts.scope ?? "global", opts.overrideDataDir);
   const db: DB = openDb(config);
-  // The HTTP server cannot afford sqlite's internal busy sleep: it parks
-  // the database thread and with it the whole event loop, so ONE
-  // lock-contended write froze /healthz (and tripped the desktop service
-  // watchdog) for the entire busy timeout. This connection instead fails
-  // fast and ServerContext.write drives the same total retry budget with
-  // the loop yielded between attempts. CLI/MCP connections keep the
-  // in-process blocking behavior — their event loops have nothing else to
-  // serve.
   db.pragma("busy_timeout = 50");
+
   const host = resolveHttpHost(opts.host);
   const port = resolveHttpPort(opts.port);
   const webDist = process.env.CONFLUX_WEB_DIST
     ? resolve(process.env.CONFLUX_WEB_DIST)
     : resolve(__dirname, "../../../web/dist");
 
-  // ---- Web console identity ----
-  // The browser UI acts as one fixed pseudo-session, so Drawer-originated
-  // asks have a stable FK target and appear in the graph as a single node.
-  registerSession(db, {
-    id: WEB_CONSOLE_ID,
-    name: WEB_CONSOLE_NAME,
-    description: WEB_CONSOLE_DESCRIPTION,
-  });
-  const consoleBeat = setInterval(() => {
-    try {
-      heartbeat(db, WEB_CONSOLE_ID);
-    } catch {
-      // transient sqlite lock — next tick retries
-    }
-  }, 30_000);
-  consoleBeat.unref();
+  const app = Fastify({ logger: false, bodyLimit: 2 * 1024 * 1024 });
 
-  // ---- zero-turn session reaper ----
-  // Sessions abandoned mid-startup (open claude → immediately /resume) and
-  // dead MCP temp placeholders go stale; sweep them out of the DB so the
-  // graph doesn't accumulate zombie nodes.
-  const sweepAbandoned = () => {
-    try {
-      markStaleSessions(db);
-      pruneAbandonedSessions(db);
-    } catch {
-      // transient sqlite lock — next tick retries
-    }
-  };
-  sweepAbandoned();
-  const abandonedSweep = setInterval(sweepAbandoned, 60_000);
-  abandonedSweep.unref();
+  const threadManager = new ThreadManager(db, opts.threadManagerOptions);
+  setThreadManager(threadManager);
+  threadManager.startQueuePolling();
+  installRoomOrchestrationHooks();
+  installWorkflowHooks();
 
-  // ---- scheduled runtime agents (patrol pattern) ----
-  // Every 30s: launch due, non-overlapping scheduled presets headless.
-  const scheduleTick = () => {
-    try {
-      tickScheduledAgents(db);
-    } catch {
-      // transient sqlite lock — next tick retries
-    }
-  };
-  const scheduleTimer = setInterval(scheduleTick, 30_000);
-  scheduleTimer.unref();
-
-  // ---- liveness probe (AgentRecall-style process scan) ----
-  // MCP lease sessions are governed by connection heartbeats and lease TTL;
-  // legacy rows without a lease are reconciled by runtime PID probing. If the
-  // probe fails, the legacy heartbeat TTL remains the fallback.
-  const livenessTick = async () => {
-    try {
-      await reconcileRuntimeState(db);
-      // covers codex rows whose MCP child died but whose process still runs
-      refreshCodexSessionTitles(db);
-    } catch {
-      // transient — next tick retries
-    }
-  };
-  const livenessTimer = setInterval(livenessTick, 30_000);
-  livenessTimer.unref();
-
-  const app = Fastify({
-    logger: false, // we use our own pino sink writing to stderr
-  });
-  const requestStarts = new WeakMap<FastifyRequest, number>();
-  app.addHook("onRequest", async (request) => {
-    requestStarts.set(request, performance.now());
-  });
-  app.addHook("onResponse", async (request, reply) => {
-    const started = requestStarts.get(request);
-    if (started === undefined) return;
-    logger.info(
-      {
-        method: request.method,
-        url: request.url,
-        statusCode: reply.statusCode,
-        durationMs: requestDurationMs(started, performance.now()),
-      },
-      "http request completed",
-    );
-  });
-
-  let managedManager: ManagedCodexManager | null = null;
-  let managedClaudeManager: ManagedClaudeManager | null = null;
-  let managedAntigravityManager: ManagedAntigravityManager | null = null;
-  let managedAcpManager: ManagedAcpManager | null = null;
+  let resourcesClosed = false;
   const closeResources = async () => {
-    clearInterval(consoleBeat);
-    clearInterval(abandonedSweep);
-    clearInterval(scheduleTimer);
-    clearInterval(livenessTimer);
-    if (managedManager) {
-      const manager = managedManager;
-      managedManager = null;
-      if (getManagedCodexManager() === manager) setManagedCodexManager(null);
-      manager.stopQueuePolling();
-      await manager.shutdown();
-    }
-    if (managedClaudeManager) {
-      const manager = managedClaudeManager;
-      managedClaudeManager = null;
-      if (getManagedClaudeManager() === manager) setManagedClaudeManager(null);
-      manager.stopQueuePolling();
-      await manager.shutdown();
-    }
-    if (managedAntigravityManager) {
-      const manager = managedAntigravityManager;
-      managedAntigravityManager = null;
-      if (getManagedAntigravityManager() === manager) setManagedAntigravityManager(null);
-      manager.stopQueuePolling();
-      await manager.shutdown();
-    }
-    if (managedAcpManager) {
-      const manager = managedAcpManager;
-      managedAcpManager = null;
-      if (getManagedAcpManager() === manager) setManagedAcpManager(null);
-      manager.stopQueuePolling();
-      await manager.shutdown();
-    }
+    if (resourcesClosed) return;
+    resourcesClosed = true;
+    if (getThreadManager() === threadManager) setThreadManager(null);
+    await threadManager.shutdown();
     stopWalCheckpoint(db);
     if (db.open) db.close();
   };
@@ -242,34 +75,27 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   await app.register(swagger, {
     openapi: {
       info: {
-        title: "Conflux",
+        title: "Conflux v2",
         version: APP_VERSION,
-        description: "Cross-session context query and async messaging for AI coding assistants.",
+        description: "Project-first multi-agent workbench & orchestration control plane.",
       },
     },
   });
-  await app.register(swaggerUi, {
-    routePrefix: "/docs",
-  });
+  await app.register(swaggerUi, { routePrefix: "/docs" });
 
-  // CORS — allow only loopback origins (Vite dev server / local Electron / browser)
-  // so arbitrary external web pages cannot call the local daemon.
   await app.register(cors, {
     origin: (origin, cb) => cb(null, isAllowedCorsOrigin(origin)),
   });
 
-  // Serve the built frontend when either the packaged or repository path exists.
   if (existsSync(webDist)) {
     await app.register(fastifyStatic, {
       root: webDist,
       prefix: "/",
       decorateReply: false,
     });
-    logger.info({ webDist }, "serving frontend static files");
   }
 
   const ctx = createServerContext(db, { dataDir: config.dataDir, port });
-
   app.setNotFoundHandler((req, reply) =>
     ctx.sendError(reply, httpError(404, `route not found: ${req.method} ${req.url}`)),
   );
@@ -278,41 +104,11 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
     return ctx.sendError(reply, err);
   });
 
-  registerSessionRoutes(app, ctx);
-  registerContextRoutes(app, ctx);
-  registerMessageRoutes(app, ctx);
-  registerAgentRoutes(app, ctx);
-  registerRuntimeRoutes(app, ctx);
-  registerSettingsRoutes(app, ctx);
-  registerSystemRoutes(app, ctx);
-
-  registerWakeStreamRoutes(app, ctx);
-
-  registerChatRoomRoutes(app, ctx);
-  registerLiveEventsRoutes(app);
+  registerProjectRoutes(app, ctx);
+  registerThreadRoutes(app, ctx);
+  registerRoomAndMemoryRoutes(app, ctx);
   registerWorkflowRoutes(app, ctx);
-  installManagedLiveEventBridge();
-  installManagedOrchestrationHooks();
-
-  // The managed Codex executor lives for the lifetime of this server: one
-  // manager instance owns every app-server child, and shutdown (below)
-  // reconciles them — in-flight runs go unknown for explicit review, never
-  // silently re-run. The queue poll drains tasks enqueued by OTHER
-  // processes (MCP children, CLI one-shots) against this server's live
-  // executors, and heartbeats their sessions.
-  managedManager = new ManagedCodexManager(db);
-  setManagedCodexManager(managedManager);
-  managedManager.startQueuePolling();
-  managedClaudeManager = new ManagedClaudeManager(db);
-  setManagedClaudeManager(managedClaudeManager);
-  managedClaudeManager.startQueuePolling();
-  managedAntigravityManager = new ManagedAntigravityManager(db);
-  setManagedAntigravityManager(managedAntigravityManager);
-  managedAntigravityManager.startQueuePolling();
-  managedAcpManager = new ManagedAcpManager(db);
-  setManagedAcpManager(managedAcpManager);
-  managedAcpManager.startQueuePolling();
-  registerManagedCodexRoutes(app, ctx);
+  registerLiveEventsRoutes(app);
 
   try {
     await app.listen({ host, port });
@@ -320,10 +116,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
     await closeResources();
     throw err;
   }
-  logger.info({ webDist, host, port, dataDir: config.dataDir }, "http server listening");
 
+  logger.info({ webDist, host, port, dbPath: config.dbPath }, "conflux v2 http server listening");
   return app;
 }
-
-// Re-export for completeness.
-export { getContext, getMessage, getSession };

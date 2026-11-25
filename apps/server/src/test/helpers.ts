@@ -1,26 +1,26 @@
-import { mkdtempSync, rmSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
-import { openDb, type DB } from "../core/db.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { openDb, stopWalCheckpoint, type DB } from "../core/db.js";
 
 /**
- * Fresh isolated database per test file. Each file runs in its own process
- * (node:test), so no cross-contamination. Cleanup closes the handle and
- * removes the temp dir (WAL files included) via fs, not shell.
+ * Fresh isolated v2 database (`conflux-v2.db`) per test file.
  */
-export function makeDb(): { db: DB; cleanup: () => void } {
-  const dir = mkdtempSync(join(tmpdir(), "muiltchat-test-"));
+export function makeDb(): { db: DB; dataDir: string; cleanup: () => void } {
+  const dir = mkdtempSync(join(tmpdir(), "conflux-v2-test-"));
   const db = openDb({
     dataDir: dir,
-    dbPath: join(dir, "data.db"),
+    dbPath: join(dir, "conflux-v2.db"),
     scope: "global",
   });
   return {
     db,
+    dataDir: dir,
     cleanup: () => {
       try {
-        db.close();
-        rmSync(dir, { recursive: true, force: true });
+        stopWalCheckpoint(db);
+        if (db.open) db.close();
+        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
       } catch {
         // Windows WAL locks can linger briefly; temp dir is disposable.
       }

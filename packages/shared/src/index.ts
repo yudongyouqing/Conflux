@@ -1,123 +1,56 @@
 /**
- * Shared types for Conflux — the single source of truth.
+ * Shared TypeScript contracts for Conflux v2 (Project -> Agent Thread architecture).
  *
- * Consumed by apps/server (core modules, type-only imports) and apps/web.
- * When the backend changes a response field, the frontend compile breaks
- * here instead of silently drifting.
+ * Single source of truth consumed by apps/server, apps/web, and MCP/CLI surfaces.
  */
 
-export type SessionStatus = "active" | "stale" | "ended";
+export const WEB_CONSOLE_ID = "web-console";
+export const WEB_CONSOLE_NAME = "Web 控制台";
+export const WEB_CONSOLE_DESCRIPTION = "Conflux 桌面 / Web 控制台";
 
-/**
- * Ask priority, three tiers: P0 critical (main dev line) … P2 background.
- * Asks flow high→low only — a lower-priority session asking a higher one is
- * rejected. Human asks from the web console are exempt.
- */
-export type SessionPriority = "P0" | "P1" | "P2";
-export const DEFAULT_SESSION_PRIORITY: SessionPriority = "P1";
+export type RuntimeId = "claude" | "codex" | "antigravity" | "acp";
 
-export type NodeType = "session" | "agent";
+export type ThreadKind = "managed" | "external";
 
-export type SessionRuntime = "claude" | "codex" | "antigravity" | "acp" | "internal" | "web";
+export type ThreadState = "idle" | "running" | "waiting_approval" | "stopped" | "error";
 
-export type IdentitySource = "hook" | "mcp" | "http" | "cli" | "internal";
+export type ApprovalMode = "ask" | "auto";
 
-/**
- * Message lifecycle: pending (unseen by addressee) -> seen (read but not
- * yet answered) -> replied (answer written) -> read (asker consumed the
- * reply). "seen" distinguishes "looked at, still composing" from "never
- * opened".
- */
+export type ManagedDeliveryMode = "queue" | "steer" | "interrupt";
+
+export type ManagedApprovalKind = "commandExecution" | "fileChange" | "userInput" | "toolCall";
+
+export type ApprovalDecision = "accept" | "decline" | "cancel";
+
+export type ApprovalState = "pending" | "resolved" | "auto_approved" | "expired";
+
+export type ThreadRunState =
+  | "queued"
+  | "submitting"
+  | "running"
+  | "waiting_approval"
+  | "completed"
+  | "failed"
+  | "interrupted"
+  | "unknown";
+
+export type ThreadEventType =
+  | "user"
+  | "text"
+  | "thinking"
+  | "tool"
+  | "approval"
+  | "status"
+  | "error";
+
+export type ContextKind = "note" | "decision" | "artifact" | "summary" | "handoff";
+
 export type MessageStatus = "pending" | "seen" | "replied" | "read";
 
-export interface MessageDelivery {
-  state: "queued" | "woken" | "failed";
-  attempts: number;
-  last_attempted_at: string;
-  reason: string | null;
-}
-
-export interface RuntimeInstance {
-  id: string;
-  preset_id: number;
-  preset_name: string;
-  runtime: RuntimeId;
-  workdir: string | null;
-  session_id: string | null;
-  runtime_pid: number | null;
-  state: "starting" | "running" | "ended" | "stale" | "failed";
-  created_at: string;
-  updated_at: string;
-  ended_at: string | null;
-  resumed_from: string | null;
-  /** Set when a stop was requested but the process exit is not yet verified. */
-  stop_requested_at: string | null;
-  can_stop: boolean;
-  can_resume: boolean;
-  limitation: string | null;
-  last_seen: string | null;
-  error: string | null;
-}
-
-export interface Session {
-  id: string;
-  name: string;
-  description: string | null;
-  project_dir: string | null;
-  status: SessionStatus;
-  created_at: string;
-  last_heartbeat_at: string;
-  metadata: string | null;
-  runtime: SessionRuntime | null;
-  identity_source: IdentitySource | null;
-  runtime_pid: number | null;
-  chat_room_id?: number | null;
-  /** Derived from metadata.priority; P1 when unset. */
-  priority?: SessionPriority;
-}
-
-export interface SessionSummary extends Session {
-  context_count: number;
-  pending_inbox: number;
-  /** Derived: a turn is in progress (hook event pair for Claude, rollout mtime freshness for Codex). */
-  busy?: boolean;
-}
-
-export type ContextKind = "note" | "decision" | "artifact" | "handoff";
-
-export interface ContextEntry {
-  id: number;
-  session_id: string;
-  title: string;
-  content: string;
-  tags: string[] | null;
-  room_id?: number | null;
-  kind?: ContextKind;
-  pinned?: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export type LiveEventType =
-  | "managed.event"
-  | "session.updated"
-  | "room.message"
-  | "room.task"
-  | "workflow.updated"
-  | "context.updated";
-
-export interface LiveEventEnvelope {
-  id: number;
-  type: LiveEventType;
-  room_id?: number | null;
-  session_id?: string | null;
-  instance_id?: string | null;
-  workflow_run_id?: number | null;
-  payload: Record<string, unknown>;
-  created_at: string;
-}
+export type RoomTaskStatus = "pending" | "running" | "done" | "failed";
 
 export type WorkflowStepKind = "agent" | "human_gate";
+
 export type WorkflowRunStatus =
   | "pending"
   | "running"
@@ -125,6 +58,7 @@ export type WorkflowRunStatus =
   | "completed"
   | "failed"
   | "cancelled";
+
 export type WorkflowStepStatus =
   | "pending"
   | "ready"
@@ -134,12 +68,260 @@ export type WorkflowStepStatus =
   | "failed"
   | "skipped";
 
+export type LiveEventType =
+  | "project.updated"
+  | "thread.updated"
+  | "thread.event"
+  | "approval.updated"
+  | "room.message"
+  | "room.task"
+  | "workflow.updated"
+  | "context.updated"
+  | "git.dirty";
+
+export interface Project {
+  id: number;
+  name: string;
+  root_path: string;
+  default_branch: string | null;
+  is_git_repo: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectFileMatch {
+  path: string;
+  name: string;
+}
+
+export interface AgentThread {
+  id: string;
+  project_id: number | null;
+  name: string;
+  kind: ThreadKind;
+  runtime: RuntimeId;
+  state: ThreadState;
+  approval_mode: ApprovalMode;
+  workdir: string;
+  worktree_path: string | null;
+  worktree_branch: string | null;
+  base_branch: string | null;
+  pr_url?: string | null;
+  model: string | null;
+  instructions: string | null;
+  extra_env: string | null;
+  provider_thread_id: string | null;
+  active_turn_id: string | null;
+  pid: number | null;
+  parent_thread_id: string | null;
+  last_synced_context_id: number;
+  last_seen_at: string;
+  created_at: string;
+  updated_at: string;
+  /** Derived runtime metadata populated by list/detail queries. */
+  live?: boolean;
+  supports_steer?: boolean;
+  pending_approvals?: number;
+  project_name?: string | null;
+  room_ids?: number[];
+}
+
+export interface AgentTemplate {
+  id: number;
+  name: string;
+  runtime: RuntimeId;
+  model: string | null;
+  instructions: string | null;
+  extra_env: string | null;
+  approval_mode: ApprovalMode;
+  use_worktree: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ThreadRun {
+  id: number;
+  thread_id: string;
+  message_id: number | null;
+  room_id: number | null;
+  prompt: string;
+  state: ThreadRunState;
+  turn_id: string | null;
+  final_text: string | null;
+  error_code: string | null;
+  checkpoint_id: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ThreadEvent {
+  seq: number;
+  thread_id: string;
+  run_id: number | null;
+  type: ThreadEventType;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ThreadApproval {
+  id: number;
+  thread_id: string;
+  run_id: number;
+  kind: ManagedApprovalKind;
+  payload: Record<string, unknown>;
+  state: ApprovalState;
+  decision: ApprovalDecision | null;
+  response_json: string | null;
+  created_at: string;
+  resolved_at: string | null;
+  thread_name?: string;
+  runtime?: RuntimeId;
+  project_id?: number | null;
+  room_id?: number | null;
+}
+
+export interface ThreadCheckpoint {
+  id: number;
+  thread_id: string;
+  run_id: number | null;
+  ref_name: string;
+  tree_sha: string;
+  commit_sha: string;
+  summary: string | null;
+  created_at: string;
+}
+
+export interface ThreadDetailResponse {
+  thread: AgentThread;
+  runs: ThreadRun[];
+  pending_approvals: ThreadApproval[];
+  checkpoints: ThreadCheckpoint[];
+  queued_run_ids: number[];
+}
+
+export interface GitFileChange {
+  path: string;
+  status: "modified" | "added" | "deleted" | "renamed" | "untracked" | "conflicted";
+  staged: boolean;
+  additions?: number;
+  deletions?: number;
+}
+
+export interface GitStatusResponse {
+  is_git_repo: boolean;
+  branch: string | null;
+  base_branch: string | null;
+  worktree_path: string | null;
+  dirty: boolean;
+  files: GitFileChange[];
+  ahead?: number;
+  behind?: number;
+  gh_available?: boolean;
+}
+
+export interface GitDiffResponse {
+  path: string | null;
+  diff: string;
+  truncated: boolean;
+}
+
+export interface GitMergeResult {
+  ok: boolean;
+  merged_branch: string;
+  target_branch: string;
+  conflicts?: string[];
+  message: string;
+}
+
+export interface GitCreatePrResult {
+  ok: boolean;
+  branch: string;
+  base_branch: string;
+  pr_url: string | null;
+  existing?: boolean;
+  message: string;
+}
+
+export interface CliProbeEntry {
+  runtime: RuntimeId;
+  label: string;
+  executable: string;
+  available: boolean;
+  resolved_path: string | null;
+  version: string | null;
+  models: string[];
+  supports_steer: boolean;
+}
+
+export interface RuntimeSettings {
+  claude_path: string;
+  codex_path: string;
+  antigravity_path: string;
+  acp_path: string;
+  max_autonomous_hops: number;
+  pair_cooldown_ms: number;
+}
+
+export interface Room {
+  id: number;
+  project_id: number | null;
+  name: string;
+  description: string | null;
+  members: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoomTask {
+  id: number;
+  room_id: number;
+  initiator_thread_id: string;
+  executor_thread_id: string;
+  prompt: string;
+  status: RoomTaskStatus;
+  summary: string | null;
+  message_id: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Message {
+  id: number;
+  edge_id: number | null;
+  from_session: string;
+  to_session: string;
+  from_name?: string;
+  to_name?: string;
+  question: string;
+  reply: string | null;
+  status: MessageStatus;
+  room_id: number | null;
+  hop_count: number;
+  created_at: string;
+  replied_at: string | null;
+}
+
+export interface ContextEntry {
+  id: number;
+  thread_id: string;
+  project_id: number | null;
+  room_id: number | null;
+  kind: ContextKind;
+  pinned: boolean;
+  title: string;
+  content: string;
+  tags: string[] | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface WorkflowStepDefinition {
   key: string;
   title: string;
   kind: WorkflowStepKind;
   depends_on: string[];
-  target_session_id?: string | null;
+  target_thread_id?: string | null;
   prompt_template: string;
   include_handoff?: boolean;
 }
@@ -148,6 +330,7 @@ export interface WorkflowDefinition {
   id: number;
   name: string;
   description: string | null;
+  project_id: number | null;
   room_id: number | null;
   steps: WorkflowStepDefinition[];
   created_at: string;
@@ -161,7 +344,7 @@ export interface WorkflowStepState {
   title: string;
   kind: WorkflowStepKind;
   depends_on: string[];
-  target_session_id: string | null;
+  target_thread_id: string | null;
   prompt_template: string;
   include_handoff: boolean;
   status: WorkflowStepStatus;
@@ -176,6 +359,7 @@ export interface WorkflowRun {
   id: number;
   workflow_id: number;
   workflow_name?: string;
+  project_id: number | null;
   room_id: number | null;
   status: WorkflowRunStatus;
   input: string | null;
@@ -194,202 +378,35 @@ export interface HandoffResult {
   summary_chars: number;
 }
 
-export interface ModelConfig {
-  provider: string; // "anthropic" | "openai" | ...
-  model: string; // e.g. "claude-sonnet-4-20250514"
-  temperature?: number;
-  max_tokens?: number;
-}
-
-export interface Agent {
-  id: number;
-  name: string;
-  system_prompt: string;
-  model_config: ModelConfig;
-  description: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export type RuntimeId = "claude" | "codex" | "antigravity" | "acp";
-
-/** How a runtime preset executes: external terminal window vs a Conflux-held
- *  managed child process (codex / claude / antigravity / acp). */
-export type RuntimeExecutionMode = "terminal" | "managed";
-
-/** How a follow-up prompt is delivered to a busy managed session. */
-export type ManagedDeliveryMode = "queue" | "steer" | "interrupt";
-
-/** Canonical human-decision request categories surfaced from managed runtimes. */
-export type ManagedApprovalKind = "commandExecution" | "fileChange" | "userInput" | "toolCall";
-
-/** Lifecycle of one managed task execution (Conflux-side vocabulary). */
-export type ManagedRunState =
-  | "queued"
-  | "submitting"
-  | "running"
-  | "waiting_approval"
-  | "completed"
-  | "failed"
-  | "interrupted"
-  | "unknown";
-
-/** Normalized replayable event for the managed executor UI (SSE payload). */
-export interface ManagedEventPayload {
-  sequence: number;
-  run_id: number | null;
-  type: "text" | "tool" | "approval" | "status" | "error";
-  payload: Record<string, unknown>;
-  created_at: string;
-}
-
-/** One pending or resolved approval as shown to the human. */
-export interface ManagedApprovalView {
-  id: number;
-  kind: string;
-  payload: Record<string, unknown>;
-}
-
-/** GET /runtime-instances/:id/managed response shape. */
-export interface ManagedStatusResponse {
-  binding:
-    | { instance_id: string; session_id: string; thread_id: string; active_turn_id: string | null }
-    | null;
-  current: {
-    /** False when this server process does not hold the instance (stopped,
-     *  crashed, restarted elsewhere): history and queue are still served,
-     *  live control (interrupt/approvals) is not. */
-    live: boolean;
-    runtime?: string;
-    supportsSteer?: boolean;
-    threadId: string;
-    activeRun: { runId: number; turnId: string; state: ManagedRunState } | null;
-    queuedRunIds: number[];
-    pendingApprovals: ManagedApprovalView[];
-  };
-  runs: Array<{
-    id: number;
-    message_id: number;
-    state: ManagedRunState;
-    turn_id: string | null;
-    final_text: string | null;
-    error_code: string | null;
-    created_at: string;
-    updated_at: string;
-  }>;
-}
-
-/** How Conflux opens a new terminal window (AgentRecall-style choice). */
-export type TerminalChoice =
-  | "wt"
-  | "powershell"
-  | "cmd"
-  | "wezterm"
-  /** macOS Terminal.app */
-  | "terminal"
-  /** macOS iTerm2 */
-  | "iterm"
-  /** tmux window in the tmux server (attach from any terminal) */
-  | "tmux";
-
-export interface TerminalSettings {
-  /** Terminal opener. wt falls back to cmd when wt.exe is missing. */
-  terminal: TerminalChoice;
-  /** Claude Code executable override (default "claude"). */
-  claude_path: string;
-  /** Codex executable override (default "codex"). */
-  codex_path: string;
-}
-
-/** One dropdown entry in the settings UI, with live availability. */
-export interface TerminalOption {
-  value: TerminalChoice;
-  label: string;
-  hint: string;
-  /** Whether any of the opener's executables was found on PATH. */
-  available: boolean;
-}
-
-/**
- * User-configured runtime agent: a preset for spawning a real CLI agent
- * (Claude Code / Codex) with a fixed working directory and API channel.
- * AgentRecall-inspired: runtime + channel (API config) + instructions.
- */
-export interface RuntimeAgent {
-  id: number;
-  name: string;
-  runtime: string;
-  workdir: string | null;
-  model: string | null;
-  base_url: string | null;
-  api_key: string | null;
-  /** Derived on HTTP responses so credentials are never echoed in plaintext. */
-  api_key_configured?: boolean;
-  /** JSON object string of extra environment variables. */
-  extra_env: string | null;
-  instructions: string | null;
-  /** Scheduled wake-up interval in minutes; null/0 = manual start only. */
-  interval_min: number | null;
-  /** ISO timestamp of the last scheduled headless run. */
-  last_scheduled_run: string | null;
-  /**
-   * Execution mode: "terminal" opens a window and injects prompts (default,
-   * and the only mode before this field existed); "managed" runs a
-   * Conflux-held app-server child. Managed is codex-only.
-   */
-  execution_mode: RuntimeExecutionMode;
-  /** Derived: does any spawned session of this preset have a fresh heartbeat? */
-  live?: boolean;
-  /** Derived: newest heartbeat across this preset's sessions (ISO). */
-  last_seen?: string | null;
-  created_at: string;
-  updated_at: string;
+export interface ForkHandoffResult {
+  source_thread: AgentThread;
+  target_thread: AgentThread;
+  context_entry: ContextEntry;
+  run: ThreadRun | null;
+  summary_chars: number;
 }
 
 export interface GraphNode {
   id: string;
   name: string;
-  status: SessionStatus;
-  type: NodeType;
+  kind: ThreadKind | "console";
+  runtime: RuntimeId | "web";
+  state: ThreadState;
+  project_id: number | null;
+  project_name: string | null;
+  workdir: string | null;
+  worktree_branch: string | null;
+  pending_approvals: number;
   context_count: number;
-  pending_inbox: number;
-  conversation_count?: number;
-  description?: string | null;
-  /** Working directory of the session (external sessions only). */
-  project_dir?: string | null;
-  /** ISO timestamp of the last heartbeat (external sessions only). */
-  last_heartbeat_at?: string;
-  /** Runtime-agent definition this session was spawned from (if any). */
-  agent_id?: number | null;
-  /** Session runtime identifier, e.g. "claude" | "codex" | "internal" | "web". */
-  runtime?: SessionRuntime | null;
-  /** Source that established the session identity. */
-  identity_source?: IdentitySource | null;
-  /** PID of the owning CLI runtime, when known. */
-  runtime_pid?: number | null;
-  /** Derived: a turn is in progress (hook event pair for Claude, rollout mtime freshness for Codex). */
-  busy?: boolean;
-  /** Agent Card: capability self-description (register_session skills). */
-  skills?: string[];
-  /** Owning chat room; null = free-floating */
-  chat_room_id?: number | null;
-  /** Ask priority (metadata.priority; P1 default). */
-  priority?: SessionPriority;
+  room_ids: number[];
 }
 
-/**
- * Edge = a directed conversation CHANNEL: `from` initiated it and speaks,
- * `to` answers. Replies stay on the same channel (no reverse edge).
- */
 export interface GraphEdge {
-  /** Channel id (edges.rowid). */
   id: number;
   from: string;
   to: string;
-  /** Number of exchanges (asks) on this channel. */
   weight: number;
   last_interact_at: string;
-  /** Latest question on this channel; "↩ ..." when the channel only ever carried a reply. */
   last_message?: string | null;
 }
 
@@ -398,114 +415,22 @@ export interface Graph {
   edges: GraphEdge[];
 }
 
-export interface Message {
-  /** Wake attempts are independent of the read/reply lifecycle. Absent for legacy imports. */
-  delivery?: MessageDelivery;
+export interface LiveEventEnvelope {
   id: number;
-  /** The conversation channel (edge) this exchange belongs to. */
-  edge_id?: number | null;
-  from_session: string;
-  to_session: string;
-  question: string;
-  reply: string | null;
-  status: MessageStatus;
-  created_at: string;
-  replied_at: string | null;
-  /** When the asker's CLI was last pushed this reply via hooks. */
-  reply_seen_at?: string | null;
-  /** Chat room shared thread. */
+  type: LiveEventType;
+  project_id?: number | null;
+  thread_id?: string | null;
   room_id?: number | null;
-}
-
-export interface Conversation {
-  id: number;
-  agent_id: number;
-  initiated_by: string | null;
-  title: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface Turn {
-  id: number;
-  conversation_id: number;
-  role: "user" | "assistant" | "system";
-  content: string;
+  workflow_run_id?: number | null;
+  payload: Record<string, unknown>;
   created_at: string;
 }
 
-export type DataBundleScope = "global" | "project";
-
-/** Runtime preset shape used by portable exports; secrets never leave the database. */
-export interface ExportedRuntimeAgent extends Omit<RuntimeAgent, "api_key" | "live" | "last_seen"> {
-  api_key_configured: boolean;
-}
-
-export interface ConfluxDataBundle {
-  format: "conflux-data";
-  version: 1;
-  exported_at: string;
-  scope: DataBundleScope;
-  sessions: Session[];
-  context_entries: ContextEntry[];
-  messages: Message[];
-  edges: GraphEdge[];
-  agents: Agent[];
-  conversations: Conversation[];
-  turns: Turn[];
-  runtime_agents: ExportedRuntimeAgent[];
-}
-
-/**
- * Well-known session identities shared by the server (which registers them)
- * and the web app (which styles/filters them). String literals must never
- * drift between the two sides.
- */
-export const WEB_CONSOLE_ID = "web-console";
-export const WEB_CONSOLE_NAME = "Web 控制台";
-
-/**
- * Boilerplate descriptions the server writes for sessions that have no
- * user-facing name yet. Writers reference the named constants; consumers
- * (SQL filters, card renderers) match against PLACEHOLDER_DESCRIPTIONS.
- */
-export const HOOK_SESSION_DESCRIPTION = "Claude Code session (hook)";
-export const AUTO_REGISTERED_DESCRIPTION = "Claude Code session (auto-registered)";
-export const CODEX_AUTO_REGISTERED_DESCRIPTION = "Codex session (auto-registered)";
-export const WEB_CONSOLE_DESCRIPTION = "浏览器界面身份(从会话详情抽屉发起的对话)";
-
-export const PLACEHOLDER_DESCRIPTIONS = [
-  HOOK_SESSION_DESCRIPTION,
-  AUTO_REGISTERED_DESCRIPTION,
-  CODEX_AUTO_REGISTERED_DESCRIPTION,
-  WEB_CONSOLE_DESCRIPTION,
-] as const;
-
-// ---- Chat Rooms: structured collaboration scopes ----
-
-export interface ChatRoom {
-  id: number;
-  name: string;
-  description: string | null;
-  members: string[];
-  created_at: string;
-  updated_at: string;
-}
-
-export interface CliBinaryStatus {
-  runtime: RuntimeId;
-  label: string;
-  configured: string;
-  resolved_path: string | null;
-  available: boolean;
-}
-
-export interface NativeCliProviderState {
-  runtime: RuntimeId;
-  config_path: string;
-  exists: boolean;
-  base_url: string | null;
-  model: string | null;
-  api_key_configured: boolean;
-  env_keys: string[];
+export interface WorkspaceTreeResponse {
+  projects: Project[];
+  threads: AgentThread[];
+  rooms: Room[];
+  workflows: WorkflowDefinition[];
+  pending_approvals: ThreadApproval[];
+  cli_probes: CliProbeEntry[];
 }

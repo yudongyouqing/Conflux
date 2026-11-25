@@ -1,4 +1,4 @@
-import type { ManagedCodexEvent } from "./types.js";
+import type { ManagedEventType } from "../managed/adapter.js";
 
 /**
  * Normalize official app-server notifications into Conflux's replayable
@@ -11,7 +11,7 @@ import type { ManagedCodexEvent } from "./types.js";
  * would duplicate it).
  */
 
-type EventBody = Pick<ManagedCodexEvent, "type" | "payload">;
+type EventBody = { type: ManagedEventType; payload: Record<string, unknown> };
 
 /** Return the normalized event for a notification, or null to ignore. */
 export function normalizeNotification(method: string, params: unknown): EventBody | null {

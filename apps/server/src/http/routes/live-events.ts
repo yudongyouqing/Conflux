@@ -6,17 +6,16 @@ import {
 } from "../../core/event-bus.js";
 
 /**
- * Global / scoped SSE live event stream (`/live/events`). Replays buffered
- * events strictly after `?after=<id>` or `Last-Event-ID`, then streams live
- * events across managed executors, rooms, shared memory, and workflow DAGs.
+ * Unified SSE live event stream (`/live/events`) with Last-Event-ID replay and
+ * immediate header flush so browsers and fetch clients connect without stalling.
  */
 export function registerLiveEventsRoutes(app: FastifyInstance): void {
   app.get<{
     Querystring: {
       after?: string;
+      project_id?: string;
+      thread_id?: string;
       room_id?: string;
-      session_id?: string;
-      instance_id?: string;
       workflow_run_id?: string;
     };
   }>("/live/events", {}, async (req, reply) => {
@@ -26,11 +25,13 @@ export function registerLiveEventsRoutes(app: FastifyInstance): void {
     const after = Number.isFinite(parsedAfter) && parsedAfter > 0 ? parsedAfter : 0;
 
     const filter: LiveEventFilter = {};
+    if (req.query.project_id && Number.isFinite(Number(req.query.project_id))) {
+      filter.project_id = Number(req.query.project_id);
+    }
+    if (req.query.thread_id) filter.thread_id = req.query.thread_id;
     if (req.query.room_id && Number.isFinite(Number(req.query.room_id))) {
       filter.room_id = Number(req.query.room_id);
     }
-    if (req.query.session_id) filter.session_id = req.query.session_id;
-    if (req.query.instance_id) filter.instance_id = req.query.instance_id;
     if (req.query.workflow_run_id && Number.isFinite(Number(req.query.workflow_run_id))) {
       filter.workflow_run_id = Number(req.query.workflow_run_id);
     }

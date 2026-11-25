@@ -275,6 +275,14 @@ export class AcpStreamConnection implements ManagedConnection {
       return { accepted: true };
     }
 
+    if (method === "acp/set_model") {
+      const sid = (typeof p.sessionId === "string" && p.sessionId) || this.sessionId;
+      const model = typeof p.model === "string" ? p.model.trim() : "";
+      if (!sid || !model) return { ok: false };
+      const ok = await this.trySetSessionModel(sid, model);
+      return { ok };
+    }
+
     if (method === "acp/turn_cancel") {
       const sid = (typeof p.sessionId === "string" && p.sessionId) || this.sessionId;
       if (!sid) return { ok: true };
@@ -345,18 +353,20 @@ export class AcpStreamConnection implements ManagedConnection {
     this.rpc.close(error);
   }
 
-  private async trySetSessionModel(sessionId: string, model: string): Promise<void> {
+  private async trySetSessionModel(sessionId: string, model: string): Promise<boolean> {
     try {
       await this.rpc.request("session/set_config_option", {
         sessionId,
         configId: "model",
         value: model,
       });
+      return true;
     } catch {
       try {
         await this.rpc.request("session/set_model", { sessionId, modelId: model });
+        return true;
       } catch {
-        // Model override is best-effort when the ACP agent uses default selection.
+        return false;
       }
     }
   }

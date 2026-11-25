@@ -1,189 +1,63 @@
+import { WEB_CONSOLE_ID, WEB_CONSOLE_NAME, type Graph, type GraphEdge, type GraphNode } from "@conflux/shared";
 import type { DB } from "./db.js";
-import { nowIso } from "./db.js";
-import { markStaleSessions } from "./sessions.js";
-import type { Graph, GraphEdge, GraphNode, NodeType } from "@conflux/shared";
-import {
-  parseIdentitySource,
-  parseRuntimePid,
-  parseSessionPriority,
-  parseSessionRuntime,
-} from "./session-identity.js";
+import { listThreads } from "./threads/store.js";
 
-export type { Graph, GraphEdge, GraphNode, NodeType };
+export function buildGraph(db: DB): Graph {
+  const threads = listThreads(db);
+  const ctxCounts = new Map<string, number>();
+  for (const row of db
+    .prepare(`SELECT thread_id, COUNT(*) AS n FROM context_entries GROUP BY thread_id`)
+    .all() as Array<{ thread_id: string; n: number }>) {
+    ctxCounts.set(row.thread_id, row.n);
+  }
 
-/**
- * Upsert the directed conversation channel (edge) and return its id.
- * Called from askSession only — a reply stays ON the channel it answers
- * (no reverse edge; the channel's last_interact_at is touched instead).
- */
-export function recordEdge(db: DB, from: string, to: string): number {
-  const now = nowIso();
-  db.prepare(
-    `INSERT INTO edges (from_session, to_session, weight, last_interact_at)
-     VALUES (?, ?, 1, ?)
-     ON CONFLICT(from_session, to_session) DO UPDATE SET
-       weight = edges.weight + 1,
-       last_interact_at = excluded.last_interact_at`,
-  ).run(from, to, now);
-  const row = db
-    .prepare(`SELECT rowid AS id FROM edges WHERE from_session = ? AND to_session = ?`)
-    .get(from, to) as { id: number };
-  return row.id;
-}
+  const nodes: GraphNode[] = threads.map((t) => ({
+    id: t.id,
+    name: t.name,
+    kind: t.kind,
+    runtime: t.runtime,
+    state: t.state,
+    project_id: t.project_id,
+    project_name: t.project_name ?? null,
+    workdir: t.workdir,
+    worktree_branch: t.worktree_branch,
+    pending_approvals: t.pending_approvals ?? 0,
+    context_count: ctxCounts.get(t.id) ?? 0,
+    room_ids: t.room_ids ?? [],
+  }));
 
-/** Touch a channel's activity timestamp without creating traffic (replies). */
-export function touchEdge(db: DB, edgeId: number): void {
-  db.prepare(`UPDATE edges SET last_interact_at = ? WHERE rowid = ?`).run(nowIso(), edgeId);
-}
-
-/**
- * Return the full graph: nodes (sessions) + edges (communication links).
- * Stale sessions are lazily marked before querying.
- */
-export function getGraph(
-  db: DB,
-  opts: { status?: "active" | "stale" | "ended" | "all" } = {},
-): Graph {
-  markStaleSessions(db);
-  const status = opts.status ?? "active";
-  // Active MCP placeholders represent live Codex/Claude sessions. Hide only
-  // stale or ended placeholders, which are UUID noise after their process exits.
-  const tempVisibility = `(COALESCE(s.metadata, '') NOT LIKE '%"temp":true%' OR s.status = 'active')`;
-  const where =
-    status === "all"
-      ? `WHERE s.id NOT LIKE 'agent-%' AND ${tempVisibility}`
-      : `WHERE s.status = ? AND s.id NOT LIKE 'agent-%' AND ${tempVisibility}`;
-  const params: string[] = status === "all" ? [] : [status];
-
-  const nodes = db
+  const rawEdges = db
     .prepare(
-      `SELECT s.id, s.name, s.description, s.project_dir, s.status, s.last_heartbeat_at,
-         s.metadata, s.runtime, s.identity_source, s.runtime_pid, s.chat_room_id,
-         (SELECT COUNT(*) FROM context_entries c WHERE c.session_id = s.id) AS context_count,
-         (SELECT COUNT(*) FROM messages m WHERE m.to_session = s.id AND m.status IN ('pending','seen')) AS pending_inbox
-       FROM sessions s
-       ${where}
-       ORDER BY s.last_heartbeat_at DESC`,
-    )
-    .all(...params) as (Omit<GraphNode, "type" | "agent_id" | "skills"> & {
-    metadata: string | null;
-  })[];
-
-  // Annotate sessions spawned from a runtime-agent preset (metadata carries
-  // {agent_id, runtime} — written by hooks/MCP from CONFLUX_AGENT_ID).
-  // The preset name is a FALLBACK identity for sessions that never got a
-  // name of their own (custom title or first prompt excerpt); it must not
-  // mask a name the user gave the conversation in Claude Code.
-  const presetNames = new Map<number, string>(
-    (db.prepare(`SELECT id, name FROM runtime_agents`).all() as { id: number; name: string }[]).map(
-      (r) => [r.id, r.name],
-    ),
-  );
-  const annotate = (n: (typeof nodes)[number]) => {
-    let agentId: number | null = null;
-    let runtime = parseSessionRuntime(n.runtime);
-    let identitySource = parseIdentitySource(n.identity_source);
-    let runtimePid = parseRuntimePid(n.runtime_pid);
-    let ownName = false;
-    let busy = false;
-    let skills: string[] | undefined;
-    let priority: GraphNode["priority"];
-    try {
-      const meta = n.metadata ? (JSON.parse(n.metadata) as Record<string, unknown>) : null;
-      if (meta && typeof meta.agent_id === "number") {
-        agentId = meta.agent_id;
-      }
-      if (runtime === null) {
-        const legacyClaudePid = parseRuntimePid(meta?.claude_pid);
-        runtime =
-          parseSessionRuntime(meta?.runtime) ?? (legacyClaudePid !== null ? "claude" : null);
-      }
-      if (identitySource === null) identitySource = parseIdentitySource(meta?.identity_source);
-      if (runtimePid === null) {
-        const legacyClaudePid = parseRuntimePid(meta?.claude_pid);
-        const metadataRuntimePid = parseRuntimePid(meta?.runtime_pid);
-        runtimePid = metadataRuntimePid ?? (runtime === "claude" ? legacyClaudePid : null);
-      }
-      ownName = !!(meta && (meta.named === true || meta.custom_title === true));
-      busy = !!(meta && meta.busy === true);
-      // Agent Card: capability self-description written by register_session
-      const card = meta?.agent_card;
-      if (
-        card &&
-        typeof card === "object" &&
-        Array.isArray((card as { skills?: unknown }).skills)
-      ) {
-        skills = (card as { skills: unknown[] }).skills
-          .filter((s): s is string => typeof s === "string")
-          .slice(0, 20);
-      }
-      priority = parseSessionPriority(meta?.priority);
-    } catch {
-      // malformed metadata — leave unannotated
-    }
-    const { metadata: _metadata, ...rest } = n;
-    const name = agentId !== null && !ownName ? (presetNames.get(agentId) ?? n.name) : n.name;
-    return {
-      ...rest,
-      name,
-      agent_id: agentId,
-      runtime,
-      identity_source: identitySource,
-      runtime_pid: runtimePid,
-      skills,
-      priority,
-      busy,
-    };
-  };
-
-  // Also include internal agents as nodes — they are always visible
-  // regardless of session heartbeat status.
-  const agentNodes = db
-    .prepare(
-      `SELECT
-         'agent-' || a.id AS id,
-         a.name,
-         'active' AS status,
-         a.description,
-         (SELECT COUNT(*) FROM context_entries c WHERE c.session_id = 'agent-' || a.id) AS context_count,
-         (SELECT COUNT(*) FROM messages m WHERE m.to_session = 'agent-' || a.id AND m.status IN ('pending','seen')) AS pending_inbox,
-         (SELECT COUNT(*) FROM conversations cv WHERE cv.agent_id = a.id) AS conversation_count
-       FROM agents a
-       ORDER BY a.updated_at DESC`,
-    )
-    .all() as Omit<GraphNode, "type">[];
-
-  const edges = db
-    .prepare(
-      `SELECT e.rowid AS id, e.from_session AS "from", e.to_session AS "to", e.weight, e.last_interact_at,
-         COALESCE(
-           -- traffic THIS edge's direction carried: its own questions first
-           (SELECT m.question FROM messages m
-            WHERE m.from_session = e.from_session AND m.to_session = e.to_session
-            ORDER BY m.id DESC LIMIT 1),
-           -- a reply-only edge (created by reply_ask) shows the answer it carried
-           (SELECT '↩ ' || m.reply FROM messages m
-            WHERE m.to_session = e.from_session AND m.from_session = e.to_session
-              AND m.reply IS NOT NULL
-            ORDER BY m.replied_at DESC LIMIT 1)
-         ) AS last_message
+      `SELECT e.rowid AS id, e.from_thread AS "from", e.to_thread AS "to",
+              e.weight, e.last_interact_at,
+              (SELECT question FROM messages m
+               WHERE m.from_thread = e.from_thread AND m.to_thread = e.to_thread
+               ORDER BY m.id DESC LIMIT 1) AS last_message
        FROM edges e
-       ORDER BY e.weight DESC, e.last_interact_at DESC`,
+       ORDER BY e.last_interact_at DESC`,
     )
     .all() as GraphEdge[];
 
-  return {
-    nodes: [
-      ...nodes.map((n) => ({ ...annotate(n), type: "session" as const })),
-      ...agentNodes.map((n) => ({
-        ...n,
-        agent_id: null,
-        runtime: null,
-        identity_source: null,
-        runtime_pid: null,
-        type: "agent" as const,
-      })),
-    ],
-    edges,
-  };
+  const knownIds = new Set(nodes.map((n) => n.id));
+  // Include web-console pseudo-node only when it participates in edges.
+  if (rawEdges.some((e) => e.from === WEB_CONSOLE_ID || e.to === WEB_CONSOLE_ID)) {
+    nodes.unshift({
+      id: WEB_CONSOLE_ID,
+      name: WEB_CONSOLE_NAME,
+      kind: "console",
+      runtime: "web",
+      state: "idle",
+      project_id: null,
+      project_name: null,
+      workdir: null,
+      worktree_branch: null,
+      pending_approvals: 0,
+      context_count: ctxCounts.get(WEB_CONSOLE_ID) ?? 0,
+      room_ids: [],
+    });
+    knownIds.add(WEB_CONSOLE_ID);
+  }
+
+  const edges = rawEdges.filter((e) => knownIds.has(e.from) && knownIds.has(e.to));
+  return { nodes, edges };
 }

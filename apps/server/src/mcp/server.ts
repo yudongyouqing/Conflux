@@ -1,1043 +1,416 @@
-import { APP_VERSION } from "../version.js";
+import { randomUUID } from "node:crypto";
+import { basename, resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { randomUUID } from "node:crypto";
-import type { RuntimeId } from "@conflux/shared";
-
+import type { ContextKind, RuntimeId, WorkflowStepDefinition } from "@conflux/shared";
 import { resolveConfig, type Scope } from "../config.js";
-import { isLockError, openDb, publicError, stopWalCheckpoint, type DB } from "../core/db.js";
+import { APP_VERSION } from "../version.js";
+import { openDb, stopWalCheckpoint, type DB } from "../core/db.js";
+import { ensureProjectForDir } from "../core/projects.js";
 import {
-  registerSession,
-  listSessions,
-  searchSessions,
-  sessionPriority,
-  getSession,
-} from "../core/sessions.js";
-import {
-  MCP_HEARTBEAT_INTERVAL_MS,
-  claimMcpConnection,
-  createMcpLeaseMetadata,
-  installMcpStdioLifecycle,
-  markMcpDisconnected,
-  touchMcpConnection,
-} from "../core/mcp-liveness.js";
-import { getSetting } from "../core/app-settings.js";
-import { publishContext, updateContext, deleteContext, listMyContext } from "../core/context.js";
-import { queryContext } from "../core/search.js";
-import { checkInbox, checkReplies, recordExchange } from "../core/messages.js";
-import { replyAskAndPush } from "../core/mail-push.js";
-import { getGraph } from "../core/graph.js";
-import { mergeSessionMeta } from "../core/sessions.js";
-import { logAudit } from "../core/audit.js";
-import { getRuntimePid, findSessionByRuntimePid, deleteUnreferencedSession } from "../core/live.js";
-import { askAndMaybeWake, retryMessageDelivery } from "../core/ask.js";
-import {
-  bindRuntimeInstance,
-  listRuntimeInstances,
-  stopRuntimeInstance,
-  resumeRuntimeInstance,
-} from "../core/runtime-instances.js";
-import { askAndReplySync } from "../core/ask-sync.js";
-import { summonAgent, writeResult, readRoom, roomStatus } from "../core/room-orchestrator.js";
+  getThread,
+  heartbeatThread,
+  insertThread,
+  isValidRuntime,
+  listThreads,
+  updateThread,
+} from "../core/threads/store.js";
+import { publishContext, queryContext } from "../core/context.js";
+import { askThread, checkInbox, replyMessage } from "../core/messages.js";
+import { reportRoomTaskDone, summonRoomAgent } from "../core/rooms.js";
+import { handoffContext } from "../core/handoff.js";
 import {
   createWorkflow,
   getWorkflowRun,
   onWorkflowStepMessageCompleted,
   startWorkflowRun,
 } from "../core/workflows.js";
-import { handoffContext } from "../core/handoff.js";
-import { refreshCodexSessionTitles } from "../core/codex-titles.js";
 import { logger } from "../log.js";
-import { registerSessionDirectory } from "./session-directory.js";
 
-const INSTRUCTIONS = `
-Conflux: cross-session context + async messaging for AI coding assistants.
-
-This session is already auto-registered. Call register_session to update its
-name and description with something meaningful for other sessions to recognize.
-
-You share a SQLite file with other sessions, so you can:
-  - publish_context: expose a slice of your context for other sessions to search
-  - query_context: FTS-search what other sessions have published
-  - ask_session / reply_ask / check_inbox / check_replies: async Q&A between sessions
-  - get_graph: see the session topology (who's online, who talked to whom)
-  - list_session_directory: show full peer IDs and resource URIs for user selection
-
-For messaging Claude Code peers you may prefer your NATIVE SendMessage tool
-(lower latency). When you do, call log_exchange once afterwards so the
-exchange lands in the shared archive + graph. Conflux ask_session stays
-the channel for non-claude runtimes and offline mail.
-
-After answering a user, if you discovered something worth sharing, proactively
-publish_context. Before answering a question that might already be answered
-elsewhere, query_context first.
-
-All operations are audited. Be concise in published content; prefer structured
-tags for discoverability.
-
-When a requested peer name, title, or partial ID is ambiguous, call
-find_session_candidates and use the host's question UI to show at most three
-candidates with project, runtime, last activity, and full ID. Wait for the user's
-choice before contacting a candidate. A changed Ghostty title does not establish
-a changed session ID.
-`.trim();
-
-export interface McpServerOptions {
-  scope?: Scope;
-  overrideDataDir?: string;
+function ok(data: unknown) {
+  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
 }
 
-function detectMcpRuntime(): { runtime: RuntimeId; pid: number | null } {
-  const configured = process.env.CONFLUX_AGENT_RUNTIME;
-  if (configured === "claude" || configured === "codex") {
-    return { runtime: configured, pid: getRuntimePid(configured) };
+function fail(err: unknown) {
+  const msg = err instanceof Error ? err.message : String(err);
+  return { content: [{ type: "text" as const, text: `Error: ${msg}` }], isError: true };
+}
+
+function detectExternalRuntime(): RuntimeId {
+  const explicit = process.env.CONFLUX_AGENT_RUNTIME?.trim().toLowerCase();
+  if (isValidRuntime(explicit)) return explicit;
+  if (process.env.CODEX_THREAD_ID || process.env.CODEX_CI) return "codex";
+  if (process.env.CLAUDE_PROJECT_DIR || process.env.CLAUDECODE) return "claude";
+  return "claude";
+}
+
+/**
+ * Ensure an external MCP caller (or managed child's MCP process) is registered
+ * in `agent_threads` under the matching `projects` entry by `project_dir`.
+ */
+export function ensureMcpThread(
+  db: DB,
+  opts: {
+    id?: string;
+    name?: string;
+    project_dir?: string;
+    runtime?: RuntimeId;
+  } = {},
+): string {
+  const id =
+    opts.id?.trim() ||
+    process.env.CONFLUX_THREAD_ID?.trim() ||
+    process.env.CONFLUX_SESSION_ID?.trim() ||
+    `ext-${randomUUID().slice(0, 12)}`;
+
+  const existing = getThread(db, id);
+  const workdir = resolve(opts.project_dir?.trim() || process.env.CLAUDE_PROJECT_DIR || process.cwd());
+  const project = ensureProjectForDir(db, workdir);
+
+  if (existing) {
+    heartbeatThread(db, existing.id);
+    if (opts.name?.trim() && opts.name.trim() !== existing.name && existing.kind === "external") {
+      updateThread(db, existing.id, { name: opts.name.trim(), project_id: project?.id ?? existing.project_id });
+    }
+    return existing.id;
   }
-  const codexPid = getRuntimePid("codex");
-  if (codexPid !== null) return { runtime: "codex", pid: codexPid };
-  return { runtime: "claude", pid: getRuntimePid("claude") };
+
+  const runtime = opts.runtime && isValidRuntime(opts.runtime) ? opts.runtime : detectExternalRuntime();
+  const name = opts.name?.trim() || `${runtime}-${basename(workdir)}`;
+  insertThread(db, {
+    id,
+    project_id: project?.id ?? null,
+    name,
+    kind: "external",
+    runtime,
+    state: "idle",
+    approval_mode: "ask",
+    workdir,
+    pid: process.ppid || null,
+  });
+  return id;
 }
 
-export function buildMcpSessionMetadata(input: {
-  connectionId: string;
-  runtime: RuntimeId;
-  pid: number | null;
-  agentTag?: Record<string, unknown>;
-  now?: Date;
-}): Record<string, unknown> {
-  return {
-    temp: true,
-    ...input.agentTag,
-    runtime: input.runtime,
-    ...(input.pid !== null ? { runtime_pid: input.pid } : {}),
-    ...createMcpLeaseMetadata(input.connectionId, input.now),
-  };
-}
+export function createMcpServer(db: DB, defaultThreadId?: string): McpServer {
+  let currentThreadId = defaultThreadId || ensureMcpThread(db);
 
-export function adoptMcpSession(
-  currentSessionId: string,
-  targetSessionId: string,
-  claim: () => boolean,
-  deletePrevious: (id: string) => void,
-): { sessionId: string; adopted: boolean } {
-  if (currentSessionId === targetSessionId || !claim()) {
-    return { sessionId: currentSessionId, adopted: false };
-  }
-  deletePrevious(currentSessionId);
-  return { sessionId: targetSessionId, adopted: true };
-}
-
-export async function runMcpServer(opts: McpServerOptions = {}): Promise<void> {
-  const config = resolveConfig(opts.scope ?? "global", opts.overrideDataDir);
-  const db: DB = openDb(config);
-  const connectionId = randomUUID();
-  let sessionId: string = randomUUID();
-  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
-  let identity = detectMcpRuntime();
-
-  // Auto-register immediately so the session is visible in the graph
-  // and available for cross-session communication without waiting for
-  // the LLM to call register_session. metadata.temp marks this as a
-  // placeholder node — the graph hides unadopted temps to cut noise.
-  // A session spawned from a runtime-agent preset carries the preset id in
-  // its env (set by startRuntimeAgent) — stamp it into metadata.
-  const dirName = projectDir.replace(/\\/g, "/").split("/").pop() || "session";
-  const agentTag = (() => {
-    const aid = process.env.CONFLUX_AGENT_ID;
-    if (!aid || Number.isNaN(Number(aid))) return {};
-    return {
-      agent_id: Number(aid),
-      ...(process.env.CONFLUX_RUNTIME_INSTANCE_ID
-        ? { runtime_instance_id: process.env.CONFLUX_RUNTIME_INSTANCE_ID }
-        : {}),
-      ...(process.env.CONFLUX_TMUX_SESSION
-        ? { tmux_session: process.env.CONFLUX_TMUX_SESSION }
-        : {}),
-      ...(identity.runtime === "codex" && process.env.CONFLUX_RESUME_SESSION_ID
-        ? { codex_session_id: process.env.CONFLUX_RESUME_SESSION_ID }
-        : {}),
-      ...(process.env.CONFLUX_AGENT_RUNTIME ? { runtime: process.env.CONFLUX_AGENT_RUNTIME } : {}),
-    };
-  })();
-  registerSession(db, {
-    id: sessionId,
-    name: dirName,
-    description: `${identity.runtime === "codex" ? "Codex" : "Claude Code"} session (auto-registered)`,
-    project_dir: projectDir,
-    identity_source: "mcp",
-    metadata: buildMcpSessionMetadata({
-      connectionId,
-      runtime: identity.runtime,
-      pid: identity.pid,
-      agentTag,
-    }),
+  const server = new McpServer({
+    name: "conflux",
+    version: APP_VERSION,
   });
 
-  logger.info(
+  server.tool(
+    "register_session",
+    "Register or update this external terminal session as an Agent Thread under its project directory.",
     {
-      sessionId,
-      runtime: identity.runtime,
-      runtimePid: identity.pid,
-      dataDir: config.dataDir,
-      scope: config.scope,
+      name: z.string().min(1).max(120),
+      project_dir: z.string().optional(),
+      runtime: z.enum(["claude", "codex", "antigravity", "acp"]).optional(),
     },
-    "mcp starting",
+    async (args) => {
+      try {
+        currentThreadId = ensureMcpThread(db, {
+          id: currentThreadId,
+          name: args.name,
+          project_dir: args.project_dir,
+          runtime: args.runtime,
+        });
+        return ok({ thread: getThread(db, currentThreadId) });
+      } catch (err) {
+        return fail(err);
+      }
+    },
   );
 
-  // If the CLI integration registered a session for this same runtime
-  // process (matched by pid), adopt it: our tools then act as that
-  // conversation-id-keyed session, and the temp uuid node is removed.
-  // Best-effort — without hooks installed we keep the temp node.
-  //
-  // Re-resolved on every beat AND every tool call (no one-shot latch): a
-  // /resume mid-process moves the conversation to a new id, and the hook
-  // pins the authoritative current id under claude-current:<pid> — read
-  // that first; heartbeat-order guessing is only the fallback (it lags and
-  // can flap between the old and new rows).
-  let beat: NodeJS.Timeout | undefined;
-  let disposeStdio: (() => void) | undefined;
-  let disconnected = false;
-  let refreshSessionResources: (() => void) | undefined;
-
-  const disconnect = (reason: string): void => {
-    if (disconnected) return;
-    disconnected = true;
-    if (beat) clearInterval(beat);
-    disposeStdio?.();
-    try {
-      markMcpDisconnected(db, sessionId, connectionId, reason);
-    } catch {
-      // transient sqlite lock contention must not prevent database cleanup
-    }
-    try {
-      stopWalCheckpoint(db);
-      if (db.open) db.close();
-    } catch {
-      // the database may already be closed by an outer shutdown path
-    }
-  };
-
-  const tryAdopt = () => {
-    // Explicit identity first: a headless auto-answer wake tells us which
-    // conversation it is answering FOR (newer claude versions don't fire
-    // registering hooks in -p mode, so pid/pin adoption may find nothing).
-    if (identity.pid === null) identity = detectMcpRuntime();
-    const assume = process.env.CONFLUX_ASSUME_SESSION;
-    const pid = getRuntimePid(identity.runtime);
-    const pinned = pid === null ? null : getSetting(db, `${identity.runtime}-current:${pid}`);
-    if (pid !== null) {
-      mergeSessionMeta(db, sessionId, { runtime: identity.runtime, runtime_pid: pid });
-    }
-    const target =
-      (assume ? getSession(db, assume) : null) ??
-      (pinned ? getSession(db, pinned) : null) ??
-      (pid === null ? null : findSessionByRuntimePid(db, identity.runtime, pid, sessionId));
-    if (!target) return; // hook hasn't fired yet — retry on the next tick
-    if (target.id === sessionId) return;
-    const oldId = sessionId;
-    const adoption = adoptMcpSession(
-      oldId,
-      target.id,
-      () => {
-        try {
-          return claimMcpConnection(db, target.id, connectionId);
-        } catch {
-          // transient sqlite lock contention — retry adoption later
-          return false;
-        }
-      },
-      (previousId) => deleteUnreferencedSession(db, previousId),
-    );
-    if (!adoption.adopted) return;
-    sessionId = adoption.sessionId;
-    logger.info(
-      { runtime: identity.runtime, runtimePid: pid, sessionId, oldId },
-      "mcp adopted hook-registered session",
-    );
-  };
-
-  const touchLease = (): void => {
-    try {
-      touchMcpConnection(db, sessionId, connectionId);
-      const instanceId = process.env.CONFLUX_RUNTIME_INSTANCE_ID;
-      const pid = getRuntimePid(identity.runtime);
-      if (instanceId && pid !== null) {
-        mergeSessionMeta(db, sessionId, {
-          ...agentTag,
-          runtime: identity.runtime,
-          runtime_pid: pid,
-        });
-        bindRuntimeInstance(db, instanceId, sessionId, pid);
+  server.tool(
+    "list_sessions",
+    "List all Agent Threads (both Conflux-managed and external terminal sessions).",
+    { project_id: z.number().int().positive().optional() },
+    async (args) => {
+      try {
+        heartbeatThread(db, currentThreadId);
+        return ok({ threads: listThreads(db, { project_id: args.project_id }) });
+      } catch (err) {
+        return fail(err);
       }
-    } catch {
-      // transient sqlite lock contention — next tick or tool call retries
-    }
-  };
+    },
+  );
 
-  tryAdopt();
-  touchLease();
+  server.tool(
+    "publish_context",
+    "Publish a structured shared-memory entry (note/decision/artifact/summary/handoff) for the project or room.",
+    {
+      title: z.string().min(1).max(300),
+      content: z.string().min(1).max(50_000),
+      tags: z.array(z.string()).optional(),
+      project_id: z.number().int().positive().optional(),
+      room_id: z.number().int().positive().optional(),
+      kind: z.enum(["note", "decision", "artifact", "summary", "handoff"]).optional(),
+      pinned: z.boolean().optional(),
+    },
+    async (args) => {
+      try {
+        const me = getThread(db, currentThreadId);
+        const entry = publishContext(db, {
+          thread_id: currentThreadId,
+          project_id: args.project_id ?? me?.project_id ?? null,
+          room_id: args.room_id ?? null,
+          kind: args.kind as ContextKind | undefined,
+          pinned: args.pinned,
+          title: args.title,
+          content: args.content,
+          tags: args.tags,
+        });
+        return ok({ entry });
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
 
-  // Keep this session marked active for as long as the MCP process lives,
-  // even when no tool calls happen. Process exit stops the lease and it
-  // expires after MCP_LEASE_TTL_MS.
-  beat = setInterval(() => {
+  server.tool(
+    "query_context",
+    "Search structured shared memory across projects, rooms, or threads.",
+    {
+      query: z.string().optional(),
+      project_id: z.number().int().positive().optional(),
+      room_id: z.number().int().positive().optional(),
+      kind: z.enum(["note", "decision", "artifact", "summary", "handoff"]).optional(),
+      pinned: z.boolean().optional(),
+      limit: z.number().int().min(1).max(100).optional(),
+    },
+    async (args) => {
+      try {
+        heartbeatThread(db, currentThreadId);
+        return ok({ entries: queryContext(db, args) });
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  server.tool(
+    "ask_session",
+    "Ask another Agent Thread a question (subject to autonomous hop/cooldown guardrails).",
+    {
+      to_session: z.string().min(1),
+      question: z.string().min(1),
+      room_id: z.number().int().positive().optional(),
+    },
+    async (args) => {
+      try {
+        const res = await askThread(db, {
+          from_thread: currentThreadId,
+          to_thread: args.to_session,
+          question: args.question,
+          room_id: args.room_id ?? null,
+        });
+        return ok(res);
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  server.tool(
+    "check_inbox",
+    "Read pending cross-agent messages addressed to this thread.",
+    {},
+    async () => {
+      try {
+        return ok({ messages: checkInbox(db, currentThreadId) });
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  server.tool(
+    "reply_ask",
+    "Reply to a pending message addressed to this thread and auto-advance any linked workflow step.",
+    {
+      message_id: z.number().int().positive(),
+      reply: z.string().min(1),
+    },
+    async (args) => {
+      try {
+        const msg = replyMessage(db, args.message_id, currentThreadId, args.reply);
+        await onWorkflowStepMessageCompleted(db, args.message_id, { ok: true, output: args.reply });
+        return ok({ message: msg });
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  server.tool(
+    "room_summon",
+    "Summon an Agent Thread inside a collaboration room.",
+    {
+      room_id: z.number().int().positive(),
+      executor_thread_id: z.string().min(1),
+      prompt: z.string().min(1),
+    },
+    async (args) => {
+      try {
+        const res = await summonRoomAgent(db, {
+          room_id: args.room_id,
+          executor_thread_id: args.executor_thread_id,
+          prompt: args.prompt,
+          initiator_thread_id: currentThreadId,
+        });
+        return ok(res);
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  server.tool(
+    "room_report_done",
+    "Report completion summary for a room task.",
+    {
+      task_id: z.number().int().positive(),
+      summary: z.string().min(1),
+      status: z.enum(["done", "failed"]).optional(),
+    },
+    async (args) => {
+      try {
+        const task = reportRoomTaskDone(db, args.task_id, args.summary, args.status ?? "done");
+        if (!task) return fail(new Error("room task not found"));
+        return ok({ task });
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  server.tool(
+    "handoff_context",
+    "Package summary + pinned shared memories and hand off work to another Agent Thread.",
+    {
+      to_thread: z.string().min(1),
+      title: z.string().optional(),
+      note: z.string().optional(),
+      prompt: z.string().optional(),
+      room_id: z.number().int().positive().optional(),
+    },
+    async (args) => {
+      try {
+        const res = await handoffContext(db, {
+          from_thread: currentThreadId,
+          to_thread: args.to_thread,
+          title: args.title,
+          note: args.note,
+          prompt: args.prompt,
+          room_id: args.room_id ?? null,
+        });
+        return ok(res);
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  server.tool(
+    "workflow_create",
+    "Create a multi-agent DAG workflow with cycle validation.",
+    {
+      name: z.string().min(1),
+      description: z.string().optional(),
+      project_id: z.number().int().positive().optional(),
+      room_id: z.number().int().positive().optional(),
+      steps: z.array(
+        z.object({
+          key: z.string().min(1),
+          title: z.string().min(1),
+          kind: z.enum(["agent", "human_gate"]),
+          depends_on: z.array(z.string()),
+          target_thread_id: z.string().nullable().optional(),
+          prompt_template: z.string(),
+          include_handoff: z.boolean().optional(),
+        }),
+      ),
+    },
+    async (args) => {
+      try {
+        const wf = createWorkflow(db, {
+          name: args.name,
+          description: args.description,
+          project_id: args.project_id ?? null,
+          room_id: args.room_id ?? null,
+          steps: args.steps as WorkflowStepDefinition[],
+        });
+        return ok({ workflow: wf });
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  server.tool(
+    "workflow_start",
+    "Start a DAG workflow run.",
+    {
+      workflow_id: z.number().int().positive(),
+      input: z.string().optional(),
+    },
+    async (args) => {
+      try {
+        const run = await startWorkflowRun(db, args.workflow_id, {
+          input: args.input,
+          initiated_by: currentThreadId,
+        });
+        return ok({ run });
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  server.tool(
+    "workflow_status",
+    "Inspect a DAG workflow run and all step statuses/outputs.",
+    { run_id: z.number().int().positive() },
+    async (args) => {
+      try {
+        const run = getWorkflowRun(db, args.run_id);
+        if (!run) return fail(new Error("workflow run not found"));
+        return ok({ run });
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  return server;
+}
+
+export async function startMcpServer(opts: { scope?: Scope; overrideDataDir?: string } = {}): Promise<void> {
+  const config = resolveConfig(opts.scope ?? "global", opts.overrideDataDir);
+  const db = openDb(config);
+  const threadId = ensureMcpThread(db);
+  const server = createMcpServer(db, threadId);
+  const transport = new StdioServerTransport();
+
+  const beat = setInterval(() => {
     try {
-      tryAdopt();
-      touchLease();
-      // Codex has no hooks: keep the display title in sync with its rollouts.
-      if (identity.runtime === "codex") refreshCodexSessionTitles(db, { onlySessionId: sessionId });
-      refreshSessionResources?.();
+      if (db.open) heartbeatThread(db, threadId);
     } catch {
-      // transient sqlite lock contention — next tick retries
+      // ignore transient lock
     }
-  }, MCP_HEARTBEAT_INTERVAL_MS);
+  }, 30_000);
   beat.unref();
 
-  const server = new McpServer(
-    {
-      name: "conflux",
-      version: APP_VERSION,
-    },
-    {
-      capabilities: {
-        tools: {},
-      },
-      instructions: INSTRUCTIONS,
-    },
-  );
-
-  /** Wrapper that auto-adopts + touches the lease + audits + standardises errors. */
-  async function withAudit<T>(
-    action: string,
-    args: Record<string, unknown>,
-    fn: () => T | Promise<T>,
-  ): Promise<{ ok: true; result: T } | { ok: false; error: string }> {
-    tryAdopt(); // pick up /resume id changes instantly, not on the next 30s beat
-    try {
-      const result = await fn();
-      // The lease touch is a synchronous write; doing it BEFORE the body
-      // would queue a full busy_timeout ahead of a tool that is about to
-      // fail on a held lock, doubling the stall. Touch only after the
-      // body succeeded — a failed call does not extend the lease; the
-      // next successful call or the 30s beat refreshes it.
-      touchLease();
-      logAudit(db, {
-        caller_session: sessionId,
-        interface: "mcp",
-        action,
-        args,
-        result: safeSummary(result),
-      });
-      return { ok: true, result };
-    } catch (err) {
-      // A lock error means another process still holds the write lock.
-      // Auditing it synchronously would busy-wait on that same lock for a
-      // second full busy_timeout, and the audit INSERT's own SQLITE_BUSY
-      // would escape this catch as a raw error — so skip the audit row
-      // (the pino log is the record) and return the mapped, readable
-      // message instead of leaking "database is locked" to the model.
-      if (isLockError(err)) {
-        logger.warn({ action, session: sessionId }, "skipping error audit while the database is locked");
-        return { ok: false, error: publicError(err).message };
-      }
-      const message = err instanceof Error ? err.message : String(err);
-      try {
-        logAudit(db, {
-          caller_session: sessionId,
-          interface: "mcp",
-          action,
-          args,
-          result: { error: message },
-        });
-      } catch (auditErr) {
-        logger.warn({ err: auditErr, action, session: sessionId }, "failed to audit MCP error");
-      }
-      return { ok: false, error: message };
-    }
-  }
-
-  refreshSessionResources = registerSessionDirectory(server, {
-    db,
-    currentSessionId: () => sessionId,
-    beforeRead: () => {
-      tryAdopt();
-      touchLease();
-    },
-  });
-
-  // 1. register_session
-  server.registerTool(
-    "register_session",
-    {
-      description:
-        "Register (or refresh) the current session's identity. Call once at the start of a conversation.",
-      inputSchema: {
-        name: z.string().min(1).max(200).describe("Human-readable session name"),
-        description: z
-          .string()
-          .max(2000)
-          .optional()
-          .describe("Short description of this session's purpose"),
-        skills: z
-          .array(z.string().min(1).max(60))
-          .max(20)
-          .optional()
-          .describe(
-            "Agent Card: what this session is good at (e.g. ['typescript','sql']) — shown on the graph so peers can route questions",
-          ),
-        priority: z
-          .enum(["P0", "P1", "P2"])
-          .optional()
-          .describe(
-            "Ask priority tier: P0 critical (cannot be asked by lower tiers), P1 default, P2 background",
-          ),
-      },
-    },
-    async ({ name, description, skills, priority }) => {
-      const r = await withAudit("register_session", { name, description, skills, priority }, () =>
-        db
-          .transaction(() => {
-            const session = registerSession(db, {
-              id: sessionId,
-              name,
-              description: description ?? null,
-              project_dir: projectDir,
-              priority: priority ?? null,
-            });
-            // Merge (not replace) so hook metadata (claude_pid, named, …) survives,
-            // and protect the explicitly chosen name from directory auto-naming.
-            mergeSessionMeta(db, sessionId, {
-              ...(skills && skills.length > 0 ? { agent_card: { skills } } : {}),
-              user_named: true,
-            });
-            return getSession(db, sessionId) ?? session;
-          })
-          .immediate(),
-      );
-      return json(r.ok ? { session_id: sessionId, session: r.result } : { error: r.error });
-    },
-  );
-
-  // 2. list_sessions
-  server.registerTool(
-    "list_sessions",
-    {
-      description:
-        "List registered sessions with context counts and pending inbox counts. Use status='active' to find live peers.",
-      inputSchema: {
-        status: z
-          .enum(["active", "stale", "ended", "all"])
-          .optional()
-          .describe("Filter by status; default 'active'"),
-      },
-    },
-    async ({ status }) => {
-      const r = await withAudit("list_sessions", { status }, () =>
-        listSessions(db, { status: status ?? "active" }),
-      );
-      return json(r.ok ? { sessions: r.result } : { error: r.error });
-    },
-  );
-
-  // 2b. search_sessions — capability discovery: find peers by what they say
-  // about themselves (name / description / register_session skills).
-  server.registerTool(
-    "search_sessions",
-    {
-      description:
-        "Discover which sessions can answer a question: substring-search their names, self-descriptions, and declared skills (a session's self-description is its capability index). Only LIVE sessions you are ALLOWED to ask are returned — priority never strictly higher than yours — so every result can go straight into ask_session.",
-      inputSchema: {
-        query: z
-          .string()
-          .min(1)
-          .max(100)
-          .describe("Capability or topic keyword, e.g. 'postgres', 'llm', '构建'"),
-      },
-    },
-    async ({ query }) => {
-      const r = await withAudit("search_sessions", { query }, () =>
-        searchSessions(db, query, { activeOnly: true, askableFrom: sessionId }),
-      );
-      return json(
-        r.ok
-          ? {
-              results: r.result.map((s) => ({
-                id: s.id,
-                name: s.name,
-                description: s.description,
-                status: s.status,
-                priority: sessionPriority(s.metadata),
-                skills: (() => {
-                  try {
-                    return JSON.parse(s.metadata ?? "{}")?.agent_card?.skills ?? [];
-                  } catch {
-                    return [];
-                  }
-                })(),
-              })),
-            }
-          : { error: r.error },
-      );
-    },
-  );
-
-  // 3. publish_context
-  server.registerTool(
-    "publish_context",
-    {
-      description:
-        "Publish a piece of your session's context (a finding, a decision, a snippet) so other sessions can search it.",
-      inputSchema: {
-        title: z.string().min(1).max(300).describe("Short title"),
-        content: z.string().min(1).max(50_000).describe("The context body"),
-        tags: z
-          .array(z.string().min(1).max(60))
-          .max(20)
-          .optional()
-          .describe("Optional tags for filtering"),
-      },
-    },
-    async ({ title, content, tags }) => {
-      const r = await withAudit(
-        "publish_context",
-        { title, tags, contentLen: content.length },
-        () => publishContext(db, { session_id: sessionId, title, content, tags: tags ?? null }),
-      );
-      return json(r.ok ? { entry: r.result } : { error: r.error });
-    },
-  );
-
-  // 4. update_context
-  server.registerTool(
-    "update_context",
-    {
-      description: "Update one of your previously published context entries.",
-      inputSchema: {
-        entry_id: z.number().int().positive(),
-        title: z.string().min(1).max(300).optional(),
-        content: z.string().min(1).max(50_000).optional(),
-        tags: z.array(z.string().min(1).max(60)).max(20).optional(),
-      },
-    },
-    async ({ entry_id, title, content, tags }) => {
-      const r = await withAudit(
-        "update_context",
-        { entry_id, title, tags, contentLen: content?.length },
-        () => updateContext(db, entry_id, sessionId, { title, content, tags }),
-      );
-      return json(r.ok ? { entry: r.result } : { error: r.error });
-    },
-  );
-
-  // 5. delete_context
-  server.registerTool(
-    "delete_context",
-    {
-      description: "Delete one of your previously published context entries.",
-      inputSchema: {
-        entry_id: z.number().int().positive(),
-      },
-    },
-    async ({ entry_id }) => {
-      const r = await withAudit("delete_context", { entry_id }, () =>
-        deleteContext(db, entry_id, sessionId),
-      );
-      return json(r.ok ? { deleted: r.result } : { error: r.error });
-    },
-  );
-
-  // 6. list_my_context
-  server.registerTool(
-    "list_my_context",
-    {
-      description: "List the context entries your session has published.",
-      inputSchema: {},
-    },
-    async () => {
-      const r = await withAudit("list_my_context", {}, () => listMyContext(db, sessionId));
-      return json(r.ok ? { entries: r.result } : { error: r.error });
-    },
-  );
-
-  // 7. query_context
-  server.registerTool(
-    "query_context",
-    {
-      description:
-        "Full-text search across all sessions' published context (or a specific session). Empty query returns most recent entries.",
-      inputSchema: {
-        query: z.string().max(2000).optional().describe("FTS query string"),
-        session_id: z.string().optional().describe("Restrict to a specific session"),
-        tags: z.array(z.string().min(1).max(60)).max(20).optional(),
-        limit: z.number().int().min(1).max(500).optional(),
-      },
-    },
-    async ({ query, session_id, tags, limit }) => {
-      const r = await withAudit("query_context", { query, session_id, tags, limit }, () =>
-        queryContext(db, { query, session_id, tags, limit }),
-      );
-      return json(r.ok ? { entries: r.result } : { error: r.error });
-    },
-  );
-
-  // 8. ask_session
-  server.registerTool(
-    "retry_message_delivery",
-    {
-      description:
-        "Retry waking the current recipient of an existing pending message. Does not send a second message or bypass wake safeguards.",
-      inputSchema: { id: z.number().int().positive() },
-    },
-    async ({ id }) => {
-      const result = await withAudit("retry_message_delivery", { id }, () =>
-        retryMessageDelivery(db, id, sessionId),
-      );
-      return json(result.ok ? result.result : { error: result.error });
-    },
-  );
-  server.registerTool(
-    "list_runtime_instances",
-    {
-      description:
-        "List managed runtime executions and whether they can be safely stopped or resumed.",
-      inputSchema: {},
-    },
-    async () => {
-      const result = await withAudit("list_runtime_instances", {}, () => ({
-        instances: listRuntimeInstances(db),
-      }));
-      return json(result.ok ? result.result : { error: result.error });
-    },
-  );
-  for (const action of ["stop", "resume"] as const) {
-    server.registerTool(
-      `${action}_runtime_instance`,
-      {
-        description:
-          action === "stop"
-            ? "Stop a verified managed runtime process. Unowned or unverifiable PIDs are refused."
-            : "Resume a stopped managed conversation in a fresh instance with its original configuration.",
-        inputSchema: { id: z.string().uuid() },
-      },
-      async ({ id }) => {
-        const result = await withAudit(`${action}_runtime_instance`, { id }, async () =>
-          action === "stop"
-            ? { instance: await stopRuntimeInstance(db, id) }
-            : await resumeRuntimeInstance(db, id),
-        );
-        return json(result.ok ? result.result : { error: result.error });
-      },
-    );
-  }
-  server.registerTool(
-    "ask_session",
-    {
-      description:
-        "Ask another session a question. The target session will see it in check_inbox and may reply asynchronously.",
-      inputSchema: {
-        to_session: z.string().min(1).describe("Target session id"),
-        question: z.string().min(1).max(20_000).describe("The question"),
-      },
-    },
-
-    async ({ to_session, question }) => {
-      // unified ask path: delivery + auto-answer wake in one audited action
-      const r = await withAudit("ask_session", { to_session, questionLen: question.length }, () =>
-        askAndMaybeWake(db, { from_session: sessionId, to_session, question }),
-      );
-      return json(r.ok ? { message: r.result.message, wake: r.result.wake } : { error: r.error });
-    },
-  );
-
-  // 8b. ask_session_sync — synchronous variant: wait in-turn for the
-  //  reply. The asking AI gets the answer as the tool result of the SAME
-  //  turn; on timeout the message stays delivered and the async layers
-  //  (hook push / OS notification / check_replies) take over.
-  server.registerTool(
-    "ask_session_sync",
-    {
-      description:
-        "Ask another session and WAIT for the reply in this same turn (headless auto-wake included). Use this when you need the answer now; use ask_session when fire-and-forget is fine. On timeout the message is still delivered and will surface via the usual async channels.",
-      inputSchema: {
-        to_session: z.string().min(1).describe("Target session id"),
-        question: z.string().min(1).max(20_000).describe("The question"),
-        timeout_s: z
-          .number()
-          .int()
-          .min(5)
-          .max(600)
-          .optional()
-          .describe("How long to wait (seconds, default 120)"),
-      },
-    },
-    async ({ to_session, question, timeout_s }) => {
-      const r = await withAudit(
-        "ask_session_sync",
-        { to_session, questionLen: question.length, timeout_s: timeout_s ?? 120 },
-        () =>
-          askAndReplySync(db, {
-            from_session: sessionId,
-            to_session,
-            question,
-            timeoutMs: (timeout_s ?? 120) * 1_000,
-          }),
-      );
-      return json(
-        r.ok
-          ? {
-              status: r.result.status,
-              message_id: r.result.message_id,
-              reply: r.result.reply,
-              waited_ms: r.result.waitedMs,
-              wake: r.result.wake,
-            }
-          : { error: r.error },
-      );
-    },
-  );
-
-  // 8c. Room orchestration tools — agents coordinate through rooms
-  server.registerTool(
-    "room_write",
-    {
-      description:
-        "Write your result to a chat room's shared database and mark your task done. When all expected tasks are complete, the initiator is automatically summoned to read results.",
-      inputSchema: {
-        task_id: z.number().int().describe("The task ID you were summoned for"),
-        task_token: z.string().min(1).describe("One-shot task token from the summon prompt"),
-        result: z.string().min(1).max(50_000).describe("Your result/findings"),
-      },
-    },
-    async ({ task_id, task_token, result }) => {
-      const r = await withAudit("room_write", { task_id, resultLen: result.length }, () =>
-        writeResult(db, { task_id, task_token, result }),
-      );
-      return json(
-        r.ok
-          ? {
-              task_id,
-              status: "done",
-              all_done: r.result.allDone,
-              initiator_summoned: r.result.summonedInitiator,
-            }
-          : { error: r.error },
-      );
-    },
-  );
-
-  server.registerTool(
-    "room_summon",
-    {
-      description:
-        "Summon another agent to execute a task in a chat room. The agent's real process is started/injected with the prompt. Use for parallel fan-out, sequential chains, or cascading work.",
-      inputSchema: {
-        room_id: z.number().int().describe("Chat room ID"),
-        executor_session_id: z.string().min(1).describe("Session ID of the agent to summon"),
-        prompt: z.string().min(1).max(20_000).describe("The task prompt to inject"),
-      },
-    },
-    async ({ room_id, executor_session_id, prompt }) => {
-      const r = await withAudit(
-        "room_summon",
-        { room_id, executor_session_id, promptLen: prompt.length },
-        () =>
-          summonAgent(db, {
-            room_id,
-            initiator_session_id: sessionId,
-            executor_session_id,
-            prompt,
-          }),
-      );
-      return json(
-        r.ok
-          ? { task_id: r.result.task.id, injected: r.result.injected, method: r.result.method }
-          : { error: r.error },
-      );
-    },
-  );
-
-  server.registerTool(
-    "room_read",
-    {
-      description: "Read all shared content in a chat room: tasks, results, and messages.",
-      inputSchema: {
-        room_id: z.number().int().describe("Chat room ID"),
-      },
-    },
-    async ({ room_id }) => {
-      const r = await withAudit("room_read", { room_id }, () => readRoom(db, room_id));
-      return json(r.ok ? r.result : { error: r.error });
-    },
-  );
-
-  server.registerTool(
-    "room_status",
-    {
-      description: "Check which agents have responded and which are still working in a room.",
-      inputSchema: {
-        room_id: z.number().int().describe("Chat room ID"),
-      },
-    },
-    async ({ room_id }) => {
-      const r = await withAudit("room_status", { room_id }, () => roomStatus(db, room_id));
-      return json(r.ok ? { status: r.result } : { error: r.error });
-    },
-  );
-
-  // 9. check_inbox
-  server.registerTool(
-    "check_inbox",
-    {
-      description:
-        "Check unanswered questions other sessions have asked you. Reading marks them seen (askers can tell you looked); reply with reply_ask.",
-      inputSchema: {},
-    },
-    async () => {
-      const r = await withAudit("check_inbox", {}, () => checkInbox(db, sessionId));
-      return json(r.ok ? { inbox: r.result } : { error: r.error });
-    },
-  );
-
-  // 10. reply_ask
-  server.registerTool(
-    "reply_ask",
-    {
-      description: "Reply to a question addressed to your session.",
-      inputSchema: {
-        message_id: z.number().int().positive(),
-        reply: z.string().min(1).max(20_000),
-      },
-    },
-    async ({ message_id, reply }) => {
-      const r = await withAudit("reply_ask", { message_id, replyLen: reply.length }, () =>
-        replyAskAndPush(db, message_id, sessionId, reply),
-      );
-      if (r.ok) {
-        await onWorkflowStepMessageCompleted(db, message_id, {
-          state: "completed",
-          text: reply,
-        }).catch(() => {});
-      }
-      return json(r.ok ? { message: r.result } : { error: r.error });
-    },
-  );
-
-  // 11. check_replies
-  server.registerTool(
-    "check_replies",
-    {
-      description: "Check replies to questions your session has asked. Marks them read.",
-      inputSchema: {
-        since: z.string().optional().describe("ISO timestamp; only replies after this"),
-      },
-    },
-    async ({ since }) => {
-      const r = await withAudit("check_replies", { since }, () =>
-        checkReplies(db, sessionId, since),
-      );
-      return json(r.ok ? { replies: r.result } : { error: r.error });
-    },
-  );
-
-  // 12. log_exchange — archive a native-channel exchange (see INSTRUCTIONS)
-  server.registerTool(
-    "log_exchange",
-    {
-      description:
-        "Archive a message exchange that already happened OUTSIDE Conflux (e.g. via Claude Code's native SendMessage) into the shared history + graph, so other sessions can discover it. Call after the native exchange completes; do not use for Conflux-delivered mail.",
-      inputSchema: {
-        to_session: z.string().min(1).describe("Peer the exchange was with"),
-        question: z.string().min(1).max(20_000).describe("What was asked/sent"),
-        reply: z.string().max(20_000).optional().describe("Their answer, if already received"),
-        occurred_at: z.string().optional().describe("ISO timestamp of the exchange; default now"),
-      },
-    },
-    async ({ to_session, question, reply, occurred_at }) => {
-      const r = await withAudit("log_exchange", { to_session, questionLen: question.length }, () =>
-        recordExchange(db, {
-          from_session: sessionId,
-          to_session,
-          question,
-          reply: reply ?? null,
-          occurred_at,
-        }),
-      );
-      return json(r.ok ? { message: r.result } : { error: r.error });
-    },
-  );
-
-  // 13. get_graph
-  server.registerTool(
-    "get_graph",
-    {
-      description:
-        "Get the session communication graph: nodes (sessions) and directed edges (who talked to whom, with weights). Useful for discovering peers and understanding interaction patterns.",
-      inputSchema: {
-        status: z
-          .enum(["active", "stale", "ended", "all"])
-          .optional()
-          .describe("Filter nodes by status; default 'active'"),
-      },
-    },
-    async ({ status }) => {
-      const r = await withAudit("get_graph", { status }, () =>
-        getGraph(db, { status: status ?? "active" }),
-      );
-      return json(r.ok ? { graph: r.result } : { error: r.error });
-    },
-  );
-
-  // 14. handoff_context — structured cross-session / cross-provider handoff
-  server.registerTool(
-    "handoff_context",
-    {
-      description:
-        "Assemble pinned/decision shared memory and recent replies into a bounded handoff dossier, persist it, and deliver it to another session (Claude / Codex / Antigravity / external).",
-      inputSchema: {
-        to_session: z.string().min(1).describe("Target session id to receive the handoff"),
-        room_id: z.number().int().positive().optional().describe("Optional room scope for memory collection"),
-        title: z.string().max(300).optional(),
-        note: z.string().max(4000).optional(),
-        prompt: z.string().max(10000).optional().describe("Next instructions for the target session"),
-        delivery_mode: z.enum(["queue", "steer", "interrupt"]).optional(),
-        deliver: z.boolean().optional().describe("Default true; set false to store handoff only"),
-      },
-    },
-    async ({ to_session, room_id, title, note, prompt, delivery_mode, deliver }) => {
-      const r = await withAudit("handoff_context", { to_session, room_id }, () =>
-        handoffContext(db, {
-          from_session: sessionId,
-          to_session,
-          room_id: room_id ?? null,
-          title,
-          note,
-          prompt,
-          delivery_mode,
-          deliver,
-        }),
-      );
-      return json(r.ok ? r.result : { error: r.error });
-    },
-  );
-
-  // 15. workflow_create / workflow_start / workflow_status
-  server.registerTool(
-    "workflow_create",
-    {
-      description: "Create a multi-agent DAG workflow template (validates dependencies and rejects cycles).",
-      inputSchema: {
-        name: z.string().min(1).max(200),
-        description: z.string().max(2000).optional(),
-        room_id: z.number().int().positive().optional(),
-        steps: z.array(
-          z.object({
-            key: z.string().min(1).max(64),
-            title: z.string().min(1).max(200),
-            kind: z.enum(["agent", "human_gate"]).default("agent"),
-            depends_on: z.array(z.string()).default([]),
-            target_session_id: z.string().optional(),
-            prompt_template: z.string().default(""),
-            include_handoff: z.boolean().optional(),
-          }),
-        ),
-      },
-    },
-    async ({ name, description, room_id, steps }) => {
-      const r = await withAudit("workflow_create", { name, steps: steps.length }, () =>
-        createWorkflow(db, { name, description, room_id: room_id ?? null, steps }),
-      );
-      return json(r.ok ? { workflow: r.result } : { error: r.error });
-    },
-  );
-
-  server.registerTool(
-    "workflow_start",
-    {
-      description: "Start a DAG workflow run and dispatch its root steps immediately.",
-      inputSchema: {
-        workflow_id: z.number().int().positive(),
-        input: z.string().max(10000).optional(),
-        room_id: z.number().int().positive().optional(),
-      },
-    },
-    async ({ workflow_id, input, room_id }) => {
-      const r = await withAudit("workflow_start", { workflow_id }, () =>
-        startWorkflowRun(db, workflow_id, {
-          input,
-          room_id,
-          initiated_by: sessionId,
-        }),
-      );
-      return json(r.ok ? { run: r.result } : { error: r.error });
-    },
-  );
-
-  server.registerTool(
-    "workflow_status",
-    {
-      description: "Inspect a workflow run and the status/output of every step.",
-      inputSchema: {
-        run_id: z.number().int().positive(),
-      },
-    },
-    async ({ run_id }) => {
-      const r = await withAudit("workflow_status", { run_id }, () => getWorkflowRun(db, run_id));
-      return json(r.ok ? { run: r.result } : { error: r.error });
-    },
-  );
-
-  const transport = new StdioServerTransport();
-  disposeStdio = installMcpStdioLifecycle(process.stdin, transport, disconnect);
-  try {
-    await server.connect(transport);
-  } catch (err) {
-    disconnect("connect-failed");
-    throw err;
-  }
-  logger.info({ sessionId }, "mcp connected via stdio");
-
-  // Abrupt process termination still relies on the MCP lease TTL.
-}
-
-function json(value: unknown) {
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text: JSON.stringify(value, null, 2),
-      },
-    ],
+  const cleanup = () => {
+    clearInterval(beat);
+    stopWalCheckpoint(db);
+    if (db.open) db.close();
   };
-}
+  process.once("SIGINT", cleanup);
+  process.once("SIGTERM", cleanup);
 
-function safeSummary(value: unknown): Record<string, unknown> | null {
-  if (value === null || value === undefined) return null;
-  if (typeof value === "object") {
-    // Strip large `content` fields from context entries to keep audit small.
-    const v = value as Record<string, unknown>;
-    if (v.message && typeof v.message === "object") {
-      const message = v.message as { id: number; delivery?: { state: string; attempts: number } };
-      return {
-        message_id: message.id,
-        delivery_state: message.delivery?.state,
-        attempts: message.delivery?.attempts,
-      };
-    }
-    if (Array.isArray(v)) return { count: v.length };
-    if (typeof v.content === "string") {
-      const { content: _c, ...rest } = v;
-      return { ...rest, contentLen: v.content.length };
-    }
-    return rest(v);
-  }
-  return { value: String(value).slice(0, 200) };
-}
-
-function rest(v: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [k, val] of Object.entries(v)) {
-    if (typeof val === "string" && val.length > 200) out[k] = `<${val.length} chars>`;
-    else out[k] = val;
-  }
-  return out;
+  logger.info({ threadId, dbPath: config.dbPath }, "conflux v2 mcp server starting on stdio");
+  await server.connect(transport);
 }

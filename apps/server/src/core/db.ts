@@ -1,8 +1,7 @@
 import Database from "better-sqlite3";
-import { existsSync, statSync } from "fs";
-import { Config } from "../config.js";
+import { existsSync, statSync } from "node:fs";
+import type { Config } from "../config.js";
 import { logger } from "../log.js";
-import { parseIdentitySource, parseRuntimePid, parseSessionRuntime } from "./session-identity.js";
 
 export type DB = Database.Database;
 
@@ -14,6 +13,7 @@ export type PublicErrorCode =
   | "CONFLICT"
   | "FORBIDDEN"
   | "BAD_REQUEST"
+  | "TOO_MANY_REQUESTS"
   | "SERVICE_UNAVAILABLE"
   | "INTERNAL_ERROR";
 
@@ -27,12 +27,23 @@ export interface PublicErrorContext {
   port?: number;
 }
 
-/**
- * Is this failure a "another process holds the write lock" error? Callers
- * use it to avoid queueing MORE synchronous writes (error audits) behind
- * the same held lock, which would stall the reply for another busy timeout
- * and whose own SQLITE_BUSY would escape the error handler.
- */
+export const SCHEMA_VERSION = 21;
+export const BUSY_TIMEOUT_MS = 5000;
+export const WAL_CHECKPOINT_INTERVAL_MS = 5 * 60 * 1000;
+export const WAL_CHECKPOINT_THRESHOLD_BYTES = 10 * 1024 * 1024;
+
+const checkpointTimers = new WeakMap<DB, NodeJS.Timeout>();
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function safePublicMessage(value: string, fallback: string): string {
+  const message = value.trim();
+  if (!message || message.length > 500) return fallback;
+  return message;
+}
+
 export function isLockError(error: unknown): boolean {
   if (!isRecord(error)) return false;
   const rawCode = typeof error.code === "string" ? error.code : "";
@@ -41,22 +52,8 @@ export function isLockError(error: unknown): boolean {
   return /\bdatabase is locked\b/i.test(rawMessage);
 }
 
-/**
- * Retry a lock-contended database operation while YIELDING to the event
- * loop between attempts. sqlite's internal busy handler sleeps on the
- * database thread, which freezes a server's whole event loop for the full
- * busy_timeout; callers that cannot afford that (the HTTP server) set a
- * very short connection-level busy_timeout and drive the retry budget
- * here instead, so concurrent requests stay served during the wait.
- *
- * The operation must be retry-safe: a lock error may only escape before
- * any partial effect. Wrapping the closure in an immediate transaction
- * (BEGIN IMMEDIATE takes the write lock up front or fails before anything
- * happens) guarantees that; better-sqlite3 also rolls a throwing
- * transaction back entirely.
- */
 export async function retryOnBusy<T>(
-  db: DB,
+  _db: DB,
   op: () => T,
   opts: { budgetMs?: number; pauseMs?: number } = {},
 ): Promise<T> {
@@ -73,7 +70,6 @@ export async function retryOnBusy<T>(
   }
 }
 
-/** Convert internal failures into a stable, non-sensitive public response. */
 export function publicError(error: unknown, context: PublicErrorContext = {}): PublicError {
   const value = isRecord(error) ? error : {};
   const rawCode = typeof value.code === "string" ? value.code : "";
@@ -87,23 +83,26 @@ export function publicError(error: unknown, context: PublicErrorContext = {}): P
       message: "数据库正在被另一个进程使用，请稍后重试或关闭重复的 Conflux 实例。",
     };
   }
-
   if (/^SQLITE_(CORRUPT|NOTADB)/.test(code)) {
     return {
       code: "DATA_CORRUPT",
       message:
-        "数据库文件可能已损坏，请先停止 Conflux，备份数据目录后从最近的导出文件恢复。" +
+        "数据库文件可能已损坏，请先停止 Conflux 并检查数据目录。" +
         (context.dataDir ? ` 数据目录：${context.dataDir}` : ""),
     };
   }
-
   if (code === "EADDRINUSE") {
     return {
       code: "PORT_IN_USE",
       message: `端口 ${context.port ?? "9527"} 已被其他进程占用，请关闭重复的 Conflux 实例后重试。`,
     };
   }
-
+  if (rawStatus === 429) {
+    return {
+      code: "TOO_MANY_REQUESTS",
+      message: safePublicMessage(rawMessage, "触发自主协作护栏限制，请稍候或由人工确认。"),
+    };
+  }
   if (rawStatus === 404 || /\bnot found\b/i.test(rawMessage)) {
     return { code: "NOT_FOUND", message: safePublicMessage(rawMessage, "请求的资源不存在。") };
   }
@@ -116,7 +115,7 @@ export function publicError(error: unknown, context: PublicErrorContext = {}): P
   if (
     rawStatus === 400 ||
     rawStatus === 422 ||
-    /\bmissing\b|cannot ask yourself|invalid data bundle|invalid import|must be /i.test(rawMessage)
+    /\bmissing\b|cannot ask yourself|must be /i.test(rawMessage)
   ) {
     return { code: "BAD_REQUEST", message: safePublicMessage(rawMessage, "请求参数无效。") };
   }
@@ -126,599 +125,335 @@ export function publicError(error: unknown, context: PublicErrorContext = {}): P
       message: safePublicMessage(rawMessage, "服务暂时不可用，请稍后重试。"),
     };
   }
-
   return { code: "INTERNAL_ERROR", message: "服务器内部错误，请查看日志。" };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function safePublicMessage(value: string, fallback: string): string {
-  const message = value.trim();
-  if (!message || message.length > 500) return fallback;
-  return message;
-}
-
-const SCHEMA_VERSION = 17; // Add workflow DAGs, structured room/kind/pinned memory, and room_task message links.
-
-// Keep checkpoint timers tied to their database handles. A process can open
-// more than one temporary database during tests and interface operations.
-const checkpointTimers = new WeakMap<DB, NodeJS.Timeout>();
-
 const SCHEMA_SQL = `
--- schema_version marker (user_version PRAGMA, set separately)
-CREATE TABLE IF NOT EXISTS sessions (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  description TEXT,
-  project_dir TEXT,
-  status TEXT NOT NULL DEFAULT 'active',
-  created_at TEXT NOT NULL,
-  last_heartbeat_at TEXT NOT NULL,
-  metadata TEXT,
-  runtime TEXT,
-  identity_source TEXT,
-  runtime_pid INTEGER,
-  chat_room_id INTEGER
+CREATE TABLE IF NOT EXISTS projects (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  name           TEXT NOT NULL,
+  root_path      TEXT NOT NULL UNIQUE,
+  default_branch TEXT,
+  is_git_repo    INTEGER NOT NULL DEFAULT 0,
+  created_at     TEXT NOT NULL,
+  updated_at     TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
-CREATE INDEX IF NOT EXISTS idx_sessions_heartbeat ON sessions(last_heartbeat_at);
+CREATE TABLE IF NOT EXISTS agent_threads (
+  id                     TEXT PRIMARY KEY,
+  project_id             INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+  name                   TEXT NOT NULL,
+  kind                   TEXT NOT NULL DEFAULT 'managed',
+  runtime                TEXT NOT NULL,
+  state                  TEXT NOT NULL DEFAULT 'idle',
+  approval_mode          TEXT NOT NULL DEFAULT 'ask',
+  workdir                TEXT NOT NULL,
+  worktree_path          TEXT,
+  worktree_branch        TEXT,
+  base_branch            TEXT,
+  pr_url                 TEXT,
+  model                  TEXT,
+  instructions           TEXT,
+  extra_env              TEXT,
+  provider_thread_id     TEXT,
+  owner_token            TEXT,
+  active_turn_id         TEXT,
+  pid                    INTEGER,
+  parent_thread_id       TEXT REFERENCES agent_threads(id) ON DELETE SET NULL,
+  last_synced_context_id INTEGER NOT NULL DEFAULT 0,
+  last_seen_at           TEXT NOT NULL,
+  created_at             TEXT NOT NULL,
+  updated_at             TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_threads_project ON agent_threads(project_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_threads_workdir ON agent_threads(workdir, state);
+CREATE INDEX IF NOT EXISTS idx_threads_kind_state ON agent_threads(kind, state);
 
-CREATE TABLE IF NOT EXISTS context_entries (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id TEXT NOT NULL,
-  title TEXT NOT NULL,
-  content TEXT NOT NULL,
-  tags TEXT,
-  room_id INTEGER,
-  kind TEXT NOT NULL DEFAULT 'note',
-  pinned INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+CREATE TABLE IF NOT EXISTS agent_templates (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  name          TEXT NOT NULL UNIQUE,
+  runtime       TEXT NOT NULL,
+  model         TEXT,
+  instructions  TEXT,
+  extra_env     TEXT,
+  approval_mode TEXT NOT NULL DEFAULT 'ask',
+  use_worktree  INTEGER NOT NULL DEFAULT 0,
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_context_session ON context_entries(session_id);
-CREATE INDEX IF NOT EXISTS idx_context_updated ON context_entries(updated_at);
-
-CREATE VIRTUAL TABLE IF NOT EXISTS context_fts USING fts5(
-  title,
-  content,
-  content='',
-  tokenize='unicode61'
-);
-
--- Triggers keep context_fts in sync with context_entries.
-CREATE TRIGGER IF NOT EXISTS context_ai AFTER INSERT ON context_entries BEGIN
-  INSERT INTO context_fts(rowid, title, content) VALUES (new.id, new.title, new.content);
-END;
-CREATE TRIGGER IF NOT EXISTS context_ad AFTER DELETE ON context_entries BEGIN
-  INSERT INTO context_fts(context_fts, rowid, title, content) VALUES ('delete', old.id, old.title, old.content);
-END;
-CREATE TRIGGER IF NOT EXISTS context_au AFTER UPDATE ON context_entries BEGIN
-  INSERT INTO context_fts(context_fts, rowid, title, content) VALUES ('delete', old.id, old.title, old.content);
-  INSERT INTO context_fts(rowid, title, content) VALUES (new.id, new.title, new.content);
-END;
-
-CREATE TABLE IF NOT EXISTS messages (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  from_session TEXT NOT NULL,
-  to_session TEXT NOT NULL,
-  question TEXT NOT NULL,
-  reply TEXT,
-  status TEXT NOT NULL DEFAULT 'pending',
-  created_at TEXT NOT NULL,
-  replied_at TEXT,
-  edge_id INTEGER,
-  reply_seen_at TEXT,
-  room_id INTEGER,
-  FOREIGN KEY (from_session) REFERENCES sessions(id) ON DELETE CASCADE,
-  FOREIGN KEY (to_session) REFERENCES sessions(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_messages_to ON messages(to_session, status);
-CREATE INDEX IF NOT EXISTS idx_messages_from ON messages(from_session, status);
-CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
-
-CREATE TABLE IF NOT EXISTS message_deliveries (
-  message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
-  state TEXT NOT NULL,
-  attempts INTEGER NOT NULL DEFAULT 0,
-  last_attempted_at TEXT NOT NULL,
-  reason TEXT,
-  claim_token TEXT,
-  claim_expires_at TEXT
-);
-
-CREATE TABLE IF NOT EXISTS runtime_instances (
-  id TEXT PRIMARY KEY,
-  preset_id INTEGER NOT NULL,
-  preset_name TEXT NOT NULL,
-  runtime TEXT NOT NULL,
-  workdir TEXT,
-  preset_snapshot TEXT NOT NULL,
-  session_id TEXT,
-  runtime_pid INTEGER,
-  process_token TEXT,
-  state TEXT NOT NULL DEFAULT 'starting',
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  ended_at TEXT,
-  resumed_from TEXT,
-  error TEXT,
-  stop_requested_at TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_runtime_instances_preset ON runtime_instances(preset_id, state);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_instances_resume ON runtime_instances(resumed_from)
-  WHERE resumed_from IS NOT NULL AND
-    (state IN ('starting', 'running', 'stale') OR (state = 'failed' AND ended_at IS NULL));
-
--- Graph edges: directed, formed dynamically from communication history.
--- Each ask_session / reply_ask upserts a row (weight + 1).
--- Agent orchestration tasks: each row is one agent execution
--- within a room. The room tracks expected vs received; when all done,
--- the initiator is summoned to read results.
-CREATE TABLE IF NOT EXISTS room_tasks (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  room_id INTEGER NOT NULL,
-  initiator_session_id TEXT NOT NULL,
-  executor_session_id TEXT NOT NULL,
-  task_token TEXT NOT NULL,
-  prompt TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'pending',
-  result TEXT,
-  message_id INTEGER,
-  created_at TEXT NOT NULL,
-  completed_at TEXT
-);
-
--- Multi-agent collaborative DAG workflows (reusable templates or room-scoped).
-CREATE TABLE IF NOT EXISTS workflows (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  description TEXT,
-  room_id INTEGER,
-  steps_json TEXT NOT NULL DEFAULT '[]',
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS workflow_runs (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  workflow_id INTEGER NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
-  room_id INTEGER,
-  status TEXT NOT NULL DEFAULT 'pending',
-  input TEXT,
-  initiated_by TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  completed_at TEXT
-);
-
-CREATE TABLE IF NOT EXISTS workflow_steps (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  run_id INTEGER NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
-  step_key TEXT NOT NULL,
-  title TEXT NOT NULL,
-  kind TEXT NOT NULL DEFAULT 'agent',
-  depends_on_json TEXT NOT NULL DEFAULT '[]',
-  target_session_id TEXT,
-  prompt_template TEXT NOT NULL,
-  include_handoff INTEGER NOT NULL DEFAULT 0,
-  status TEXT NOT NULL DEFAULT 'pending',
-  message_id INTEGER,
-  output TEXT,
-  error TEXT,
-  started_at TEXT,
-  completed_at TEXT
-);
-
--- Structured collaboration rooms: fixed topology workflows.
--- topology JSON: [{from:"<sessionId>", to:"<sessionId>", order:1}, ...]
-CREATE TABLE IF NOT EXISTS chat_rooms (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  description TEXT,
-  topology TEXT NOT NULL DEFAULT '[]',
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS edges (
-  from_session TEXT NOT NULL,
-  to_session   TEXT NOT NULL,
-  weight       INTEGER NOT NULL DEFAULT 1,
-  last_interact_at TEXT NOT NULL,
-  PRIMARY KEY (from_session, to_session)
-);
-
-CREATE INDEX IF NOT EXISTS idx_edges_from ON edges(from_session);
-CREATE INDEX IF NOT EXISTS idx_edges_to ON edges(to_session);
-
--- Internal agent definitions (for the agent runtime).
--- model_config is JSON: { provider, model, temperature?, max_tokens? }
-CREATE TABLE IF NOT EXISTS agents (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  system_prompt TEXT NOT NULL,
-  model_config TEXT NOT NULL,
-  description TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_agents_name ON agents(name);
-
--- Conversation model for internal agent chats.
-CREATE TABLE IF NOT EXISTS conversations (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-  initiated_by TEXT,
-  title TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_conversations_agent ON conversations(agent_id);
-
-CREATE TABLE IF NOT EXISTS turns (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-  role TEXT NOT NULL,
-  content TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS thread_checkpoints (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id  TEXT NOT NULL REFERENCES agent_threads(id) ON DELETE CASCADE,
+  run_id     INTEGER,
+  ref_name   TEXT NOT NULL,
+  tree_sha   TEXT NOT NULL,
+  commit_sha TEXT NOT NULL,
+  summary    TEXT,
   created_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_checkpoints_thread ON thread_checkpoints(thread_id, id DESC);
 
-CREATE INDEX IF NOT EXISTS idx_turns_conv ON turns(conversation_id);
+CREATE TABLE IF NOT EXISTS rooms (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id  INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+  name        TEXT NOT NULL,
+  description TEXT,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rooms_project ON rooms(project_id, id DESC);
 
--- User-configured runtime agents: presets for spawning real CLI agents
--- (Claude Code / Codex) with a fixed working directory and API channel.
--- api_key is stored locally (single-user local tool). extra_env is a JSON
--- object string of additional environment variables for the spawned process.
-CREATE TABLE IF NOT EXISTS runtime_agents (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  runtime TEXT NOT NULL,
-  workdir TEXT,
-  model TEXT,
-  base_url TEXT,
-  api_key TEXT,
-  extra_env TEXT,
-  instructions TEXT,
-  interval_min INTEGER,
-  last_scheduled_run TEXT,
-  execution_mode TEXT NOT NULL DEFAULT 'terminal',
+CREATE TABLE IF NOT EXISTS room_members (
+  room_id   INTEGER NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  thread_id TEXT NOT NULL REFERENCES agent_threads(id) ON DELETE CASCADE,
+  joined_at TEXT NOT NULL,
+  PRIMARY KEY (room_id, thread_id)
+);
+CREATE INDEX IF NOT EXISTS idx_room_members_thread ON room_members(thread_id);
+
+CREATE TABLE IF NOT EXISTS edges (
+  from_thread      TEXT NOT NULL,
+  to_thread        TEXT NOT NULL,
+  weight           INTEGER NOT NULL DEFAULT 1,
+  last_interact_at TEXT NOT NULL,
+  PRIMARY KEY (from_thread, to_thread)
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  edge_id      INTEGER,
+  from_thread  TEXT NOT NULL,
+  to_thread    TEXT NOT NULL,
+  question     TEXT NOT NULL,
+  reply        TEXT,
+  status       TEXT NOT NULL DEFAULT 'pending',
+  room_id      INTEGER REFERENCES rooms(id) ON DELETE SET NULL,
+  hop_count    INTEGER NOT NULL DEFAULT 0,
+  created_at   TEXT NOT NULL,
+  replied_at   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_messages_to ON messages(to_thread, status, id DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_from ON messages(from_thread, id DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_room ON messages(room_id, id ASC);
+
+CREATE TABLE IF NOT EXISTS room_tasks (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  room_id             INTEGER NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  initiator_thread_id TEXT NOT NULL,
+  executor_thread_id  TEXT NOT NULL,
+  prompt              TEXT NOT NULL,
+  status              TEXT NOT NULL DEFAULT 'pending',
+  summary             TEXT,
+  message_id          INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+  created_at          TEXT NOT NULL,
+  updated_at          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_room_tasks_room ON room_tasks(room_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_room_tasks_message ON room_tasks(message_id);
+
+CREATE TABLE IF NOT EXISTS thread_runs (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id     TEXT NOT NULL REFERENCES agent_threads(id) ON DELETE CASCADE,
+  message_id    INTEGER UNIQUE REFERENCES messages(id) ON DELETE SET NULL,
+  room_id       INTEGER REFERENCES rooms(id) ON DELETE SET NULL,
+  prompt        TEXT NOT NULL,
+  state         TEXT NOT NULL DEFAULT 'queued',
+  turn_id       TEXT,
+  final_text    TEXT,
+  error_code    TEXT,
+  checkpoint_id INTEGER REFERENCES thread_checkpoints(id) ON DELETE SET NULL,
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_thread_runs_thread_state ON thread_runs(thread_id, state, id);
+
+CREATE TABLE IF NOT EXISTS thread_events (
+  seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id    TEXT NOT NULL REFERENCES agent_threads(id) ON DELETE CASCADE,
+  run_id       INTEGER REFERENCES thread_runs(id) ON DELETE SET NULL,
+  type         TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_thread_events_thread ON thread_events(thread_id, seq);
+
+CREATE TABLE IF NOT EXISTS thread_approvals (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id      TEXT NOT NULL REFERENCES agent_threads(id) ON DELETE CASCADE,
+  run_id         INTEGER NOT NULL REFERENCES thread_runs(id) ON DELETE CASCADE,
+  rpc_request_id TEXT NOT NULL,
+  kind           TEXT NOT NULL,
+  payload_json   TEXT NOT NULL,
+  state          TEXT NOT NULL DEFAULT 'pending',
+  decision       TEXT,
+  response_json  TEXT,
+  created_at     TEXT NOT NULL,
+  resolved_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_thread_approvals_state ON thread_approvals(state, id);
+CREATE INDEX IF NOT EXISTS idx_thread_approvals_run ON thread_approvals(run_id, state);
+
+CREATE TABLE IF NOT EXISTS context_entries (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id  TEXT NOT NULL,
+  project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+  room_id    INTEGER REFERENCES rooms(id) ON DELETE SET NULL,
+  kind       TEXT NOT NULL DEFAULT 'note',
+  pinned     INTEGER NOT NULL DEFAULT 0,
+  title      TEXT NOT NULL,
+  content    TEXT NOT NULL,
+  tags       TEXT,
+  version    INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_context_project ON context_entries(project_id, pinned DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_context_room ON context_entries(room_id, pinned DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_context_thread ON context_entries(thread_id, id DESC);
 
--- Simple KV store for UI/server settings (e.g. terminal opener config).
+CREATE TABLE IF NOT EXISTS workflows (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  name        TEXT NOT NULL,
+  description TEXT,
+  project_id  INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+  room_id     INTEGER REFERENCES rooms(id) ON DELETE SET NULL,
+  steps_json  TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_workflows_project ON workflows(project_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS workflow_runs (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  workflow_id  INTEGER NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+  project_id   INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+  room_id      INTEGER REFERENCES rooms(id) ON DELETE SET NULL,
+  status       TEXT NOT NULL DEFAULT 'running',
+  input        TEXT,
+  initiated_by TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL,
+  completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_wf ON workflow_runs(workflow_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS workflow_steps (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id          INTEGER NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+  step_key        TEXT NOT NULL,
+  title           TEXT NOT NULL,
+  kind            TEXT NOT NULL DEFAULT 'agent',
+  depends_on_json TEXT NOT NULL DEFAULT '[]',
+  target_thread_id TEXT,
+  prompt_template TEXT NOT NULL DEFAULT '',
+  include_handoff INTEGER NOT NULL DEFAULT 0,
+  status          TEXT NOT NULL DEFAULT 'pending',
+  message_id      INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+  output          TEXT,
+  error           TEXT,
+  started_at      TEXT,
+  completed_at    TEXT,
+  UNIQUE(run_id, step_key)
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_steps_run ON workflow_steps(run_id, id);
+CREATE INDEX IF NOT EXISTS idx_workflow_steps_msg ON workflow_steps(message_id);
+
 CREATE TABLE IF NOT EXISTS app_settings (
-  key TEXT PRIMARY KEY,
+  key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS audit_log (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  ts TEXT NOT NULL,
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts             TEXT NOT NULL,
   caller_session TEXT,
-  interface TEXT NOT NULL,
-  action TEXT NOT NULL,
-  args TEXT,
-  result TEXT
+  interface      TEXT NOT NULL,
+  action         TEXT NOT NULL,
+  args           TEXT,
+  result         TEXT
 );
-
-CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts);
-CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
-CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_log(caller_session);
-
--- Managed Codex executor: one row binds a managed runtime instance to its
--- app-server root thread. owner_token pins WHICH manager generation may
--- drive the instance; run mutations from any other token are refused.
-CREATE TABLE IF NOT EXISTS managed_codex_bindings (
-  instance_id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL,
-  thread_id TEXT NOT NULL,
-  active_turn_id TEXT,
-  owner_token TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-
--- One logical execution per message (message_id UNIQUE): retries, restarts
--- and manual re-delivery of the same message must never double-submit.
-CREATE TABLE IF NOT EXISTS managed_codex_runs (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  message_id INTEGER NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
-  instance_id TEXT NOT NULL,
-  thread_id TEXT,
-  turn_id TEXT,
-  state TEXT NOT NULL DEFAULT 'queued',
-  request_id TEXT,
-  submit_text TEXT NOT NULL,
-  final_text TEXT,
-  error_code TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_managed_codex_runs_instance
-  ON managed_codex_runs(instance_id, state);
-
--- Normalized replayable events; payloads exclude raw reasoning, credentials
--- and full environments.
-CREATE TABLE IF NOT EXISTS managed_codex_events (
-  sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-  instance_id TEXT NOT NULL,
-  run_id INTEGER,
-  type TEXT NOT NULL,
-  payload TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_managed_codex_events_instance
-  ON managed_codex_events(instance_id, sequence);
-
--- Pending/resolved approval requests keyed to the run they interrupted.
--- State expires with the connection generation that received the request.
-CREATE TABLE IF NOT EXISTS managed_codex_approvals (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  run_id INTEGER NOT NULL REFERENCES managed_codex_runs(id) ON DELETE CASCADE,
-  rpc_request_id TEXT NOT NULL,
-  request_kind TEXT NOT NULL,
-  payload TEXT NOT NULL,
-  state TEXT NOT NULL DEFAULT 'pending',
-  created_at TEXT NOT NULL,
-  resolved_at TEXT
-);
+CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts DESC);
 `;
 
-/**
- * Total time a database operation keeps retrying a held write lock before
- * surfacing SQLITE_BUSY. The HTTP server implements this budget in
- * JavaScript (yielding between attempts) instead of sqlite's internal
- * busy-handler sleep, which would freeze the event loop for the whole
- * budget — CLI/MCP connections keep the in-process blocking behavior.
- */
-export const BUSY_TIMEOUT_MS = 10_000;
-
-/**
- * Open (or reuse) a single database connection per process.
- * Uses WAL mode for safe multi-process concurrent reads + single writer.
- */
 export function openDb(config: Config): DB {
   const db = new Database(config.dbPath);
-  try {
-    db.pragma(`journal_mode = WAL`);
-    db.pragma(`busy_timeout = ${BUSY_TIMEOUT_MS}`);
-    db.pragma(`synchronous = NORMAL`);
-    db.pragma(`foreign_keys = ON`);
+  db.pragma("journal_mode = WAL");
+  db.pragma("synchronous = NORMAL");
+  db.pragma("foreign_keys = ON");
+  db.pragma(`busy_timeout = ${BUSY_TIMEOUT_MS}`);
 
-    migrate(db);
-    scheduleWalCheckpoint(config, db);
-    return db;
-  } catch (err) {
-    try {
-      if (db.open) db.close();
-    } catch (closeError) {
-      logger.warn(
-        { err: closeError, dataDir: config.dataDir },
-        "failed to close database after startup error",
-      );
-    }
-    throw err;
-  }
-}
-
-/**
- * Remove edges that never carried a question (from→to) — they were created
- * by the old replyAsk reverse-edge bookkeeping; their content lives in the
- * channel's message replies. Exported for tests.
- */
-export function collapseReplyEdges(db: DB): number {
-  const res = db
-    .prepare(
-      `DELETE FROM edges WHERE NOT EXISTS (
-         SELECT 1 FROM messages m
-         WHERE m.from_session = edges.from_session AND m.to_session = edges.to_session
-       )`,
-    )
-    .run();
-  return res.changes;
-}
-
-/** Run idempotent schema migrations. */
-function migrate(db: DB): void {
-  const current = db.pragma("user_version", { simple: true }) as number;
-  if (current >= SCHEMA_VERSION) return;
-
-  const runMigration = db.transaction(() => {
+  const current = (db.pragma("user_version", { simple: true }) as number) ?? 0;
+  if (current < SCHEMA_VERSION) {
     db.exec(SCHEMA_SQL);
-    // CREATE TABLE IF NOT EXISTS cannot extend existing tables — add columns
-    // for databases created before the column was introduced.
-    const ensureColumn = (table: string, col: string, ddl: string) => {
-      const cols = db.pragma(`table_info(${table})`) as { name: string }[];
-      if (!cols.some((c) => c.name === col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
-    };
-    ensureColumn("runtime_agents", "interval_min", "interval_min INTEGER");
-    ensureColumn("runtime_agents", "last_scheduled_run", "last_scheduled_run TEXT");
-    // v15: managed Codex executor — presets opt in; everything predating the
-    // column keeps its original terminal behavior.
-    ensureColumn(
-      "runtime_agents",
-      "execution_mode",
-      "execution_mode TEXT NOT NULL DEFAULT 'terminal'",
-    );
-    ensureColumn("sessions", "runtime", "runtime TEXT");
-    ensureColumn("sessions", "identity_source", "identity_source TEXT");
-    ensureColumn("sessions", "runtime_pid", "runtime_pid INTEGER");
-    // v8: edge-centric channels — messages link to their channel edge, and
-    // reply-created reverse edges are collapsed (replies stay on the channel)
-    ensureColumn("messages", "edge_id", "edge_id INTEGER");
-    // v10: asker-side reply push — a reply surfaced to the asker's
-    // CLI via the hook channel is marked seen so it never repeats
-    ensureColumn("messages", "reply_seen_at", "reply_seen_at TEXT");
-    // v11: chat rooms — a session belongs to at most one room
-    ensureColumn("sessions", "chat_room_id", "chat_room_id INTEGER");
-    // v12: room shared thread + orchestration
-    ensureColumn("messages", "room_id", "room_id INTEGER");
-    db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_sessions_room ON sessions(chat_room_id);
-      CREATE INDEX IF NOT EXISTS idx_messages_edge ON messages(edge_id, id);
-      CREATE INDEX IF NOT EXISTS idx_messages_room ON messages(room_id, id);
-      CREATE INDEX IF NOT EXISTS idx_messages_pair ON messages(from_session, to_session, id);
-      CREATE INDEX IF NOT EXISTS idx_room_tasks_scope ON room_tasks(room_id, initiator_session_id, status);
-      CREATE INDEX IF NOT EXISTS idx_managed_bindings_session ON managed_codex_bindings(session_id);
-      CREATE INDEX IF NOT EXISTS idx_managed_approvals_run ON managed_codex_approvals(run_id, state);
-    `);
-    // v13: one-shot task token to fix split-brain
-    ensureColumn("room_tasks", "task_token", "task_token TEXT");
-    // v17: room_tasks → messages link, structured memory columns, workflow DAG indexes
-    ensureColumn("room_tasks", "message_id", "message_id INTEGER");
-    ensureColumn("context_entries", "room_id", "room_id INTEGER");
-    ensureColumn("context_entries", "kind", "kind TEXT NOT NULL DEFAULT 'note'");
-    ensureColumn("context_entries", "pinned", "pinned INTEGER NOT NULL DEFAULT 0");
-    db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_context_room ON context_entries(room_id, pinned DESC, updated_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_room_tasks_message ON room_tasks(message_id);
-      CREATE INDEX IF NOT EXISTS idx_workflows_room ON workflows(room_id, updated_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_workflow_runs_room ON workflow_runs(room_id, created_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_workflow_steps_run ON workflow_steps(run_id, status);
-      CREATE INDEX IF NOT EXISTS idx_workflow_steps_message ON workflow_steps(message_id);
-    `);
-    // backfill task_token for existing rows with random tokens
-    db.exec(`
-      UPDATE room_tasks SET task_token = lower(hex(randomblob(16)))
-      WHERE task_token IS NULL
-    `);
-    db.exec(`
-      INSERT OR IGNORE INTO edges (from_session, to_session, weight, last_interact_at)
-        SELECT from_session, to_session, COUNT(*), MAX(COALESCE(replied_at, created_at))
-        FROM messages GROUP BY from_session, to_session;
-      UPDATE messages SET edge_id = (
-        SELECT e.rowid FROM edges e
-        WHERE e.from_session = messages.from_session AND e.to_session = messages.to_session
-      ) WHERE edge_id IS NULL;
-    `);
-    collapseReplyEdges(db);
-    backfillSessionIdentity(db);
+    const cols = db.pragma("table_info(agent_threads)") as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === "pr_url")) {
+      db.exec(`ALTER TABLE agent_threads ADD COLUMN pr_url TEXT`);
+    }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
-  });
-  runMigration();
-  logger.info({ from: current, to: SCHEMA_VERSION }, "db migrated");
+    logger.info({ from: current, to: SCHEMA_VERSION, dbPath: config.dbPath }, "conflux v2 db initialized");
+  }
+
+  scheduleWalCheckpoint(db, config.dbPath);
+  return db;
 }
 
-function backfillSessionIdentity(db: DB): void {
-  const rows = db
-    .prepare(`SELECT id, metadata, runtime, identity_source, runtime_pid FROM sessions`)
-    .all() as {
-    id: string;
-    metadata: string | null;
-    runtime: unknown;
-    identity_source: unknown;
-    runtime_pid: unknown;
-  }[];
-  const update = db.prepare(
-    `UPDATE sessions SET
-       runtime = ?,
-       identity_source = ?,
-       runtime_pid = ?
-     WHERE id = ?`,
-  );
-
-  for (const row of rows) {
-    const storedRuntime = parseSessionRuntime(row.runtime);
-    const storedIdentitySource = parseIdentitySource(row.identity_source);
-    const storedRuntimePid = parseRuntimePid(row.runtime_pid);
-    let runtime = storedRuntime;
-    let identitySource = storedIdentitySource;
-    let runtimePid = storedRuntimePid;
-
-    if (row.metadata) {
-      let meta: Record<string, unknown>;
-      try {
-        const parsed: unknown = JSON.parse(row.metadata);
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-          throw new Error("session metadata is not a JSON object");
-        }
-        meta = parsed as Record<string, unknown>;
-      } catch (err) {
-        logger.warn(
-          { err, sessionId: row.id },
-          "skipping malformed session metadata during identity migration",
-        );
-        if (
-          row.runtime !== runtime ||
-          row.identity_source !== identitySource ||
-          row.runtime_pid !== runtimePid
-        ) {
-          update.run(runtime, identitySource, runtimePid, row.id);
-        }
-        continue;
-      }
-
-      const legacyClaudePid = parseRuntimePid(meta.claude_pid);
-      runtime = runtime ?? parseSessionRuntime(meta.runtime);
-      if (runtime === null && legacyClaudePid !== null) runtime = "claude";
-      identitySource = identitySource ?? parseIdentitySource(meta.identity_source);
-      runtimePid =
-        runtimePid ??
-        parseRuntimePid(meta.runtime_pid) ??
-        (runtime === "claude" ? legacyClaudePid : null);
-    }
-
-    if (
-      row.runtime !== runtime ||
-      row.identity_source !== identitySource ||
-      row.runtime_pid !== runtimePid
-    ) {
-      update.run(runtime, identitySource, runtimePid, row.id);
-    }
+export function walFileSize(dbPath: string): number {
+  const walPath = `${dbPath}-wal`;
+  if (!existsSync(walPath)) return 0;
+  try {
+    return statSync(walPath).size;
+  } catch {
+    return 0;
   }
 }
 
-/**
- * Schedule a periodic WAL checkpoint monitor. Long-running processes (HTTP server)
- * need this so the WAL file does not grow unbounded. MCP/CLI short-lived processes
- * rely on the default PASSIVE checkpointing that happens during reads.
- */
-function scheduleWalCheckpoint(config: Config, db: DB): void {
-  const intervalMs = 30_000;
-  const walThresholdBytes = 64 * 1024 * 1024;
+export function maybeCheckpointWal(
+  db: DB,
+  dbPath: string,
+  thresholdBytes = WAL_CHECKPOINT_THRESHOLD_BYTES,
+): boolean {
+  if (!db.open || dbPath === ":memory:") return false;
+  const walBytes = walFileSize(dbPath);
+  if (walBytes < thresholdBytes) return false;
+  try {
+    const result = db.pragma("wal_checkpoint(TRUNCATE)") as Array<{
+      busy: number;
+      log: number;
+      checkpointed: number;
+    }>;
+    logger.info({ walBytes, result: result[0] ?? null }, "wal checkpointed");
+    return true;
+  } catch (err) {
+    logger.warn({ err, walBytes }, "wal checkpoint skipped");
+    return false;
+  }
+}
 
-  if (checkpointTimers.has(db)) return;
+export function scheduleWalCheckpoint(
+  db: DB,
+  dbPath: string,
+  opts: { intervalMs?: number; thresholdBytes?: number } = {},
+): void {
+  if (dbPath === ":memory:") return;
+  stopWalCheckpoint(db);
   const timer = setInterval(() => {
     if (!db.open) {
       stopWalCheckpoint(db);
       return;
     }
-    try {
-      const walPath = `${config.dbPath}-wal`;
-      if (existsSync(walPath)) {
-        const size = statSync(walPath).size;
-        if (size > walThresholdBytes) {
-          const before = Date.now();
-          db.pragma("wal_checkpoint(TRUNCATE)");
-          logger.debug(
-            { walBytesBefore: size, ms: Date.now() - before },
-            "wal checkpoint triggered",
-          );
-        }
-      }
-    } catch (err) {
-      logger.warn({ err }, "wal checkpoint monitor error");
-    }
-  }, intervalMs);
-  if (typeof timer.unref === "function") timer.unref();
+    maybeCheckpointWal(db, dbPath, opts.thresholdBytes);
+  }, opts.intervalMs ?? WAL_CHECKPOINT_INTERVAL_MS);
+  timer.unref();
   checkpointTimers.set(db, timer);
 }
 
 export function stopWalCheckpoint(db: DB): void {
   const timer = checkpointTimers.get(db);
-  if (!timer) return;
-  clearInterval(timer);
-  checkpointTimers.delete(db);
+  if (timer) {
+    clearInterval(timer);
+    checkpointTimers.delete(db);
+  }
 }
 
 export function nowIso(): string {

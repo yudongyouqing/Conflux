@@ -1,1482 +1,188 @@
+import { Command } from "commander";
 import { APP_VERSION } from "../version.js";
-import { Command, Option } from "commander";
-import { randomUUID } from "node:crypto";
-import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, realpathSync } from "node:fs";
-
-import { resolveConfig, type Scope, DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT } from "../config.js";
-import { openDb, stopWalCheckpoint, publicError, type DB } from "../core/db.js";
-import { migrateDataDir, readMigrationStatus } from "../core/config-migration.js";
-import { handleHookEvent, readJsonFile } from "../core/live.js";
-import { clearData, getClearableCounts } from "../core/data-clear.js";
-import { runBackfill } from "../core/hooks-backfill.js";
-import { installSessionCommands } from "./session-commands.js";
-import { logger, setLogLevel } from "../log.js";
-import { registerSession, listSessions, endSession } from "../core/sessions.js";
-import { publishContext, updateContext, deleteContext, listMyContext } from "../core/context.js";
-import { queryContext } from "../core/search.js";
-import {
-  checkInbox,
-  checkReplies,
-  listMessages,
-  formatInboxNotice,
-  getEdge,
-  listEdgeMessages,
-} from "../core/messages.js";
-import { replyAskAndPush } from "../core/mail-push.js";
-import { askAndMaybeWake, retryMessageDelivery } from "../core/ask.js";
-import {
-  listRuntimeInstances,
-  stopRuntimeInstance,
-  resumeRuntimeInstance,
-} from "../core/runtime-instances.js";
-import {
-  parseEdgeId,
-  parseWatchInterval,
-  watchChannelSnapshots,
-  type ChannelSnapshot,
-} from "./channel-watch.js";
-import { getGraph } from "../core/graph.js";
-import { createAgent, listAgents, deleteAgent, type ModelConfig } from "../core/agents.js";
-import { logAudit, queryAudit } from "../core/audit.js";
-import {
-  exportData,
-  importData,
-  type DataBundleScope,
-  type ImportConflictStrategy,
-} from "../core/data-transfer.js";
-import {
-  approveHumanGate,
-  getWorkflowRun,
-  listWorkflowRuns,
-  listWorkflows,
-  startWorkflowRun,
-} from "../core/workflows.js";
+import { resolveConfig, resolveHttpHost, resolveHttpPort, type Scope } from "../config.js";
+import { openDb, stopWalCheckpoint } from "../core/db.js";
+import { startHttpServer } from "../http/server.js";
+import { startMcpServer } from "../mcp/server.js";
+import { createProject, listProjects } from "../core/projects.js";
+import { listThreads } from "../core/threads/store.js";
+import { probeLocalClis } from "../core/cli-probe.js";
+import { approveHumanGate, getWorkflowRun, listWorkflows, startWorkflowRun } from "../core/workflows.js";
 import { handoffContext } from "../core/handoff.js";
+import { WEB_CONSOLE_ID } from "@conflux/shared";
 
-/**
- * Build the CLI command tree.
- *
- * Each leaf command runs against either:
- *   - a local SQLite file (default): the action's local() closure calls the
- *     core function directly — no HTTP routing is involved
- *   - a remote HTTP server (when --http is passed): runOp falls back to fetch()
- *
- * Adding a new endpoint no longer requires touching two places: the core
- * function lives in the local() closure, and only --http mode needs the path.
- */
-export function buildCli(_argv?: string | readonly string[]): Command {
+interface GlobalOpts {
+  dataDir?: string;
+  scope?: Scope;
+}
+
+function withDb<T>(opts: GlobalOpts, fn: (db: ReturnType<typeof openDb>) => Promise<T> | T): Promise<T> {
+  const config = resolveConfig(opts.scope ?? "global", opts.dataDir);
+  const db = openDb(config);
+  return Promise.resolve(fn(db)).finally(() => {
+    stopWalCheckpoint(db);
+    if (db.open) db.close();
+  });
+}
+
+export function buildCli(_argv?: string[]): Command {
   const program = new Command();
   program
     .name("conflux")
-    .description("Cross-session context query and conversation system")
+    .description("Conflux v2 — Project-first multi-agent workbench & orchestration control plane")
     .version(APP_VERSION)
-    .option("--data-dir <path>", "override the Conflux data directory (also via CONFLUX_HOME)")
-    .option("--scope <scope>", '"project" or "global" (default: auto)', "auto")
-    .option(
-      "--http <url>",
-      "send commands to a remote HTTP server instead of the local SQLite file",
-    )
-    .option("--log-level <level>", "pino log level", "warn");
+    .option("--data-dir <path>", "Override Conflux data directory (holds conflux-v2.db)")
+    .option("--scope <scope>", "Config scope: global | project", "global");
 
-  // mcp -------------------------------------------------------------
-  program
-    .command("mcp")
-    .description("run the stdio MCP server (Claude Code spawns this)")
-    .action(async function (this: Command) {
-      const { runMcpServer } = await import("../mcp/server.js");
-      const o = this.optsWithGlobals();
-      await runMcpServer({
-        scope: normaliseScope(o.scope),
-        overrideDataDir: o.dataDir,
-      });
-    });
-
-  // serve -----------------------------------------------------------
   program
     .command("serve")
-    .description("run the HTTP server")
-    .option("--host <host>", "bind host", DEFAULT_HTTP_HOST)
-    .option("--port <port>", "bind port", String(DEFAULT_HTTP_PORT))
-    .action(async function (this: Command) {
-      const { startHttpServer } = await import("../http/server.js");
-      const o = this.optsWithGlobals();
-      const port = Number(o.port);
-      if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-        throw new Error(`invalid --port: ${o.port}`);
-      }
-      await startHttpServer({
-        host: o.host,
-        port,
-        scope: normaliseScope(o.scope),
-        overrideDataDir: o.dataDir,
+    .description("Start the Conflux v2 HTTP + SSE server and Web UI")
+    .option("-H, --host <host>", "Bind host")
+    .option("-p, --port <port>", "Bind port")
+    .action(async (cmdOpts: { host?: string; port?: string }) => {
+      const g = program.opts<GlobalOpts>();
+      const port = cmdOpts.port ? Number(cmdOpts.port) : undefined;
+      const app = await startHttpServer({
+        host: resolveHttpHost(cmdOpts.host),
+        port: resolveHttpPort(port),
+        scope: g.scope,
+        overrideDataDir: g.dataDir,
+      });
+      const shutdown = async () => {
+        await app.close();
+        process.exit(0);
+      };
+      process.once("SIGINT", () => void shutdown());
+      process.once("SIGTERM", () => void shutdown());
+    });
+
+  program
+    .command("mcp")
+    .description("Start the Conflux v2 MCP server over stdio")
+    .action(async () => {
+      const g = program.opts<GlobalOpts>();
+      await startMcpServer({ scope: g.scope, overrideDataDir: g.dataDir });
+    });
+
+  program
+    .command("status")
+    .description("Show probed local CLIs, projects, and active Agent Threads")
+    .action(async () => {
+      const g = program.opts<GlobalOpts>();
+      await withDb(g, (db) => {
+        const out = {
+          cli_probes: probeLocalClis(db, { force: true }),
+          projects: listProjects(db),
+          threads: listThreads(db),
+        };
+        process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
       });
     });
 
-  // path ------------------------------------------------------------
-  program
-    .command("path")
-    .description("print the resolved data directory and db file")
-    .action(function (this: Command) {
-      const o = this.optsWithGlobals();
-      const cfg = resolveConfig(normaliseScope(o.scope), o.dataDir);
-      console.log(JSON.stringify(cfg, null, 2));
-    });
-
-  // migrate --------------------------------------------------------
-  program
-    .command("migrate")
-    .description("copy legacy muiltchat data into a Conflux directory")
-    .option("--from <legacy-dir>", "source muiltchat data directory")
-    .option("--to <conflux-dir>", "destination Conflux data directory")
-    .option("--status", "show migration marker status without changing files")
-    .action(function (this: Command) {
-      const o = this.optsWithGlobals() as CliOpts & {
-        from?: string;
-        to?: string;
-        status?: boolean;
-      };
-
-      if (o.status) {
-        if (o.from) throw new Error("migrate --status cannot be combined with --from");
-        const destination = o.to ?? o.dataDir ?? process.env.CONFLUX_HOME ?? join(homedir(), ".conflux");
-        console.log(JSON.stringify(readMigrationStatus(destination), null, 2));
-        return;
-      }
-
-      if (!o.from || !o.to) {
-        throw new Error("migrate requires --from <legacy-dir> and --to <conflux-dir>");
-      }
-      console.log(JSON.stringify(migrateDataDir({ from: o.from, to: o.to }), null, 2));
-    });
-
-  // data ------------------------------------------------------------
-  const data = program.command("data").description("export and import local data");
-
-  data
-    .command("export")
-    .description("export a secret-free data bundle")
-    .option("--scope <scope>", "global or project", "global")
-    .option("--project-dir <path>", "project directory for project scope")
-    .option("--output <file>", "write JSON to a file instead of stdout")
-    .action(async function (this: Command) {
-      const o = this.optsWithGlobals() as CliOpts & {
-        scope?: string;
-        projectDir?: string;
-        output?: string;
-      };
-      const scope = parseDataScope(o.scope);
-      if (!scope) throw new Error("scope must be global or project");
-      const result = await runOp(
-        program,
-        () => withDb(openDbFrom(o), (db) => exportData(db, { scope, projectDir: o.projectDir })),
-        "GET",
-        `/data/export?scope=${encodeURIComponent(scope)}${o.projectDir ? `&project_dir=${encodeURIComponent(o.projectDir)}` : ""}`,
-      );
-      writeDataOutput(result, o.output);
-    });
-
-  data
-    .command("import")
-    .description("import a versioned data bundle")
-    .requiredOption("--file <file>", "JSON bundle to import")
-    .option("--conflict <strategy>", "skip, overwrite, or copy", "skip")
-    .action(async function (this: Command) {
-      const o = this.optsWithGlobals() as CliOpts & {
-        file: string;
-        conflict?: string;
-      };
-      const conflict = parseImportConflict(o.conflict);
-      const bundle = JSON.parse(readFileSync(resolve(o.file), "utf8")) as unknown;
-      const result = await runOp(
-        program,
-        () => withDb(openDbFrom(o), (db) => importData(db, bundle, { conflict })),
-        "POST",
-        "/data/import",
-        { bundle, conflict },
-      );
-      console.log(JSON.stringify(result, null, 2));
-    });
-
-  data
-    .command("counts")
-    .description("show clearable per-category data counts")
-    .action(async function (this: Command) {
-      const o = this.optsWithGlobals() as CliOpts;
-      const result = await runOp(
-        program,
-        // close the one-shot connection: leaked handles keep data.db locked
-        // on Windows (tests delete the data dir while the CLI still "runs")
-        () => withDb(openDbFrom(o), (db) => getClearableCounts(db)),
-        "GET",
-        "/data/counts",
-      );
-      console.log(JSON.stringify(result));
-    });
-
-  data
-    .command("clear")
-    .description("auto-backup a full bundle, then clear selected categories")
-    .option("--sessions", "clear session nodes (cascades their messages/context)")
-    .option("--messages", "clear cross-session messages, keep nodes")
-    .option("--context", "clear published context notes")
-    .action(async function (this: Command) {
-      const o = this.optsWithGlobals() as CliOpts & {
-        sessions?: boolean;
-        messages?: boolean;
-        context?: boolean;
-      };
-      const categories = {
-        sessions: o.sessions === true,
-        messages: o.messages === true,
-        context: o.context === true,
-      };
-      if (!categories.sessions && !categories.messages && !categories.context) {
-        throw new Error("pick at least one of --sessions/--messages/--context");
-      }
-      const cfg = resolveConfig(normaliseScope(o.scope), o.dataDir);
-      const result = await runOp(
-        program,
-        // close the one-shot connection: leaked handles keep data.db locked
-        // on Windows (tests delete the data dir while the CLI still "runs")
-        () => withDb(openDb(cfg), (db) => clearData(db, categories, join(cfg.dataDir, "backups"))),
-        "POST",
-        "/data/clear",
-        { categories },
-      );
-      console.log(JSON.stringify(result, null, 2));
-    });
-
-  // graph -----------------------------------------------------------
-  program
-    .command("graph")
-    .description("show the session graph (nodes + edges)")
-    .option("--status <status>", '"active" | "stale" | "ended" | "all"', "active")
-    .action(async function (this: Command) {
-      const o = this.optsWithGlobals();
-      const status = o.status ?? "active";
-      const res = await runOp(
-        program,
-        () => withDb(openDbFrom(o), (db) => getGraph(db, { status })),
-        "GET",
-        `/graph?status=${encodeURIComponent(status)}`,
-      );
-      console.log(JSON.stringify(res, null, 2));
-    });
-
-  // sessions --------------------------------------------------------
-  const sessions = program.command("sessions").description("manage sessions");
-
-  sessions
-    .command("list")
-    .description("list registered sessions")
-    .option("--status <status>", '"active" | "stale" | "ended" | "all"', "active")
-    .action(async function (this: Command) {
-      const o = this.optsWithGlobals();
-      const status = o.status ?? "active";
-      const res = await runOp(
-        program,
-        () => withDb(openDbFrom(o), (db) => ({ sessions: listSessions(db, { status }) })),
-        "GET",
-        `/sessions?status=${encodeURIComponent(status)}`,
-      );
-      console.log(JSON.stringify(res, null, 2));
-    });
-
-  sessions
-    .command("register")
-    .description("register a session")
-    .requiredOption("--name <name>")
-    .option("--desc <description>")
-    .action(async function (this: Command) {
-      const o = this.optsWithGlobals();
-      const res = await runOp(
-        program,
-        () => withDb(openDbFrom(o), (db) => {
-          const sid = resolveCliSessionId(db);
-          const session = registerSession(db, {
-            id: sid,
-            name: o.name,
-            description: o.desc ?? null,
-            project_dir: process.env.CLAUDE_PROJECT_DIR || process.cwd(),
-          });
-          logAudit(db, {
-            caller_session: sid,
-            interface: "cli",
-            action: "register_session",
-            args: { name: o.name, description: o.desc },
-            result: { session_id: sid },
-          });
-          return { session_id: sid, session };
-        }),
-        "POST",
-        "/sessions/register",
-        { name: o.name, description: o.desc },
-      );
-      console.log(JSON.stringify(res, null, 2));
-    });
-
-  sessions
-    .command("end")
-    .description("mark a session as ended")
-    .requiredOption("--id <id>")
-    .action(function (this: Command) {
-      const o = this.optsWithGlobals();
-      // Ending a remote session requires an explicit server endpoint.
-      const res = o.http
-        ? (() => { throw new Error("sessions end does not support --http"); })()
-        : (() => {
-            const db = openDbFrom(o);
-            try {
-            endSession(db, o.id);
-            logAudit(db, {
-              caller_session: o.id,
-              interface: "cli",
-              action: "end_session",
-              args: { id: o.id },
-              result: { ok: true },
-            });
-            return { ok: true };
-            } finally { stopWalCheckpoint(db); db.close(); }
-          })();
-      console.log(JSON.stringify(res, null, 2));
-    });
-
-  // context ---------------------------------------------------------
-  const context = program.command("context").description("manage published context");
-
-  context
-    .command("publish")
-    .description("publish a context entry")
-    .requiredOption("--title <title>")
-    .requiredOption("--content <content>")
-    .option("--tags <tags>", "comma-separated tags")
-    .action(async function (this: Command) {
-      const o = this.optsWithGlobals();
-      const tags = parseTags(o.tags);
-      const res = await runOp(
-        program,
-        () => withDb(openDbFrom(o), (db) => {
-          const sid = resolveCliSessionId(db);
-          const entry = publishContext(db, {
-            session_id: sid,
-            title: o.title,
-            content: o.content,
-            tags: tags ?? null,
-          });
-          logAudit(db, {
-            caller_session: sid,
-            interface: "cli",
-            action: "publish_context",
-            args: { title: o.title, tags },
-            result: { entry_id: entry.id },
-          });
-          return { entry };
-        }),
-        "POST",
-        "/context",
-        { title: o.title, content: o.content, tags },
-      );
-      console.log(JSON.stringify(res, null, 2));
-    });
-
-  context
-    .command("list-mine")
-    .description("list my session's published context")
-    .action(async function (this: Command) {
-      const o = this.optsWithGlobals();
-      const res = await runOp(
-        program,
-        () => withDb(openDbFrom(o), (db) => {
-          const sid = resolveCliSessionId(db);
-          const entries = listMyContext(db, sid);
-          logAudit(db, {
-            caller_session: sid,
-            interface: "cli",
-            action: "list_my_context",
-            args: {},
-            result: { count: entries.length },
-          });
-          return { entries };
-        }),
-        "GET",
-        "/context/mine",
-      );
-      console.log(JSON.stringify(res, null, 2));
-    });
-
-  context
-    .command("query")
-    .description("full-text search across published context")
-    .argument("[query]", "FTS query")
-    .option("--session <id>", "restrict to a session")
-    .option("--tags <tags>", "comma-separated tags")
-    .option("--limit <n>", "max results", "50")
-    .action(async function (this: Command, query: string | undefined) {
-      const o = this.optsWithGlobals();
-      const tags = parseTags(o.tags);
-      const args = {
-        query,
-        session_id: o.session,
-        tags,
-        limit: o.limit ? Number(o.limit) : undefined,
-      };
-      const qs = new URLSearchParams();
-      if (query) qs.set("query", query);
-      if (o.session) qs.set("session_id", o.session);
-      if (o.tags) qs.set("tags", o.tags);
-      if (o.limit) qs.set("limit", String(o.limit));
-      const res = await runOp(
-        program,
-        () => withDb(openDbFrom(o), (db) => {
-          const sid = resolveCliSessionId(db);
-          const entries = queryContext(db, args);
-          logAudit(db, {
-            caller_session: sid,
-            interface: "cli",
-            action: "query_context",
-            args,
-            result: { count: entries.length },
-          });
-          return { entries };
-        }),
-        "GET",
-        `/context/query?${qs.toString()}`,
-      );
-      console.log(JSON.stringify(res, null, 2));
-    });
-
-  context
-    .command("update")
-    .description("update one of your context entries")
-    .requiredOption("--id <id>")
-    .option("--title <title>")
-    .option("--content <content>")
-    .option("--tags <tags>", "comma-separated tags")
-    .action(async function (this: Command) {
-      const o = this.optsWithGlobals();
-      const id = parsePositiveIntId(o.id, "context id");
-      const tags = parseTags(o.tags);
-      const patch: { title?: string; content?: string; tags?: string[] } = {};
-      if (o.title !== undefined) patch.title = o.title;
-      if (o.content !== undefined) patch.content = o.content;
-      if (tags !== undefined) patch.tags = tags;
-      const res = await runOp(
-        program,
-        () => withDb(openDbFrom(o), (db) => {
-          const sid = resolveCliSessionId(db);
-          const entry = updateContext(db, id, sid, patch);
-          logAudit(db, {
-            caller_session: sid,
-            interface: "cli",
-            action: "update_context",
-            args: { id, ...patch },
-            result: entry ? { id: entry.id } : null,
-          });
-          return { entry: entry ?? null };
-        }),
-        "PUT",
-        `/context/${id}`,
-        patch,
-      );
-      console.log(JSON.stringify(res, null, 2));
-    });
-
-  context
-    .command("delete")
-    .description("delete one of your context entries")
-    .requiredOption("--id <id>")
-    .action(async function (this: Command) {
-      const o = this.optsWithGlobals();
-      const id = parsePositiveIntId(o.id, "context id");
-      const res = await runOp(
-        program,
-        () => withDb(openDbFrom(o), (db) => {
-          const sid = resolveCliSessionId(db);
-          const ok = deleteContext(db, id, sid);
-          logAudit(db, {
-            caller_session: sid,
-            interface: "cli",
-            action: "delete_context",
-            args: { id },
-            result: { ok },
-          });
-          return { deleted: ok };
-        }),
-        "DELETE",
-        `/context/${id}`,
-      );
-      console.log(JSON.stringify(res, null, 2));
-    });
-
-  // agents ----------------------------------------------------------
-  const agents = program.command("agents").description("manage internal agent definitions");
-
-  agents
-    .command("create")
-    .description("create a new internal agent")
-    .requiredOption("--name <name>")
-    .requiredOption("--prompt <system_prompt>")
-    .requiredOption("--provider <provider>", '"anthropic" | "openai" | ...')
-    .requiredOption("--model <model>")
-    .option("--desc <description>")
-    .option("--temperature <n>", "sampling temperature", parseFloat)
-    .option("--max-tokens <n>", "max output tokens", parseInt)
-    .action(async function (this: Command) {
-      const o = this.optsWithGlobals();
-      const modelConfig: ModelConfig = {
-        provider: o.provider,
-        model: o.model,
-      };
-      if (o.temperature !== undefined) modelConfig.temperature = o.temperature;
-      if (o.maxTokens !== undefined) modelConfig.max_tokens = o.maxTokens;
-      const res = await runOp(
-        program,
-        () => withDb(openDbFrom(o), (db) => {
-          const sid = resolveCliSessionId(db);
-          const agent = createAgent(db, {
-            name: o.name,
-            system_prompt: o.prompt,
-            model_config: modelConfig,
-            description: o.desc ?? null,
-          });
-          logAudit(db, {
-            caller_session: sid,
-            interface: "cli",
-            action: "create_agent",
-            args: { name: o.name, provider: o.provider, model: o.model },
-            result: { id: agent.id },
-          });
-          return { agent };
-        }),
-        "POST",
-        "/agents",
-        {
-          name: o.name,
-          system_prompt: o.prompt,
-          model_config: modelConfig,
-          description: o.desc,
-        },
-      );
-      console.log(JSON.stringify(res, null, 2));
-    });
-
-  agents
-    .command("list")
-    .description("list all agents")
-    .action(async function (this: Command) {
-      const o = this.optsWithGlobals();
-      const res = await runOp(
-        program,
-        () => withDb(openDbFrom(o), (db) => {
-          const sid = resolveCliSessionId(db);
-          const agentList = listAgents(db);
-          logAudit(db, {
-            caller_session: sid,
-            interface: "cli",
-            action: "list_agents",
-            args: {},
-            result: { count: agentList.length },
-          });
-          return { agents: agentList };
-        }),
-        "GET",
-        "/agents",
-      );
-      console.log(JSON.stringify(res, null, 2));
-    });
-
-  agents
-    .command("delete")
-    .description("delete an agent")
-    .requiredOption("--id <id>")
-    .action(async function (this: Command) {
-      const o = this.optsWithGlobals();
-      const id = parsePositiveIntId(o.id, "agent id");
-      const res = await runOp(
-        program,
-        () => withDb(openDbFrom(o), (db) => {
-          const sid = resolveCliSessionId(db);
-          const ok = deleteAgent(db, id);
-          logAudit(db, {
-            caller_session: sid,
-            interface: "cli",
-            action: "delete_agent",
-            args: { id },
-            result: { ok },
-          });
-          return { deleted: ok };
-        }),
-        "DELETE",
-        `/agents/${id}`,
-      );
-      console.log(JSON.stringify(res, null, 2));
-    });
-
-  // channel ---------------------------------------------------------
-  const channel = program
-    .command("channel")
-    .description("inspect one directed conversation channel");
-
-  channel
-    .command("show <edge-id>")
-    .description("show a channel's complete message history")
-    .action(async function (this: Command, rawEdgeId: string) {
-      const o = this.optsWithGlobals();
-      const edgeId = parseEdgeId(rawEdgeId);
-      const db = o.http ? undefined : openDbFrom(o);
-      try {
-        const snapshot = await readChannelSnapshot(program, db, edgeId);
-        console.log(JSON.stringify(snapshot, null, 2));
-      } finally {
-        if (db) { stopWalCheckpoint(db); db.close(); }
-      }
-    });
-
-  channel
-    .command("watch <edge-id>")
-    .description("watch a channel for new messages and replies")
-    .option("--interval <milliseconds>", "polling interval in milliseconds")
-    .action(async function (this: Command, rawEdgeId: string) {
-      const o = this.optsWithGlobals() as CliOpts & { interval?: string };
-      const edgeId = parseEdgeId(rawEdgeId);
-      const intervalMs = parseWatchInterval(o.interval);
-      const db = o.http ? undefined : openDbFrom(o);
-      const controller = new AbortController();
-      const stop = () => controller.abort();
-      process.once("SIGINT", stop);
-      try {
-        for await (const snapshot of watchChannelSnapshots(
-          () => readChannelSnapshot(program, db, edgeId),
-          { intervalMs, signal: controller.signal },
-        )) {
-          console.log(JSON.stringify(snapshot, null, 2));
-        }
-      } finally {
-        process.off("SIGINT", stop);
-        if (db) { stopWalCheckpoint(db); db.close(); }
-      }
-    });
-
-  // msg -------------------------------------------------------------
-  const msg = program.command("msg").description("inter-session messaging");
-
-  msg
-    .command("ask")
-    .description("ask another session a question")
-    .requiredOption("--to <session>")
-    .argument("<question>")
-    .action(async function (this: Command, question: string) {
-      const o = this.optsWithGlobals();
-      const res = await runOp(
-        program,
-        () => withDb(openDbFrom(o), async (db) => {
-          const sid = resolveCliSessionId(db);
-          const result = await askAndMaybeWake(db, {
-            from_session: sid,
-            to_session: o.to,
-            question,
-          });
-          logAudit(db, {
-            caller_session: sid,
-            interface: "cli",
-            action: "ask_session",
-            args: { to_session: o.to },
-            result: { message_id: result.message.id },
-          });
-          return result;
-        }),
-        "POST",
-        "/messages/ask",
-        { to_session: o.to, question },
-      );
-      console.log(JSON.stringify(res, null, 2));
-    });
-
-  msg
-    .command("retry")
-    .description("retry waking an existing pending message without creating a duplicate")
-    .argument("<id>")
-    .action(async function (this: Command, rawId: string) {
-      const o = this.optsWithGlobals();
-      const id = parsePositiveIntId(rawId, "message id");
-      const result = await runOp(
-        program,
-        async () =>
-          withDb(openDbFrom(o), async (db) => {
-            const actor = resolveCliSessionId(db);
-            try {
-              const outcome = await retryMessageDelivery(db, id, actor);
-              logAudit(db, {
-                interface: "cli",
-                caller_session: actor,
-                action: "retry_message_delivery",
-                args: { id },
-                result: {
-                  state: outcome.message.delivery?.state,
-                  attempts: outcome.message.delivery?.attempts,
-                },
-              });
-              return outcome;
-            } catch (error) {
-              logAudit(db, {
-                interface: "cli",
-                caller_session: actor,
-                action: "retry_message_delivery",
-                args: { id },
-                result: { code: publicError(error).code },
-              });
-              throw error;
-            }
-          }),
-        "POST",
-        `/messages/${id}/retry`,
-        {},
-      );
-      console.log(JSON.stringify(result, null, 2));
-    });
-
-  const runtime = program.command("runtime").description("manage owned runtime instances");
-  runtime
-    .command("instances")
-    .description("list managed runtime instances")
-    .action(async function (this: Command) {
-      const o = this.optsWithGlobals();
-      const result = await runOp(
-        program,
-        () => withDb(openDbFrom(o), (db) => ({ instances: listRuntimeInstances(db) })),
-        "GET",
-        "/runtime-instances",
-      );
-      console.log(JSON.stringify(result, null, 2));
-    });
-  for (const action of ["stop", "resume"] as const) {
-    runtime
-      .command(action)
-      .argument("<id>")
-      .description(`${action} a verified managed instance`)
-      .action(async function (this: Command, id: string) {
-        const o = this.optsWithGlobals();
-        const result = await runOp(
-          program,
-          () =>
-            withDb(openDbFrom(o), async (db) => {
-              try {
-                const outcome =
-                  action === "stop"
-                    ? { instance: await stopRuntimeInstance(db, id) }
-                    : await resumeRuntimeInstance(db, id);
-                logAudit(db, {
-                  interface: "cli",
-                  action: `${action}_runtime_instance`,
-                  args: { id },
-                  result: { instance_id: outcome.instance.id, state: outcome.instance.state },
-                });
-                return outcome;
-              } catch (error) {
-                logAudit(db, {
-                  interface: "cli",
-                  action: `${action}_runtime_instance`,
-                  args: { id },
-                  result: { code: publicError(error).code },
-                });
-                throw error;
-              }
-            }),
-          "POST",
-          `/runtime-instances/${encodeURIComponent(id)}/${action}`,
-          {},
-        );
-        console.log(JSON.stringify(result, null, 2));
+  const projectCmd = program.command("project").description("Manage workspace projects");
+  projectCmd
+    .command("ls")
+    .description("List registered projects")
+    .action(async () => {
+      const g = program.opts<GlobalOpts>();
+      await withDb(g, (db) => {
+        process.stdout.write(`${JSON.stringify({ projects: listProjects(db) }, null, 2)}\n`);
       });
-  }
-
-  msg
-    .command("inbox")
-    .description("check questions addressed to your session")
-    .action(async function (this: Command) {
-      const o = this.optsWithGlobals();
-      const res = await runOp(
-        program,
-        () => withDb(openDbFrom(o), (db) => {
-          const sid = resolveCliSessionId(db);
-          const inbox = checkInbox(db, sid);
-          logAudit(db, {
-            caller_session: sid,
-            interface: "cli",
-            action: "check_inbox",
-            args: {},
-            result: { count: inbox.length },
-          });
-          return { inbox };
-        }),
-        "GET",
-        "/messages/inbox",
-      );
-      console.log(JSON.stringify(res, null, 2));
+    });
+  projectCmd
+    .command("add <path>")
+    .option("-n, --name <name>", "Display name")
+    .description("Register a local project directory")
+    .action(async (rootPath: string, cmdOpts: { name?: string }) => {
+      const g = program.opts<GlobalOpts>();
+      await withDb(g, (db) => {
+        const project = createProject(db, { root_path: rootPath, name: cmdOpts.name });
+        process.stdout.write(`${JSON.stringify({ project }, null, 2)}\n`);
+      });
     });
 
-  msg
-    .command("reply")
-    .description("reply to a question")
-    .requiredOption("--id <id>")
-    .argument("<reply>")
-    .action(async function (this: Command, reply: string) {
-      const o = this.optsWithGlobals();
-      const id = parsePositiveIntId(o.id, "message id");
-      const res = await runOp(
-        program,
-        () => withDb(openDbFrom(o), async (db) => {
-          const sid = resolveCliSessionId(db);
-          const m = await replyAskAndPush(db, id, sid, reply);
-          logAudit(db, {
-            caller_session: sid,
-            interface: "cli",
-            action: "reply_ask",
-            args: { id },
-            result: { message_id: m.id },
-          });
-          return { message: m };
-        }),
-        "POST",
-        `/messages/${id}/reply`,
-        { reply },
-      );
-      console.log(JSON.stringify(res, null, 2));
+  const threadCmd = program.command("thread").description("Inspect Agent Threads");
+  threadCmd
+    .command("ls")
+    .option("--project <id>", "Filter by project id")
+    .description("List Agent Threads")
+    .action(async (cmdOpts: { project?: string }) => {
+      const g = program.opts<GlobalOpts>();
+      await withDb(g, (db) => {
+        const threads = listThreads(db, {
+          project_id: cmdOpts.project ? Number(cmdOpts.project) : undefined,
+        });
+        process.stdout.write(`${JSON.stringify({ threads }, null, 2)}\n`);
+      });
     });
 
-  msg
-    .command("replies")
-    .description("check replies to your questions")
-    .option("--since <iso>", "only replies after this ISO timestamp")
-    .action(async function (this: Command) {
-      const o = this.optsWithGlobals();
-      const qs = o.since ? `?since=${encodeURIComponent(o.since)}` : "";
-      const res = await runOp(
-        program,
-        () => withDb(openDbFrom(o), (db) => {
-          const sid = resolveCliSessionId(db);
-          const replies = checkReplies(db, sid, o.since);
-          logAudit(db, {
-            caller_session: sid,
-            interface: "cli",
-            action: "check_replies",
-            args: { since: o.since },
-            result: { count: replies.length },
-          });
-          return { replies };
-        }),
-        "GET",
-        `/messages/replies${qs}`,
-      );
-      console.log(JSON.stringify(res, null, 2));
+  const wfCmd = program.command("workflow").description("Manage multi-agent DAG workflows");
+  wfCmd
+    .command("ls")
+    .description("List workflows")
+    .action(async () => {
+      const g = program.opts<GlobalOpts>();
+      await withDb(g, (db) => {
+        process.stdout.write(`${JSON.stringify({ workflows: listWorkflows(db) }, null, 2)}\n`);
+      });
+    });
+  wfCmd
+    .command("run <workflowId>")
+    .option("-i, --input <text>", "Run input text")
+    .description("Start a workflow run")
+    .action(async (wfId: string, cmdOpts: { input?: string }) => {
+      const g = program.opts<GlobalOpts>();
+      await withDb(g, async (db) => {
+        const run = await startWorkflowRun(db, Number(wfId), {
+          input: cmdOpts.input,
+          initiated_by: WEB_CONSOLE_ID,
+        });
+        process.stdout.write(`${JSON.stringify({ run }, null, 2)}\n`);
+      });
+    });
+  wfCmd
+    .command("status <runId>")
+    .description("Inspect a workflow run")
+    .action(async (runId: string) => {
+      const g = program.opts<GlobalOpts>();
+      await withDb(g, (db) => {
+        const run = getWorkflowRun(db, Number(runId));
+        process.stdout.write(`${JSON.stringify({ run }, null, 2)}\n`);
+      });
+    });
+  wfCmd
+    .command("approve <stepId>")
+    .option("--reject", "Reject instead of approve")
+    .option("-c, --comment <text>", "Approval comment")
+    .description("Approve or reject a workflow human_gate step")
+    .action(async (stepId: string, cmdOpts: { reject?: boolean; comment?: string }) => {
+      const g = program.opts<GlobalOpts>();
+      await withDb(g, async (db) => {
+        const run = await approveHumanGate(db, Number(stepId), {
+          approved: !cmdOpts.reject,
+          comment: cmdOpts.comment,
+        });
+        process.stdout.write(`${JSON.stringify({ run }, null, 2)}\n`);
+      });
     });
 
-  msg
-    .command("list")
-    .description("list all messages globally (message-flow viewer)")
-    .option("--from <session>", "filter by sender")
-    .option("--to <session>", "filter by receiver")
-    .option("--status <status>", '"pending" | "seen" | "replied" | "read" | "all"')
-    .option("--since <iso>", "only messages after this ISO timestamp")
-    .option("--limit <n>", "max results", "50")
-    .action(async function (this: Command) {
-      const o = this.optsWithGlobals();
-      const args = {
-        from_session: o.from,
-        to_session: o.to,
-        status: o.status,
-        since: o.since,
-        limit: o.limit ? Number(o.limit) : undefined,
-      };
-      const qs = new URLSearchParams();
-      if (o.from) qs.set("from", o.from);
-      if (o.to) qs.set("to", o.to);
-      if (o.status) qs.set("status", o.status);
-      if (o.since) qs.set("since", o.since);
-      if (o.limit) qs.set("limit", String(o.limit));
-      const res = await runOp(
-        program,
-        () => withDb(openDbFrom(o), (db) => ({ messages: listMessages(db, args) })),
-        "GET",
-        `/messages?${qs.toString()}`,
-      );
-      console.log(JSON.stringify(res, null, 2));
-    });
-
-  // audit -----------------------------------------------------------
   program
-    .command("audit")
-    .description("query audit log")
-    .option("--session <id>")
-    .option("--action <name>")
-    .addOption(new Option("--interface <iface>").choices(["mcp", "http", "cli"]))
-    .option("--limit <n>", "max results", "50")
-    .action(async function (this: Command) {
-      const o = this.optsWithGlobals();
-      const qs = new URLSearchParams();
-      if (o.session) qs.set("session", o.session);
-      if (o.action) qs.set("action", o.action);
-      if (o.interface) qs.set("interface", o.interface);
-      if (o.limit) qs.set("limit", String(o.limit));
-      const res = await runOp(
-        program,
-        () => withDb(openDbFrom(o), (db) => ({
-          entries: queryAudit(db, {
-            session: o.session,
-            action: o.action,
-            iface: o.interface,
-            limit: o.limit ? Number(o.limit) : undefined,
-          }),
-        })),
-        "GET",
-        `/audit?${qs.toString()}`,
-      );
-      console.log(JSON.stringify(res, null, 2));
-    });
-
-  const commands = program
-    .command("commands")
-    .description("Conflux session-directory commands for Codex and Claude Code");
-  commands
-    .command("install")
-    .description("install the Conflux list skill for user-level access across projects")
-    .addOption(
-      new Option("--client <client>", "client to install for")
-        .choices(["all", "codex", "claude"])
-        .default("all"),
-    )
-    .option("--force", "back up and replace conflicting Conflux skill instructions")
-    .action(function (this: Command) {
-      const opts = this.opts();
-      const installed = installSessionCommands({ client: opts.client, force: opts.force });
-      for (const item of installed) {
-        console.log(
-          `${item.changed ? "installed" : "unchanged"} ${item.client}: ${item.path}${item.backup ? ` (backup: ${item.backup})` : ""}`,
-        );
-      }
-      console.log(
-        "Codex: /skills → conflux or $conflux list. Claude Code: /conflux list. Reconnect the Conflux MCP server to discover its directory prompt and resources.",
-      );
-    });
-
-  // hooks ------------------------------------------------------------
-  const hooks = program
-    .command("hooks")
-    .description("Claude Code hook integration (liveness + naming)");
-
-  hooks
-    .command("install")
-    .description("install Conflux hooks into ~/.claude/settings.json (backs up first)")
-    .action(async function (this: Command) {
-      const settingsPath = claudeSettingsPath();
-      const settings = readJsonFile(settingsPath);
-      const hooksCfg = (settings.hooks ?? {}) as Record<string, unknown>;
-
-      try {
-        if (existsSync(settingsPath)) {
-          copyFileSync(settingsPath, `${settingsPath}.conflux-bak`);
-        }
-      } catch {
-        // non-fatal
-      }
-
-      const base = hookCommandBase();
-      for (const event of HOOK_EVENTS) {
-        const key = HOOK_SETTINGS_KEYS[event];
-        const entries = Array.isArray(hooksCfg[key])
-          ? (hooksCfg[key] as Record<string, unknown>[])
-          : [];
-        const cleaned = entries
-          .map((e) => {
-            if (Array.isArray(e.hooks)) {
-              e.hooks = (e.hooks as Record<string, unknown>[]).filter(
-                (h) => !isOurHookCommand(h.command),
-              );
-            }
-            return e;
-          })
-          .filter((e) => !Array.isArray(e.hooks) || e.hooks.length > 0);
-        cleaned.push({
-          hooks: [{ type: "command", command: `${base} hooks dispatch ${event}` }],
+    .command("handoff <fromThread> <toThread>")
+    .option("-p, --prompt <text>", "Follow-up task prompt")
+    .option("-n, --note <text>", "Handoff note")
+    .description("Hand off thread context + pinned shared memory to another thread")
+    .action(async (fromThread: string, toThread: string, cmdOpts: { prompt?: string; note?: string }) => {
+      const g = program.opts<GlobalOpts>();
+      await withDb(g, async (db) => {
+        const res = await handoffContext(db, {
+          from_thread: fromThread,
+          to_thread: toThread,
+          prompt: cmdOpts.prompt,
+          note: cmdOpts.note,
         });
-        hooksCfg[key] = cleaned;
-      }
-      settings.hooks = hooksCfg;
-      mkdirSync(dirname(settingsPath), { recursive: true });
-      writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf8");
-
-      console.log(
-        `installed hooks for [${HOOK_EVENTS.join(", ")}] -> ${settingsPath}\n` +
-          `entry: ${base}\n` +
-          `new Claude Code sessions will now register themselves (id = conversation id, node named after the project directory, matching the terminal tab; /rename still overrides).`,
-      );
-
-      // Backfill sessions that were already running before hooks existed —
-      // they never saw SessionStart and would otherwise surface as stale or
-      // not at all. Best-effort: install must not fail here.
-      try {
-        const report = await withDb(openDbFrom(this.optsWithGlobals()), (db) => runBackfill(db));
-        if (report.registered.length > 0 || report.refreshed > 0) {
-          console.log(
-            `backfilled ${report.registered.length} running session(s)` +
-              (report.refreshed > 0 ? `, refreshed pid on ${report.refreshed} existing` : ""),
-          );
-        }
-      } catch (err) {
-        logger.warn(
-          { err: err instanceof Error ? err.message : String(err) },
-          "post-install backfill failed (non-fatal)",
-        );
-      }
-    });
-
-  hooks
-    .command("backfill")
-    .description("register still-running Claude Code sessions that predate hooks install")
-    .action(async function (this: Command) {
-      const report = await withDb(openDbFrom(this.optsWithGlobals()), (db) => runBackfill(db));
-      for (const r of report.registered) {
-        console.log(`registered ${r.id} (pid ${r.pid}) as "${r.name}"`);
-      }
-      if (report.refreshed > 0)
-        console.log(`refreshed pid on ${report.refreshed} existing session(s)`);
-      if (report.skippedBound > 0)
-        console.log(`${report.skippedBound} process(es) already tracked`);
-      if (report.unmatchedPids > 0)
-        console.log(`${report.unmatchedPids} process(es) had no verifiable transcript`);
-      if (report.registered.length === 0 && report.refreshed === 0)
-        console.log("nothing to backfill");
-    });
-
-  hooks
-    .command("uninstall")
-    .description("remove Conflux hooks from ~/.claude/settings.json")
-    .action(function (this: Command) {
-      const settingsPath = claudeSettingsPath();
-      const settings = readJsonFile(settingsPath);
-      const hooksCfg = (settings.hooks ?? {}) as Record<string, unknown>;
-      let removed = 0;
-      for (const event of HOOK_EVENTS) {
-        const key = HOOK_SETTINGS_KEYS[event];
-        if (!Array.isArray(hooksCfg[key])) continue;
-        const entries = (hooksCfg[key] as Record<string, unknown>[]).map((e) => {
-          if (Array.isArray(e.hooks)) {
-            e.hooks = (e.hooks as Record<string, unknown>[]).filter((h) => {
-              const ours = isOurHookCommand(h.command);
-              if (ours) removed++;
-              return !ours;
-            });
-          }
-          return e;
-        });
-        const kept = entries.filter((e) => !Array.isArray(e.hooks) || e.hooks.length > 0);
-        if (kept.length > 0) hooksCfg[key] = kept;
-        else delete hooksCfg[key];
-      }
-      if (Object.keys(hooksCfg).length > 0) settings.hooks = hooksCfg;
-      else delete settings.hooks;
-      writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf8");
-      console.log(
-        `removed ${removed} hook entr${removed === 1 ? "y" : "ies"} from ${settingsPath}`,
-      );
-    });
-
-  hooks
-    .command("dispatch <event>")
-    .description("(internal) handle a Claude Code hook event from stdin JSON")
-    .action(async function (this: Command, event: string) {
-      if (!HOOK_EVENTS.includes(event as HookEvent)) {
-        process.stderr.write(`unknown hook event: ${event}\n`);
-        process.exitCode = 1;
-        return;
-      }
-      let payload: Record<string, unknown> = {};
-      try {
-        const chunks: Buffer[] = [];
-        for await (const c of process.stdin) chunks.push(c as Buffer);
-        const raw = Buffer.concat(chunks).toString("utf8");
-        if (raw.trim()) payload = JSON.parse(raw) as Record<string, unknown>;
-      } catch {
-        // malformed stdin — ignore quietly, hooks must never block a session
-      }
-      try {
-        await withDb(openDbFrom(this.optsWithGlobals()), (db) => {
-        handleHookEvent(db, event as HookEvent, payload as never);
-        // UserPromptSubmit / SessionStart stdout is injected into the
-        // conversation context — the only push channel into a live session.
-        // Silent unless there is unread mail, so hooks never spam.
-        if (event === "prompt" || event === "session-start") {
-          const sid = typeof payload.session_id === "string" ? payload.session_id : null;
-          if (sid) {
-            const notice = formatInboxNotice(db, sid);
-            if (notice) process.stdout.write(notice + "\n");
-          }
-        }
-        });
-      } catch (err) {
-        logger.warn(
-          { err: err instanceof Error ? err.message : String(err) },
-          "hook dispatch failed",
-        );
-      }
-    });
-
-  // workflow ---------------------------------------------------------
-  const wf = program.command("workflow").description("multi-agent DAG workflow orchestration");
-
-  wf.command("ls")
-    .description("list workflows")
-    .option("--room <id>", "filter by room id")
-    .action(async function (this: Command) {
-      const o = this.optsWithGlobals();
-      const roomId = o.room ? parsePositiveIntId(String(o.room), "room id") : undefined;
-      const res = await runOp(
-        program,
-        () => withDb(openDbFrom(o), (db) => ({ workflows: listWorkflows(db, roomId) })),
-        "GET",
-        roomId !== undefined ? `/workflows?room_id=${roomId}` : "/workflows",
-      );
-      console.log(JSON.stringify(res, null, 2));
-    });
-
-  wf.command("run <workflowId>")
-    .description("start a workflow run")
-    .option("--input <text>", "input prompt for {{input}}")
-    .action(async function (this: Command, workflowIdRaw: string) {
-      const o = this.optsWithGlobals();
-      const workflowId = parsePositiveIntId(workflowIdRaw, "workflow id");
-      const res = await runOp(
-        program,
-        () =>
-          withDb(openDbFrom(o), async (db) => {
-            const sid = resolveCliSessionId(db);
-            return { run: await startWorkflowRun(db, workflowId, { input: o.input, initiated_by: sid }) };
-          }),
-        "POST",
-        `/workflows/${workflowId}/runs`,
-        { input: o.input },
-      );
-      console.log(JSON.stringify(res, null, 2));
-    });
-
-  wf.command("status [runId]")
-    .description("inspect a workflow run or list recent runs")
-    .action(async function (this: Command, runIdRaw?: string) {
-      const o = this.optsWithGlobals();
-      if (runIdRaw) {
-        const runId = parsePositiveIntId(runIdRaw, "run id");
-        const res = await runOp(
-          program,
-          () => withDb(openDbFrom(o), (db) => ({ run: getWorkflowRun(db, runId) })),
-          "GET",
-          `/workflow-runs/${runId}`,
-        );
-        console.log(JSON.stringify(res, null, 2));
-      } else {
-        const res = await runOp(
-          program,
-          () => withDb(openDbFrom(o), (db) => ({ runs: listWorkflowRuns(db) })),
-          "GET",
-          "/workflow-runs",
-        );
-        console.log(JSON.stringify(res, null, 2));
-      }
-    });
-
-  wf.command("approve <stepId>")
-    .description("approve or reject a human_gate workflow step")
-    .option("--reject", "reject instead of approving")
-    .option("--comment <text>", "optional approval comment")
-    .action(async function (this: Command, stepIdRaw: string) {
-      const o = this.optsWithGlobals();
-      const stepId = parsePositiveIntId(stepIdRaw, "step id");
-      const approved = !o.reject;
-      const res = await runOp(
-        program,
-        () =>
-          withDb(openDbFrom(o), async (db) => ({
-            run: await approveHumanGate(db, stepId, { approved, comment: o.comment }),
-          })),
-        "POST",
-        `/workflow-steps/${stepId}/approve`,
-        { approved, comment: o.comment },
-      );
-      console.log(JSON.stringify(res, null, 2));
-    });
-
-  // handoff ----------------------------------------------------------
-  program
-    .command("handoff <toSession>")
-    .description("assemble shared memory and hand off context to another session")
-    .option("--room <id>", "room id for memory collection")
-    .option("--prompt <text>", "next instructions for the target session")
-    .option("--mode <mode>", "delivery mode: queue | steer | interrupt", "queue")
-    .action(async function (this: Command, toSession: string) {
-      const o = this.optsWithGlobals();
-      const roomId = o.room ? parsePositiveIntId(String(o.room), "room id") : null;
-      const res = await runOp(
-        program,
-        () =>
-          withDb(openDbFrom(o), async (db) => {
-            const sid = resolveCliSessionId(db);
-            return handoffContext(db, {
-              from_session: sid,
-              to_session: toSession,
-              room_id: roomId,
-              prompt: o.prompt,
-              delivery_mode: o.mode,
-            });
-          }),
-        "POST",
-        "/handoff",
-        { to_session: toSession, room_id: roomId, prompt: o.prompt, delivery_mode: o.mode },
-      );
-      console.log(JSON.stringify(res, null, 2));
+        process.stdout.write(`${JSON.stringify(res, null, 2)}\n`);
+      });
     });
 
   return program;
-}
-
-// --- helpers --------------------------------------------------------
-
-type HookEvent = "session-start" | "prompt" | "stop";
-const HOOK_EVENTS: HookEvent[] = ["session-start", "prompt", "stop"];
-
-/** Our dispatch arg -> the canonical Claude Code settings.json event key. */
-const HOOK_SETTINGS_KEYS: Record<HookEvent, string> = {
-  "session-start": "SessionStart",
-  prompt: "UserPromptSubmit",
-  stop: "Stop",
-};
-
-function claudeSettingsPath(): string {
-  const dir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
-  return join(dir, "settings.json");
-}
-
-/**
- * Absolute command prefix the hooks will invoke. Prefers the built dist
- * output (works from any cwd, no tsx needed); falls back to whatever
- * entrypoint is currently running.
- */
-function hookCommandBase(): string {
-  const argv1 = realpathSync(resolve(process.argv[1]));
-  const asDist = argv1.replace(/src([\\/])index\.ts$/, "dist$1index.js");
-  const entry = asDist.endsWith(".js") && existsSync(asDist) ? asDist : argv1;
-  return entry.endsWith(".js") ? `node "${entry}"` : `npx tsx "${entry}"`;
-}
-
-/**
- * Recognise our own hook entries so install cleans before re-adding and
- * uninstall removes exactly ours. Matches every shape we ever wrote:
- * legacy bin-style (`conflux|muiltchat hooks dispatch <event>`) and the
- * current path-style (`node "…apps/server/dist/index.js" hooks dispatch …`).
- */
-function isOurHookCommand(command: unknown): boolean {
-  if (typeof command !== "string" || !command.includes("hooks dispatch")) return false;
-  return (
-    command.includes("conflux") ||
-    command.includes("muiltchat") ||
-    command.includes("index.js") ||
-    command.includes("index.ts")
-  );
-}
-
-function normaliseScope(s: string | undefined): Scope {
-  if (s === "project") return "project";
-  if (s === "global") return "global";
-  return "global"; // "auto" + anything else falls back to global resolution
-}
-
-function parseDataScope(value: string | undefined): DataBundleScope | null {
-  if (value === undefined || value === "global") return "global";
-  if (value === "project") return "project";
-  return null;
-}
-
-function parseImportConflict(value: string | undefined): ImportConflictStrategy {
-  if (value === undefined || value === "skip") return "skip";
-  if (value === "overwrite" || value === "copy") return value;
-  throw new Error("conflict must be skip, overwrite, or copy");
-}
-
-function writeDataOutput(value: unknown, output?: string): void {
-  const serialized = `${JSON.stringify(value, null, 2)}\n`;
-  if (output) {
-    writeFileSync(resolve(output), serialized, "utf8");
-    return;
-  }
-  console.log(serialized.trimEnd());
-}
-
-/** Options available on every command via optsWithGlobals(). */
-interface CliOpts {
-  dataDir?: string;
-  scope?: string;
-  http?: string;
-  logLevel?: string;
-}
-
-function openDbFrom(o: CliOpts): DB {
-  const cfg = resolveConfig(normaliseScope(o.scope), o.dataDir);
-  return openDb(cfg);
-}
-
-/**
- * Run a one-shot read/write against a fresh connection and always close it.
- * A leaked better-sqlite3 handle keeps data.db locked on Windows long
- * after the command's work is done.
- */
-function withDb<T>(db: DB, fn: (db: DB) => T | Promise<T>): Promise<T> {
-  return Promise.resolve(undefined)
-    .then(() => fn(db))
-    .finally(() => {
-      stopWalCheckpoint(db);
-      if (db.open) db.close();
-    });
-}
-
-function parsePositiveIntId(raw: string, label = "id"): number {
-  if (!/^[1-9][0-9]*$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
-    throw new Error(`${label} must be a positive integer`);
-  }
-  return Number(raw);
-}
-
-/**
- * Execute one CLI operation in local or remote mode.
- *
- * - `--http` passed: fetch() against the remote HTTP server (path is only
- *   used in this branch).
- * - otherwise: invoke the `local()` closure, which calls the core function
- *   directly and logs its own audit entry. No route mirroring involved.
- */
-async function runOp(
-  program: Command,
-  local: () => unknown,
-  method: string,
-  path: string,
-  body?: unknown,
-): Promise<unknown> {
-  const opts = program.opts();
-  if (opts.logLevel) {
-    setLogLevel(opts.logLevel);
-  }
-  if (opts.http) {
-    return remote(opts.http, method, path, body);
-  }
-  return local();
-}
-
-async function remote(
-  baseUrl: string,
-  method: string,
-  path: string,
-  body?: unknown,
-): Promise<unknown> {
-  const url = `${baseUrl.replace(/\/$/, "")}${path}`;
-  const sid = process.env.CONFLUX_SESSION_ID || randomUUID();
-  const headers: Record<string, string> = {
-    "X-Session-Id": sid,
-    ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
-  };
-  const init: RequestInit = { method, headers };
-  if (body !== undefined) init.body = JSON.stringify(body);
-
-  const res = await fetch(url, init);
-  const text = await res.text();
-  let json: unknown;
-  try {
-    json = text ? JSON.parse(text) : {};
-  } catch {
-    json = { raw: text };
-  }
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status}: ${JSON.stringify(json)}`);
-  }
-  return json;
-}
-
-async function readChannelSnapshot(
-  program: Command,
-  db: DB | undefined,
-  edgeId: number,
-): Promise<ChannelSnapshot> {
-  const result = await runOp(
-    program,
-    () => {
-      if (!db) throw new Error("local channel database is unavailable");
-      const edge = getEdge(db, edgeId);
-      if (!edge) throw new Error("edge not found");
-      return {
-        edge: { id: edge.id, from: edge.from_session, to: edge.to_session },
-        messages: listEdgeMessages(db, edgeId, null),
-      };
-    },
-    "GET",
-    `/edges/${edgeId}/messages?all=true`,
-  );
-  return normalizeChannelSnapshot(result);
-}
-
-function normalizeChannelSnapshot(value: unknown): ChannelSnapshot {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("invalid channel response");
-  }
-  const response = value as Record<string, unknown>;
-  const edge = response.edge;
-  if (!edge || typeof edge !== "object" || Array.isArray(edge)) {
-    throw new Error("invalid channel response");
-  }
-  const edgeRecord = edge as Record<string, unknown>;
-  if (
-    typeof edgeRecord.id !== "number" ||
-    !Number.isSafeInteger(edgeRecord.id) ||
-    typeof edgeRecord.from !== "string" ||
-    typeof edgeRecord.to !== "string" ||
-    !Array.isArray(response.messages)
-  ) {
-    throw new Error("invalid channel response");
-  }
-  return {
-    edge: { id: edgeRecord.id, from: edgeRecord.from, to: edgeRecord.to },
-    messages: response.messages as ChannelSnapshot["messages"],
-  };
-}
-
-function parseTags(raw: string | undefined): string[] | undefined {
-  return raw
-    ? String(raw)
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean)
-    : undefined;
-}
-
-/**
- * Resolve the CLI session id.
- *
- * - If `CONFLUX_SESSION_ID` env var is set, use it.
- * - Otherwise generate a new UUID, auto-register it as a transient session
- *   named "cli", and print a hint to stderr (so stdout stays machine-readable).
- */
-function resolveCliSessionId(db: DB): string {
-  const env = process.env.CONFLUX_SESSION_ID;
-  if (env && env.trim().length > 0) return env;
-
-  const sid = randomUUID();
-  registerSession(db, {
-    id: sid,
-    name: `cli-${process.env.USER || process.env.USERNAME || "anon"}`,
-    description: "ad-hoc CLI invocation",
-    project_dir: process.env.CLAUDE_PROJECT_DIR || process.cwd(),
-  });
-  process.env.CONFLUX_SESSION_ID = sid;
-  process.stderr.write(
-    `conflux: registered transient CLI session ${sid}\n` +
-      `set CONFLUX_SESSION_ID=${sid} to reuse it across commands\n`,
-  );
-  return sid;
 }

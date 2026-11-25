@@ -1,529 +1,325 @@
-import type { DB } from "./db.js";
-import { nowIso } from "./db.js";
-import { recordEdge, touchEdge } from "./graph.js";
-import { WEB_CONSOLE_ID, type Message, type MessageStatus } from "@conflux/shared";
-import { PRIORITY_RANK, sessionPriority } from "./sessions.js";
-import { badge, flattenOneLine, truncateForTyping } from "./inject-format.js";
-
-export type { Message, MessageStatus };
-
-/** P0 ranks 0 (most protected) … P2 ranks 2. Asks flow lower-rank → equal. */
-
-function metadataOf(db: DB, sessionId: string): string | null {
-  const row = db.prepare(`SELECT metadata FROM sessions WHERE id = ?`).get(sessionId) as
-    { metadata: string | null } | undefined;
-  return row?.metadata ?? null;
-}
+import { WEB_CONSOLE_ID, WEB_CONSOLE_NAME, type ManagedDeliveryMode, type Message } from "@conflux/shared";
+import { nowIso, type DB } from "./db.js";
+import { getRuntimeSettings } from "./runtime-env.js";
+import { getThread, heartbeatThread } from "./threads/store.js";
+import { getThreadManager } from "./threads/executor.js";
+import { publishLiveEvent } from "./event-bus.js";
 
 interface MessageRow {
   id: number;
   edge_id: number | null;
-  from_session: string;
-  to_session: string;
+  from_thread: string;
+  to_thread: string;
   question: string;
   reply: string | null;
-  status: MessageStatus;
+  status: string;
+  room_id: number | null;
+  hop_count: number;
   created_at: string;
   replied_at: string | null;
-  reply_seen_at: string | null;
-  room_id: number | null;
+  from_name?: string | null;
+  to_name?: string | null;
 }
 
-function toMsg(db: DB, row: MessageRow): Message {
-  const delivery = db
-    .prepare(
-      `SELECT state, attempts, last_attempted_at, reason FROM message_deliveries WHERE message_id = ?`,
-    )
-    .get(row.id) as Message["delivery"];
-  return delivery ? { ...row, delivery } : { ...row };
+function toMessage(row: MessageRow): Message {
+  return {
+    id: row.id,
+    edge_id: row.edge_id,
+    from_session: row.from_thread,
+    to_session: row.to_thread,
+    ...(row.from_name ? { from_name: row.from_name } : {}),
+    ...(row.to_name ? { to_name: row.to_name } : {}),
+    question: row.question,
+    reply: row.reply,
+    status: row.status as Message["status"],
+    room_id: row.room_id,
+    hop_count: row.hop_count ?? 0,
+    created_at: row.created_at,
+    replied_at: row.replied_at,
+  };
 }
 
-function toMessages(db: DB, rows: MessageRow[]): Message[] {
-  if (!rows.length) return [];
-  const deliveries: (NonNullable<Message["delivery"]> & { message_id: number })[] = [];
-  for (let offset = 0; offset < rows.length; offset += 500) {
-    const chunk = rows.slice(offset, offset + 500);
-    deliveries.push(
-      ...(db
-        .prepare(
-          `SELECT message_id, state, attempts, last_attempted_at, reason
-      FROM message_deliveries WHERE message_id IN (${chunk.map(() => "?").join(",")})`,
-        )
-        .all(...chunk.map((row) => row.id)) as typeof deliveries),
+function displayNameFor(db: DB, id: string): string {
+  if (id === WEB_CONSOLE_ID) return WEB_CONSOLE_NAME;
+  return getThread(db, id)?.name ?? id.slice(0, 8);
+}
+
+/**
+ * Autonomous cross-agent loop guardrail:
+ *  - Human (`web-console`) initiates at hop 0 and is exempt from cooldown.
+ *  - Agent-to-agent calls inherit upstream hop depth + 1, capped at `max_autonomous_hops` (default 5).
+ *  - Repeated calls between the exact same pair within `pair_cooldown_ms` are blocked with 429.
+ */
+export function enforceAutonomousGuardrails(
+  db: DB,
+  fromThread: string,
+  toThread: string,
+  explicitHopCount?: number,
+): number {
+  if (fromThread === WEB_CONSOLE_ID) return 0;
+  const settings = getRuntimeSettings(db);
+  let nextHop: number;
+  if (typeof explicitHopCount === "number" && Number.isFinite(explicitHopCount)) {
+    nextHop = explicitHopCount;
+  } else {
+    // Infer depth from the caller's most recent active inbound message within the last 5 minutes.
+    const recentCutoff = new Date(Date.now() - 5 * 60_000).toISOString();
+    const upstream = db
+      .prepare(
+        `SELECT hop_count FROM messages
+         WHERE to_thread = ? AND created_at >= ?
+         ORDER BY id DESC LIMIT 1`,
+      )
+      .get(fromThread, recentCutoff) as { hop_count: number } | undefined;
+    nextHop = (upstream?.hop_count ?? 0) + 1;
+  }
+
+  if (nextHop > settings.max_autonomous_hops) {
+    throw Object.assign(
+      new Error(
+        `自主协作跳数已达上限（${nextHop} > ${settings.max_autonomous_hops}），已自动暂停以防死循环，请由人工介入确认`,
+      ),
+      { statusCode: 429 },
     );
   }
-  const byId = new Map(deliveries.map(({ message_id, ...delivery }) => [message_id, delivery]));
-  return rows.map((row) => {
-    const delivery = byId.get(row.id);
-    return delivery ? { ...row, delivery } : { ...row };
-  });
-}
 
-export function askSession(
-  db: DB,
-  input: { from_session: string; to_session: string; question: string; room_id?: number | null },
-): Message {
-  return db.transaction(() => {
-  if (input.from_session === input.to_session) {
-    throw new Error("cannot ask yourself");
-  }
-  if (!db.prepare(`SELECT id FROM sessions WHERE id = ?`).get(input.from_session)) {
-    throw Object.assign(new Error(`source session not found: ${input.from_session}`), { statusCode: 404 });
-  }
-  // target row may have been pruned (e.g. offline cleanup) — fail with a
-  // clear error instead of a raw FOREIGN KEY violation (and before priority
-  // gating, so a nonexistent target reports 404 rather than priority blocked)
-  const target = db.prepare(`SELECT id FROM sessions WHERE id = ?`).get(input.to_session);
-  if (!target) {
-    throw Object.assign(new Error(`target session not found: ${input.to_session}`), {
-      statusCode: 404,
-    });
-  }
-  // Priority gate: a lower-priority session may not interrupt a higher one.
-  // The human web console (from === WEB_CONSOLE_ID) is exempt — people can
-  // ask anything; session→session automation respects the tiers.
-  if (input.from_session !== WEB_CONSOLE_ID) {
-    const fromP = sessionPriority(metadataOf(db, input.from_session));
-    const toP = sessionPriority(metadataOf(db, input.to_session));
-    if ((PRIORITY_RANK[fromP] ?? 1) > (PRIORITY_RANK[toP] ?? 1)) {
-      throw Object.assign(
-        new Error(
-          `ASK_PRIORITY_BLOCKED: ${fromP} session "${input.from_session}" cannot ask ` +
-            `${toP} session "${input.to_session}" — raise the asker's priority or ask a peer`,
-        ),
-        { statusCode: 403 },
-      );
+  if (settings.pair_cooldown_ms > 0) {
+    const lastPair = db
+      .prepare(
+        `SELECT created_at FROM messages
+         WHERE (from_thread = ? AND to_thread = ?) OR (from_thread = ? AND to_thread = ?)
+         ORDER BY id DESC LIMIT 1`,
+      )
+      .get(fromThread, toThread, toThread, fromThread) as { created_at: string } | undefined;
+    if (lastPair) {
+      const elapsed = Date.now() - Date.parse(lastPair.created_at);
+      if (Number.isFinite(elapsed) && elapsed >= 0 && elapsed < settings.pair_cooldown_ms) {
+        throw Object.assign(
+          new Error(
+            `同对 Agent 自主互调触发冷却护栏（距上次仅 ${elapsed}ms < ${settings.pair_cooldown_ms}ms），请稍后再试`,
+          ),
+          { statusCode: 429 },
+        );
+      }
     }
   }
-  const now = nowIso();
-  // the channel edge (from→to) IS the conversation: questions travel on it
-  const edgeId = recordEdge(db, input.from_session, input.to_session);
-  const res = db
-    .prepare(
-      `INSERT INTO messages (from_session, to_session, question, status, created_at, edge_id, room_id)
-       VALUES (?, ?, ?, 'pending', ?, ?, ?)`,
-    )
-    .run(input.from_session, input.to_session, input.question, now, edgeId, input.room_id ?? null);
-  return getMessage(db, Number(res.lastInsertRowid))!;
-  }).immediate();
+  return nextHop;
 }
 
 export function getMessage(db: DB, id: number): Message | null {
-  const row = db.prepare(`SELECT * FROM messages WHERE id = ?`).get(id) as MessageRow | undefined;
-  return row ? toMsg(db, row) : null;
-}
-
-export function replyAsk(db: DB, id: number, replierSessionId: string, reply: string): Message {
-  const msg = getMessage(db, id);
-  if (!msg) throw new Error("message not found");
-  if (msg.to_session !== replierSessionId) {
-    throw new Error("not the addressee of this message");
-  }
-  const now = nowIso();
-  db.prepare(
-    `UPDATE messages SET reply = ?, status = 'replied', replied_at = ?, reply_seen_at = NULL WHERE id = ?`,
-  ).run(reply, now, id);
-  // the reply stays ON the channel — no reverse edge (direction is fixed:
-  // the channel's from asked, its to answered)
-  if (msg.edge_id !== null && msg.edge_id !== undefined) {
-    touchEdge(db, msg.edge_id);
-  } else {
-    touchEdge(db, recordEdge(db, msg.from_session, msg.to_session));
-  }
-  return getMessage(db, id)!;
-}
-
-export function checkInbox(db: DB, sessionId: string): Message[] {
-  const rows = db
+  const row = db
     .prepare(
-      `SELECT * FROM messages WHERE to_session = ? AND status IN ('pending','seen') ORDER BY created_at ASC`,
+      `SELECT m.*,
+         COALESCE(tf.name, CASE WHEN m.from_thread = ? THEN ? ELSE NULL END) AS from_name,
+         COALESCE(tt.name, CASE WHEN m.to_thread = ? THEN ? ELSE NULL END) AS to_name
+       FROM messages m
+       LEFT JOIN agent_threads tf ON tf.id = m.from_thread
+       LEFT JOIN agent_threads tt ON tt.id = m.to_thread
+       WHERE m.id = ?`,
     )
-    .all(sessionId) as MessageRow[];
-  // Mark freshly-fetched pending messages as seen so the asker can tell
-  // "read but not yet answered" from "never looked at". Unanswered items
-  // stay in the inbox until replied.
-  const fresh = rows.filter((r) => r.status === "pending");
-  if (fresh.length > 0) {
-    const ids = fresh.map((r) => r.id);
-    const placeholders = ids.map(() => "?").join(",");
-    db.prepare(
-      `UPDATE messages SET status = 'seen' WHERE status = 'pending' AND id IN (${placeholders})`,
-    ).run(...ids);
-  }
-  return toMessages(db, rows).map((row) =>
-    row.status === "pending" ? { ...row, status: "seen" as const } : row,
-  );
-}
-
-export function checkReplies(db: DB, sessionId: string, since?: string): Message[] {
-  const sinceClause = since ? `AND replied_at > ?` : ``;
-  const params: string[] = since ? [sessionId, since] : [sessionId];
-  const rows = db
-    .prepare(
-      `SELECT * FROM messages
-       WHERE from_session = ? AND status IN ('replied','read') ${sinceClause}
-       ORDER BY replied_at DESC`,
-    )
-    .all(...params) as MessageRow[];
-  // Mark unread replies as read and seen so hooks/tmux do not re-push them.
-  const unread = rows.filter((r) => r.status === "replied");
-  const seenAt = unread.length > 0 ? nowIso() : null;
-  if (unread.length > 0 && seenAt) {
-    for (let offset = 0; offset < unread.length; offset += 500) {
-      const chunk = unread.slice(offset, offset + 500);
-      const placeholders = chunk.map(() => "?").join(",");
-      db.prepare(
-        `UPDATE messages
-         SET status = 'read', reply_seen_at = COALESCE(reply_seen_at, ?)
-         WHERE status = 'replied' AND id IN (${placeholders})`,
-      ).run(seenAt, ...chunk.map((r) => r.id));
-    }
-  }
-  return toMessages(db, rows).map((row) =>
-    row.status === "replied"
-      ? { ...row, status: "read" as const, reply_seen_at: row.reply_seen_at ?? seenAt }
-      : row,
-  );
-}
-
-/**
- * Global message query with optional filters. Used by the frontend message-flow
- * viewer. Unlike checkInbox/checkReplies, this does NOT mutate status.
- */
-/**
- * Archive an exchange that already happened out-of-band (e.g. Claude Code's
- * native SendMessage). The delivery is complete, so the row is written in
- * its terminal state — no pending/seen inbox noise — on the same channel
- * that carries its questions and replies.
- */
-export function recordExchange(
-  db: DB,
-  input: {
-    from_session: string;
-    to_session: string;
-    question: string;
-    reply?: string | null;
-    /** ISO timestamp of when the exchange happened; default now. */
-    occurred_at?: string;
-  },
-): Message {
-  return db.transaction(() => {
-  if (input.from_session === input.to_session) throw new Error("cannot ask yourself");
-  for (const id of [input.from_session, input.to_session]) {
-    const row = db.prepare(`SELECT id FROM sessions WHERE id = ?`).get(id);
-    if (!row) throw new Error(`session not found: ${id}`);
-  }
-  const occurred = input.occurred_at ?? nowIso();
-  const status: MessageStatus = input.reply ? "replied" : "read";
-  const edgeId = recordEdge(db, input.from_session, input.to_session);
-  const res = db
-    .prepare(
-      `INSERT INTO messages (from_session, to_session, question, reply, status, created_at, replied_at, edge_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      input.from_session,
-      input.to_session,
-      input.question,
-      input.reply ?? null,
-      status,
-      occurred,
-      input.reply ? occurred : null,
-      edgeId,
-    );
-  return getMessage(db, Number(res.lastInsertRowid))!;
-  }).immediate();
-}
-
-/**
- * Two-way message flow between two sessions (web console ↔ peer), oldest
- * first — used by the web Drawer conversation view.
- */
-export function listPeerMessages(db: DB, a: string, b: string, limit = 200): Message[] {
-  const rows = db
-    .prepare(
-      `SELECT * FROM messages
-       WHERE (from_session = ? AND to_session = ?) OR (from_session = ? AND to_session = ?)
-       ORDER BY id DESC LIMIT ?`,
-    )
-    .all(a, b, b, a, Math.min(Math.max(limit, 1), 500)) as MessageRow[];
-  return toMessages(db, rows).reverse();
+    .get(WEB_CONSOLE_ID, WEB_CONSOLE_NAME, WEB_CONSOLE_ID, WEB_CONSOLE_NAME, id) as
+    | MessageRow
+    | undefined;
+  return row ? toMessage(row) : null;
 }
 
 export function listMessages(
   db: DB,
   opts: {
-    from_session?: string;
-    to_session?: string;
-    status?: MessageStatus | "all";
-    since?: string;
+    from?: string;
+    to?: string;
+    room_id?: number;
+    status?: string;
     limit?: number;
   } = {},
 ): Message[] {
-  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 500);
-  const where: string[] = [];
-  const params: (string | number)[] = [];
-  if (opts.from_session) {
-    where.push("from_session = ?");
-    params.push(opts.from_session);
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+  if (opts.from) {
+    clauses.push("m.from_thread = ?");
+    params.push(opts.from);
   }
-  if (opts.to_session) {
-    where.push("to_session = ?");
-    params.push(opts.to_session);
+  if (opts.to) {
+    clauses.push("m.to_thread = ?");
+    params.push(opts.to);
   }
-  if (opts.status && opts.status !== "all") {
-    where.push("status = ?");
+  if (opts.room_id !== undefined) {
+    clauses.push("m.room_id = ?");
+    params.push(opts.room_id);
+  }
+  if (opts.status) {
+    clauses.push("m.status = ?");
     params.push(opts.status);
   }
-  if (opts.since) {
-    where.push("created_at > ?");
-    params.push(opts.since);
+  const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+  const limit = Math.max(1, Math.min(opts.limit ?? 100, 500));
+  const order = opts.room_id !== undefined ? "ORDER BY m.id ASC" : "ORDER BY m.id DESC";
+  const rows = db
+    .prepare(
+      `SELECT m.*,
+         COALESCE(tf.name, CASE WHEN m.from_thread = ? THEN ? ELSE NULL END) AS from_name,
+         COALESCE(tt.name, CASE WHEN m.to_thread = ? THEN ? ELSE NULL END) AS to_name
+       FROM messages m
+       LEFT JOIN agent_threads tf ON tf.id = m.from_thread
+       LEFT JOIN agent_threads tt ON tt.id = m.to_thread
+       ${where}
+       ${order}
+       LIMIT ?`,
+    )
+    .all(WEB_CONSOLE_ID, WEB_CONSOLE_NAME, WEB_CONSOLE_ID, WEB_CONSOLE_NAME, ...params, limit) as MessageRow[];
+  return rows.map(toMessage);
+}
+
+export function checkInbox(db: DB, threadId: string): Message[] {
+  heartbeatThread(db, threadId);
+  const rows = db
+    .prepare(
+      `SELECT m.*,
+         COALESCE(tf.name, CASE WHEN m.from_thread = ? THEN ? ELSE NULL END) AS from_name,
+         COALESCE(tt.name, CASE WHEN m.to_thread = ? THEN ? ELSE NULL END) AS to_name
+       FROM messages m
+       LEFT JOIN agent_threads tf ON tf.id = m.from_thread
+       LEFT JOIN agent_threads tt ON tt.id = m.to_thread
+       WHERE m.to_thread = ? AND m.status IN ('pending', 'seen')
+       ORDER BY m.id ASC`,
+    )
+    .all(WEB_CONSOLE_ID, WEB_CONSOLE_NAME, WEB_CONSOLE_ID, WEB_CONSOLE_NAME, threadId) as MessageRow[];
+  if (rows.length > 0) {
+    db.prepare(`UPDATE messages SET status = 'seen' WHERE to_thread = ? AND status = 'pending'`).run(
+      threadId,
+    );
   }
-  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
-  const rows = db
-    .prepare(`SELECT * FROM messages ${whereSql} ORDER BY created_at DESC LIMIT ?`)
-    .all(...params, limit) as MessageRow[];
-  return toMessages(db, rows);
-}
-
-// ---- inbox delivery across /resume + proactive notices ----------------------
-
-/**
- * /resume continues the same conversation under a NEW conversation id, so
- * mail addressed to the process's previous ids would strand there forever
- * even though the conversation lives on. Re-address undelivered mail
- * (pending/seen) to the successor. Called from the session-start hook when
- * source === "resume"; a /clear'ed conversation is a DIFFERENT conversation
- * and must not be forwarded.
- */
-export function forwardInboxFromPid(db: DB, claudePid: number, successorId: string): number {
-  const rows = db
-    .prepare(`SELECT id, metadata FROM sessions WHERE id != ? AND metadata LIKE ?`)
-    .all(successorId, `%"claude_pid":${claudePid}%`) as { id: string; metadata: string | null }[];
-  const ids = rows
-    .filter((r) => {
-      try {
-        return JSON.parse(r.metadata ?? "{}").claude_pid === claudePid;
-      } catch {
-        return false;
-      }
-    })
-    .map((r) => r.id);
-  if (ids.length === 0) return 0;
-  return forwardPendingMessagesToSuccessor(db, ids, successorId);
+  return rows.map(toMessage);
 }
 
 /**
- * Re-address pending/seen messages from predecessor session ids to `successorId`,
- * excluding self-addressed rows and updating `edge_id` to the successor's channel.
+ * Send a cross-thread question, enforce autonomous loop guardrails, update the
+ * communication graph edge, and natively dispatch to managed threads via ThreadManager.
  */
-export function forwardPendingMessagesToSuccessor(
+export async function askThread(
   db: DB,
-  fromSessionIds: string[],
-  successorId: string,
-): number {
-  if (fromSessionIds.length === 0) return 0;
-  const placeholders = fromSessionIds.map(() => "?").join(",");
-  return db
+  input: {
+    from_thread: string;
+    to_thread: string;
+    question: string;
+    room_id?: number | null;
+    delivery_mode?: ManagedDeliveryMode;
+    hop_count?: number;
+  },
+): Promise<{
+  message: Message;
+  delivered: boolean;
+  delivery_method: string;
+}> {
+  if (input.from_thread === input.to_thread) {
+    throw Object.assign(new Error("cannot ask yourself"), { statusCode: 400 });
+  }
+  const question = input.question?.trim();
+  if (!question) {
+    throw Object.assign(new Error("question is required"), { statusCode: 400 });
+  }
+  const target = getThread(db, input.to_thread);
+  if (!target) {
+    throw Object.assign(new Error(`target thread not found: ${input.to_thread}`), { statusCode: 404 });
+  }
+
+  const hopCount = enforceAutonomousGuardrails(
+    db,
+    input.from_thread,
+    input.to_thread,
+    input.hop_count,
+  );
+
+  const msg = db
     .transaction(() => {
-      const pending = db
+      const now = nowIso();
+      db.prepare(
+        `INSERT INTO edges (from_thread, to_thread, weight, last_interact_at)
+         VALUES (?, ?, 1, ?)
+         ON CONFLICT(from_thread, to_thread)
+         DO UPDATE SET weight = weight + 1, last_interact_at = excluded.last_interact_at`,
+      ).run(input.from_thread, input.to_thread, now);
+      const edgeRow = db
+        .prepare(`SELECT rowid AS id FROM edges WHERE from_thread = ? AND to_thread = ?`)
+        .get(input.from_thread, input.to_thread) as { id: number };
+      const res = db
         .prepare(
-          `SELECT id, from_session FROM messages
-           WHERE status IN ('pending','seen') AND to_session IN (${placeholders}) AND from_session != ?`,
+          `INSERT INTO messages
+           (edge_id, from_thread, to_thread, question, status, room_id, hop_count, created_at)
+           VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)`,
         )
-        .all(...fromSessionIds, successorId) as { id: number; from_session: string }[];
-      if (pending.length === 0) return 0;
-      const update = db.prepare(`UPDATE messages SET to_session = ?, edge_id = ? WHERE id = ?`);
-      const edgeCache = new Map<string, number>();
-      for (const msg of pending) {
-        let edgeId = edgeCache.get(msg.from_session);
-        if (edgeId === undefined) {
-          edgeId = recordEdge(db, msg.from_session, successorId);
-          edgeCache.set(msg.from_session, edgeId);
-        }
-        update.run(successorId, edgeId, msg.id);
-      }
-      return pending.length;
+        .run(
+          edgeRow.id,
+          input.from_thread,
+          input.to_thread,
+          question,
+          input.room_id ?? null,
+          hopCount,
+          now,
+        );
+      return getMessage(db, Number(res.lastInsertRowid))!;
     })
     .immediate();
-}
 
-// ---- undelivered mail: one gather for two renderers --------------------
-//
-// The hook stdout notice (context injection — dim) and the typed prompt
-// (tmux send-keys — prompt-level visibility) render the SAME undelivered
-// mail, so gathering + delivery marking live here once.
-
-export interface MailItem {
-  id: number;
-  edge_id?: number | null;
-  kind: "reply" | "question";
-  /** sender's display name (session name, falling back to id8) */
-  from: string;
-  /** flattened body, capped with a channel-show hint when truncated */
-  body: string;
-}
-
-const MAIL_BODY_LIMIT = 1200;
-
-/**
- * Undelivered mail for a session, oldest first: replies to its questions
- * (≤3) then questions addressed to it (≤2). Pure read — nothing is marked;
- * call markMailDelivered only after the mail actually reached the session.
- */
-export function gatherUnseenMail(db: DB, sessionId: string): MailItem[] {
-  const items: MailItem[] = [];
-
-  // replies to MY questions — the channel direction is fixed (from asked,
-  // to answered), so the REPLIER on a reply row is to_session. Joining
-  // from_session here used to badge the reply with the asker's own name.
-  const replies = db
-    .prepare(
-      `SELECT m.id, m.edge_id, m.reply, s.name, substr(m.to_session, 1, 8) AS sid8
-       FROM messages m LEFT JOIN sessions s ON s.id = m.to_session
-       WHERE m.from_session = ? AND m.reply IS NOT NULL AND m.reply_seen_at IS NULL AND m.status != 'read'
-       ORDER BY m.id ASC LIMIT 3`,
-    )
-    .all(sessionId) as { id: number; edge_id: number | null; reply: string; name: string | null; sid8: string }[];
-  for (const r of replies) {
-    items.push({
-      id: r.id,
-      edge_id: r.edge_id,
-      kind: "reply",
-      from: r.name ?? r.sid8,
-      body: truncateForTyping(
-        flattenOneLine(r.reply),
-        MAIL_BODY_LIMIT,
-        r.edge_id == null ? "check_replies 看全文" : `channel show ${r.edge_id} 看全文`,
-      ),
+  if (input.room_id) {
+    publishLiveEvent({
+      type: "room.message",
+      project_id: target.project_id,
+      thread_id: target.id,
+      room_id: input.room_id,
+      payload: { phase: "asked", message: msg },
     });
   }
 
-  const rows = db
-    .prepare(
-      `SELECT m.id, m.edge_id, m.question, s.name, substr(m.from_session, 1, 8) AS sid8
-       FROM messages m LEFT JOIN sessions s ON s.id = m.from_session
-       WHERE m.to_session = ? AND m.status = 'pending'
-       ORDER BY m.id ASC LIMIT 2`,
-    )
-    .all(sessionId) as { id: number; edge_id: number | null; question: string; name: string | null; sid8: string }[];
-  for (const q of rows) {
-    items.push({
-      id: q.id,
-      edge_id: q.edge_id,
-      kind: "question",
-      from: q.name ?? q.sid8,
-      body: truncateForTyping(
-        flattenOneLine(q.question),
-        MAIL_BODY_LIMIT,
-        q.edge_id == null ? "check_inbox 看全文" : `channel show ${q.edge_id} 看全文`,
-      ),
+  const manager = getThreadManager();
+  if (target.kind === "managed" && manager) {
+    const senderLabel = displayNameFor(db, input.from_thread);
+    const { steered } = await manager.enqueuePrompt(target.id, {
+      prompt: question,
+      messageId: msg.id,
+      roomId: input.room_id ?? null,
+      deliveryMode: input.delivery_mode ?? "queue",
+      senderLabel,
     });
+    return {
+      message: msg,
+      delivered: true,
+      delivery_method: steered
+        ? `managed-${target.runtime}:steered`
+        : `managed-${target.runtime}:${target.id}`,
+    };
   }
-  return items;
+
+  return {
+    message: msg,
+    delivered: false,
+    delivery_method: target.kind === "external" ? "external-mcp-inbox" : "queued",
+  };
 }
 
-/**
- * Record delivery of gathered mail: replies get their receipt timestamp,
- * questions go seen (and, as before, one noticed question sweeps every
- * still-pending question for the session — they'd be stale anyway).
- */
-export function markMailDelivered(db: DB, sessionId: string, items: MailItem[]): void {
-  const replyIds = items.filter((i) => i.kind === "reply").map((i) => i.id);
-  if (replyIds.length > 0) {
-    db.prepare(
-      `UPDATE messages SET reply_seen_at = ? WHERE id IN (${replyIds.map(() => "?").join(",")})`,
-    ).run(nowIso(), ...replyIds);
-  }
-  // questions: the pending-only sweep covers every gathered question AND
-  // cannot regress one that got answered mid-delivery (gather → tmux spawns
-  // → mark leaves a window where replyAsk may have already set 'replied')
-  if (items.some((i) => i.kind === "question")) {
-    db.prepare(
-      `UPDATE messages SET status = 'seen' WHERE to_session = ? AND status = 'pending'`,
-    ).run(sessionId);
-  }
-}
-
-/**
- * Render gathered mail as ONE typed prompt line: badged with
- * provenance, flattened (send-keys types literal characters — a newline
- * submits early), so it lands in the TUI exactly like a user prompt.
- */
-export function formatTypedMailPrompt(items: MailItem[]): string | null {
-  if (items.length === 0) return null;
-  return items
-    .map((item) =>
-      item.kind === "reply"
-        ? `${badge({ label: "回复", from: item.from, ref: `msg #${item.id}` })} ${item.body} —— 追问用 ask_session，全文 ${item.edge_id == null ? "check_replies" : `channel show ${item.edge_id}`}`
-        : `${badge({ label: "提问", from: item.from, ref: `msg #${item.id}` })} ${item.body} —— 用 Conflux 的 reply_ask 回复 msg #${item.id}`,
-    )
-    .join(" ｜ ");
-}
-
-/**
- * Short stdout notice for hook events (UserPromptSubmit/SessionStart stdout
- * is injected into the conversation context). Returns null when there is
- * nothing unread — hooks must stay silent in the common case. Only
- * still-pending (never even seen) messages trigger a notice, so the nag
- * stops once the session actually runs check_inbox.
- */
-export function formatInboxNotice(db: DB, sessionId: string): string | null {
-  const items = gatherUnseenMail(db, sessionId);
-  if (items.length === 0) return null;
-  const notices = items.map((item) =>
-    item.kind === "reply"
-      ? `── Conflux · 回复 ← ${item.from} (msg #${item.id}) ──\n` +
-        `  ${item.body}\n` +
-        `── 追问 ask_session · ${item.edge_id == null ? "check_replies" : `查通道 channel show ${item.edge_id}`} ──`
-      : `── Conflux · 提问 → 你 (msg #${item.id}) 来自 ${item.from} ──\n` +
-        `  ${item.body}\n` +
-        `── 回复 reply_ask ──`,
-  );
-  markMailDelivered(db, sessionId, items);
-  return notices.join("\n\n");
-}
-
-/**
- * The full exchange history of one conversation channel (edge), oldest
- * first — the edge-panel view.
- */
-export function listEdgeMessages(db: DB, edgeId: number, limit: number | null = 200): Message[] {
-  if (limit === null) {
-    const rows = db
-      .prepare(`SELECT * FROM messages WHERE edge_id = ? ORDER BY id ASC`)
-      .all(edgeId) as MessageRow[];
-    return toMessages(db, rows);
-  }
-  const rows = db
-    .prepare(`SELECT * FROM messages WHERE edge_id = ? ORDER BY id DESC LIMIT ?`)
-    .all(edgeId, Math.min(Math.max(limit, 1), 500)) as MessageRow[];
-  return toMessages(db, rows).reverse();
-}
-
-/** Channel header for the edge panel. */
-export function getEdge(
+export function replyMessage(
   db: DB,
-  edgeId: number,
-): {
-  id: number;
-  from_session: string;
-  to_session: string;
-  weight: number;
-  last_interact_at: string;
-} | null {
-  const row = db
-    .prepare(
-      `SELECT rowid AS id, from_session, to_session, weight, last_interact_at FROM edges WHERE rowid = ?`,
-    )
-    .get(edgeId) as
-    | {
-        id: number;
-        from_session: string;
-        to_session: string;
-        weight: number;
-        last_interact_at: string;
-      }
-    | undefined;
-  return row ?? null;
+  messageId: number,
+  replierThreadId: string,
+  replyText: string,
+): Message {
+  const existing = getMessage(db, messageId);
+  if (!existing) throw Object.assign(new Error("message not found"), { statusCode: 404 });
+  if (existing.to_session !== replierThreadId && replierThreadId !== WEB_CONSOLE_ID) {
+    throw Object.assign(new Error("not the addressee of this message"), { statusCode: 403 });
+  }
+  db.prepare(
+    `UPDATE messages SET reply = ?, status = 'replied', replied_at = ? WHERE id = ?`,
+  ).run(replyText, nowIso(), messageId);
+  heartbeatThread(db, replierThreadId);
+  const updated = getMessage(db, messageId)!;
+  if (updated.room_id) {
+    publishLiveEvent({
+      type: "room.message",
+      thread_id: replierThreadId,
+      room_id: updated.room_id,
+      payload: { phase: "replied", message: updated },
+    });
+  }
+  return updated;
 }

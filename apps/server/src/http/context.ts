@@ -1,25 +1,14 @@
 import type { FastifyReply } from "fastify";
 import {
   BUSY_TIMEOUT_MS,
-  isLockError,
   publicError,
   retryOnBusy,
   type DB,
   type PublicErrorCode,
 } from "../core/db.js";
-import { heartbeat } from "../core/sessions.js";
-import { logAudit } from "../core/audit.js";
 import { logger } from "../log.js";
 import { WEB_CONSOLE_ID } from "@conflux/shared";
 
-/**
- * Shared per-server context handed to every route module: the DB handle,
- * error mapping with the server's dataDir/port, and the session/audit
- * helpers every route uses. Route modules receive this instead of reaching
- * into closures, so each lives in its own file.
- */
-
-/** The browser UI acts as one fixed pseudo-session. */
 export { WEB_CONSOLE_ID };
 
 export interface ServerContext {
@@ -27,28 +16,21 @@ export interface ServerContext {
   dataDir: string;
   port: number;
   requireSession(req: { headers: Record<string, string | string[] | undefined> }): string;
-  audit(sid: string, action: string, args: Record<string, unknown>, result: unknown): void;
-  sendError(
-    reply: FastifyReply,
-    err: unknown,
-    sid?: string,
-    action?: string,
-    args?: Record<string, unknown>,
-    statusOverride?: number,
-  ): FastifyReply;
+  sendError(reply: FastifyReply, err: unknown, statusOverride?: number): FastifyReply;
   sendHttpError(reply: FastifyReply, status: number, message: string): FastifyReply;
-  /**
-   * Run a route's write closure (core operation + audit) as ONE retry-safe
-   * unit: an immediate transaction takes the write lock before any effect,
-   * and a lock error retries with the event loop yielded between attempts
-   * until the shared busy budget is spent. Concurrent requests — including
-   * /healthz — stay served while the closure waits for the lock.
-   */
   write<T>(op: () => T): Promise<T>;
 }
 
 export function httpError(code: number, message: string): { statusCode: number; message: string } {
   return { statusCode: code, message };
+}
+
+export function resourceId(raw: string): number {
+  const n = Number(raw);
+  if (!Number.isSafeInteger(n) || n <= 0) {
+    throw httpError(400, `invalid resource id: ${raw}`);
+  }
+  return n;
 }
 
 export function createServerContext(
@@ -57,105 +39,33 @@ export function createServerContext(
 ): ServerContext {
   const { dataDir, port } = opts;
 
-  /** Resolve X-Session-Id header (or query) + ensure session exists in DB. */
   function requireSession(req: { headers: Record<string, string | string[] | undefined> }): string {
     const header = req.headers["x-session-id"];
     const sid = Array.isArray(header) ? header[0] : header;
-    if (!sid || typeof sid !== "string") {
-      throw httpError(400, "missing X-Session-Id header");
-    }
-    return sid;
+    return sid && typeof sid === "string" && sid.trim() ? sid.trim() : WEB_CONSOLE_ID;
   }
 
-  function audit(sid: string, action: string, args: Record<string, unknown>, result: unknown) {
-    heartbeat(db, sid);
-    logAudit(db, {
-      caller_session: sid,
-      interface: "http",
-      action,
-      args,
-      result: safeSummary(result),
-    });
-  }
-
-  /** Send an error reply AND audit the failure (when sid+action are known). */
-  function sendError(
-    reply: FastifyReply,
-    err: unknown,
-    sid?: string,
-    action?: string,
-    args?: Record<string, unknown>,
-    statusOverride?: number,
-  ): FastifyReply {
+  function sendError(reply: FastifyReply, err: unknown, statusOverride?: number): FastifyReply {
     const mapped = publicError(err, { dataDir, port });
     const status = statusOverride ?? publicStatus(err, mapped.code);
-    logger.error({ err, sid, action, code: mapped.code, status }, "http request failed");
-    if (sid && action) {
-      // A lock error means another process still holds the write lock.
-      // Auditing it synchronously would busy-wait on that same lock for a
-      // second full busy_timeout before the reply goes out, so the
-      // structured error log above stays the record for this request.
-      if (mapped.code === "DATA_LOCKED" || isLockError(err)) {
-        logger.warn(
-          { sid, action, code: mapped.code },
-          "skipping error audit while the database is locked",
-        );
-      } else {
-        try {
-          logAudit(db, {
-            caller_session: sid,
-            interface: "http",
-            action,
-            args: args ?? {},
-            result: { code: mapped.code },
-          });
-        } catch (auditError) {
-          logger.warn({ err: auditError, action }, "failed to audit HTTP error");
-        }
-      }
-    }
+    logger.error({ err, code: mapped.code, status }, "http request failed");
     return reply.code(status).send({ ...mapped, error: mapped.message });
   }
 
   function sendHttpError(reply: FastifyReply, status: number, message: string): FastifyReply {
-    const mapped = publicError(httpError(status, message), { dataDir, port });
-    return reply.code(status).send({ ...mapped, error: mapped.message });
+    return sendError(reply, httpError(status, message), status);
   }
 
   function write<T>(op: () => T): Promise<T> {
-    // BEGIN IMMEDIATE fails before any effect when the write lock is held,
-    // so retrying the whole closure can never duplicate a partially
-    // applied write; core functions using their own transactions nest as
-    // savepoints inside this one.
-    return retryOnBusy(db, () => db.transaction(op).immediate(), { budgetMs: BUSY_TIMEOUT_MS });
+    return retryOnBusy(db, op, { budgetMs: BUSY_TIMEOUT_MS });
   }
 
-  return { db, dataDir, port, requireSession, audit, sendError, sendHttpError, write };
+  return { db, dataDir, port, requireSession, sendError, sendHttpError, write };
 }
 
-export function safeSummary(value: unknown): Record<string, unknown> | null {
-  if (value === null || value === undefined) return null;
-  if (typeof value === "object") {
-    const v = value as Record<string, unknown>;
-    if (Array.isArray(v)) return { count: v.length };
-    if (typeof v.content === "string") {
-      return { id: v.id, contentLen: v.content.length };
-    }
-    return v;
-  }
-  return { value: String(value).slice(0, 200) };
-}
-
-function publicStatus(error: unknown, code: PublicErrorCode): number {
-  if (typeof error === "object" && error !== null) {
-    const statusCode = (error as { statusCode?: unknown }).statusCode;
-    if (typeof statusCode === "number" && statusCode >= 400 && statusCode <= 599) {
-      return statusCode;
-    }
-  }
+function publicStatus(err: unknown, code: PublicErrorCode): number {
   switch (code) {
     case "DATA_LOCKED":
-    case "PORT_IN_USE":
     case "SERVICE_UNAVAILABLE":
       return 503;
     case "NOT_FOUND":
@@ -166,16 +76,11 @@ function publicStatus(error: unknown, code: PublicErrorCode): number {
       return 403;
     case "BAD_REQUEST":
       return 400;
-    default:
-      return 500;
+    case "TOO_MANY_REQUESTS":
+      return 429;
+    default: {
+      const raw = (err as { statusCode?: unknown })?.statusCode;
+      return typeof raw === "number" && raw >= 400 && raw < 600 ? raw : 500;
+    }
   }
-}
-
-
-/** Reject ambiguous numeric resource names before passing values to SQLite. */
-export function resourceId(raw: string): number {
-  if (!/^[1-9][0-9]*$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
-    throw Object.assign(new Error("invalid resource id"), { statusCode: 400 });
-  }
-  return Number(raw);
 }

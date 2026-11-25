@@ -1,11 +1,13 @@
 import type { DB } from "../db.js";
 import { dirname } from "node:path";
 import { logger } from "../../log.js";
-import type { RuntimeAgent } from "@conflux/shared";
-import { cleanTerminalEnv } from "../terminal.js";
-import { buildCodexManagedMcpArgs, buildRuntimeEnv } from "../runtime-agents.js";
-import { runtimeDescriptor } from "../runtime-registry.js";
-import { getTerminalSettings } from "../app-settings.js";
+import {
+  buildCodexManagedMcpArgs,
+  buildThreadEnv,
+  cleanSpawnEnv,
+  resolveRuntimeExecutable,
+  type ThreadLaunchSpec,
+} from "../runtime-env.js";
 import type {
   AdapterConnection,
   ManagedLaunchConfig,
@@ -14,35 +16,21 @@ import type {
   RuntimeAdapter,
   ServerRequestClassification,
 } from "../managed/adapter.js";
-import { assertSupportedCodexVersion } from "./version.js";
 import { normalizeNotification as normalizeCodexNotification, mergeFinalText } from "./events.js";
 import { sanitizeApprovalPayload, type ApprovalKind } from "./approvals.js";
 
-/**
- * The Codex app-server adapter: every wire-shape decision for the managed
- * executor lives here — method names, parameter fields (including the
- * developerInstructions slot), the handshake version gate, notification
- * normalization, approval classification and thread-history parsing. The
- * runtime-agnostic scheduling/state machine lives in core/managed/executor.
- */
-
 const CLIENT_INFO = {
-  clientInfo: { name: "conflux", title: "Conflux managed executor", version: "0.3.1" },
+  clientInfo: { name: "conflux", title: "Conflux v2 Thread Executor", version: "2.0.0" },
   capabilities: null,
 };
 
-/** Trimmed preset instructions, or null when the preset carries none. */
-function developerInstructions(agent: RuntimeAgent): string | null {
-  return agent.instructions?.trim() ? agent.instructions.trim() : null;
+function developerInstructions(spec: ThreadLaunchSpec): string | null {
+  return spec.instructions?.trim() ? spec.instructions.trim() : null;
 }
 
-/** Resolve the default codex app-server launch from settings/env. */
-export function defaultCodexLaunch(db: DB, agent: RuntimeAgent): ManagedLaunchConfig {
-  const settings = getTerminalSettings(db);
-  const def = runtimeDescriptor(agent.runtime);
-  const defaultExe = def.settingsKey ? settings[def.settingsKey] : def.executable;
-  const executable = process.env[def.executableEnv] || defaultExe;
-  const env = buildRuntimeEnv(agent, cleanTerminalEnv());
+export function defaultCodexLaunch(db: DB, spec: ThreadLaunchSpec): ManagedLaunchConfig {
+  const executable = resolveRuntimeExecutable(db, "codex");
+  const env = buildThreadEnv(spec, cleanSpawnEnv());
   const args = ["app-server"];
   if (db.name && db.name !== ":memory:") {
     env.CONFLUX_HOME = dirname(db.name);
@@ -52,7 +40,7 @@ export function defaultCodexLaunch(db: DB, agent: RuntimeAgent): ManagedLaunchCo
     executable,
     args,
     env,
-    cwd: agent.workdir || process.cwd(),
+    cwd: spec.workdir || process.cwd(),
   };
 }
 
@@ -66,10 +54,7 @@ export const codexAdapter: RuntimeAdapter = {
 
   async initialize(conn) {
     const init = (await conn.request("initialize", CLIENT_INFO)) as { userAgent?: string };
-    // The wire protocol is certified against one codex minor — a drifted
-    // app-server fails fast here instead of corrupting a thread midway.
-    assertSupportedCodexVersion(init?.userAgent);
-    logger.info({ userAgent: init?.userAgent }, "managed codex app-server initialized");
+    logger.info({ userAgent: init?.userAgent ?? null }, "managed codex app-server initialized");
   },
 
   async startThread(conn, agent, cwd) {
@@ -126,7 +111,9 @@ export const codexAdapter: RuntimeAdapter = {
     const turn = (await conn.request("turn/start", {
       threadId,
       input: [{ type: "text", text: input.text, text_elements: [] }],
-      clientUserMessageId: input.clientMessageId,
+      ...(input.clientMessageId !== undefined
+        ? { clientUserMessageId: String(input.clientMessageId) }
+        : {}),
     })) as { turn?: { id?: string } };
     const turnId = turn?.turn?.id;
     if (!turnId) throw new Error("turn/start returned no turn id");
@@ -139,7 +126,9 @@ export const codexAdapter: RuntimeAdapter = {
         threadId,
         expectedTurnId: turnId,
         input: [{ type: "text", text: input.text, text_elements: [] }],
-        ...(input.clientMessageId ? { clientUserMessageId: input.clientMessageId } : {}),
+        ...(input.clientMessageId !== undefined
+          ? { clientUserMessageId: String(input.clientMessageId) }
+          : {}),
       });
       return { accepted: true };
     } catch (err) {

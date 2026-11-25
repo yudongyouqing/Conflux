@@ -1,11 +1,13 @@
 import { dirname } from "node:path";
-import type { RuntimeAgent } from "@conflux/shared";
 import { logger } from "../../log.js";
 import type { DB } from "../db.js";
-import { buildRuntimeEnv } from "../runtime-agents.js";
-import { runtimeDescriptor } from "../runtime-registry.js";
-import { cleanTerminalEnv } from "../terminal.js";
-import { pinnedMcpLaunch } from "../wake/launcher.js";
+import {
+  buildThreadEnv,
+  cleanSpawnEnv,
+  pinnedMcpLaunch,
+  resolveRuntimeExecutable,
+  type ThreadLaunchSpec,
+} from "../runtime-env.js";
 import type {
   AdapterConnection,
   CanonicalApprovalKind,
@@ -16,12 +18,6 @@ import type {
   ServerRequestClassification,
 } from "../managed/adapter.js";
 import { AcpStreamConnection, type AcpPermissionOption } from "./connection.js";
-
-/**
- * Generic ACP (Agent Client Protocol) managed adapter + Antigravity (`agy acp`)
- * specialization. Normalizes ACP `session/update` notifications and
- * `session/request_permission` prompts onto Conflux's RuntimeAdapter contract.
- */
 
 const TEXT_CAP = 2000;
 
@@ -43,8 +39,12 @@ function buildAcpMcpServers(ctx?: ManagedSessionContext): Array<{
     const launch = pinnedMcpLaunch(dataDir);
     const envPairs: Array<{ name: string; value: string }> = [
       { name: "CONFLUX_HOME", value: dataDir },
-      ...(ctx?.instanceId ? [{ name: "CONFLUX_RUNTIME_INSTANCE_ID", value: ctx.instanceId }] : []),
-      ...(ctx?.sessionId ? [{ name: "CONFLUX_SESSION_ID", value: ctx.sessionId }] : []),
+      ...(ctx?.threadId
+        ? [
+            { name: "CONFLUX_THREAD_ID", value: ctx.threadId },
+            { name: "CONFLUX_SESSION_ID", value: ctx.threadId },
+          ]
+        : []),
       ...Object.entries(launch.env ?? {}).map(([name, value]) => ({ name, value })),
     ];
     return [
@@ -77,16 +77,13 @@ function extractUpdateText(update: Record<string, unknown>): string | null {
 
 export function defaultAcpLaunch(
   db: DB,
-  agent: RuntimeAgent,
+  spec: ThreadLaunchSpec,
   defaultArgs: string[] = ["acp"],
 ): ManagedLaunchConfig {
-  const def = runtimeDescriptor(agent.runtime);
-  const env = buildRuntimeEnv(agent, cleanTerminalEnv());
+  const env = buildThreadEnv(spec, cleanSpawnEnv());
   if (db.name && db.name !== ":memory:") env.CONFLUX_HOME = dirname(db.name);
 
-  // Allow custom ACP command/args via extra_env (`ACP_COMMAND`, `ACP_ARGS`) for
-  // generic `acp` presets (Copilot `--acp`, Cursor, Kiro, Gemini CLI, etc.).
-  const executable = env.ACP_COMMAND || process.env[def.executableEnv] || def.executable;
+  const executable = env.ACP_COMMAND || resolveRuntimeExecutable(db, spec.runtime);
   let args = [...defaultArgs];
   if (env.ACP_ARGS) {
     try {
@@ -103,7 +100,7 @@ export function defaultAcpLaunch(
     executable,
     args,
     env,
-    cwd: agent.workdir || process.cwd(),
+    cwd: spec.workdir || process.cwd(),
   };
 }
 
@@ -141,12 +138,30 @@ export function createAcpAdapter(opts: {
     },
 
     async startThread(conn, agent, cwd, ctx) {
-      const started = (await conn.request("acp/session_new", {
+      const params = {
         cwd,
         model: agent.model ?? undefined,
         systemPrompt: agent.instructions ?? undefined,
         mcpServers: buildAcpMcpServers(ctx),
-      })) as { sessionId?: string };
+      };
+      let started: { sessionId?: string } | undefined;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          started = (await conn.request("acp/session_new", params)) as { sessionId?: string };
+          break;
+        } catch (err) {
+          const code = (err as { code?: number })?.code;
+          if (attempt === 0 && code === -32603) {
+            logger.warn(
+              { runtime: opts.runtime, err: err instanceof Error ? err.message : String(err) },
+              "ACP session/new transient -32603, retrying once",
+            );
+            await new Promise((r) => setTimeout(r, 1200));
+            continue;
+          }
+          throw err;
+        }
+      }
       if (!started?.sessionId) throw new Error("ACP session/new returned no sessionId");
       return started.sessionId;
     },
@@ -182,6 +197,13 @@ export function createAcpAdapter(opts: {
         clientMessageId: input.clientMessageId,
       })) as { accepted?: boolean; reason?: string };
       return { accepted: res?.accepted === true, reason: res?.reason };
+    },
+
+    async setModel(conn, threadId, model) {
+      const res = (await conn.request("acp/set_model", { sessionId: threadId, model })) as {
+        ok?: boolean;
+      };
+      return res?.ok === true;
     },
 
     async interrupt(conn, threadId, turnId) {
@@ -283,7 +305,24 @@ export function createAcpAdapter(opts: {
           };
         }
 
+        if (kind === "agent_thought_chunk" || kind === "agent_thought") {
+          const text = extractUpdateText(update);
+          if (!text) return null;
+          return {
+            type: "thinking",
+            payload: { text, delta: kind === "agent_thought_chunk" },
+            turnId,
+            agentText: null,
+            turnCompleted: null,
+          };
+        }
+
         if (kind === "tool_call" || kind === "tool_call_update") {
+          const contentBlocks = Array.isArray(update.content) ? update.content : [];
+          const diffBlock = contentBlocks.find(
+            (b): b is Record<string, unknown> =>
+              Boolean(b && typeof b === "object" && (b as { type?: string }).type === "diff"),
+          );
           return {
             type: "tool",
             payload: {
@@ -291,6 +330,15 @@ export function createAcpAdapter(opts: {
               ...(typeof update.toolCallId === "string" ? { toolCallId: update.toolCallId } : {}),
               ...(typeof update.title === "string" ? { title: trimCap(update.title, 300) } : {}),
               ...(typeof update.kind === "string" ? { kind: update.kind } : {}),
+              ...(diffBlock
+                ? {
+                    diff: {
+                      filePath: typeof diffBlock.path === "string" ? diffBlock.path : "",
+                      oldText: trimCap(diffBlock.oldText, 4000) ?? "",
+                      newText: trimCap(diffBlock.newText, 4000) ?? "",
+                    },
+                  }
+                : {}),
             },
             turnId,
             agentText: null,

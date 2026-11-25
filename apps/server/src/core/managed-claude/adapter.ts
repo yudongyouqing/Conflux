@@ -2,14 +2,16 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { RuntimeAgent } from "@conflux/shared";
 import { logger } from "../../log.js";
 import type { DB } from "../db.js";
-import { getTerminalSettings } from "../app-settings.js";
-import { buildRuntimeEnv } from "../runtime-agents.js";
-import { runtimeDescriptor } from "../runtime-registry.js";
-import { cleanTerminalEnv } from "../terminal.js";
-import { ensureWakeMcpConfig, pinnedMcpLaunch } from "../wake/launcher.js";
+import {
+  buildThreadEnv,
+  cleanSpawnEnv,
+  ensureClaudeMcpConfig,
+  pinnedMcpLaunch,
+  resolveRuntimeExecutable,
+  type ThreadLaunchSpec,
+} from "../runtime-env.js";
 import type {
   AdapterConnection,
   CanonicalApprovalKind,
@@ -114,14 +116,11 @@ export function readClaudeTranscriptTurns(
 
 export function defaultClaudeLaunch(
   db: DB,
-  agent: RuntimeAgent,
+  spec: ThreadLaunchSpec,
   opts?: ManagedLaunchOptions,
 ): ManagedLaunchConfig {
-  const settings = getTerminalSettings(db);
-  const def = runtimeDescriptor("claude");
-  const defaultExe = def.settingsKey ? settings[def.settingsKey] : def.executable;
-  const executable = process.env[def.executableEnv] || defaultExe;
-  const env = buildRuntimeEnv(agent, cleanTerminalEnv());
+  const executable = resolveRuntimeExecutable(db, "claude");
+  const env = buildThreadEnv(spec, cleanSpawnEnv());
   if (db.name && db.name !== ":memory:") env.CONFLUX_HOME = dirname(db.name);
 
   const args = [
@@ -139,16 +138,16 @@ export function defaultClaudeLaunch(
   } else {
     args.push("--session-id", randomUUID());
   }
-  if (agent.model?.trim()) {
-    args.push("--model", agent.model.trim());
+  if (spec.model?.trim()) {
+    args.push("--model", spec.model.trim());
   }
-  if (agent.instructions?.trim()) {
-    args.push("--append-system-prompt", agent.instructions.trim());
+  if (spec.instructions?.trim()) {
+    args.push("--append-system-prompt", spec.instructions.trim());
   }
   if (db.name && db.name !== ":memory:") {
     try {
       const dataDir = dirname(db.name);
-      args.push("--mcp-config", ensureWakeMcpConfig(dataDir, undefined, pinnedMcpLaunch(dataDir)));
+      args.push("--mcp-config", ensureClaudeMcpConfig(dataDir, spec.id, pinnedMcpLaunch(dataDir)));
     } catch (err) {
       logger.warn(
         { err: err instanceof Error ? err.message : String(err) },
@@ -161,7 +160,7 @@ export function defaultClaudeLaunch(
     executable,
     args,
     env,
-    cwd: agent.workdir || process.cwd(),
+    cwd: spec.workdir || process.cwd(),
   };
 }
 
@@ -275,14 +274,30 @@ export const claudeAdapter: RuntimeAdapter = {
       const message = p.message as { content?: Array<Record<string, unknown>> } | undefined;
       const blocks = Array.isArray(message?.content) ? message.content : [];
       const texts: string[] = [];
-      const tools: Array<{ name: string; id?: string }> = [];
+      const thoughts: string[] = [];
+      const tools: Array<Record<string, unknown>> = [];
       for (const b of blocks) {
         if (b?.type === "text" && typeof b.text === "string" && b.text.trim()) {
           texts.push(b.text);
+        } else if (b?.type === "thinking" && typeof b.thinking === "string" && b.thinking.trim()) {
+          thoughts.push(b.thinking);
         } else if (b?.type === "tool_use" && typeof b.name === "string") {
+          const inp =
+            b.input && typeof b.input === "object" && !Array.isArray(b.input)
+              ? (b.input as Record<string, unknown>)
+              : {};
+          const filePath =
+            trimCap(inp.file_path, 400) ?? trimCap(inp.path, 400);
+          const oldStr = trimCap(inp.old_string, 4000);
+          const newStr = trimCap(inp.new_string, 4000) ?? trimCap(inp.content, 4000);
           tools.push({
             name: b.name,
             ...(typeof b.id === "string" ? { id: b.id } : {}),
+            ...(trimCap(inp.command, 500) ? { command: trimCap(inp.command, 500) } : {}),
+            ...(filePath ? { filePath } : {}),
+            ...(oldStr !== undefined || newStr !== undefined
+              ? { diff: { filePath: filePath ?? "", oldText: oldStr ?? "", newText: newStr ?? "" } }
+              : {}),
           });
         }
       }
@@ -300,6 +315,15 @@ export const claudeAdapter: RuntimeAdapter = {
         return {
           type: "tool",
           payload: { phase: "start", tools },
+          turnId,
+          agentText: null,
+          turnCompleted: null,
+        };
+      }
+      if (thoughts.length > 0) {
+        return {
+          type: "thinking",
+          payload: { text: thoughts.join("\n") },
           turnId,
           agentText: null,
           turnCompleted: null,
@@ -346,6 +370,30 @@ export const claudeAdapter: RuntimeAdapter = {
           errorMessage,
         },
       };
+    }
+
+    if (method === "claude/system") {
+      const subtype = typeof p.subtype === "string" ? p.subtype : "";
+      if (subtype === "api_retry") {
+        const attempt = typeof p.attempt === "number" ? p.attempt : null;
+        const maxRetries = typeof p.max_retries === "number" ? p.max_retries : null;
+        const errStatus = typeof p.error_status === "number" ? p.error_status : null;
+        const errLabel = typeof p.error === "string" ? p.error : "retry";
+        return {
+          type: "status",
+          payload: {
+            phase: "api_retry",
+            text: `上游 API 暂不可用 (${errStatus ?? errLabel})，正在重试${attempt && maxRetries ? ` (${attempt}/${maxRetries})` : ""}...`,
+            attempt,
+            maxRetries,
+            errorStatus: errStatus,
+          },
+          turnId,
+          agentText: null,
+          turnCompleted: null,
+        };
+      }
+      return null;
     }
 
     return null;

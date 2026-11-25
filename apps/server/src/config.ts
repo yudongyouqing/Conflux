@@ -1,60 +1,60 @@
 import { homedir } from "os";
 import { join, resolve } from "path";
 import { existsSync, mkdirSync } from "fs";
-import { resolveDataHome } from "./core/config-migration.js";
 
 export type Scope = "project" | "global";
 
 export interface Config {
-  /** Root directory that contains data.db (and WAL/SHM siblings). */
+  /** Root directory that contains conflux-v2.db (and WAL/SHM siblings). */
   dataDir: string;
-  /** Absolute path to the SQLite database file. */
+  /** Absolute path to the v2 SQLite database file (physically isolated from v1 data.db). */
   dbPath: string;
   /** Effective scope used to resolve dataDir. */
   scope: Scope;
 }
 
 /**
- * Resolve the shared Conflux/muiltchat data directory.
- *
- * Precedence (highest first):
+ * Resolve the shared Conflux data directory without creating it:
  *   1. Explicit `override` argument
- *   2. `CONFLUX_HOME` env var (when set & non-empty)
- *   3. an existing project-scoped `.muiltchat` directory
+ *   2. `CONFLUX_HOME` env var
+ *   3. Project-scoped `.muiltchat` (when scope !== "global")
  *   4. `~/.muiltchat` (global default)
- *
- * `scope` overrides detection: `--scope global` forces the home dir even when
- * `CLAUDE_PROJECT_DIR` is set.
  */
+export function resolveDataHome(opts: {
+  override?: string;
+  scope?: Scope;
+  env?: NodeJS.ProcessEnv;
+} = {}): string {
+  const env = opts.env ?? process.env;
+  const explicit = opts.override?.trim();
+  if (explicit) return resolve(explicit);
+
+  const confluxHome = env.CONFLUX_HOME?.trim();
+  if (confluxHome) return resolve(confluxHome);
+
+  if (opts.scope !== "global") {
+    const projectDir = env.CLAUDE_PROJECT_DIR?.trim();
+    if (projectDir) {
+      const projectHome = resolve(join(projectDir, ".muiltchat"));
+      if (opts.scope === "project" || existsSync(projectHome)) return projectHome;
+    }
+  }
+
+  return resolve(join(homedir(), ".muiltchat"));
+}
+
 export function resolveConfig(scope: Scope = "global", override?: string): Config {
-  const dataDir = resolveDataHome({
-    override,
-    scope,
-    env: process.env,
-  });
-  return finalize(dataDir, detectScope(dataDir));
-}
-
-function detectScope(dir: string): Scope {
-  // If the directory sits inside $CLAUDE_PROJECT_DIR/.muiltchat we treat it as project-scoped.
-  const projectDir = process.env.CLAUDE_PROJECT_DIR;
-  if (projectDir && dir === resolve(join(projectDir, ".muiltchat"))) {
-    return "project";
-  }
-  if (dir === resolve(join(homedir(), ".muiltchat"))) {
-    return "global";
-  }
-  return "global";
-}
-
-function finalize(dataDir: string, scope: Scope): Config {
+  const dataDir = resolveDataHome({ override, scope });
   if (!existsSync(dataDir)) {
     mkdirSync(dataDir, { recursive: true });
   }
+  const projectDir = process.env.CLAUDE_PROJECT_DIR;
+  const effectiveScope: Scope =
+    projectDir && dataDir === resolve(join(projectDir, ".muiltchat")) ? "project" : "global";
   return {
     dataDir,
-    dbPath: join(dataDir, "data.db"),
-    scope,
+    dbPath: join(dataDir, "conflux-v2.db"),
+    scope: effectiveScope,
   };
 }
 
@@ -77,10 +77,3 @@ export function resolveHttpPort(override?: number): number {
   }
   return port;
 }
-
-/** Heartbeat staleness threshold in ms (2 minutes; MCP processes beat every 30s). */
-export const STALE_AFTER_MS = 2 * 60 * 1000;
-
-/** Default list/query limits. */
-export const DEFAULT_LIMIT = 50;
-export const MAX_LIMIT = 500;
