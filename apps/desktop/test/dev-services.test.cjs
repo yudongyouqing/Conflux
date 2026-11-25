@@ -299,35 +299,6 @@ test("runtime child failures are ignored before readiness and during shutdown", 
   ]);
 });
 
-test("runtime health failure is reported once and recovery does not fail the app", () => {
-  let servicesReady = true;
-  let isQuitting = false;
-  const failures = [];
-  const guard = createServiceRuntimeGuard({
-    isServicesReady: () => servicesReady,
-    isQuitting: () => isQuitting,
-    onFailure: (failure) => failures.push(failure),
-  });
-
-  assert.equal(guard.handleHealthState({ name: "server", state: "degraded" }), false);
-  assert.equal(guard.handleHealthState({ name: "server", state: "unhealthy" }), true);
-  assert.equal(guard.handleHealthState({ name: "server", state: "healthy" }), false);
-  assert.equal(guard.handleHealthState({ name: "server", state: "unhealthy" }), false);
-
-  assert.deepEqual(failures, [
-    {
-      type: "health",
-      name: "server",
-      reason: "health state unhealthy",
-    },
-  ]);
-
-  servicesReady = false;
-  isQuitting = false;
-  assert.equal(guard.handleHealthState({ name: "web", state: "unhealthy" }), false);
-});
-
-
 test("waitForHttp retries HTTP errors until a healthy response arrives", async () => {
   let calls = 0;
   const server = http.createServer((_req, res) => {

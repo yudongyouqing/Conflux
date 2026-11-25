@@ -1,10 +1,27 @@
 const http = require("node:http");
+const net = require("node:net");
 const { spawn } = require("node:child_process");
-const { assertPortAvailable } = require("./port-diagnostics.cjs");
 
 const API_HEALTH_URL = "http://127.0.0.1:9527/healthz";
 const WEB_URL = "http://127.0.0.1:5173/";
 const DEV_SERVICE_STARTUP_TIMEOUT_MS = 120_000;
+
+function assertPortAvailable(port, host = "127.0.0.1") {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.once("error", (err) => {
+      if (err && err.code === "EADDRINUSE") {
+        reject(new Error(`Port ${host}:${port} is already in use`));
+      } else {
+        reject(err);
+      }
+    });
+    server.listen(port, host, () => {
+      server.close(() => resolve());
+    });
+  });
+}
 
 function createNpmInvocation({
   platform = process.platform,
@@ -61,7 +78,7 @@ function createDevServiceSpecs(repoRoot, options = {}) {
 
 async function assertDevServicePorts(
   specs,
-  { assertPortAvailableFn = assertPortAvailable } = {}
+  { assertPortAvailableFn = assertPortAvailable } = {},
 ) {
   for (const spec of specs) {
     await assertPortAvailableFn(spec.port, spec.host);
@@ -71,23 +88,19 @@ async function assertDevServicePorts(
 function createDevServiceSpawnOptions(
   cwd,
   env = process.env,
-  shell = process.platform === "win32"
+  shell = process.platform === "win32",
 ) {
   return {
     cwd,
     env,
     stdio: ["ignore", "pipe", "pipe"],
-    // npm.cmd fallback needs cmd.exe; direct npm CLI launches do not.
     shell,
     windowsHide: true,
     detached: process.platform !== "win32",
   };
 }
 
-function waitForHttp(
-  url,
-  { timeoutMs = 30_000, intervalMs = 100, signal } = {}
-) {
+function waitForHttp(url, { timeoutMs = 30_000, intervalMs = 100, signal } = {}) {
   const deadline = Date.now() + timeoutMs;
   let timer;
   let timeout;
@@ -96,9 +109,7 @@ function waitForHttp(
   return new Promise((resolve, reject) => {
     let settled = false;
 
-    const abort = () => {
-      finish(reject, new Error(`Aborted waiting for ${url}`));
-    };
+    const abort = () => finish(reject, new Error(`Aborted waiting for ${url}`));
 
     const cleanup = () => {
       if (timer) clearTimeout(timer);
@@ -125,7 +136,6 @@ function waitForHttp(
 
     const attempt = () => {
       if (settled) return;
-
       request = http.get(url, (response) => {
         response.resume();
         request = undefined;
@@ -151,12 +161,7 @@ function waitForHttp(
 function waitForService(
   spec,
   child,
-  {
-    timeoutMs = 30_000,
-    intervalMs = 100,
-    exitProbeTimeoutMs = 250,
-    signal,
-  } = {}
+  { timeoutMs = 30_000, intervalMs = 100, exitProbeTimeoutMs = 250, signal } = {},
 ) {
   const controller = new AbortController();
   const exitProbeController = new AbortController();
@@ -185,9 +190,7 @@ function waitForService(
       finish(reject, new Error(`${spec.name} failed to start: ${message}`));
     };
 
-    const onAbort = () => {
-      finish(reject, new Error(`Aborted waiting for ${spec.name}`));
-    };
+    const onAbort = () => finish(reject, new Error(`Aborted waiting for ${spec.name}`));
 
     const onExit = (code, exitSignal) => {
       childExited = true;
@@ -199,13 +202,8 @@ function waitForService(
       })
         .then(() => finish(resolve))
         .catch(() => {
-          const reason = exitSignal
-            ? `signal ${exitSignal}`
-            : `code ${code ?? "unknown"}`;
-          finish(
-            reject,
-            new Error(`${spec.name} exited before becoming ready (${reason})`)
-          );
+          const reason = exitSignal ? `signal ${exitSignal}` : `code ${code ?? "unknown"}`;
+          finish(reject, new Error(`${spec.name} exited before becoming ready (${reason})`));
         });
     };
 
@@ -223,11 +221,7 @@ function waitForService(
       return;
     }
 
-    waitForHttp(spec.url, {
-      timeoutMs,
-      intervalMs,
-      signal: controller.signal,
-    })
+    waitForHttp(spec.url, { timeoutMs, intervalMs, signal: controller.signal })
       .then(() => {
         if (!childExited) finish(resolve);
       })
@@ -237,7 +231,10 @@ function waitForService(
   });
 }
 
-function stopChild(child, { platform = process.platform, spawnFn = spawn, killFn = process.kill, timeoutMs = 2_000 } = {}) {
+function stopChild(
+  child,
+  { platform = process.platform, spawnFn = spawn, killFn = process.kill, timeoutMs = 2_000 } = {},
+) {
   if (!child) return Promise.resolve();
   if (stoppingChildren.has(child)) return stoppingChildren.get(child);
 
@@ -251,11 +248,10 @@ function stopChild(child, { platform = process.platform, spawnFn = spawn, killFn
         clearTimeout(timer);
         resolve();
       };
-      const killer = spawnFn(
-        "taskkill",
-        ["/pid", String(child.pid), "/T", "/F"],
-        { windowsHide: true, stdio: "ignore" }
-      );
+      const killer = spawnFn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+        windowsHide: true,
+        stdio: "ignore",
+      });
       if (!killer?.once) {
         finish();
         return;
@@ -296,13 +292,21 @@ function stopChild(child, { platform = process.platform, spawnFn = spawn, killFn
         if (error.code === "ESRCH") finish();
       }
     };
-    const onExit = () => child.pid ? checkGroup() : finish();
+    const onExit = () => (child.pid ? checkGroup() : finish());
     child.once?.("exit", onExit);
     signal("SIGTERM");
-    if (!child.once) { finish(); return; }
+    if (!child.once) {
+      finish();
+      return;
+    }
     if (!settled && child.pid) probe = setInterval(checkGroup, 25);
     if (child.exitCode !== null && child.exitCode !== undefined) onExit();
-    if (!settled) timer = setTimeout(() => { signal("SIGKILL"); finish(); }, timeoutMs);
+    if (!settled) {
+      timer = setTimeout(() => {
+        signal("SIGKILL");
+        finish();
+      }, timeoutMs);
+    }
   });
   stoppingChildren.set(child, stopping);
   return stopping;
@@ -316,49 +320,21 @@ function createServiceRuntimeGuard({
   let failureHandled = false;
 
   function report(failure) {
-    if (failureHandled || !isServicesReady() || isQuitting()) {
-      return false;
-    }
+    if (failureHandled || !isServicesReady() || isQuitting()) return false;
     failureHandled = true;
     onFailure(failure);
     return true;
   }
 
-  function handleChildExit(spec, code, signal) {
-    const reason = signal
-      ? `signal ${signal}`
-      : `code ${code ?? "unknown"}`;
-    return report({
-      type: "child-exit",
-      name: spec.name,
-      reason,
-    });
-  }
-
-  function handleChildError(spec, error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    return report({
-      type: "child-error",
-      name: spec.name,
-      reason,
-    });
-  }
-
-  function handleHealthState(snapshot) {
-    if (snapshot?.state !== "unhealthy") {
-      return false;
-    }
-    return report({
-      type: "health",
-      name: snapshot.name,
-      reason: "health state unhealthy",
-    });
-  }
-
   return {
-    handleChildExit,
-    handleChildError,
-    handleHealthState,
+    handleChildExit(spec, code, signal) {
+      const reason = signal ? `signal ${signal}` : `code ${code ?? "unknown"}`;
+      return report({ type: "child-exit", name: spec.name, reason });
+    },
+    handleChildError(spec, error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      return report({ type: "child-error", name: spec.name, reason });
+    },
     hasFailed: () => failureHandled,
   };
 }
@@ -368,6 +344,7 @@ const stoppingChildren = new WeakMap();
 module.exports = {
   API_HEALTH_URL,
   WEB_URL,
+  assertPortAvailable,
   createDevServiceSpecs,
   createDevServiceSpawnOptions,
   assertDevServicePorts,

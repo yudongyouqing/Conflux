@@ -3,6 +3,7 @@ const { spawn } = require("node:child_process");
 const { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, shell } = require("electron");
 
 const {
+  assertPortAvailable,
   createDevServiceSpecs,
   createDevServiceSpawnOptions,
   assertDevServicePorts,
@@ -16,20 +17,15 @@ const {
   PRODUCTION_PORT,
   startProductionService,
 } = require("./production-services.cjs");
-const { assertPortAvailable } = require("./port-diagnostics.cjs");
 const { resolveRuntimePaths } = require("./runtime-paths.cjs");
 const { configureElectronRuntime } = require("./runtime-config.cjs");
 const { createTray } = require("./tray.cjs");
 const { startMessageNotifications } = require("./desktop-notify.cjs");
 const { externalLinkDecision, installProductionCsp } = require("./security.cjs");
-const { createRendererWatchdog } = require("./renderer-watchdog.cjs");
-const { createServiceHealthMonitor, probeHttp } = require("./service-health.cjs");
 const { configureAutoUpdater } = require("./auto-update.cjs");
 
 const repoRoot = path.resolve(__dirname, "../../..");
 const PRODUCTION_URL = `http://${PRODUCTION_HOST}:${PRODUCTION_PORT}/`;
-// Same expression works in dev (apps/desktop/src → ../build) and in the
-// asar bundle (nativeImage reads asar-internal paths transparently).
 const ICON_PATH = path.join(__dirname, "..", "build", "icon.png");
 const children = [];
 let mainWindow;
@@ -38,11 +34,9 @@ let stopMessageNotifications = null;
 let isQuitting = false;
 let servicesStopped = false;
 let focusWhenReady = false;
-let rendererWatchdog;
 let rendererFailureHandled = false;
 let servicesReady = false;
 let runtimeFailureHandled = false;
-let serviceHealthMonitors = [];
 const startupController = new AbortController();
 
 function log(message) {
@@ -63,9 +57,7 @@ log(`boot cwd=${process.cwd()} repoRoot=${repoRoot}`);
 const runtime = configureElectronRuntime(app, repoRoot);
 
 function throwIfStartupAborted(signal) {
-  if (signal?.aborted) {
-    throw new Error("Conflux startup was aborted");
-  }
+  if (signal?.aborted) throw new Error("Conflux startup was aborted");
 }
 
 function focusMainWindow() {
@@ -80,15 +72,13 @@ function focusMainWindow() {
 
 function openExternal(url) {
   shell.openExternal(url).catch((error) => {
-    const message = error instanceof Error ? error.message : String(error);
-    log(`external link failed: ${message}`);
+    log(`external link failed: ${error instanceof Error ? error.message : String(error)}`);
   });
 }
 
 function routeNavigation(event, url, appOrigin) {
   const decision = externalLinkDecision(url, appOrigin);
   if (decision.action === "allow") return;
-
   event.preventDefault();
   if (decision.action === "external") openExternal(decision.url);
 }
@@ -119,29 +109,6 @@ function handleRendererCrash(details = {}) {
   app.quit();
 }
 
-function startRendererWatchdog() {
-  rendererWatchdog = createRendererWatchdog({
-    sendPing: (payload) => {
-      if (
-        !mainWindow ||
-        mainWindow.isDestroyed() ||
-        mainWindow.webContents.isDestroyed()
-      ) {
-        return;
-      }
-      try {
-        mainWindow.webContents.send("conflux:renderer-ping", payload);
-      } catch (error) {
-        log(`renderer ping failed: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    },
-    onStateChange: ({ state, reason }) => {
-      log(`renderer watchdog state=${state} reason=${reason ?? "none"}`);
-    },
-  });
-  rendererWatchdog.start();
-}
-
 function recordChild(spec, child) {
   child.stdout?.on("data", (chunk) => process.stderr.write(`[${spec.name}] ${chunk}`));
   child.stderr?.on("data", (chunk) => process.stderr.write(`[${spec.name}] ${chunk}`));
@@ -154,40 +121,10 @@ function recordChild(spec, child) {
     serviceRuntimeGuard.handleChildExit(spec, code, signal);
   });
 
-  const record = {
-    name: spec.name,
-    pid: child.pid ?? null,
-    startedAt: new Date().toISOString(),
-    child,
-  };
-  log(`${record.name} pid=${record.pid ?? "unknown"} startedAt=${record.startedAt}`);
+  const record = { name: spec.name, pid: child.pid ?? null, child };
+  log(`${record.name} pid=${record.pid ?? "unknown"} started`);
   children.push(record);
   return child;
-}
-
-function stopServiceHealthMonitors() {
-  for (const monitor of serviceHealthMonitors) {
-    monitor.stop();
-  }
-  serviceHealthMonitors = [];
-}
-
-function startServiceHealthMonitors(specs) {
-  stopServiceHealthMonitors();
-  serviceHealthMonitors = specs.map((spec) => {
-    const monitor = createServiceHealthMonitor({
-      name: spec.name,
-      probe: () => probeHttp(spec.url),
-      onStateChange: (snapshot) => {
-        log(
-          `${snapshot.name} health state=${snapshot.state} failures=${snapshot.consecutiveFailures}`
-        );
-        serviceRuntimeGuard.handleHealthState(snapshot);
-      },
-    });
-    monitor.start();
-    return monitor;
-  });
 }
 
 async function startDevServices(signal) {
@@ -205,7 +142,7 @@ async function startDevServices(signal) {
     const child = spawn(
       spec.command,
       spec.args,
-      createDevServiceSpawnOptions(spec.cwd, process.env, spec.shell)
+      createDevServiceSpawnOptions(spec.cwd, process.env, spec.shell),
     );
     processes.push(recordChild(spec, child));
   }
@@ -222,14 +159,14 @@ async function startProductionServiceOwned(signal) {
   await assertPortAvailable(PRODUCTION_PORT, PRODUCTION_HOST);
   throwIfStartupAborted(signal);
 
-  const { spec, child } = await startProductionService(paths, {
+  await startProductionService(paths, {
     signal,
     spawnFn: (command, args, options) => {
       const ownedChild = spawn(command, args, options);
       return recordChild({ name: "server" }, ownedChild);
     },
   });
-  return { webUrl: PRODUCTION_URL, specs: [spec], processes: [child] };
+  return { webUrl: PRODUCTION_URL };
 }
 
 function createWindow(webUrl) {
@@ -239,8 +176,6 @@ function createWindow(webUrl) {
     minWidth: 960,
     minHeight: 640,
     show: false,
-    // macOS 窗口质感：标题栏内嵌 + 侧栏毛玻璃材质；深浅随
-    // nativeTheme（palette→IPC 已联动）。Windows/Linux 保持系统标题栏。
     ...(process.platform === "darwin"
       ? {
           titleBarStyle: "hiddenInset",
@@ -250,7 +185,6 @@ function createWindow(webUrl) {
           backgroundColor: "#00000000",
         }
       : {}),
-    // window/taskbar icon on Windows + Linux (macOS windows don't show one)
     icon: ICON_PATH,
     webPreferences: {
       contextIsolation: true,
@@ -263,25 +197,14 @@ function createWindow(webUrl) {
   const appOrigin = new URL(webUrl).origin;
   if (runtime.mode === "production") installProductionCsp(mainWindow.webContents.session, appOrigin);
   mainWindow.webContents.on("will-navigate", (event, url) =>
-    routeNavigation(event, url, appOrigin)
+    routeNavigation(event, url, appOrigin),
   );
   mainWindow.webContents.on("will-redirect", (event, url) =>
-    routeNavigation(event, url, appOrigin)
+    routeNavigation(event, url, appOrigin),
   );
-  mainWindow.webContents.on("unresponsive", () => {
-    if (rendererWatchdog) {
-      rendererWatchdog.markUnresponsive({ reason: "unresponsive" });
-    }
-  });
-  mainWindow.webContents.on("responsive", () => {
-    if (rendererWatchdog) {
-      rendererWatchdog.markResponsive({ reason: "responsive" });
-    }
-  });
+  mainWindow.webContents.on("unresponsive", () => log("renderer unresponsive"));
+  mainWindow.webContents.on("responsive", () => log("renderer responsive"));
   mainWindow.webContents.on("render-process-gone", (_event, details) => {
-    if (rendererWatchdog) {
-      rendererWatchdog.markCrashed(details);
-    }
     handleRendererCrash(details);
   });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -296,9 +219,6 @@ function createWindow(webUrl) {
   });
   mainWindow.once("closed", () => {
     servicesReady = false;
-    rendererWatchdog?.stop();
-    rendererWatchdog = undefined;
-    stopServiceHealthMonitors();
     mainWindow = undefined;
   });
   mainWindow.once("ready-to-show", () => {
@@ -309,40 +229,36 @@ function createWindow(webUrl) {
     }
     mainWindow.show();
   });
-  mainWindow.webContents.once("did-finish-load", startRendererWatchdog);
   return mainWindow.loadURL(webUrl);
 }
 
 async function start(signal) {
-  const services = runtime.mode === "production"
-    ? await startProductionServiceOwned(signal)
-    : await (async () => {
-        log("starting development services");
-        const { specs, processes } = await startDevServices(signal);
-        await Promise.all(
-          specs.map((spec, index) =>
-            waitForService(spec, processes[index], {
-              timeoutMs: spec.startupTimeoutMs,
-              signal,
-            })
-          )
-        );
-        return { webUrl: WEB_URL, specs, processes };
-      })();
+  const { webUrl } =
+    runtime.mode === "production"
+      ? await startProductionServiceOwned(signal)
+      : await (async () => {
+          log("starting development services");
+          const { specs, processes } = await startDevServices(signal);
+          await Promise.all(
+            specs.map((spec, index) =>
+              waitForService(spec, processes[index], {
+                timeoutMs: spec.startupTimeoutMs,
+                signal,
+              }),
+            ),
+          );
+          return { webUrl: WEB_URL };
+        })();
   throwIfStartupAborted(signal);
   servicesReady = true;
-  startServiceHealthMonitors(services.specs);
   log(`${runtime.mode} services ready`);
-  await createWindow(services.webUrl);
+  await createWindow(webUrl);
   log("window loaded");
 }
 
 function stopDevServices() {
   if (servicesStopped) return servicesStopped;
-  servicesStopped = true;
-  servicesStopped = Promise.all(
-    children.map((service) => stopChild(service.child))
-  );
+  servicesStopped = Promise.all(children.map((service) => stopChild(service.child)));
   return servicesStopped;
 }
 
@@ -357,8 +273,6 @@ if (!hasSingleInstanceLock) {
   ipcMain.on("conflux:show-window", (event) => {
     if (trustedSender(event)) focusMainWindow();
   });
-  // Dark palette → native chrome (macOS menu bar / context menus / dialogs)
-  // follows the app theme instead of the OS appearance
   ipcMain.on("conflux:native-theme", (event, mode) => {
     if (!trustedSender(event)) return;
     nativeTheme.themeSource = mode === "dark" ? "dark" : "light";
@@ -370,71 +284,57 @@ if (!hasSingleInstanceLock) {
     });
     return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
   });
-  ipcMain.on("conflux:renderer-pong", (event, payload) => {
-    if (!mainWindow || event.sender !== mainWindow.webContents) return;
-    if (!payload || !Number.isInteger(payload.nonce) || payload.nonce <= 0) return;
-    if (rendererWatchdog) {
-      rendererWatchdog.handlePong(payload);
-    }
-  });
 
-  app.whenReady().then(async () => {
-    log("app ready");
-    // macOS menu bar shows the FIRST menu's label where the app name goes —
-    // dev mode runs the raw Electron binary, so without this it reads
-    // "Electron" with Electron's default menus instead of Conflux branding
-    app.setName("Conflux");
-    Menu.setApplicationMenu(
-      Menu.buildFromTemplate([
-        {
-          label: "Conflux",
-          submenu: [{ role: "about" }, { type: "separator" }, { role: "quit" }],
-        },
-        { role: "editMenu" },
-        { role: "windowMenu" },
-      ]),
-    );
-    // macOS Dock icon: dev mode has no .app bundle icns to inherit, so the
-    // Dock would show the generic Electron placeholder without this.
-    if (process.platform === "darwin" && app.dock) {
-      try {
-        app.dock.setIcon(ICON_PATH);
-      } catch (error) {
-        log(`dock icon not applied: ${error instanceof Error ? error.message : error}`);
-      }
-    }
-    tray = createTray({
-      showWindow: focusMainWindow,
-      quit: () => app.quit(),
-    });
-    await start(startupController.signal);
-    throwIfStartupAborted(startupController.signal);
-    // OS notifications for cross-session traffic: the hook channel
-    // only injects at turn boundaries, so a reply can sit unseen for a full
-    // turn. This raises a native notification the moment a message lands;
-    // click focuses the workspace window.
-    stopMessageNotifications = startMessageNotifications({
-      baseUrl: PRODUCTION_URL.replace(/\/$/, ""),
-      onNotify: ({ title, body }) => {
+  app
+    .whenReady()
+    .then(async () => {
+      log("app ready");
+      app.setName("Conflux");
+      Menu.setApplicationMenu(
+        Menu.buildFromTemplate([
+          {
+            label: "Conflux",
+            submenu: [{ role: "about" }, { type: "separator" }, { role: "quit" }],
+          },
+          { role: "editMenu" },
+          { role: "windowMenu" },
+        ]),
+      );
+      if (process.platform === "darwin" && app.dock) {
         try {
-          if (!Notification.isSupported()) return;
-          const n = new Notification({ title, body, silent: false });
-          n.on("click", focusMainWindow);
-          n.show();
-        } catch {
-          // notification center unavailable — the web view still shows it
+          app.dock.setIcon(ICON_PATH);
+        } catch (error) {
+          log(`dock icon not applied: ${error instanceof Error ? error.message : error}`);
         }
-      },
+      }
+      tray = createTray({
+        showWindow: focusMainWindow,
+        quit: () => app.quit(),
+      });
+      await start(startupController.signal);
+      throwIfStartupAborted(startupController.signal);
+      stopMessageNotifications = startMessageNotifications({
+        baseUrl: PRODUCTION_URL.replace(/\/$/, ""),
+        onNotify: ({ title, body }) => {
+          try {
+            if (!Notification.isSupported()) return;
+            const n = new Notification({ title, body, silent: false });
+            n.on("click", focusMainWindow);
+            n.show();
+          } catch {
+            // notification center unavailable — the web view still shows it
+          }
+        },
+      });
+      startAutoUpdater();
+    })
+    .catch((error) => {
+      if (isQuitting || startupController.signal.aborted) return;
+      const message = error instanceof Error ? error.message : String(error);
+      log(`startup failed: ${message}`);
+      dialog.showErrorBox("Conflux 启动失败", message);
+      app.quit();
     });
-    startAutoUpdater();
-
-  }).catch((error) => {
-    if (isQuitting || startupController.signal.aborted) return;
-    const message = error instanceof Error ? error.message : String(error);
-    log(`startup failed: ${message}`);
-    dialog.showErrorBox("Conflux 启动失败", message);
-    app.quit();
-  });
 
   app.on("before-quit", (event) => {
     if (isQuitting) return;
@@ -442,8 +342,6 @@ if (!hasSingleInstanceLock) {
     isQuitting = true;
     startupController.abort();
     servicesReady = false;
-    rendererWatchdog?.stop();
-    stopServiceHealthMonitors();
     stopMessageNotifications?.();
     stopMessageNotifications = null;
     tray?.destroy();
@@ -451,12 +349,6 @@ if (!hasSingleInstanceLock) {
     stopDevServices().finally(() => app.quit());
   });
 
-  // Closing the last window hides it; the tray remains the explicit exit path.
-  // The env opt-in below is an E2E affordance (same spirit as
-  // CONFLUX_DISABLE_AUTO_UPDATE): packaged-app tests drive the real
-  // BrowserWindow close via CDP and need the app to run its full
-  // before-quit teardown (services stopped, port released) without a
-  // human clicking the tray menu.
   app.on("window-all-closed", () => {
     if (process.env.CONFLUX_QUIT_ON_LAST_WINDOW_CLOSED === "1") app.quit();
   });

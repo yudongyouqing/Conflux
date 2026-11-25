@@ -22,26 +22,62 @@ function harness(env = {}) {
   const calls = [];
   class Window extends EventEmitter {
     constructor(opts) {
-      super(); window = this; windowOpts = opts;
+      super();
+      window = this;
+      windowOpts = opts;
       this.webContents = new EventEmitter();
-      this.webContents.session = { webRequest: { onHeadersReceived: fn => { csp = fn; } } };
+      this.webContents.session = {
+        webRequest: {
+          onHeadersReceived: (fn) => {
+            csp = fn;
+          },
+        },
+      };
       this.webContents.setWindowOpenHandler = () => {};
       this.webContents.send = () => {};
     }
-    loadURL() { return Promise.resolve(); }
-    isDestroyed() { return false; }
-    isMinimized() { return false; }
-    show() { calls.push("show"); }
-    focus() { calls.push("focus"); }
-    hide() { calls.push("hide"); }
+    loadURL() {
+      return Promise.resolve();
+    }
+    isDestroyed() {
+      return false;
+    }
+    isMinimized() {
+      return false;
+    }
+    show() {
+      calls.push("show");
+    }
+    focus() {
+      calls.push("focus");
+    }
+    hide() {
+      calls.push("hide");
+    }
   }
-  const electron = { app, ipcMain, BrowserWindow: Window, nativeTheme: {}, dialog: {}, Menu: {}, Notification: {}, shell: {} };
-  const context = vm.createContext({ require: name => {
-    if (name === "electron") return electron;
-    if (name === "./runtime-config.cjs") return { configureElectronRuntime: () => ({ mode: "production" }) };
-    if (name === "./renderer-watchdog.cjs") return { createRendererWatchdog: () => ({ start() {}, stop() {} }) };
-    return localRequire(name);
-  }, __dirname: path.dirname(sourcePath), process: { platform: "win32", env, cwd: () => __dirname, stderr: { write() {} } }, AbortController, URL });
+  const electron = {
+    app,
+    ipcMain,
+    BrowserWindow: Window,
+    nativeTheme: {},
+    dialog: {},
+    Menu: {},
+    Notification: {},
+    shell: {},
+  };
+  const context = vm.createContext({
+    require: (name) => {
+      if (name === "electron") return electron;
+      if (name === "./runtime-config.cjs") {
+        return { configureElectronRuntime: () => ({ mode: "production" }) };
+      }
+      return localRequire(name);
+    },
+    __dirname: path.dirname(sourcePath),
+    process: { platform: "win32", env, cwd: () => __dirname, stderr: { write() {} } },
+    AbortController,
+    URL,
+  });
   vm.runInContext(fs.readFileSync(sourcePath, "utf8"), context);
   vm.runInContext('createWindow("http://127.0.0.1:9527/")', context);
   return { context, app, ipcMain, handlers, window, windowOpts, calls, csp };
@@ -51,7 +87,11 @@ test("close opt-in closes the real window while default close hides it", () => {
   for (const enabled of [false, true]) {
     const h = harness(enabled ? { CONFLUX_QUIT_ON_LAST_WINDOW_CLOSED: "1" } : {});
     let prevented = false;
-    h.window.emit("close", { preventDefault() { prevented = true; } });
+    h.window.emit("close", {
+      preventDefault() {
+        prevented = true;
+      },
+    });
     assert.equal(prevented, !enabled);
     assert.equal(h.calls.includes("hide"), !enabled);
   }
