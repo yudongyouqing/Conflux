@@ -45,8 +45,8 @@ function makeCodeComponent(onBlue: boolean) {
     }
     return (
       <code
-        className={`font-mono text-xs px-1 py-px rounded ${
-          onBlue ? "bg-transparent text-on-accent" : "bg-paper text-pink-600"
+        className={`font-mono text-xs px-1.5 py-0.5 rounded ${
+          onBlue ? "bg-transparent text-on-accent" : "border border-line bg-tile text-ink"
         }`}
       >
         {children}

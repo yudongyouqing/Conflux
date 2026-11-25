@@ -5,8 +5,10 @@ import { ApprovalCard, type ResolveApprovalParams } from "./ApprovalCard";
 
 interface TopBarProps {
   breadcrumb: string;
-  subtitle?: string | null;
+  subtitle?: ReactNode;
+  subtitleTitle?: string;
   leftExtra?: ReactNode;
+  centerExtra?: ReactNode;
   rightExtra?: ReactNode;
   pendingApprovals: ThreadApproval[];
   isDark: boolean;
@@ -17,6 +19,7 @@ interface TopBarProps {
   showInspectorToggle?: boolean;
   inspectorOpen?: boolean;
   onToggleInspector?: () => void;
+  showNewAgentButton?: boolean;
   onResolveApproval: (params: ResolveApprovalParams) => Promise<unknown> | void;
   onSelectThread: (threadId: string) => void;
 }
@@ -24,7 +27,9 @@ interface TopBarProps {
 export function TopBar({
   breadcrumb,
   subtitle,
+  subtitleTitle,
   leftExtra,
+  centerExtra,
   rightExtra,
   pendingApprovals,
   isDark,
@@ -35,6 +40,7 @@ export function TopBar({
   showInspectorToggle = false,
   inspectorOpen = false,
   onToggleInspector,
+  showNewAgentButton = false,
   onResolveApproval,
   onSelectThread,
 }: TopBarProps) {
@@ -53,28 +59,49 @@ export function TopBar({
   }, [approvalsOpen]);
 
   return (
-    <header className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-line bg-surface px-3.5">
-      <div className="flex min-w-0 items-center gap-2">
+    <header className="flex min-h-[56px] shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-line bg-surface px-4 py-2 xl:flex-nowrap lg:px-5">
+      {/* Left: Title + Worktree / PR / Status Badges + Subtitle */}
+      <div className="flex min-w-0 items-center gap-2.5">
         <button
           type="button"
           data-testid="mobile-menu-btn"
           onClick={onOpenMobileSidebar}
-          aria-label="打开导航栏"
-          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-tile-hover hover:text-ink md:hidden"
+          aria-label="打开指挥台导航"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line text-ink-muted hover:bg-tile-hover hover:text-ink md:hidden"
         >
           <Menu className="h-4 w-4" />
         </button>
-        <div
-          data-testid="topbar-breadcrumb"
-          title={subtitle ?? undefined}
-          className="truncate text-[13px] font-medium text-ink"
-        >
-          {breadcrumb}
+
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h1
+              data-testid="topbar-breadcrumb"
+              className="truncate text-[15px] font-semibold tracking-tight text-ink"
+            >
+              {breadcrumb}
+            </h1>
+            {leftExtra}
+          </div>
+          {subtitle && (
+            <div
+              title={subtitleTitle ?? (typeof subtitle === "string" ? subtitle : undefined)}
+              className="mt-0.5 flex max-w-[360px] items-center gap-1.5 truncate font-mono text-2xs text-ink-faint"
+            >
+              {subtitle}
+            </div>
+          )}
         </div>
-        {leftExtra}
       </div>
 
-      <div className="flex shrink-0 items-center gap-1">
+      {/* Center: Segmented Stage Switcher (Execution / Diff / Memory / Handoff) */}
+      {centerExtra && (
+        <div className="order-3 flex w-full shrink-0 justify-start sm:order-none sm:w-auto sm:justify-center">
+          {centerExtra}
+        </div>
+      )}
+
+      {/* Right: High-leverage actions + Global Approvals + Theme + Settings */}
+      <div className="flex shrink-0 items-center gap-1.5">
         {rightExtra}
 
         {/* Global Pending Approvals Inbox */}
@@ -84,10 +111,10 @@ export function TopBar({
             data-testid="global-approvals-btn"
             onClick={() => setApprovalsOpen((v) => !v)}
             title="全局待审批收件箱"
-            className={`inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs transition-colors ${
+            className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs transition-colors ${
               pendingApprovals.length > 0
-                ? "bg-warning-soft font-medium text-warning"
-                : "text-ink-muted hover:bg-tile-hover hover:text-ink"
+                ? "border-warning/40 bg-warning-soft font-semibold text-warning"
+                : "border-line bg-paper/60 text-ink-muted hover:border-line-strong hover:text-ink"
             }`}
           >
             <Bell className={`h-3.5 w-3.5 ${pendingApprovals.length > 0 ? "animate-pulse" : ""}`} />
@@ -102,11 +129,11 @@ export function TopBar({
           {approvalsOpen && (
             <div
               data-testid="global-approvals-popover"
-              className="absolute right-0 top-9 z-50 w-[min(92vw,400px)] rounded-xl border border-line-strong bg-surface p-3 shadow-overlay"
+              className="absolute right-0 top-10 z-50 w-[min(92vw,420px)] rounded-xl border border-line-strong bg-surface p-3 shadow-overlay"
             >
               <div className="mb-2 flex items-center justify-between px-0.5">
-                <span className="text-xs font-medium text-ink">
-                  待审批（{pendingApprovals.length}）
+                <span className="text-xs font-semibold text-ink">
+                  全局待审批（{pendingApprovals.length}）
                 </span>
                 <span className="text-2xs text-ink-faint">可直接原地处理</span>
               </div>
@@ -141,7 +168,7 @@ export function TopBar({
           onClick={onToggleTheme}
           title={isDark ? "切换到浅色主题" : "切换到深色主题"}
           aria-label={isDark ? "切换到浅色主题" : "切换到深色主题"}
-          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-tile-hover hover:text-ink transition-colors"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-paper/60 text-ink-muted hover:border-line-strong hover:text-ink transition-colors"
         >
           {isDark ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
         </button>
@@ -151,11 +178,11 @@ export function TopBar({
             type="button"
             data-testid="toggle-inspector-btn"
             onClick={onToggleInspector}
-            title={inspectorOpen ? "收起右侧检查栏" : "展开右侧 Git Diff / 记忆栏"}
-            className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+            title={inspectorOpen ? "收起右侧检查栏" : "展开右侧检查栏"}
+            className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${
               inspectorOpen
-                ? "bg-tile-active text-ink"
-                : "text-ink-muted hover:bg-tile-hover hover:text-ink"
+                ? "border-accent bg-accent-soft text-accent"
+                : "border-line bg-paper/60 text-ink-muted hover:border-line-strong hover:text-ink"
             }`}
           >
             <PanelRight className="h-3.5 w-3.5" />
@@ -168,20 +195,22 @@ export function TopBar({
           onClick={onOpenSettings}
           title="系统设置"
           aria-label="系统设置"
-          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-tile-hover hover:text-ink transition-colors"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-paper/60 text-ink-muted hover:border-line-strong hover:text-ink transition-colors"
         >
           <Settings className="h-3.5 w-3.5" />
         </button>
 
-        <button
-          type="button"
-          data-testid="topbar-new-agent-btn"
-          onClick={onOpenNewAgent}
-          className="ml-1 inline-flex h-7 items-center gap-1 rounded-md bg-accent px-2.5 text-xs font-medium text-on-accent hover:bg-accent-deep transition-colors"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">新建</span>
-        </button>
+        {showNewAgentButton && (
+          <button
+            type="button"
+            data-testid="topbar-new-agent-btn"
+            onClick={onOpenNewAgent}
+            className="inline-flex h-8 items-center gap-1 rounded-lg bg-accent px-3 text-xs font-semibold text-on-accent hover:bg-accent-deep transition-colors"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">派发 Agent</span>
+          </button>
+        )}
       </div>
     </header>
   );

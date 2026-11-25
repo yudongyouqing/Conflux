@@ -99,15 +99,15 @@ export function applyThemeColors(root: StyleTarget = document.documentElement, c
   else root.style.removeProperty("--tk-on-accent");
 }
 
-// 内置预设：浅色系转译自 theme-factory 主题规格（Ocean Depths / Forest Canopy / Desert Rose / Tech Innovation），
-// 终端深色 = 暗色令牌组的色板化（选中即全站深色）
+// 内置预设：默认采用 Conductor 指挥台浅色/深色翡翠体系，同时保留经典汇流蓝与多套可读色板
 export const BUILTIN_THEMES: CustomTheme[] = [
-  { name: "汇流蓝（默认）", colors: { ink: "#111827", paper: "#f7f8fa", surface: "#ffffff", line: "#e6e8ee", lineStrong: "#cdd2df", accent: "#4353ff", accentDeep: "#3341e0", accentSoft: "#eef0ff" } },
+  { name: "指挥台浅色（默认）", colors: { ink: "#0f172a", paper: "#f3f6f9", surface: "#ffffff", line: "#e2e8f0", lineStrong: "#cbd5e1", accent: "#047857", accentDeep: "#065f46", accentSoft: "#ecfdf5" } },
+  { name: "汇流蓝", colors: { ink: "#111827", paper: "#f7f8fa", surface: "#ffffff", line: "#e6e8ee", lineStrong: "#cdd2df", accent: "#4353ff", accentDeep: "#3341e0", accentSoft: "#eef0ff" } },
   { name: "海洋深处", colors: { ink: "#0f2440", paper: "#eef4f8", surface: "#ffffff", line: "#d8e3ec", lineStrong: "#b9cbdc", accent: "#0e7490", accentDeep: "#0b5a6e", accentSoft: "#e0f2f7" } },
   { name: "森林树冠", colors: { ink: "#1d2a20", paper: "#f1f6f1", surface: "#ffffff", line: "#dce7dc", lineStrong: "#b9cdb9", accent: "#2f6b4f", accentDeep: "#24523c", accentSoft: "#e3f0e6" } },
   { name: "沙漠玫瑰", colors: { ink: "#33272b", paper: "#faf4f1", surface: "#ffffff", line: "#ecdfda", lineStrong: "#d6bfb8", accent: "#9e4f63", accentDeep: "#843e51", accentSoft: "#f7e8e6" } },
-  { name: "科技创新", colors: { ink: "#1e1e1e", paper: "#f5f7fa", surface: "#ffffff", line: "#e2e8f0", lineStrong: "#c4cfda", accent: "#0066ff", accentDeep: "#0052cc", accentSoft: "#e5eeff" } },
-  { name: "终端深色", colors: { ink: "#eceff5", paper: "#0b0d12", surface: "#12151e", line: "#1f2432", lineStrong: "#2f374a", accent: "#7e8cff", accentDeep: "#6978ff", accentSoft: "#1b203a" } },
+  { name: "指挥台深色", colors: { ink: "#f1f5f9", paper: "#0e1015", surface: "#171a23", line: "#232836", lineStrong: "#323a4e", accent: "#10b981", accentDeep: "#059669", accentSoft: "#10362c" } },
+  { name: "终端蓝黑", colors: { ink: "#eceff5", paper: "#0b0d12", surface: "#12151e", line: "#1f2432", lineStrong: "#2f374a", accent: "#7e8cff", accentDeep: "#6978ff", accentSoft: "#1b203a" } },
 ];
 
 /** 纸面色亮度判定：paper 偏暗即视为深色主题（决定 data-theme 联动） */

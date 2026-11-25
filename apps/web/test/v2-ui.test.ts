@@ -319,6 +319,13 @@ describe("Conflux v2 Web UI components", () => {
     assert.ok(view.getByTestId("external-badge-ext-codex-1"));
     assert.match(view.container.textContent ?? "", /conflux\/feat-x/);
 
+    // Mission Control inbox triage filters isolate pending-approval threads cleanly
+    fireEvent.click(view.getByTestId("inbox-filter-approval"));
+    assert.ok(view.getByTestId("sidebar-thread-thr-claude-1"));
+    assert.equal(view.queryByTestId("sidebar-thread-ext-codex-1"), null);
+    fireEvent.click(view.getByTestId("inbox-filter-all"));
+    assert.ok(view.getByTestId("sidebar-thread-ext-codex-1"));
+
     fireEvent.click(view.getByTestId("sidebar-room-9"));
     assert.deepEqual(selected, { kind: "room", roomId: 9 });
   });
@@ -519,6 +526,8 @@ describe("Conflux v2 Web UI components", () => {
     const view = render(
       withQueryClient(
         React.createElement(RightInspector, {
+          mode: "stage",
+          activeTab: "git",
           thread,
           checkpoints: [],
           allThreads: [thread],

@@ -15,7 +15,7 @@
 
 | 令牌 | 值 | 用途 |
 | --- | --- | --- |
-| `text-ink` | `#111827`（浅色）/ `#ECEFF5`（深色） | 标题、正文主色 |
+| `text-ink` | `#0F172A`（浅色）/ `#F1F5F9`（深色） | 标题、正文主色 |
 | `text-ink-muted` | ink / 76% | 次级说明、辅助文字 |
 | `text-ink-faint` | ink / 66% | 提示、占位、时间戳；默认明暗主题在表面与 active 行上达到 4.5:1 |
 
@@ -23,19 +23,19 @@
 
 | 令牌 | 值 | 用途 |
 | --- | --- | --- |
-| `bg-paper` | `#F7F8FA`（浅色）/ `#0B0D12`（深色） | 外框壳层、侧栏底、画布底 |
-| `bg-surface` | `#FFFFFF`（浅色）/ `#12151E`（深色） | 嵌框主工作区、卡片、面板面 |
-| `border-line` | `#E6E8EE`（浅色）/ `#1F2432`（深色） | 常规 hairline 边框 |
-| `border-line-strong` | `#CDD2DF`（浅色）/ `#2F374A`（深色） | hover 强调边框、实线分隔 |
+| `bg-paper` | `#F3F6F9`（浅色）/ `#0E1015`（深色） | 指挥台左侧收件箱轨、外框壳层、画布底 |
+| `bg-surface` | `#FFFFFF`（浅色）/ `#171A23`（深色） | 主单焦舞台、线程卡片、面板面 |
+| `border-line` | `#E2E8F0`（浅色）/ `#232836`（深色） | 常规 hairline 边框 |
+| `border-line-strong` | `#CBD5E1`（浅色）/ `#323A4E`（深色） | hover 强调边框、实线分隔 |
 
 ### 强调色（全局唯一）
 
 | 令牌 | 值 | 用途 |
 | --- | --- | --- |
-| `accent` / `bg-accent` | `#4353FF`（浅色）/ `#7E8CFF`（深色） | 品牌汇流靛蓝——主操作、选中态、焦点 |
-| `accent-deep` | `#3341E0`（浅色）/ `#6978FF`（深色） | hover 加深 |
-| `accent-soft` / `bg-accent-soft` | `#EEF0FF`（浅色）/ `#1B203A`（深色） | 选中底色 |
-| `text-on-accent` | 自动选择白色或深墨色 | `bg-accent hover:bg-accent-deep` 按钮文字；不得固定 `text-white` |
+| `accent` / `bg-accent` | `#047857`（浅色）/ `#10B981`（深色） | 指挥台翡翠绿——主操作、选中态、焦点 |
+| `accent-deep` | `#065F46`（浅色）/ `#059669`（深色） | hover 加深 |
+| `accent-soft` / `bg-accent-soft` | `#ECFDF5`（浅色）/ `#10362C`（深色） | 选中底色 |
+| `text-on-accent` | 自动选择白色或深墨色（深色下为 `#042014`） | `bg-accent hover:bg-accent-deep` 按钮文字；不得固定 `text-white` |
 
 ### 状态色（只表达状态，不参与装饰）
 

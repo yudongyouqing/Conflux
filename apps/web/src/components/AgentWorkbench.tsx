@@ -42,6 +42,7 @@ interface AgentWorkbenchProps {
   forkModalOpen: boolean;
   onSetForkModalOpen: (open: boolean) => void;
   onCheckpointRollback?: (checkpointId: number) => Promise<void>;
+  hidden?: boolean;
 }
 
 interface TimelineItem {
@@ -313,6 +314,7 @@ export function AgentWorkbench({
   onSelectThread,
   forkModalOpen,
   onSetForkModalOpen,
+  hidden = false,
 }: AgentWorkbenchProps) {
   const qc = useQueryClient();
   const detailQuery = useThreadDetail(threadId);
@@ -517,7 +519,7 @@ export function AgentWorkbench({
   };
 
   if (detailQuery.isLoading) {
-    return (
+    return hidden ? null : (
       <div className="flex flex-1 items-center justify-center bg-surface text-xs text-ink-faint">
         加载工作台...
       </div>
@@ -525,7 +527,7 @@ export function AgentWorkbench({
   }
 
   if (!thread) {
-    return (
+    return hidden ? null : (
       <div className="flex flex-1 items-center justify-center bg-surface text-xs text-danger">
         找不到该 Agent 线程
       </div>
@@ -538,11 +540,15 @@ export function AgentWorkbench({
   const forkProbe = cliProbes.find((p) => p.runtime === forkRuntime);
 
   return (
-    <div data-testid="agent-workbench" className="flex min-w-0 flex-1 flex-col bg-surface">
+    <>
+      <div
+        data-testid="agent-workbench"
+        className={hidden ? "hidden" : "flex min-h-0 min-w-0 flex-1 flex-col bg-surface"}
+      >
       {/* Transient feedback banner (only when needed) */}
       {(actionError || actionNotice) && (
         <div
-          className={`flex items-center justify-between border-b border-line px-4 py-1.5 text-xs ${
+          className={`flex items-center justify-between border-b border-line px-5 py-2 text-xs ${
             actionError ? "bg-danger-soft text-danger" : "bg-info-soft text-info"
           }`}
         >
@@ -560,15 +566,26 @@ export function AgentWorkbench({
         </div>
       )}
 
-      {/* Calm flat document timeline */}
-      <div data-testid="workbench-timeline" className="flex-1 overflow-y-auto px-5 py-6">
-        <div className="mx-auto max-w-[760px] space-y-5">
+      {/* Pinned Top Pending Approvals Strip (Conductor Mission Control) */}
+      {pendingApprovals.length > 0 && (
+        <div className="shrink-0 border-b border-warning/30 bg-warning-soft/20 px-5 py-3">
+          <div className="mx-auto max-w-[840px] space-y-2">
+            {pendingApprovals.map((ap) => (
+              <ApprovalCard key={ap.id} approval={ap} onResolve={onResolveApproval} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Spacious 100%-wide Conductor execution stream */}
+      <div data-testid="workbench-timeline" className="flex-1 overflow-y-auto px-5 py-6 lg:px-8">
+        <div className="mx-auto max-w-[840px] space-y-5">
           {timeline.length === 0 && pendingApprovals.length === 0 && (
             <div className="py-16 text-center">
-              <div className="mx-auto inline-flex h-9 w-9 items-center justify-center rounded-lg bg-tile text-ink-muted">
+              <div className="mx-auto inline-flex h-10 w-10 items-center justify-center rounded-xl border border-line bg-paper text-ink-muted">
                 <RuntimeGlyph runtime={thread.runtime} size={18} />
               </div>
-              <h2 className="mt-3 text-sm font-medium text-ink">{thread.name}</h2>
+              <h2 className="mt-3 text-sm font-semibold text-ink">{thread.name}</h2>
               <p className="mt-1 font-mono text-2xs text-ink-faint">{thread.workdir}</p>
               <p className="mt-2 text-xs text-ink-muted">
                 输入指令开始编写代码；输入 <span className="font-mono text-ink">@</span> 引用项目文件。
@@ -601,7 +618,7 @@ export function AgentWorkbench({
                       <div className="h-px flex-1 bg-line" />
                     </div>
                   )}
-                  <div className="rounded-lg bg-tile px-3.5 py-2.5 text-ink">
+                  <div className="rounded-[10px] border border-line bg-paper px-4 py-3 text-[13.5px] text-ink">
                     {isSteer && (
                       <div className="mb-1 text-2xs font-medium text-warning">Steer 实时纠偏</div>
                     )}
@@ -626,7 +643,7 @@ export function AgentWorkbench({
                     <RuntimeGlyph runtime={thread.runtime} size={12} />
                     <span className="font-medium text-ink-muted">{thread.name}</span>
                   </div>
-                  <div className="text-ink">
+                  <div className="text-[13.5px] leading-relaxed text-ink">
                     <MarkdownText>{item.text ?? ""}</MarkdownText>
                   </div>
                 </div>
@@ -637,7 +654,7 @@ export function AgentWorkbench({
               return (
                 <div
                   key={item.key}
-                  className="flex items-start gap-2 rounded-lg bg-danger-soft px-3 py-2 text-xs text-danger"
+                  className="flex items-start gap-2 rounded-lg bg-danger-soft px-3.5 py-2.5 text-xs text-danger"
                 >
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   <span className="whitespace-pre-wrap">
@@ -689,11 +706,6 @@ export function AgentWorkbench({
             </div>
           )}
 
-          {/* Inline pending approvals */}
-          {pendingApprovals.map((ap) => (
-            <ApprovalCard key={ap.id} approval={ap} onResolve={onResolveApproval} />
-          ))}
-
           {timeline.length === 0 && runs.length > 0 && (
             <div className="text-center text-2xs text-ink-faint">
               共 {runs.length} 次历史执行记录
@@ -704,9 +716,9 @@ export function AgentWorkbench({
         </div>
       </div>
 
-      {/* Minimalist T3Code / Linear bottom composer with inline Model & Ask/Auto controls */}
-      <div className="shrink-0 px-5 pb-4 pt-2">
-        <div className="mx-auto max-w-[760px]">
+      {/* Conductor Bottom Composer */}
+      <div className="shrink-0 border-t border-line bg-surface px-5 py-3.5 lg:px-8">
+        <div className="mx-auto max-w-[840px]">
           {atQuery !== null && atMatches.length > 0 && (
             <div
               data-testid="at-file-popover"
@@ -877,6 +889,7 @@ export function AgentWorkbench({
           </div>
         </div>
       </div>
+      </div>
 
       {/* Fork & Handoff Modal */}
       {forkModalOpen && (
@@ -973,6 +986,6 @@ export function AgentWorkbench({
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

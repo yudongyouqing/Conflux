@@ -53,27 +53,27 @@ body,
 
 /* Design tokens as channel triplets (rgb(var(--tk-x) / α) pattern) so any
  * alpha modifier works and custom themes can override at :root style level.
- * Defaults = the 汇流蓝 baseline; custom themes replace via inline style. */
+ * Defaults = Conductor Mission Control light emerald-slate baseline. */
 :root {
-  --tk-ink: 17 24 39;
-  --tk-paper: 247 248 250;
+  --tk-ink: 15 23 42;
+  --tk-paper: 243 246 249;
   --tk-surface: 255 255 255;
-  --tk-line: 230 232 238;
-  --tk-line-strong: 205 210 223;
-  --tk-accent: 67 83 255;
-  --tk-accent-deep: 51 65 224;
-  --tk-accent-soft: 238 240 255;
+  --tk-line: 226 232 240;
+  --tk-line-strong: 203 213 225;
+  --tk-accent: 4 120 87;
+  --tk-accent-deep: 6 95 70;
+  --tk-accent-soft: 236 253 245;
   --tk-on-accent: 255 255 255;
-  --tk-success: 22 115 76;
-  --tk-success-soft: 232 244 237;
-  --tk-warning: 137 86 0;
-  --tk-warning-soft: 255 242 214;
-  --tk-danger: 179 52 64;
-  --tk-danger-soft: 252 236 239;
-  --tk-info: 33 93 176;
-  --tk-info-soft: 234 241 252;
-  --tk-neutral: 92 103 125;
-  --tk-neutral-soft: 237 240 245;
+  --tk-success: 5 122 85;
+  --tk-success-soft: 232 248 238;
+  --tk-warning: 161 98 7;
+  --tk-warning-soft: 254 243 199;
+  --tk-danger: 185 28 28;
+  --tk-danger-soft: 254 236 236;
+  --tk-info: 29 78 216;
+  --tk-info-soft: 235 242 254;
+  --tk-neutral: 100 116 139;
+  --tk-neutral-soft: 241 245 249;
   color-scheme: light;
 }
 
@@ -144,29 +144,29 @@ body {
   animation: edge-flow 0.9s linear infinite;
 }
 
-/* 深色主题：同一组 --tk-* 令牌的暗色取值（设置页 data-theme=dark 驱动）。
+/* 深色主题：Conductor 指挥台暗色翡翠令牌（设置页或顶栏 data-theme=dark 驱动）。
  * 自定义主题（导入/预设）在其上再覆写。 */
 html[data-theme="dark"] {
   color-scheme: dark;
-  --tk-ink: 236 239 245;
-  --tk-paper: 11 13 18;
-  --tk-surface: 18 21 30;
-  --tk-line: 31 36 50;
-  --tk-line-strong: 47 55 74;
-  --tk-accent: 126 140 255;
-  --tk-accent-deep: 105 120 255;
-  --tk-accent-soft: 27 32 58;
-  --tk-on-accent: 11 13 18;
-  --tk-success: 116 212 165;
-  --tk-success-soft: 21 58 43;
-  --tk-warning: 237 193 108;
-  --tk-warning-soft: 62 50 30;
-  --tk-danger: 247 151 160;
-  --tk-danger-soft: 68 37 45;
-  --tk-info: 138 185 255;
-  --tk-info-soft: 32 55 80;
-  --tk-neutral: 167 179 199;
-  --tk-neutral-soft: 41 51 67;
+  --tk-ink: 241 245 249;
+  --tk-paper: 14 16 21;
+  --tk-surface: 23 26 35;
+  --tk-line: 35 40 54;
+  --tk-line-strong: 50 58 78;
+  --tk-accent: 16 185 129;
+  --tk-accent-deep: 5 150 105;
+  --tk-accent-soft: 16 54 44;
+  --tk-on-accent: 4 32 20;
+  --tk-success: 52 211 153;
+  --tk-success-soft: 16 54 44;
+  --tk-warning: 245 158 11;
+  --tk-warning-soft: 61 45 20;
+  --tk-danger: 248 113 113;
+  --tk-danger-soft: 68 32 39;
+  --tk-info: 129 140 248;
+  --tk-info-soft: 34 39 74;
+  --tk-neutral: 148 163 184;
+  --tk-neutral-soft: 35 40 54;
   font-weight: 450;
 }
 html[data-theme="dark"] .workspace-frame {

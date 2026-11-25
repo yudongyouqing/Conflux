@@ -1,12 +1,26 @@
-import { useEffect, useState } from "react";
-import { ArrowRightLeft, ExternalLink, FolderPlus, GitBranch, GitPullRequest, MessageSquarePlus, Play, Square, Terminal, X } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import {
+  ArrowRightLeft,
+  ExternalLink,
+  FolderPlus,
+  GitBranch,
+  GitMerge,
+  GitPullRequest,
+  MessageSquarePlus,
+  Play,
+  Square,
+  Terminal,
+  X,
+} from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
 import {
+  useContextEntries,
   useCreateProject,
   useResolveApproval,
   useTemplates,
   useThreadDetail,
+  useThreadGitStatus,
   useWorkspaceTree,
 } from "./hooks";
 import { useLiveEvents } from "./use-live-events";
@@ -15,21 +29,26 @@ import { TopBar } from "./components/TopBar";
 import { ProjectTreeSidebar, type ActiveView } from "./components/ProjectTreeSidebar";
 import { NewAgentModal } from "./components/NewAgentModal";
 import { AgentWorkbench } from "./components/AgentWorkbench";
-import { RightInspector } from "./components/RightInspector";
+import { RightInspector, type InspectorTab } from "./components/RightInspector";
 import { RoomView } from "./components/RoomView";
 import { WorkflowView } from "./components/WorkflowView";
 import { GraphOverview } from "./components/GraphOverview";
 import { SettingsView } from "./components/SettingsView";
 
 const DARK_THEME_NAME = BUILTIN_THEMES[5].name;
+type ThreadStageTab = "chat" | InspectorTab;
 
-function ActiveThreadInspector({
+function ActiveThreadStagePanel({
   threadId,
+  activeTab,
+  defaultPrFormOpen,
   allThreads,
   onOpenForkModal,
   onSelectThread,
 }: {
   threadId: string;
+  activeTab: InspectorTab;
+  defaultPrFormOpen: boolean;
   allThreads: ReturnType<typeof useWorkspaceTree>["data"] extends infer D
     ? D extends { threads: infer T }
       ? T
@@ -41,10 +60,20 @@ function ActiveThreadInspector({
   const qc = useQueryClient();
   const detail = useThreadDetail(threadId);
   const thread = detail.data?.thread;
-  if (!thread) return null;
+  if (!thread) {
+    return (
+      <div className="flex flex-1 items-center justify-center bg-surface text-xs text-ink-faint">
+        加载面板...
+      </div>
+    );
+  }
 
   return (
     <RightInspector
+      key={`${thread.id}-${defaultPrFormOpen ? "pr" : "view"}`}
+      mode="stage"
+      activeTab={activeTab}
+      defaultPrFormOpen={defaultPrFormOpen}
       thread={thread}
       checkpoints={detail.data?.checkpoints ?? []}
       allThreads={allThreads}
@@ -77,11 +106,10 @@ export default function App() {
   const templates = templatesQuery.data?.templates ?? [];
 
   const [activeView, setActiveView] = useState<ActiveView>({ kind: "graph" });
+  const [threadStageTab, setThreadStageTab] = useState<ThreadStageTab>("chat");
+  const [prQuickOpen, setPrQuickOpen] = useState(false);
   const [initializedSelection, setInitializedSelection] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [inspectorOpen, setInspectorOpen] = useState(() =>
-    typeof window !== "undefined" ? window.innerWidth >= 1280 : true,
-  );
   const [newAgentModal, setNewAgentModal] = useState<{ open: boolean; projectId: number | null }>({
     open: false,
     projectId: null,
@@ -114,6 +142,29 @@ export default function App() {
     }
     setInitializedSelection(true);
   }, [initializedSelection, treeQuery.isLoading, threads]);
+
+  const activeThread =
+    activeView.kind === "thread"
+      ? threads.find((x) => x.id === activeView.threadId) ?? null
+      : null;
+
+  // Live counts for the Conductor segmented stage tabs (shared React Query cache)
+  const activeGitStatus = useThreadGitStatus(activeThread?.id ?? null);
+  const activeContext = useContextEntries(
+    activeThread && activeThread.project_id !== null
+      ? { project_id: activeThread.project_id }
+      : {},
+  );
+  const changedFilesCount = activeGitStatus.data?.files.length ?? 0;
+  const memoryCount = activeContext.data?.entries.length ?? 0;
+
+  const selectView = (next: ActiveView) => {
+    setActiveView(next);
+    if (next.kind === "thread") {
+      setThreadStageTab("chat");
+      setPrQuickOpen(false);
+    }
+  };
 
   const applyThemeChoice = (themeName: string | null) => {
     setActiveCustomTheme(themeName);
@@ -169,13 +220,8 @@ export default function App() {
     setRoomMemberIds([]);
     setNewRoomState({ open: false, projectId: null });
     void qc.invalidateQueries({ queryKey: ["workspace-tree"] });
-    setActiveView({ kind: "room", roomId: res.room.id });
+    selectView({ kind: "room", roomId: res.room.id });
   };
-
-  const activeThread =
-    activeView.kind === "thread"
-      ? threads.find((x) => x.id === activeView.threadId) ?? null
-      : null;
 
   const handleStopOrResumeActive = async () => {
     if (!activeThread) return;
@@ -188,53 +234,61 @@ export default function App() {
     void qc.invalidateQueries({ queryKey: ["thread-detail", activeThread.id] });
   };
 
-  // Compute unified TopBar breadcrumb & inline thread actions (single 44px bar, zero double headers)
+  // Compute unified Stage Header breadcrumb & subtitle
   let breadcrumb = "态势图谱";
-  let subtitle: string | null = null;
+  let subtitle: ReactNode = null;
+  let subtitleTitle: string | undefined;
   if (activeView.kind === "thread") {
     const p = projects.find((x) => x.id === activeThread?.project_id);
-    breadcrumb = activeThread ? `${p ? `${p.name} / ` : ""}${activeThread.name}` : "Agent 工作台";
-    subtitle = activeThread?.workdir ?? null;
+    breadcrumb = activeThread ? activeThread.name : "Agent 工作台";
+    if (activeThread) {
+      subtitleTitle = activeThread.workdir;
+      subtitle = (
+        <>
+          <span
+            data-testid="workbench-thread-state"
+            className={
+              activeThread.state === "waiting_approval"
+                ? "font-medium text-warning"
+                : activeThread.state === "running"
+                  ? "font-medium text-info"
+                  : activeThread.state === "error"
+                    ? "font-medium text-danger"
+                    : "text-ink-faint"
+            }
+          >
+            {activeThread.state}
+          </span>
+          {p && <span>· {p.name}</span>}
+          <span className="truncate">· {activeThread.model ?? activeThread.runtime}</span>
+        </>
+      );
+    }
   } else if (activeView.kind === "room") {
     const r = rooms.find((x) => x.id === activeView.roomId);
-    breadcrumb = r ? `协作房间 / ${r.name}` : "协作房间";
+    breadcrumb = r ? `# ${r.name}` : "协作房间";
+    subtitle = r?.description ?? "多 Agent 双向协作房间";
   } else if (activeView.kind === "workflow") {
     const p = projects.find((x) => x.id === activeView.projectId);
-    breadcrumb = p ? `${p.name} / 工作流` : "工作流";
+    breadcrumb = p ? `${p.name} · DAG 工作流` : "DAG 工作流";
   } else if (activeView.kind === "settings") {
-    breadcrumb = "设置";
+    breadcrumb = "系统设置";
   }
 
   const isStopped = activeThread?.state === "stopped" || activeThread?.state === "error";
 
   const threadLeftExtra = activeThread ? (
     <div className="hidden items-center gap-1.5 sm:flex">
-      <span
-        data-testid="workbench-thread-state"
-        className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-2xs ${
-          activeThread.state === "running"
-            ? "bg-accent-soft text-accent"
-            : activeThread.state === "waiting_approval"
-              ? "bg-warning-soft text-warning"
-              : activeThread.state === "idle"
-                ? "bg-success-soft text-success"
-                : activeThread.state === "error"
-                  ? "bg-danger-soft text-danger"
-                  : "bg-neutral-soft text-neutral"
-        }`}
-      >
-        {activeThread.state}
-      </span>
-      {activeThread.kind === "external" && (
-        <span className="inline-flex items-center gap-1 rounded bg-info-soft px-1.5 py-0.5 text-2xs text-info">
-          <Terminal className="h-3 w-3" />
-          外部终端
-        </span>
-      )}
       {activeThread.worktree_branch && (
-        <span className="inline-flex max-w-[180px] items-center gap-1 truncate rounded bg-tile px-1.5 py-0.5 font-mono text-2xs text-ink-faint">
+        <span className="inline-flex max-w-[160px] items-center gap-1 truncate rounded-md border border-line bg-paper px-2 py-0.5 font-mono text-2xs text-ink-muted">
           <GitBranch className="h-3 w-3 shrink-0" />
           <span className="truncate">{activeThread.worktree_branch}</span>
+        </span>
+      )}
+      {activeThread.kind === "external" && (
+        <span className="inline-flex items-center gap-1 rounded-md bg-info-soft px-1.5 py-0.5 text-2xs text-info">
+          <Terminal className="h-3 w-3" />
+          外部
         </span>
       )}
       {activeThread.pr_url && (
@@ -243,59 +297,123 @@ export default function App() {
           target="_blank"
           rel="noreferrer"
           data-testid="topbar-pr-link"
-          className="inline-flex items-center gap-1 rounded bg-accent-soft px-1.5 py-0.5 font-mono text-2xs font-medium text-accent hover:underline"
+          className="inline-flex items-center gap-1 rounded-md bg-accent-soft px-2 py-0.5 font-mono text-2xs font-semibold text-accent hover:underline"
         >
           <GitPullRequest className="h-3 w-3 shrink-0" />
-          <span>{activeThread.pr_url.match(/\/pull\/(\d+)/)?.[1] ? `PR #${activeThread.pr_url.match(/\/pull\/(\d+)/)![1]}` : "PR"}</span>
+          <span>
+            {activeThread.pr_url.match(/\/pull\/(\d+)/)?.[1]
+              ? `PR #${activeThread.pr_url.match(/\/pull\/(\d+)/)![1]}`
+              : "PR"}
+          </span>
           <ExternalLink className="h-2.5 w-2.5 shrink-0" />
         </a>
       )}
     </div>
   ) : null;
 
+  const threadCenterSegmented = activeThread ? (
+    <div
+      data-testid="stage-segmented-tabs"
+      className="inline-flex items-center rounded-lg border border-line bg-paper p-0.5"
+    >
+      {(
+        [
+          { id: "chat", label: "执行流", count: null },
+          { id: "git", label: "代码 Diff", count: changedFilesCount },
+          { id: "memory", label: "共享记忆", count: memoryCount },
+          { id: "handoff", label: "交接", count: null },
+        ] as const
+      ).map((item) => {
+        const active = threadStageTab === item.id;
+        return (
+          <button
+            key={item.id}
+            type="button"
+            data-testid={`stage-tab-${item.id}`}
+            onClick={() => {
+              setThreadStageTab(item.id);
+              if (item.id !== "git") setPrQuickOpen(false);
+            }}
+            className={`inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-md px-2.5 text-xs transition-colors ${
+              active
+                ? "bg-surface font-semibold text-ink shadow-card"
+                : "text-ink-muted hover:text-ink"
+            }`}
+          >
+            <span>{item.label}</span>
+            {item.count !== null && item.count > 0 && (
+              <span className="font-mono text-2xs text-ink-faint tabular-nums">({item.count})</span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  ) : null;
+
   const threadRightExtra = activeThread ? (
-    <div className="hidden items-center gap-0.5 sm:flex">
+    <div className="hidden items-center gap-1.5 sm:flex">
+      {activeThread.worktree_path && threadStageTab !== "git" && (
+        <>
+          <button
+            type="button"
+            data-testid="stage-quick-pr-btn"
+            onClick={() => {
+              setPrQuickOpen(true);
+              setThreadStageTab("git");
+            }}
+            className="inline-flex h-8 items-center gap-1 whitespace-nowrap rounded-lg border border-line bg-paper/60 px-2.5 text-xs font-medium text-ink hover:border-line-strong hover:bg-tile-hover transition-colors"
+          >
+            <GitPullRequest className="h-3.5 w-3.5" />
+            <span>{activeThread.pr_url ? "更新 PR" : "建 PR"}</span>
+          </button>
+          <button
+            type="button"
+            data-testid="stage-quick-merge-btn"
+            onClick={() => {
+              setPrQuickOpen(false);
+              setThreadStageTab("git");
+            }}
+            className="inline-flex h-8 items-center gap-1 whitespace-nowrap rounded-lg bg-accent px-2.5 text-xs font-semibold text-on-accent hover:bg-accent-deep transition-colors"
+          >
+            <GitMerge className="h-3.5 w-3.5" />
+            <span>合并</span>
+          </button>
+        </>
+      )}
+
       <button
         type="button"
         data-testid="workbench-fork-btn"
         onClick={() => setForkModalOpen(true)}
         title="原地换引擎接力 (Fork & Handoff)"
-        className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-ink-muted hover:bg-tile-hover hover:text-ink transition-colors"
+        aria-label="原地换引擎接力"
+        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-paper/60 text-ink-muted hover:border-line-strong hover:text-ink transition-colors"
       >
         <ArrowRightLeft className="h-3.5 w-3.5" />
-        <span className="hidden lg:inline">接力</span>
       </button>
+
       {activeThread.kind === "managed" && (
         <button
           type="button"
           data-testid="workbench-stop-resume-btn"
           onClick={() => void handleStopOrResumeActive()}
           title={isStopped ? "恢复进程" : "停止进程"}
-          className={`inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs transition-colors ${
+          aria-label={isStopped ? "恢复进程" : "停止进程"}
+          className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${
             isStopped
-              ? "bg-success-soft text-success"
-              : "text-ink-muted hover:bg-tile-hover hover:text-danger"
+              ? "border-success/40 bg-success-soft text-success"
+              : "border-line bg-paper/60 text-ink-muted hover:border-danger/40 hover:text-danger"
           }`}
         >
-          {isStopped ? (
-            <>
-              <Play className="h-3 w-3" />
-              <span className="hidden lg:inline">恢复</span>
-            </>
-          ) : (
-            <>
-              <Square className="h-3 w-3" />
-              <span className="hidden lg:inline">停止</span>
-            </>
-          )}
+          {isStopped ? <Play className="h-3.5 w-3.5" /> : <Square className="h-3 w-3" />}
         </button>
       )}
-      <span className="mx-1 h-4 w-px bg-line" />
     </div>
   ) : null;
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-paper text-ink">
+      {/* Left: 312px Conductor Rich Thread Inbox */}
       <ProjectTreeSidebar
         projects={projects}
         threads={threads}
@@ -304,7 +422,7 @@ export default function App() {
         activeView={activeView}
         mobileOpen={mobileSidebarOpen}
         onCloseMobile={() => setMobileSidebarOpen(false)}
-        onSelectView={setActiveView}
+        onSelectView={selectView}
         onAddProjectClick={() => void handleAddProjectClick()}
         onNewAgentForProject={(projectId) => setNewAgentModal({ open: true, projectId })}
         onNewRoomClick={(projectId) => {
@@ -318,90 +436,91 @@ export default function App() {
         }}
       />
 
-      {/* Linear inset workspace frame */}
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden md:py-2 md:pr-2">
-        <div className="workspace-frame flex min-h-0 flex-1 flex-col overflow-hidden bg-surface md:rounded-[10px] md:border md:border-line">
-          <TopBar
-            breadcrumb={breadcrumb}
-            subtitle={subtitle}
-            leftExtra={threadLeftExtra}
-            rightExtra={threadRightExtra}
-            pendingApprovals={pendingApprovals}
-            isDark={isDark}
-            onToggleTheme={handleToggleTheme}
-            onOpenNewAgent={() =>
-              setNewAgentModal({
-                open: true,
-                projectId:
-                  activeView.kind === "thread"
-                    ? (activeThread?.project_id ?? projects[0]?.id ?? null)
-                    : (projects[0]?.id ?? null),
-              })
-            }
-            onOpenSettings={() => setActiveView({ kind: "settings" })}
-            onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
-            showInspectorToggle={activeView.kind === "thread"}
-            inspectorOpen={inspectorOpen}
-            onToggleInspector={() => setInspectorOpen((v) => !v)}
-            onResolveApproval={(params) => resolveApproval.mutateAsync(params)}
-            onSelectThread={(threadId) => setActiveView({ kind: "thread", threadId })}
-          />
+      {/* Right: 100%-Width Conductor Single-Focus Stage (zero 3-column squeeze) */}
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-surface">
+        <TopBar
+          breadcrumb={breadcrumb}
+          subtitle={subtitle}
+          subtitleTitle={subtitleTitle}
+          leftExtra={threadLeftExtra}
+          centerExtra={threadCenterSegmented}
+          rightExtra={threadRightExtra}
+          pendingApprovals={pendingApprovals}
+          isDark={isDark}
+          onToggleTheme={handleToggleTheme}
+          onOpenNewAgent={() =>
+            setNewAgentModal({
+              open: true,
+              projectId:
+                activeView.kind === "thread"
+                  ? (activeThread?.project_id ?? projects[0]?.id ?? null)
+                  : (projects[0]?.id ?? null),
+            })
+          }
+          onOpenSettings={() => selectView({ kind: "settings" })}
+          onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
+          showNewAgentButton={activeView.kind !== "thread"}
+          onResolveApproval={(params) => resolveApproval.mutateAsync(params)}
+          onSelectThread={(threadId) => selectView({ kind: "thread", threadId })}
+        />
 
-          <main className="relative flex min-h-0 flex-1 overflow-hidden">
-            {activeView.kind === "thread" && (
-              <>
-                <AgentWorkbench
-                  threadId={activeView.threadId}
-                  cliProbes={cliProbes}
-                  allThreads={threads}
-                  onResolveApproval={(params) => resolveApproval.mutateAsync(params)}
-                  onSelectThread={(threadId) => setActiveView({ kind: "thread", threadId })}
-                  forkModalOpen={forkModalOpen}
-                  onSetForkModalOpen={setForkModalOpen}
-                />
-                {inspectorOpen && (
-                  <ActiveThreadInspector
-                    threadId={activeView.threadId}
-                    allThreads={threads}
-                    onOpenForkModal={() => setForkModalOpen(true)}
-                    onSelectThread={(threadId) => setActiveView({ kind: "thread", threadId })}
-                  />
-                )}
-              </>
-            )}
-
-            {activeView.kind === "room" && (
-              <RoomView
-                roomId={activeView.roomId}
+        <main className="relative flex min-h-0 flex-1 overflow-hidden">
+          {activeView.kind === "thread" && (
+            <>
+              <AgentWorkbench
+                threadId={activeView.threadId}
+                cliProbes={cliProbes}
                 allThreads={threads}
-                onSelectThread={(threadId) => setActiveView({ kind: "thread", threadId })}
                 onResolveApproval={(params) => resolveApproval.mutateAsync(params)}
+                onSelectThread={(threadId) => selectView({ kind: "thread", threadId })}
+                forkModalOpen={forkModalOpen}
+                onSetForkModalOpen={setForkModalOpen}
+                hidden={threadStageTab !== "chat"}
               />
-            )}
+              {threadStageTab !== "chat" && (
+                <ActiveThreadStagePanel
+                  threadId={activeView.threadId}
+                  activeTab={threadStageTab}
+                  defaultPrFormOpen={prQuickOpen}
+                  allThreads={threads}
+                  onOpenForkModal={() => setForkModalOpen(true)}
+                  onSelectThread={(threadId) => selectView({ kind: "thread", threadId })}
+                />
+              )}
+            </>
+          )}
 
-            {activeView.kind === "workflow" && (
-              <WorkflowView
-                projectId={activeView.projectId}
-                workflows={workflows}
-                allThreads={threads}
-                onSelectThread={(threadId) => setActiveView({ kind: "thread", threadId })}
-              />
-            )}
+          {activeView.kind === "room" && (
+            <RoomView
+              roomId={activeView.roomId}
+              allThreads={threads}
+              onSelectThread={(threadId) => selectView({ kind: "thread", threadId })}
+              onResolveApproval={(params) => resolveApproval.mutateAsync(params)}
+            />
+          )}
 
-            {activeView.kind === "graph" && (
-              <GraphOverview
-                onSelectThread={(threadId) => setActiveView({ kind: "thread", threadId })}
-                onNewAgentClick={() =>
-                  setNewAgentModal({ open: true, projectId: projects[0]?.id ?? null })
-                }
-              />
-            )}
+          {activeView.kind === "workflow" && (
+            <WorkflowView
+              projectId={activeView.projectId}
+              workflows={workflows}
+              allThreads={threads}
+              onSelectThread={(threadId) => selectView({ kind: "thread", threadId })}
+            />
+          )}
 
-            {activeView.kind === "settings" && (
-              <SettingsView cliProbes={cliProbes} onSelectTheme={applyThemeChoice} />
-            )}
-          </main>
-        </div>
+          {activeView.kind === "graph" && (
+            <GraphOverview
+              onSelectThread={(threadId) => selectView({ kind: "thread", threadId })}
+              onNewAgentClick={() =>
+                setNewAgentModal({ open: true, projectId: projects[0]?.id ?? null })
+              }
+            />
+          )}
+
+          {activeView.kind === "settings" && (
+            <SettingsView cliProbes={cliProbes} onSelectTheme={applyThemeChoice} />
+          )}
+        </main>
       </div>
 
       {/* Modals */}
@@ -414,7 +533,7 @@ export default function App() {
         templates={templates}
         onCreated={(thread) => {
           void qc.invalidateQueries({ queryKey: ["workspace-tree"] });
-          setActiveView({ kind: "thread", threadId: thread.id });
+          selectView({ kind: "thread", threadId: thread.id });
         }}
       />
 
@@ -472,7 +591,7 @@ export default function App() {
                 <button
                   type="submit"
                   data-testid="add-project-submit-btn"
-                  className="rounded-md bg-accent px-3.5 py-1.5 text-xs font-medium text-on-accent hover:bg-accent-deep"
+                  className="rounded-md bg-accent px-3.5 py-1.5 text-xs font-semibold text-on-accent hover:bg-accent-deep"
                 >
                   添加
                 </button>
@@ -555,7 +674,7 @@ export default function App() {
                 </button>
                 <button
                   type="submit"
-                  className="rounded-md bg-accent px-3.5 py-1.5 text-xs font-medium text-on-accent hover:bg-accent-deep"
+                  className="rounded-md bg-accent px-3.5 py-1.5 text-xs font-semibold text-on-accent hover:bg-accent-deep"
                 >
                   创建
                 </button>
