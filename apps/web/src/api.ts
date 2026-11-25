@@ -1,558 +1,326 @@
-import type {
-  Agent,
-  ChatRoom,
-  CliBinaryStatus,
-  ConfluxDataBundle,
-  ContextEntry,
-  ContextKind,
-  Conversation,
-  Graph,
-  HandoffResult,
-  ManagedDeliveryMode,
-  ManagedEventPayload,
-  ManagedStatusResponse,
-  Message,
-  MessageStatus,
-  ModelConfig,
-  NativeCliProviderState,
-  RuntimeAgent,
-  RuntimeInstance,
-  SessionSummary,
-  TerminalOption,
-  TerminalSettings,
-  Turn,
-  WorkflowDefinition,
-  WorkflowRun,
-  WorkflowStepDefinition,
+import {
+  WEB_CONSOLE_ID,
+  type AgentTemplate,
+  type AgentThread,
+  type ApprovalDecision,
+  type ApprovalMode,
+  type CliProbeEntry,
+  type ContextEntry,
+  type ContextKind,
+  type ForkHandoffResult,
+  type GitCreatePrResult,
+  type GitDiffResponse,
+  type GitMergeResult,
+  type GitStatusResponse,
+  type Graph,
+  type HandoffResult,
+  type ManagedDeliveryMode,
+  type Message,
+  type Project,
+  type ProjectFileMatch,
+  type Room,
+  type RoomTask,
+  type RuntimeId,
+  type RuntimeSettings,
+  type ThreadApproval,
+  type ThreadDetailResponse,
+  type ThreadEvent,
+  type ThreadRun,
+  type WorkflowDefinition,
+  type WorkflowRun,
+  type WorkflowStepDefinition,
+  type WorkspaceTreeResponse,
 } from "@conflux/shared";
-import { WEB_CONSOLE_ID } from "@conflux/shared";
 
-async function get<T>(
-  path: string,
-  headers?: Record<string, string>,
-  signal?: AbortSignal,
-): Promise<T> {
-  const init: RequestInit = {};
-  if (headers) init.headers = headers;
-  if (signal) init.signal = signal;
-  const res = await fetch(path, headers || signal ? init : undefined);
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
-  }
-  return res.json() as Promise<T>;
+const BASE = (import.meta.env as { VITE_API_BASE?: string } | undefined)?.VITE_API_BASE || "";
+
+export function apiUrl(path: string): string {
+  return `${BASE}${path}`;
 }
 
-async function post<T>(
-  path: string,
-  body: unknown,
-  headers?: Record<string, string>,
-  signal?: AbortSignal,
-): Promise<T> {
-  const res = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...headers },
-    body: JSON.stringify(body),
-    ...(signal ? { signal } : {}),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers: Record<string, string> = {
+    "X-Session-Id": WEB_CONSOLE_ID,
+    ...(init.headers as Record<string, string> | undefined),
+  };
+  if (init.body !== undefined && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
   }
-  return res.json() as Promise<T>;
-}
-
-async function del<T>(path: string): Promise<T> {
-  const res = await fetch(path, { method: "DELETE" });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
+  const res = await fetch(apiUrl(path), { ...init, headers });
+  const text = await res.text();
+  let payload: unknown = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = text;
+    }
   }
-  return res.json() as Promise<T>;
-}
-
-async function put<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
+    const msg =
+      (payload && typeof payload === "object" && "message" in payload
+        ? String((payload as { message?: unknown }).message)
+        : null) ||
+      (payload && typeof payload === "object" && "error" in payload
+        ? String((payload as { error?: unknown }).error)
+        : null) ||
+      `HTTP ${res.status}`;
+    throw new Error(msg);
   }
-  return res.json() as Promise<T>;
+  return payload as T;
 }
 
 export const api = {
-  health: (signal?: AbortSignal) => get<{ ok: boolean }>("/healthz", undefined, signal),
+  // Workspace tree & system
+  getWorkspaceTree: () => request<WorkspaceTreeResponse>("/workspace/tree"),
+  getGraph: () => request<Graph>("/graph"),
+  probeRuntimes: (refresh = false) =>
+    request<{ runtimes: CliProbeEntry[] }>(`/runtimes/probe${refresh ? "?refresh=1" : ""}`),
+  getSettings: () => request<{ settings: RuntimeSettings }>("/settings"),
+  saveSettings: (patch: Partial<RuntimeSettings>) =>
+    request<{ settings: RuntimeSettings }>("/settings", {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    }),
 
-  getGraph: (status = "all", signal?: AbortSignal) =>
-    get<Graph>(`/graph?status=${encodeURIComponent(status)}`, undefined, signal),
-
-  getMessages: (
-    params?: {
-      from?: string;
-      to?: string;
-      status?: MessageStatus | "all";
-      since?: string;
-      limit?: number;
-    },
-    signal?: AbortSignal,
-  ) => {
-    const qs = new URLSearchParams();
-    if (params?.from) qs.set("from", params.from);
-    if (params?.to) qs.set("to", params.to);
-    if (params?.status) qs.set("status", params.status);
-    if (params?.since) qs.set("since", params.since);
-    if (params?.limit) qs.set("limit", String(params.limit));
-    return get<{ messages: Message[] }>(`/messages?${qs.toString()}`, undefined, signal);
-  },
-
-  checkInbox: (signal?: AbortSignal) =>
-    get<{ inbox: Message[] }>("/messages/inbox", { "X-Session-Id": WEB_CONSOLE_ID }, signal),
-
-  retryMessage: (id: number) =>
-    post<{ message: Message; wake: { woke: boolean; reason?: string } }>(
-      `/messages/${id}/retry`,
-      {},
-      { "X-Session-Id": WEB_CONSOLE_ID },
+  // Projects
+  listProjects: () => request<{ projects: Project[] }>("/projects"),
+  createProject: (body: { root_path: string; name?: string }) =>
+    request<{ project: Project }>("/projects", { method: "POST", body: JSON.stringify(body) }),
+  deleteProject: (id: number) => request<{ ok: boolean }>(`/projects/${id}`, { method: "DELETE" }),
+  searchProjectFiles: (projectId: number, q: string) =>
+    request<{ files: ProjectFileMatch[] }>(
+      `/projects/${projectId}/files?q=${encodeURIComponent(q)}&limit=25`,
     ),
 
-  getSessions: (status = "all", signal?: AbortSignal) =>
-    get<{ sessions: SessionSummary[] }>(
-      `/sessions?status=${encodeURIComponent(status)}`,
-      undefined,
-      signal,
-    ),
-
-  getPeerMessages: (peer: string, signal?: AbortSignal) =>
-    get<{ messages: Message[] }>(
-      `/web/peer-messages?peer=${encodeURIComponent(peer)}`,
-      undefined,
-      signal,
-    ),
-
-  getEdgeMessages: (edgeId: number, signal?: AbortSignal) =>
-    get<{
-      edge: { id: number; from: string; to: string };
-      messages: Message[];
-    }>(`/edges/${edgeId}/messages`, undefined, signal),
-
-  edgeAsk: (edgeId: number, question: string) =>
-    post<{ message: Message }>(`/edges/${edgeId}/ask`, { question }),
-
-  getRuntimes: (signal?: AbortSignal) =>
-    get<{
-      runtimes: Record<string, { label: string; executable: string; executableEnv: string }>;
-      agents: RuntimeAgent[];
-    }>("/runtimes", undefined, signal),
-
-  createRuntimeAgent: (body: {
+  // Templates
+  listTemplates: () => request<{ templates: AgentTemplate[] }>("/templates"),
+  createTemplate: (body: {
     name: string;
-    /** Any registry runtime id (server validates against RUNTIME_REGISTRY) */
-    runtime: string;
+    runtime: RuntimeId;
+    model?: string | null;
+    instructions?: string | null;
+    approval_mode?: ApprovalMode;
+    use_worktree?: boolean;
+  }) =>
+    request<{ template: AgentTemplate }>("/templates", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  deleteTemplate: (id: number) =>
+    request<{ ok: boolean }>(`/templates/${id}`, { method: "DELETE" }),
+
+  // Agent Threads
+  createThread: (body: {
+    project_id?: number | null;
     workdir?: string;
-    model?: string;
-    base_url?: string;
-    api_key?: string;
-    extra_env?: string;
-    instructions?: string;
-    interval_min?: number;
-    /** codex-only: run as a Conflux-held app-server instead of a terminal */
-    execution_mode?: "terminal" | "managed";
-  }) => post<{ agent: RuntimeAgent }>("/runtimes", body),
-
-  deleteRuntimeAgent: (id: number) => del<{ ok: boolean }>(`/runtimes/${id}`),
-
-  startRuntimeAgent: (id: number) =>
-    post<{ started: boolean; instance: RuntimeInstance }>(`/runtimes/${id}/start`, {}),
-
-  getRuntimeInstances: (signal?: AbortSignal) =>
-    get<{ instances: RuntimeInstance[] }>("/runtime-instances", undefined, signal),
-
-  stopRuntimeInstance: (id: string) =>
-    post<{ instance: RuntimeInstance }>(`/runtime-instances/${encodeURIComponent(id)}/stop`, {}),
-
-  resumeRuntimeInstance: (id: string) =>
-    post<{ started: boolean; instance: RuntimeInstance }>(
-      `/runtime-instances/${encodeURIComponent(id)}/resume`,
-      {},
-    ),
-
-  // ---- managed Codex executor ----
-
-  getManagedStatus: (instanceId: string, signal?: AbortSignal) =>
-    get<ManagedStatusResponse>(
-      `/runtime-instances/${encodeURIComponent(instanceId)}/managed`,
-      undefined,
-      signal,
-    ),
-
-  getManagedEvents: (instanceId: string, after = 0, signal?: AbortSignal) =>
-    get<{ events: ManagedEventPayload[] }>(
-      `/runtime-instances/${encodeURIComponent(instanceId)}/managed/events?after=${after}`,
-      undefined,
-      signal,
-    ),
-
-  interruptManagedTurn: (instanceId: string, expectedTurnId?: string | null) =>
-    post<{ accepted: boolean; reason?: string }>(
-      `/runtime-instances/${encodeURIComponent(instanceId)}/managed/interrupt`,
-      { expected_turn_id: expectedTurnId ?? undefined },
-    ),
-
-  steerManagedTurn: (instanceId: string, text: string, expectedTurnId?: string | null) =>
-    post<{ accepted: boolean; reason?: string }>(
-      `/runtime-instances/${encodeURIComponent(instanceId)}/managed/steer`,
-      { text, expected_turn_id: expectedTurnId ?? undefined },
-    ),
-
-  resolveManagedApproval: (
-    instanceId: string,
+    name?: string;
+    runtime: RuntimeId;
+    model?: string | null;
+    instructions?: string | null;
+    approval_mode?: ApprovalMode;
+    use_worktree?: boolean;
+    initial_prompt?: string | null;
+  }) =>
+    request<{ thread: AgentThread }>("/threads", { method: "POST", body: JSON.stringify(body) }),
+  getThreadDetail: (id: string) => request<ThreadDetailResponse>(`/threads/${id}`),
+  deleteThread: (id: string, removeWorktree = false) =>
+    request<{ ok: boolean }>(`/threads/${id}?remove_worktree=${removeWorktree ? "1" : "0"}`, {
+      method: "DELETE",
+    }),
+  listThreadEvents: (id: string, after = 0) =>
+    request<{ events: ThreadEvent[] }>(`/threads/${id}/events?after=${after}&limit=500`),
+  sendPrompt: (
+    id: string,
+    body: { prompt: string; delivery_mode?: ManagedDeliveryMode; room_id?: number | null },
+  ) =>
+    request<{ run: ThreadRun | null; steered?: boolean }>(`/threads/${id}/prompt`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  steerThread: (id: string, text: string) =>
+    request<{ accepted: boolean; reason?: string }>(`/threads/${id}/steer`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    }),
+  interruptThread: (id: string) =>
+    request<{ accepted: boolean; reason?: string }>(`/threads/${id}/interrupt`, { method: "POST" }),
+  stopThread: (id: string) =>
+    request<{ thread: AgentThread }>(`/threads/${id}/stop`, { method: "POST" }),
+  resumeThread: (id: string) =>
+    request<{ thread: AgentThread }>(`/threads/${id}/resume`, { method: "POST" }),
+  switchThreadModel: (id: string, model: string) =>
+    request<{ thread: AgentThread; hotSwitched: boolean }>(`/threads/${id}/model`, {
+      method: "POST",
+      body: JSON.stringify({ model }),
+    }),
+  setApprovalMode: (id: string, approval_mode: ApprovalMode) =>
+    request<{ thread: AgentThread }>(`/threads/${id}/approval-mode`, {
+      method: "POST",
+      body: JSON.stringify({ approval_mode }),
+    }),
+  forkAndHandoff: (
+    id: string,
+    body: {
+      target_runtime: RuntimeId;
+      model?: string | null;
+      name?: string;
+      prompt?: string;
+      approval_mode?: ApprovalMode;
+    },
+  ) =>
+    request<ForkHandoffResult>(`/threads/${id}/fork-handoff`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  resolveApproval: (
+    threadId: string,
     approvalId: number,
-    decision: "accept" | "decline" | "cancel",
-    extra?: { option_id?: string; answers?: Record<string, string | string[]> },
+    body: { decision: ApprovalDecision; option_id?: string; answers?: Record<string, string | string[]> },
   ) =>
-    post<{ ok: boolean }>(
-      `/runtime-instances/${encodeURIComponent(instanceId)}/managed/approvals/${approvalId}`,
-      {
-        decision,
-        ...(extra?.option_id ? { option_id: extra.option_id } : {}),
-        ...(extra?.answers ? { answers: extra.answers } : {}),
-      },
-      { "X-Session-Id": WEB_CONSOLE_ID },
+    request<{ ok: boolean }>(`/threads/${threadId}/approvals/${approvalId}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  listPendingApprovals: (roomId?: number) =>
+    request<{ approvals: ThreadApproval[] }>(
+      `/approvals/pending${roomId !== undefined ? `?room_id=${roomId}` : ""}`,
+    ),
+  rollbackCheckpoint: (threadId: string, checkpointId: number) =>
+    request<{ ok: boolean; checkpoint_id: number }>(
+      `/threads/${threadId}/checkpoints/${checkpointId}/rollback`,
+      { method: "POST" },
+    ),
+  searchThreadFiles: (threadId: string, q: string) =>
+    request<{ files: ProjectFileMatch[] }>(
+      `/threads/${threadId}/files?q=${encodeURIComponent(q)}&limit=25`,
     ),
 
-  openSessionTerminal: (sessionId: string) =>
-    post<{ opener: string }>(`/sessions/${encodeURIComponent(sessionId)}/open-terminal`, {}),
-
-  getTerminalSettings: (signal?: AbortSignal) =>
-    get<{
-      terminal: TerminalSettings;
-      options: TerminalOption[];
-      binaries?: CliBinaryStatus[];
-      auto_wake: boolean;
-      wake_max_concurrent: number;
-      wake_active_count: number;
-    }>("/settings/terminal", undefined, signal),
-
-  saveTerminalSettings: (
-    body: Partial<TerminalSettings> & {
-      auto_wake?: boolean;
-      wake_max_concurrent?: number;
-    },
+  // Git & Worktree
+  getGitStatus: (threadId: string) => request<GitStatusResponse>(`/threads/${threadId}/git/status`),
+  getGitDiff: (threadId: string, path?: string | null) =>
+    request<GitDiffResponse>(
+      `/threads/${threadId}/git/diff${path ? `?path=${encodeURIComponent(path)}` : ""}`,
+    ),
+  mergeWorktree: (threadId: string) =>
+    request<GitMergeResult>(`/threads/${threadId}/git/merge`, { method: "POST" }),
+  createWorktreePr: (
+    threadId: string,
+    body: { title?: string; body?: string; draft?: boolean } = {},
   ) =>
-    put<{
-      terminal: TerminalSettings;
-      binaries?: CliBinaryStatus[];
-      auto_wake: boolean;
-      wake_max_concurrent: number;
-    }>("/settings/terminal", body),
+    request<GitCreatePrResult>(`/threads/${threadId}/git/pr`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  cleanupWorktree: (threadId: string) =>
+    request<{ thread: AgentThread }>(`/threads/${threadId}/worktree/cleanup`, { method: "POST" }),
 
-  getCliProviders: (signal?: AbortSignal) =>
-    get<{
-      native: NativeCliProviderState[];
-    }>("/settings/cli-providers", undefined, signal),
+  // Rooms
+  createRoom: (body: {
+    name: string;
+    description?: string;
+    project_id?: number | null;
+    members?: string[];
+  }) => request<{ room: Room }>("/rooms", { method: "POST", body: JSON.stringify(body) }),
+  getRoomDetail: (roomId: number) =>
+    request<{
+      room: Room;
+      tasks: RoomTask[];
+      messages: Message[];
+      pending_approvals: ThreadApproval[];
+    }>(`/rooms/${roomId}`),
+  deleteRoom: (roomId: number) => request<{ ok: boolean }>(`/rooms/${roomId}`, { method: "DELETE" }),
+  joinRoom: (roomId: number, thread_id: string) =>
+    request<{ room: Room }>(`/rooms/${roomId}/join`, {
+      method: "POST",
+      body: JSON.stringify({ thread_id }),
+    }),
+  summonRoom: (
+    roomId: number,
+    body: { executor_thread_id: string; prompt: string; delivery_mode?: ManagedDeliveryMode },
+  ) =>
+    request<{ task: RoomTask; message_id: number; delivered: boolean; delivery_method: string }>(
+      `/rooms/${roomId}/summon`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  broadcastRoom: (roomId: number, prompt: string) =>
+    request<{ room_id: number; dispatched: Array<{ thread_id: string; task_id: number }> }>(
+      `/rooms/${roomId}/broadcast`,
+      { method: "POST", body: JSON.stringify({ prompt }) },
+    ),
 
-  webAsk: (body: { to_session: string; question: string; from_session?: string }) =>
-    post<{ message: Message }>("/web/ask", body),
-
-  getContext: (
-    params?: {
-      query?: string;
-      session_id?: string;
-      room_id?: number;
-      kind?: ContextKind;
-      pinned?: boolean;
-      limit?: number;
-    },
-    signal?: AbortSignal,
-  ) => {
+  // Context shared memory
+  queryContext: (opts: { project_id?: number; room_id?: number; query?: string } = {}) => {
     const qs = new URLSearchParams();
-    if (params?.query) qs.set("query", params.query);
-    if (params?.session_id) qs.set("session_id", params.session_id);
-    if (params?.room_id !== undefined) qs.set("room_id", String(params.room_id));
-    if (params?.kind) qs.set("kind", params.kind);
-    if (params?.pinned !== undefined) qs.set("pinned", String(params.pinned));
-    if (params?.limit) qs.set("limit", String(params.limit));
-    return get<{ entries: ContextEntry[] }>(
-      `/context/query?${qs.toString()}`,
-      { "X-Session-Id": WEB_CONSOLE_ID },
-      signal,
-    );
+    if (opts.project_id !== undefined) qs.set("project_id", String(opts.project_id));
+    if (opts.room_id !== undefined) qs.set("room_id", String(opts.room_id));
+    if (opts.query) qs.set("query", opts.query);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return request<{ entries: ContextEntry[] }>(`/context${suffix}`);
   },
-
   publishContext: (body: {
     title: string;
     content: string;
-    tags?: string[];
+    project_id?: number | null;
     room_id?: number | null;
     kind?: ContextKind;
     pinned?: boolean;
-  }) => post<{ entry: ContextEntry }>("/context", body, { "X-Session-Id": WEB_CONSOLE_ID }),
-
+    tags?: string[];
+  }) => request<{ entry: ContextEntry }>("/context", { method: "POST", body: JSON.stringify(body) }),
   updateContext: (
     id: number,
-    patch: { title?: string; content?: string; kind?: ContextKind; pinned?: boolean },
+    body: {
+      title?: string;
+      content?: string;
+      pinned?: boolean;
+      kind?: ContextKind;
+      expected_version?: number;
+    },
   ) =>
-    fetch(`/context/${id}`, {
+    request<{ entry: ContextEntry }>(`/context/${id}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json", "X-Session-Id": WEB_CONSOLE_ID },
-      body: JSON.stringify(patch),
-    }).then(async (res) => {
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => res.statusText)}`);
-      return res.json() as Promise<{ entry: ContextEntry }>;
+      body: JSON.stringify(body),
     }),
+  deleteContext: (id: number) => request<{ ok: boolean }>(`/context/${id}`, { method: "DELETE" }),
 
-  getRoomContext: (roomId: number, signal?: AbortSignal) =>
-    get<{ entries: ContextEntry[] }>(`/chat-rooms/${roomId}/context`, undefined, signal),
-
-  handoff: (body: {
-    from_session?: string;
-    from_sessions?: string[];
-    to_session: string;
+  // Workflows & Handoff
+  createWorkflow: (body: {
+    name: string;
+    description?: string | null;
+    project_id?: number | null;
+    room_id?: number | null;
+    steps: WorkflowStepDefinition[];
+  }) =>
+    request<{ workflow: WorkflowDefinition }>("/workflows", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  deleteWorkflow: (id: number) =>
+    request<{ ok: boolean }>(`/workflows/${id}`, { method: "DELETE" }),
+  listWorkflowRuns: (opts: { project_id?: number; workflow_id?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (opts.project_id !== undefined) qs.set("project_id", String(opts.project_id));
+    if (opts.workflow_id !== undefined) qs.set("workflow_id", String(opts.workflow_id));
+    return request<{ runs: WorkflowRun[] }>(`/workflow-runs${qs.toString() ? `?${qs}` : ""}`);
+  },
+  startWorkflowRun: (workflowId: number, body: { input?: string; project_id?: number | null; room_id?: number | null }) =>
+    request<{ run: WorkflowRun }>(`/workflows/${workflowId}/runs`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  approveWorkflowStep: (stepId: number, body: { approved: boolean; comment?: string }) =>
+    request<{ run: WorkflowRun }>(`/workflow-steps/${stepId}/approve`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  handoffContext: (body: {
+    from_thread: string;
+    to_thread: string;
+    project_id?: number | null;
     room_id?: number | null;
     title?: string;
     note?: string;
     prompt?: string;
     delivery_mode?: ManagedDeliveryMode;
-    deliver?: boolean;
-  }) => post<HandoffResult>("/handoff", body, { "X-Session-Id": WEB_CONSOLE_ID }),
-
-  workflows: {
-    list: (roomId?: number, signal?: AbortSignal) =>
-      get<{ workflows: WorkflowDefinition[] }>(
-        roomId !== undefined ? `/workflows?room_id=${roomId}` : "/workflows",
-        undefined,
-        signal,
-      ),
-    create: (body: {
-      name: string;
-      description?: string;
-      room_id?: number | null;
-      steps: WorkflowStepDefinition[];
-    }) => post<{ workflow: WorkflowDefinition }>("/workflows", body),
-    delete: (id: number) => del<{ ok: boolean }>(`/workflows/${id}`),
-    startRun: (workflowId: number, body: { input?: string; room_id?: number | null } = {}) =>
-      post<{ run: WorkflowRun }>(
-        `/workflows/${workflowId}/runs`,
-        body,
-        { "X-Session-Id": WEB_CONSOLE_ID },
-      ),
-    listRuns: (params?: { roomId?: number; workflowId?: number }, signal?: AbortSignal) => {
-      const qs = new URLSearchParams();
-      if (params?.roomId !== undefined) qs.set("room_id", String(params.roomId));
-      if (params?.workflowId !== undefined) qs.set("workflow_id", String(params.workflowId));
-      return get<{ runs: WorkflowRun[] }>(`/workflow-runs?${qs.toString()}`, undefined, signal);
-    },
-    cancelRun: (runId: number) => post<{ run: WorkflowRun }>(`/workflow-runs/${runId}/cancel`, {}),
-    approveGate: (stepId: number, approved: boolean, comment?: string) =>
-      post<{ run: WorkflowRun }>(
-        `/workflow-steps/${stepId}/approve`,
-        { approved, comment },
-        { "X-Session-Id": WEB_CONSOLE_ID },
-      ),
-  },
-
-  getAgents: (signal?: AbortSignal) => get<{ agents: Agent[] }>("/agents", undefined, signal),
-
-  createAgent: (body: {
-    name: string;
-    system_prompt: string;
-    model_config: ModelConfig;
-    description?: string;
-  }) => post<{ agent: Agent }>("/agents", body),
-
-  deleteAgent: (id: number) => del<{ deleted: boolean }>(`/agents/${id}`),
-
-  testProvider: (
-    body: { provider: string; base_url?: string; api_key?: string; model?: string },
-    signal?: AbortSignal,
-  ) =>
-    post<{ ok: boolean; error?: string; model?: string; response?: string }>(
-      "/agents/test-provider",
-      body,
-      undefined,
-      signal,
-    ),
-
-  getConversations: (agentId: number, signal?: AbortSignal) =>
-    get<{ conversations: Conversation[] }>(`/agents/${agentId}/conversations`, undefined, signal),
-
-  getTurns: (conversationId: number, signal?: AbortSignal) =>
-    get<{ turns: Turn[] }>(`/conversations/${conversationId}/turns`, undefined, signal),
-
-  deleteConversation: (id: number) => del<{ deleted: boolean }>(`/conversations/${id}`),
-
-  getSettings: () => get<{ providers: Record<string, { configured: boolean }> }>("/settings"),
-
-  exportData: (scope: "global" | "project" = "global") =>
-    get<ConfluxDataBundle>(`/data/export?scope=${encodeURIComponent(scope)}`),
-
-  importData: (bundle: ConfluxDataBundle, conflict: "skip" | "overwrite" | "copy" = "skip") =>
-    post<{
-      conflict: "skip" | "overwrite" | "copy";
-      imported: number;
-      skipped: number;
-      overwritten: number;
-      copied: number;
-    }>("/data/import", { bundle, conflict }),
-
-  dataCounts: () =>
-    get<{ sessions: number; messages: number; contextEntries: number }>("/data/counts"),
-
-  dataClear: (categories: { sessions?: boolean; messages?: boolean; context?: boolean }) =>
-    post<{
-      backupPath: string | null;
-      cleared: { sessions: number; messages: number; contextEntries: number };
-    }>("/data/clear", { categories }),
-
-  streamChat: async (
-    agentId: number,
-    message: string,
-    conversationId: number | null,
-    onToken: (text: string) => void,
-    onDone: (data: { conversation_id: number; turn_id: number }) => void,
-    onError: (msg: string) => void,
-    onToolUse?: (name: string, input: unknown) => void,
-    onToolResult?: (name: string, result: unknown) => void,
-    signal?: AbortSignal,
-  ) => {
-    const res = await fetch(`/agents/${agentId}/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, conversation_id: conversationId ?? undefined }),
-      signal,
-    });
-
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({ error: res.statusText }));
-      onError(body.error ?? `HTTP ${res.status}`);
-      return;
-    }
-
-    if (!res.body) throw new Error("聊天响应缺少数据流");
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    const dispatchPart = (part: string) => {
-      const dataLine = part
-        .split(/\r?\n/)
-        .find((l) => l.startsWith("data: "));
-      if (!dataLine) return;
-      try {
-        const data = JSON.parse(dataLine.slice(6));
-        switch (data.type) {
-          case "token":
-            onToken(data.content);
-            break;
-          case "done":
-            onDone(data);
-            break;
-          case "error":
-            onError(data.message);
-            break;
-          case "tool_use":
-            onToolUse?.(data.name, data.input);
-            break;
-          case "tool_result":
-            onToolResult?.(data.name, data.result);
-            break;
-        }
-      } catch {
-        /* skip malformed */
-      }
-    };
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          buffer += decoder.decode();
-          if (buffer.trim()) {
-            for (const part of buffer.split(/\r?\n\r?\n/)) {
-              if (part.trim()) dispatchPart(part);
-            }
-          }
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split(/\r?\n\r?\n/);
-        buffer = parts.pop() ?? "";
-
-        for (const part of parts) {
-          dispatchPart(part);
-        }
-      }
-    } finally {
-      await reader.cancel().catch(() => {});
-      reader.releaseLock();
-    }
-  },
-
-  // ---- Chat Rooms ----
-  chatRooms: {
-    list: (signal?: AbortSignal) => get<{ rooms: ChatRoom[] }>("/chat-rooms", undefined, signal),
-    create: (body: { name: string; description?: string; members: string[] }) =>
-      post<{ room: ChatRoom }>("/chat-rooms", body),
-    delete: (id: number) => del<{ ok: boolean }>(`/chat-rooms/${id}`),
-    join: (roomId: number, sessionId: string) =>
-      post<{ ok: boolean }>(`/chat-rooms/${roomId}/join`, { session_id: sessionId }),
-    leave: (sessionId: string) =>
-      post<{ ok: boolean }>("/chat-rooms/leave", { session_id: sessionId }),
-    orchestrate: (roomId: number, signal?: AbortSignal) =>
-      get<RoomOrchestration>(`/chat-rooms/${roomId}/orchestrate`, undefined, signal),
-    summon: (roomId: number, executorSessionId: string, prompt: string, senderIdentity?: string) =>
-      post<{ task_id: number; injected: boolean; method: string }>(`/chat-rooms/${roomId}/summon`, {
-        executor_session_id: executorSessionId,
-        prompt,
-        sender_session_id: senderIdentity ?? WEB_CONSOLE_ID,
-      }),
-    broadcast: (roomId: number, prompt: string, senderIdentity?: string) =>
-      post<{ room_id: number; members: string[]; message_ids: number[] }>(
-        `/chat-rooms/${roomId}/broadcast`,
-        { prompt, sender_session_id: senderIdentity ?? WEB_CONSOLE_ID },
-      ),
-    messages: (roomId: number, signal?: AbortSignal) =>
-      get<{ messages: RoomThreadMessage[] }>(
-        `/chat-rooms/${roomId}/messages`,
-        undefined,
-        signal,
-      ),
-  },
+  }) => request<HandoffResult>("/handoff", { method: "POST", body: JSON.stringify(body) }),
 };
-
-/** A room orchestration task: one prompt → one result, polled as a whole. */
-export interface RoomTask {
-  id: number;
-  room_id: number;
-  initiator_session_id: string;
-  executor_session_id: string;
-  prompt: string;
-  status: "pending" | "running" | "done" | "failed";
-  result: string | null;
-  created_at: string;
-  completed_at: string | null;
-}
-
-export interface RoomOrchestration {
-  tasks: RoomTask[];
-  status: Array<{ executor_session_id: string; status: string; n: number }>;
-}
-
-/** One exchange on a room's shared broadcast thread. */
-export interface RoomThreadMessage {
-  id: number;
-  room_id: number;
-  from_session: string;
-  to_session: string;
-  from_name: string;
-  to_name: string;
-  question: string;
-  reply: string | null;
-  status: string;
-  created_at: string;
-}

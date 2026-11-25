@@ -1,527 +1,569 @@
+import { useEffect, useState } from "react";
+import { ArrowRightLeft, ExternalLink, FolderPlus, GitBranch, GitPullRequest, MessageSquarePlus, Play, Square, Terminal, X } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { api } from "./api";
 import {
-  useState,
-  useCallback,
-  useMemo,
-  useReducer,
-  lazy,
-  Suspense,
-  useRef,
-  useEffect,
-  type PointerEvent as ReactPointerEvent,
-  type ReactNode,
-} from "react";
-import { Sidebar, type TabId } from "./components/Sidebar";
-import { MessageTab } from "./components/MessageTab";
-import { WorkspaceTab } from "./components/WorkspaceTab";
-import { WorkspaceDetails } from "./components/WorkspaceDetails";
-import { DetailPanel } from "./components/DetailPanel";
-import { useGraph } from "./hooks";
+  useCreateProject,
+  useResolveApproval,
+  useTemplates,
+  useThreadDetail,
+  useWorkspaceTree,
+} from "./hooks";
 import { useLiveEvents } from "./use-live-events";
-import { useChatRooms } from "./room-hooks";
-import {
-  draftsReducer,
-  loadWorkspacePreference,
-  restoreRoom,
-  saveWorkspacePreference,
-  targetKey,
-  type ConversationTarget,
-  type DraftMap,
-  type WorkspacePreference,
-} from "./workspace-state";
-import { ChatRoomWizard } from "./components/ChatRoomWizard";
-import { Menu, X } from "lucide-react";
-import type { GraphNode, ChatRoom } from "@conflux/shared";
+import { BUILTIN_THEMES, setActiveCustomTheme } from "./theme";
+import { TopBar } from "./components/TopBar";
+import { ProjectTreeSidebar, type ActiveView } from "./components/ProjectTreeSidebar";
+import { NewAgentModal } from "./components/NewAgentModal";
+import { AgentWorkbench } from "./components/AgentWorkbench";
+import { RightInspector } from "./components/RightInspector";
+import { RoomView } from "./components/RoomView";
+import { WorkflowView } from "./components/WorkflowView";
+import { GraphOverview } from "./components/GraphOverview";
+import { SettingsView } from "./components/SettingsView";
 
-// Low-frequency destinations load on first visit, then stay mounted
-// (keep-alive) like every other view. The graph view also lazy-loads so a
-// cold start on chat never pulls the React Flow renderer.
-const GraphTab = lazy(() =>
-  import("./components/GraphTab").then((m) => ({ default: m.GraphTab })),
-);
-const AssistantsTab = lazy(() =>
-  import("./components/AssistantsTab").then((m) => ({ default: m.AssistantsTab })),
-);
-const SettingsTab = lazy(() =>
-  import("./components/SettingsTab").then((m) => ({ default: m.SettingsTab })),
-);
+const DARK_THEME_NAME = BUILTIN_THEMES[5].name;
 
-const DRAWER_DEFAULT = 320;
-const DRAWER_MIN = 280;
-const DRAWER_MAX = 560;
-const DRAWER_WIDTH_KEY = "conflux.drawer-width";
-
-function initialDrawerWidth(): number {
-  try {
-    const v = Number(localStorage.getItem(DRAWER_WIDTH_KEY));
-    return Number.isFinite(v) && v >= DRAWER_MIN && v <= DRAWER_MAX ? v : DRAWER_DEFAULT;
-  } catch {
-    return DRAWER_DEFAULT;
-  }
-}
-
-const TAB_LABELS: Record<TabId, string> = {
-  chat: "聊天",
-  graph: "图谱",
-  messages: "活动记录",
-  assistants: "助手",
-  settings: "设置",
-};
-
-export default function App() {
-  // ---- shell ---------------------------------------------------------------
-  const [tab, setTab] = useState<TabId>("chat");
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  // views mount on first visit and never unmount — viewport zoom, scroll
-  // positions and query caches survive tab switches
-  const [visited, setVisited] = useState<ReadonlySet<TabId>>(new Set(["chat"]));
-  const switchTab = useCallback((next: TabId) => {
-    setTab(next);
-    setMobileNavOpen(false);
-    setVisited((prev) => (prev.has(next) ? prev : new Set(prev).add(next)));
-  }, []);
-
-  // ---- workspace selection (chat-first owner) ------------------------------
-  const preferenceRef = useRef<WorkspacePreference>(
-    loadWorkspacePreference() ?? { version: 1, lastRoom: null, detailsOpen: true },
-  );
-  const [target, setTarget] = useState<ConversationTarget>(null);
-  const [drafts, dispatchDrafts] = useReducer(draftsReducer, {} as DraftMap);
-  // directed @-targets per room key — memory-only like drafts, so a room
-  // switch (and back) keeps both the text and where it was aimed
-  const [directedExecutors, setDirectedExecutors] = useState<Record<string, string>>({});
-  const [wizardOpen, setWizardOpen] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(preferenceRef.current.detailsOpen);
-  // A node picked in the workspace's global graph opens DETAILS ONLY —
-  // starting a conversation needs the explicit 与此会话对话 action.
-  const [graphInspectId, setGraphInspectId] = useState<string | null>(null);
-
-  const graph = useGraph();
-  useLiveEvents(true);
-  const roomsQuery = useChatRooms();
-  const rooms = useMemo(() => roomsQuery.data?.rooms ?? [], [roomsQuery.data]);
-  const sessions = useMemo(() => graph.data?.nodes ?? [], [graph.data]);
-  const graphError = graph.isError ? (graph.error as Error).message : null;
-
-  // Restore only from a SUCCESSFUL room list: an error response is not
-  // "no rooms" and must never clear a selection. After the first restore,
-  // later refreshes only repair a selection whose room disappeared.
-  const selectionInitedRef = useRef(false);
-  const selectionReadyRef = useRef(false);
-  useEffect(() => {
-    if (!roomsQuery.isSuccess) return;
-    if (!selectionInitedRef.current) {
-      selectionInitedRef.current = true;
-      selectionReadyRef.current = true;
-      const restored = restoreRoom(rooms, preferenceRef.current.lastRoom);
-      setTarget(restored ? { kind: "room", id: restored.id } : null);
-      return;
-    }
-    setTarget((current) => {
-      if (current?.kind === "room" && !rooms.some((r) => r.id === current.id)) {
-        const next = restoreRoom(rooms, null);
-        return next ? { kind: "room", id: next.id } : null;
-      }
-      return current;
-    });
-  }, [roomsQuery.isSuccess, rooms]);
-
-  // Persist the last selected room (id + creation time) and details
-  // preference. The remembered room tracks every actual room selection in
-  // a live ref — opening a peer afterwards must keep the room memory, not
-  // rewind it to whatever the boot-time snapshot held. Writes never throw
-  // into the interaction; wait for the first successful list so a boot
-  // failure cannot clobber the memory.
-  const lastRoomRef = useRef(preferenceRef.current.lastRoom);
-  useEffect(() => {
-    if (!selectionReadyRef.current) return;
-    if (target?.kind === "room") {
-      const room = rooms.find((r) => r.id === target.id);
-      if (room) lastRoomRef.current = { id: room.id, createdAt: room.created_at };
-    }
-    saveWorkspacePreference({ version: 1, lastRoom: lastRoomRef.current, detailsOpen });
-  }, [target, rooms, detailsOpen]);
-
-  const openRoom = useCallback((id: number) => {
-    setTarget({ kind: "room", id });
-    setGraphInspectId(null);
-    setTab("chat");
-    setMobileNavOpen(false);
-  }, []);
-
-  const openSession = useCallback((id: string) => {
-    setTarget({ kind: "session", id });
-    setGraphInspectId(null);
-    setTab("chat");
-    setMobileNavOpen(false);
-  }, []);
-
-  const inspectedSession = graphInspectId
-    ? (graph.data?.nodes.find((n) => n.id === graphInspectId) ?? null)
-    : null;
-  const inspectSessionFromGraph = useCallback((sid: string) => {
-    setGraphInspectId(sid);
-    setDetailsOpen(true);
-  }, []);
-  const converseWithInspected = useCallback(
-    (sid: string) => {
-      setGraphInspectId(null);
-      openSession(sid);
-    },
-    [openSession],
-  );
-
-  const handleRoomCreated = useCallback((room: ChatRoom) => {
-    setTarget({ kind: "room", id: room.id });
-    setGraphInspectId(null);
-    setTab("chat");
-    // remember the server's real creation time immediately — the list
-    // refetch may still be in flight when the persist effect runs
-    lastRoomRef.current = { id: room.id, createdAt: room.created_at };
-  }, []);
-
-  // Repair after delete: only when the deleted room is STILL the current
-  // target does the selection fall back to the next valid room.
-  const handleRoomDeleted = useCallback(
-    (roomId: number) => {
-      setTarget((current) => {
-        if (current?.kind !== "room" || current.id !== roomId) return current;
-        const remaining = rooms.filter((r) => r.id !== roomId);
-        const next = restoreRoom(remaining, null);
-        return next ? { kind: "room", id: next.id } : null;
-      });
-    },
-    [rooms],
-  );
-
-  const targetDraft = useMemo(
-    () =>
-      target
-        ? (drafts[targetKey(target)] ?? { text: "", revision: 0 })
-        : { text: "", revision: 0 },
-    [drafts, target],
-  );
-
-  const handleDraftChange = useCallback((t: ConversationTarget, text: string) => {
-    if (!t) return;
-    dispatchDrafts({ type: "edit", targetKey: targetKey(t), text });
-  }, []);
-
-  const handleDraftSubmitted = useCallback((key: string, revision: number) => {
-    dispatchDrafts({ type: "submitted", targetKey: key, revision });
-  }, []);
-
-  const currentExecutor = target ? (directedExecutors[targetKey(target)] ?? null) : null;
-  const handleExecutorChange = useCallback((t: ConversationTarget, executorId: string | null) => {
-    if (!t) return;
-    const key = targetKey(t);
-    setDirectedExecutors((prev) => {
-      if (executorId == null) {
-        if (!(key in prev)) return prev;
-        const next = { ...prev };
-        delete next[key];
-        return next;
-      }
-      return prev[key] === executorId ? prev : { ...prev, [key]: executorId };
-    });
-  }, []);
-
-  const toggleDetails = useCallback(() => {
-    setDetailsOpen((v) => !v);
-    // narrow screens: nav and details drawers are mutually exclusive
-    setMobileNavOpen(false);
-  }, []);
-
-  // ---- graph-tab inspection state (unchanged behavior) ----------------------
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [selectedEdge, setSelectedEdge] = useState<{ id: number; from: string; to: string } | null>(
-    null,
-  );
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [drawerWidth, setDrawerWidth] = useState(initialDrawerWidth);
-  const drawerWidthRef = useRef(drawerWidth);
-  drawerWidthRef.current = drawerWidth;
-
-  const nodeMap = useMemo(() => {
-    const m = new Map<string, GraphNode>();
-    graph.data?.nodes.forEach((n) => m.set(n.id, n));
-    return m;
-  }, [graph.data]);
-  const selectedSession = selectedSessionId ? nodeMap.get(selectedSessionId) ?? null : null;
-
-  const sessionNameLookup = useCallback((id: string) => nodeMap.get(id)?.name, [nodeMap]);
-
-  const sessionStatusLookup = useCallback((id: string) => nodeMap.get(id)?.status, [nodeMap]);
-
-  const handleSelectSession = useCallback(
-    (sid: string | null) => {
-      setSelectedEdge(null);
-      setSelectedSessionId(sid);
-      if (sid) setDrawerOpen(true);
-    },
-    [],
-  );
-
-  // "在全局图谱中查看" from a workspace conversation: inspect on the graph
-  const inspectSessionOnGraph = useCallback(
-    (sid: string) => {
-      switchTab("graph");
-      handleSelectSession(sid);
-    },
-    [switchTab, handleSelectSession],
-  );
-
-  // a channel initiated from session details keeps its graph edge view
-  const openGraphEdge = useCallback(
-    (edge: { id: number; from: string; to: string }) => {
-      switchTab("graph");
-      setSelectedSessionId(null);
-      setSelectedEdge(edge);
-      setDrawerOpen(true);
-    },
-    [switchTab],
-  );
-
-  const handleSelectEdge = useCallback(
-    (edge: { id: number; from: string; to: string } | null) => {
-      setSelectedSessionId(null);
-      setSelectedEdge(edge);
-      if (edge) setDrawerOpen(true);
-    },
-    [],
-  );
-
-  const closeDrawer = useCallback(() => {
-    setDrawerOpen(false);
-    setSelectedSessionId(null);
-    setSelectedEdge(null);
-  }, []);
-
-  // ---- drawer resize (left-edge handle, rAF-free pointer math) ----------
-  const dragRef = useRef<{ startX: number; startW: number } | null>(null);
-  const dragCleanup = useRef<(() => void) | null>(null);
-  useEffect(() => () => dragCleanup.current?.(), []);
-  const onHandleDown = useCallback(
-    (e: ReactPointerEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      dragCleanup.current?.();
-      dragRef.current = { startX: e.clientX, startW: drawerWidthRef.current };
-      const move = (ev: PointerEvent) => {
-        if (!dragRef.current) return;
-        const next = dragRef.current.startW - (ev.clientX - dragRef.current.startX);
-        setDrawerWidth(Math.min(DRAWER_MAX, Math.max(DRAWER_MIN, next)));
-      };
-      const cleanup = () => {
-        dragRef.current = null;
-        window.removeEventListener("pointermove", move);
-        window.removeEventListener("pointerup", up);
-        window.removeEventListener("pointercancel", up);
-        dragCleanup.current = null;
-      };
-      const up = () => {
-        cleanup();
-        setDrawerWidth((w) => {
-          try {
-            localStorage.setItem(DRAWER_WIDTH_KEY, String(w));
-          } catch {
-            /* private mode — width just won't persist */
-          }
-          return w;
-        });
-      };
-      window.addEventListener("pointermove", move);
-      window.addEventListener("pointerup", up);
-      window.addEventListener("pointercancel", up);
-      dragCleanup.current = cleanup;
-    },
-    [],
-  );
-  const resetDrawerWidth = useCallback(() => {
-    setDrawerWidth(DRAWER_DEFAULT);
-    try {
-      localStorage.setItem(DRAWER_WIDTH_KEY, String(DRAWER_DEFAULT));
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  const surface = (id: TabId, children: ReactNode) => (
-    <div className="tab-surface" data-active={tab === id} aria-hidden={tab !== id}>
-      {children}
-    </div>
-  );
+function ActiveThreadInspector({
+  threadId,
+  allThreads,
+  onOpenForkModal,
+  onSelectThread,
+}: {
+  threadId: string;
+  allThreads: ReturnType<typeof useWorkspaceTree>["data"] extends infer D
+    ? D extends { threads: infer T }
+      ? T
+      : never
+    : never;
+  onOpenForkModal: () => void;
+  onSelectThread: (threadId: string) => void;
+}) {
+  const qc = useQueryClient();
+  const detail = useThreadDetail(threadId);
+  const thread = detail.data?.thread;
+  if (!thread) return null;
 
   return (
-    <div className="flex h-full bg-paper">
-      <Sidebar
-        activeTab={tab}
-        onTabChange={switchTab}
-        sessions={sessions}
+    <RightInspector
+      thread={thread}
+      checkpoints={detail.data?.checkpoints ?? []}
+      allThreads={allThreads}
+      onRollbackCheckpoint={async (cpId) => {
+        await api.rollbackCheckpoint(thread.id, cpId);
+        void qc.invalidateQueries({ queryKey: ["thread-detail", thread.id] });
+        void qc.invalidateQueries({ queryKey: ["thread-git-status", thread.id] });
+        void qc.invalidateQueries({ queryKey: ["thread-git-diff", thread.id] });
+      }}
+      onOpenForkModal={onOpenForkModal}
+      onSelectThread={onSelectThread}
+    />
+  );
+}
+
+export default function App() {
+  useLiveEvents(true);
+  const qc = useQueryClient();
+  const treeQuery = useWorkspaceTree();
+  const templatesQuery = useTemplates();
+  const createProject = useCreateProject();
+  const resolveApproval = useResolveApproval();
+
+  const projects = treeQuery.data?.projects ?? [];
+  const threads = treeQuery.data?.threads ?? [];
+  const rooms = treeQuery.data?.rooms ?? [];
+  const workflows = treeQuery.data?.workflows ?? [];
+  const pendingApprovals = treeQuery.data?.pending_approvals ?? [];
+  const cliProbes = treeQuery.data?.cli_probes ?? [];
+  const templates = templatesQuery.data?.templates ?? [];
+
+  const [activeView, setActiveView] = useState<ActiveView>({ kind: "graph" });
+  const [initializedSelection, setInitializedSelection] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth >= 1280 : true,
+  );
+  const [newAgentModal, setNewAgentModal] = useState<{ open: boolean; projectId: number | null }>({
+    open: false,
+    projectId: null,
+  });
+  const [forkModalOpen, setForkModalOpen] = useState(false);
+
+  // Add project dialog (web fallback or manual path)
+  const [addProjectOpen, setAddProjectOpen] = useState(false);
+  const [projectPathInput, setProjectPathInput] = useState("");
+  const [projectNameInput, setProjectNameInput] = useState("");
+  const [projectError, setProjectError] = useState<string | null>(null);
+
+  // New room dialog
+  const [newRoomState, setNewRoomState] = useState<{ open: boolean; projectId: number | null }>({
+    open: false,
+    projectId: null,
+  });
+  const [roomNameInput, setRoomNameInput] = useState("");
+  const [roomMemberIds, setRoomMemberIds] = useState<string[]>([]);
+
+  const [isDark, setIsDark] = useState<boolean>(() =>
+    typeof document !== "undefined" ? document.documentElement.dataset.theme === "dark" : false,
+  );
+
+  // Auto-open first thread once data arrives
+  useEffect(() => {
+    if (initializedSelection || treeQuery.isLoading) return;
+    if (threads.length > 0) {
+      setActiveView({ kind: "thread", threadId: threads[0].id });
+    }
+    setInitializedSelection(true);
+  }, [initializedSelection, treeQuery.isLoading, threads]);
+
+  const applyThemeChoice = (themeName: string | null) => {
+    setActiveCustomTheme(themeName);
+    setIsDark(document.documentElement.dataset.theme === "dark");
+  };
+
+  const handleToggleTheme = () => {
+    const nextDark = !isDark;
+    setActiveCustomTheme(nextDark ? DARK_THEME_NAME : null);
+    setIsDark(nextDark);
+  };
+
+  const handleAddProjectClick = async () => {
+    const picker =
+      window.confluxDesktop?.pickProjectDirectory ?? window.confluxDesktop?.pickDirectory;
+    if (picker) {
+      const picked = await picker();
+      if (picked) {
+        await createProject.mutateAsync({ root_path: picked });
+        return;
+      }
+    }
+    setProjectError(null);
+    setAddProjectOpen(true);
+  };
+
+  const handleSubmitProject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!projectPathInput.trim()) return;
+    setProjectError(null);
+    try {
+      await createProject.mutateAsync({
+        root_path: projectPathInput.trim(),
+        name: projectNameInput.trim() || undefined,
+      });
+      setProjectPathInput("");
+      setProjectNameInput("");
+      setAddProjectOpen(false);
+    } catch (err) {
+      setProjectError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleSubmitRoom = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!roomNameInput.trim()) return;
+    const res = await api.createRoom({
+      name: roomNameInput.trim(),
+      project_id: newRoomState.projectId,
+      members: roomMemberIds,
+    });
+    setRoomNameInput("");
+    setRoomMemberIds([]);
+    setNewRoomState({ open: false, projectId: null });
+    void qc.invalidateQueries({ queryKey: ["workspace-tree"] });
+    setActiveView({ kind: "room", roomId: res.room.id });
+  };
+
+  const activeThread =
+    activeView.kind === "thread"
+      ? threads.find((x) => x.id === activeView.threadId) ?? null
+      : null;
+
+  const handleStopOrResumeActive = async () => {
+    if (!activeThread) return;
+    if (activeThread.state === "stopped" || activeThread.state === "error") {
+      await api.resumeThread(activeThread.id);
+    } else {
+      await api.stopThread(activeThread.id);
+    }
+    void qc.invalidateQueries({ queryKey: ["workspace-tree"] });
+    void qc.invalidateQueries({ queryKey: ["thread-detail", activeThread.id] });
+  };
+
+  // Compute unified TopBar breadcrumb & inline thread actions (single 44px bar, zero double headers)
+  let breadcrumb = "态势图谱";
+  let subtitle: string | null = null;
+  if (activeView.kind === "thread") {
+    const p = projects.find((x) => x.id === activeThread?.project_id);
+    breadcrumb = activeThread ? `${p ? `${p.name} / ` : ""}${activeThread.name}` : "Agent 工作台";
+    subtitle = activeThread?.workdir ?? null;
+  } else if (activeView.kind === "room") {
+    const r = rooms.find((x) => x.id === activeView.roomId);
+    breadcrumb = r ? `协作房间 / ${r.name}` : "协作房间";
+  } else if (activeView.kind === "workflow") {
+    const p = projects.find((x) => x.id === activeView.projectId);
+    breadcrumb = p ? `${p.name} / 工作流` : "工作流";
+  } else if (activeView.kind === "settings") {
+    breadcrumb = "设置";
+  }
+
+  const isStopped = activeThread?.state === "stopped" || activeThread?.state === "error";
+
+  const threadLeftExtra = activeThread ? (
+    <div className="hidden items-center gap-1.5 sm:flex">
+      <span
+        data-testid="workbench-thread-state"
+        className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-2xs ${
+          activeThread.state === "running"
+            ? "bg-accent-soft text-accent"
+            : activeThread.state === "waiting_approval"
+              ? "bg-warning-soft text-warning"
+              : activeThread.state === "idle"
+                ? "bg-success-soft text-success"
+                : activeThread.state === "error"
+                  ? "bg-danger-soft text-danger"
+                  : "bg-neutral-soft text-neutral"
+        }`}
+      >
+        {activeThread.state}
+      </span>
+      {activeThread.kind === "external" && (
+        <span className="inline-flex items-center gap-1 rounded bg-info-soft px-1.5 py-0.5 text-2xs text-info">
+          <Terminal className="h-3 w-3" />
+          外部终端
+        </span>
+      )}
+      {activeThread.worktree_branch && (
+        <span className="inline-flex max-w-[180px] items-center gap-1 truncate rounded bg-tile px-1.5 py-0.5 font-mono text-2xs text-ink-faint">
+          <GitBranch className="h-3 w-3 shrink-0" />
+          <span className="truncate">{activeThread.worktree_branch}</span>
+        </span>
+      )}
+      {activeThread.pr_url && (
+        <a
+          href={activeThread.pr_url}
+          target="_blank"
+          rel="noreferrer"
+          data-testid="topbar-pr-link"
+          className="inline-flex items-center gap-1 rounded bg-accent-soft px-1.5 py-0.5 font-mono text-2xs font-medium text-accent hover:underline"
+        >
+          <GitPullRequest className="h-3 w-3 shrink-0" />
+          <span>{activeThread.pr_url.match(/\/pull\/(\d+)/)?.[1] ? `PR #${activeThread.pr_url.match(/\/pull\/(\d+)/)![1]}` : "PR"}</span>
+          <ExternalLink className="h-2.5 w-2.5 shrink-0" />
+        </a>
+      )}
+    </div>
+  ) : null;
+
+  const threadRightExtra = activeThread ? (
+    <div className="hidden items-center gap-0.5 sm:flex">
+      <button
+        type="button"
+        data-testid="workbench-fork-btn"
+        onClick={() => setForkModalOpen(true)}
+        title="原地换引擎接力 (Fork & Handoff)"
+        className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-ink-muted hover:bg-tile-hover hover:text-ink transition-colors"
+      >
+        <ArrowRightLeft className="h-3.5 w-3.5" />
+        <span className="hidden lg:inline">接力</span>
+      </button>
+      {activeThread.kind === "managed" && (
+        <button
+          type="button"
+          data-testid="workbench-stop-resume-btn"
+          onClick={() => void handleStopOrResumeActive()}
+          title={isStopped ? "恢复进程" : "停止进程"}
+          className={`inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs transition-colors ${
+            isStopped
+              ? "bg-success-soft text-success"
+              : "text-ink-muted hover:bg-tile-hover hover:text-danger"
+          }`}
+        >
+          {isStopped ? (
+            <>
+              <Play className="h-3 w-3" />
+              <span className="hidden lg:inline">恢复</span>
+            </>
+          ) : (
+            <>
+              <Square className="h-3 w-3" />
+              <span className="hidden lg:inline">停止</span>
+            </>
+          )}
+        </button>
+      )}
+      <span className="mx-1 h-4 w-px bg-line" />
+    </div>
+  ) : null;
+
+  return (
+    <div className="flex h-screen w-screen overflow-hidden bg-paper text-ink">
+      <ProjectTreeSidebar
+        projects={projects}
+        threads={threads}
         rooms={rooms}
-        selectedRoomId={target?.kind === "room" ? target.id : null}
-        selectedSessionId={target?.kind === "session" ? target.id : null}
-        onSelectRoom={openRoom}
-        onSelectSession={openSession}
-        onCreateRoom={() => setWizardOpen(true)}
-        mobileOpen={mobileNavOpen}
-        onCloseMobile={() => setMobileNavOpen(false)}
+        workflows={workflows}
+        activeView={activeView}
+        mobileOpen={mobileSidebarOpen}
+        onCloseMobile={() => setMobileSidebarOpen(false)}
+        onSelectView={setActiveView}
+        onAddProjectClick={() => void handleAddProjectClick()}
+        onNewAgentForProject={(projectId) => setNewAgentModal({ open: true, projectId })}
+        onNewRoomClick={(projectId) => {
+          setRoomMemberIds(
+            threads
+              .filter((t) => projectId === null || t.project_id === projectId)
+              .slice(0, 4)
+              .map((t) => t.id),
+          );
+          setNewRoomState({ open: true, projectId });
+        }}
       />
-      <div className="relative flex flex-1 overflow-hidden min-w-0 md:p-2 md:pl-0">
-        <div className="workspace-frame relative flex flex-1 overflow-hidden min-w-0 md:rounded-xl md:border md:border-line bg-surface md:shadow-card">
-        <main className="relative flex-1 overflow-hidden mobile-main">
-          <div className="mobile-topbar">
-            <button
-              type="button"
-              className="mobile-menu-button"
-              aria-label="打开导航"
-              onClick={() => {
-                setMobileNavOpen(true);
-                setDetailsOpen(false);
-              }}
-            >
-              <Menu size={18} />
-            </button>
-            <span>{TAB_LABELS[tab]}</span>
-          </div>
-          {surface(
-            "chat",
-            <WorkspaceTab
-              target={target}
-              active={tab === "chat"}
-              roomsQuery={roomsQuery}
-              rooms={rooms}
-              sessions={sessions}
-              onSelectTarget={setTarget}
-              onOpenTab={switchTab}
-              onInspectSession={inspectSessionOnGraph}
-              onCreateRoom={() => setWizardOpen(true)}
-              detailsOpen={detailsOpen}
-              onToggleDetails={toggleDetails}
-              draft={targetDraft}
-              onDraftChange={handleDraftChange}
-              onDraftSubmitted={handleDraftSubmitted}
-              executorId={currentExecutor}
-              onExecutorChange={(id) => handleExecutorChange(target, id)}
-              graph={graph.data}
-              graphLoading={graph.isLoading}
-              graphError={graphError}
-              onGraphNodeSelect={inspectSessionFromGraph}
-              onOpenGraphEdge={openGraphEdge}
-            />,
-          )}
-          {surface(
-            "graph",
-            visited.has("graph") ? (
-              <Suspense fallback={<RoutePending />}>
-                <GraphTab
-                  graph={graph.data}
-                  loading={graph.isLoading}
-                  error={graphError}
-                  scope="global"
-                  scopeKey="global"
-                  active={tab === "graph"}
-                  onSelectSession={handleSelectSession}
-                  selectedSessionId={selectedSession?.id ?? null}
-                  onSelectEdge={handleSelectEdge}
-                  selectedEdge={selectedEdge}
+
+      {/* Linear inset workspace frame */}
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden md:py-2 md:pr-2">
+        <div className="workspace-frame flex min-h-0 flex-1 flex-col overflow-hidden bg-surface md:rounded-[10px] md:border md:border-line">
+          <TopBar
+            breadcrumb={breadcrumb}
+            subtitle={subtitle}
+            leftExtra={threadLeftExtra}
+            rightExtra={threadRightExtra}
+            pendingApprovals={pendingApprovals}
+            isDark={isDark}
+            onToggleTheme={handleToggleTheme}
+            onOpenNewAgent={() =>
+              setNewAgentModal({
+                open: true,
+                projectId:
+                  activeView.kind === "thread"
+                    ? (activeThread?.project_id ?? projects[0]?.id ?? null)
+                    : (projects[0]?.id ?? null),
+              })
+            }
+            onOpenSettings={() => setActiveView({ kind: "settings" })}
+            onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
+            showInspectorToggle={activeView.kind === "thread"}
+            inspectorOpen={inspectorOpen}
+            onToggleInspector={() => setInspectorOpen((v) => !v)}
+            onResolveApproval={(params) => resolveApproval.mutateAsync(params)}
+            onSelectThread={(threadId) => setActiveView({ kind: "thread", threadId })}
+          />
+
+          <main className="relative flex min-h-0 flex-1 overflow-hidden">
+            {activeView.kind === "thread" && (
+              <>
+                <AgentWorkbench
+                  threadId={activeView.threadId}
+                  cliProbes={cliProbes}
+                  allThreads={threads}
+                  onResolveApproval={(params) => resolveApproval.mutateAsync(params)}
+                  onSelectThread={(threadId) => setActiveView({ kind: "thread", threadId })}
+                  forkModalOpen={forkModalOpen}
+                  onSetForkModalOpen={setForkModalOpen}
                 />
-              </Suspense>
-            ) : null,
-          )}
-          {surface(
-            "messages",
-            visited.has("messages") ? (
-              <MessageTab
-                active={tab === "messages"}
-                onOpenPeerConversation={openSession}
+                {inspectorOpen && (
+                  <ActiveThreadInspector
+                    threadId={activeView.threadId}
+                    allThreads={threads}
+                    onOpenForkModal={() => setForkModalOpen(true)}
+                    onSelectThread={(threadId) => setActiveView({ kind: "thread", threadId })}
+                  />
+                )}
+              </>
+            )}
+
+            {activeView.kind === "room" && (
+              <RoomView
+                roomId={activeView.roomId}
+                allThreads={threads}
+                onSelectThread={(threadId) => setActiveView({ kind: "thread", threadId })}
+                onResolveApproval={(params) => resolveApproval.mutateAsync(params)}
               />
-            ) : null,
-          )}
-          {surface(
-            "assistants",
-            visited.has("assistants") ? (
-              <Suspense fallback={<RoutePending />}>
-                <AssistantsTab active={tab === "assistants"} onOpenSession={openSession} />
-              </Suspense>
-            ) : null,
-          )}
-          {surface(
-            "settings",
-            visited.has("settings") ? (
-              <Suspense fallback={<RoutePending />}>
-          <SettingsTab active={tab === "settings"} />
-              </Suspense>
-            ) : null,
-          )}
-        </main>
+            )}
 
-        {/* Workspace details rail: inline column on wide screens, overlay
-         * drawer below 1280px; Esc returns focus to the header trigger. */}
-        {tab === "chat" && detailsOpen && target && (
-          <aside className="workspace-details border-l border-line bg-surface" aria-label="详情面板">
-            <WorkspaceDetails
-              target={target}
-              rooms={rooms}
-              sessions={sessions}
-              inspectedSession={inspectedSession}
-              onConverseWith={converseWithInspected}
-              onClearInspection={() => setGraphInspectId(null)}
-              onClose={() => setDetailsOpen(false)}
-              onRoomDeleted={handleRoomDeleted}
-              onOpenSession={openSession}
-              onOpenGraphEdge={openGraphEdge}
-            />
-          </aside>
-        )}
+            {activeView.kind === "workflow" && (
+              <WorkflowView
+                projectId={activeView.projectId}
+                workflows={workflows}
+                allThreads={threads}
+                onSelectThread={(threadId) => setActiveView({ kind: "thread", threadId })}
+              />
+            )}
 
-        {/* The detail rail belongs to the graph view (node/edge/channel
-         * inspection); messages own their full-screen view, the rest are
-         * self-contained. Closable + resizable. */}
-        {tab === "graph" && drawerOpen && (
-          <aside
-            className="relative border-l border-line bg-surface overflow-hidden flex-shrink-0"
-            style={{ width: `min(${drawerWidth}px, 45vw)` }}
-          >
-            <div
-              onPointerDown={onHandleDown}
-              onDoubleClick={resetDrawerWidth}
-              title="拖动调宽 · 双击复位"
-              className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-accent/30 active:bg-accent/50 z-10"
-            />
-            {/* top drag strip — the whole window should be grabbable here */}
-            <div className="absolute left-0 right-0 top-0 h-10 app-drag z-[5]" />
-            <button
-              onClick={closeDrawer}
-              title="关闭"
-              aria-label="关闭详情面板"
-              className="absolute right-3 top-3 z-10 p-1.5 rounded-lg text-ink-faint hover:bg-tile-hover hover:text-ink app-no-drag"
-            >
-              <X size={14} />
-            </button>
-            <DetailPanel
-              session={selectedSession}
-              edge={selectedEdge}
-              sessionNameLookup={sessionNameLookup}
-              sessionStatusLookup={sessionStatusLookup}
-              onOpenEdge={handleSelectEdge}
-            />
-          </aside>
-        )}
+            {activeView.kind === "graph" && (
+              <GraphOverview
+                onSelectThread={(threadId) => setActiveView({ kind: "thread", threadId })}
+                onNewAgentClick={() =>
+                  setNewAgentModal({ open: true, projectId: projects[0]?.id ?? null })
+                }
+              />
+            )}
+
+            {activeView.kind === "settings" && (
+              <SettingsView cliProbes={cliProbes} onSelectTheme={applyThemeChoice} />
+            )}
+          </main>
         </div>
       </div>
 
-      {wizardOpen && (
-        <ChatRoomWizard
-          sessions={sessions}
-          onClose={() => setWizardOpen(false)}
-          onCreated={handleRoomCreated}
-        />
+      {/* Modals */}
+      <NewAgentModal
+        open={newAgentModal.open}
+        onClose={() => setNewAgentModal({ open: false, projectId: null })}
+        projects={projects}
+        defaultProjectId={newAgentModal.projectId}
+        cliProbes={cliProbes}
+        templates={templates}
+        onCreated={(thread) => {
+          void qc.invalidateQueries({ queryKey: ["workspace-tree"] });
+          setActiveView({ kind: "thread", threadId: thread.id });
+        }}
+      />
+
+      {addProjectOpen && (
+        <div
+          data-testid="add-project-modal"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-4"
+        >
+          <div className="w-full max-w-md rounded-xl border border-line-strong bg-surface p-4 shadow-overlay">
+            <div className="flex items-center justify-between">
+              <h2 className="flex items-center gap-2 text-[13.5px] font-semibold text-ink">
+                <FolderPlus className="h-4 w-4 text-ink-muted" />
+                添加项目目录
+              </h2>
+              <button
+                type="button"
+                onClick={() => setAddProjectOpen(false)}
+                className="rounded-md p-1 text-ink-muted hover:bg-tile-hover"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <form onSubmit={(e) => void handleSubmitProject(e)} className="mt-3.5 space-y-3">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-ink-muted">目录路径</label>
+                <input
+                  type="text"
+                  required
+                  data-testid="add-project-path-input"
+                  value={projectPathInput}
+                  onChange={(e) => setProjectPathInput(e.target.value)}
+                  placeholder="C:\Project folder\my-project"
+                  className="w-full rounded-md border border-line bg-paper/60 px-2.5 py-1.5 font-mono text-xs text-ink focus:border-accent focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-ink-muted">显示名称（可选）</label>
+                <input
+                  type="text"
+                  value={projectNameInput}
+                  onChange={(e) => setProjectNameInput(e.target.value)}
+                  placeholder="留空默认目录名"
+                  className="w-full rounded-md border border-line bg-paper/60 px-2.5 py-1.5 text-xs text-ink focus:border-accent focus:outline-none"
+                />
+              </div>
+              {projectError && <div className="text-xs text-danger">{projectError}</div>}
+              <div className="flex justify-end gap-2 border-t border-line pt-3">
+                <button
+                  type="button"
+                  onClick={() => setAddProjectOpen(false)}
+                  className="rounded-md px-3 py-1.5 text-xs text-ink-muted hover:bg-tile-hover"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  data-testid="add-project-submit-btn"
+                  className="rounded-md bg-accent px-3.5 py-1.5 text-xs font-medium text-on-accent hover:bg-accent-deep"
+                >
+                  添加
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {newRoomState.open && (
+        <div
+          data-testid="new-room-modal"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-4"
+        >
+          <div className="w-full max-w-md rounded-xl border border-line-strong bg-surface p-4 shadow-overlay">
+            <div className="flex items-center justify-between">
+              <h2 className="flex items-center gap-2 text-[13.5px] font-semibold text-ink">
+                <MessageSquarePlus className="h-4 w-4 text-ink-muted" />
+                新建{newRoomState.projectId === null ? "跨项目" : "项目"}房间
+              </h2>
+              <button
+                type="button"
+                onClick={() => setNewRoomState({ open: false, projectId: null })}
+                className="rounded-md p-1 text-ink-muted hover:bg-tile-hover"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <form onSubmit={(e) => void handleSubmitRoom(e)} className="mt-3.5 space-y-3">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-ink-muted">房间名称</label>
+                <input
+                  type="text"
+                  required
+                  value={roomNameInput}
+                  onChange={(e) => setRoomNameInput(e.target.value)}
+                  placeholder="例如：架构联调室"
+                  className="w-full rounded-md border border-line bg-paper/60 px-2.5 py-1.5 text-xs text-ink focus:border-accent focus:outline-none"
+                />
+              </div>
+              {threads.length > 0 && (
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-ink-muted">初始成员</label>
+                  <div className="max-h-36 space-y-0.5 overflow-y-auto rounded-md border border-line bg-paper/60 p-1.5">
+                    {threads.map((t) => {
+                      const checked = roomMemberIds.includes(t.id);
+                      return (
+                        <label
+                          key={t.id}
+                          className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-xs text-ink hover:bg-tile-hover"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) =>
+                              setRoomMemberIds((prev) =>
+                                e.target.checked
+                                  ? [...prev, t.id]
+                                  : prev.filter((id) => id !== t.id),
+                              )
+                            }
+                          />
+                          <span>{t.name}</span>
+                          <span className="ml-auto font-mono text-2xs text-ink-faint">
+                            {t.runtime}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              <div className="flex justify-end gap-2 border-t border-line pt-3">
+                <button
+                  type="button"
+                  onClick={() => setNewRoomState({ open: false, projectId: null })}
+                  className="rounded-md px-3 py-1.5 text-xs text-ink-muted hover:bg-tile-hover"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-md bg-accent px-3.5 py-1.5 text-xs font-medium text-on-accent hover:bg-accent-deep"
+                >
+                  创建
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
-  );
-}
-
-function RoutePending() {
-  return (
-    <div className="h-full flex items-center justify-center text-xs text-ink-faint">加载中…</div>
   );
 }

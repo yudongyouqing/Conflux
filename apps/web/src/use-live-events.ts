@@ -1,12 +1,12 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { LiveEventEnvelope } from "@conflux/shared";
+import { apiUrl } from "./api";
 
 /**
- * Subscribe to the server's unified `/live/events` SSE stream and trigger
- * targeted React Query invalidations for managed streams, rooms, workflows,
- * shared memory, and graph state. Falls back silently in environments without
- * EventSource (such as unit tests).
+ * Subscribe to the unified `/live/events` SSE stream and invalidate the matching
+ * React Query caches in real time across projects, agent threads, approvals,
+ * rooms, workflows, shared memory, and git diffs.
  */
 export function useLiveEvents(enabled = true): void {
   const qc = useQueryClient();
@@ -15,38 +15,69 @@ export function useLiveEvents(enabled = true): void {
     if (!enabled || typeof EventSource === "undefined") return;
     let source: EventSource | null = null;
     try {
-      source = new EventSource("/live/events");
+      source = new EventSource(apiUrl("/live/events"));
+      source.onmessage = (evt) => {
+        try {
+          const parsed = JSON.parse(evt.data) as LiveEventEnvelope;
+          switch (parsed.type) {
+            case "project.updated":
+              void qc.invalidateQueries({ queryKey: ["workspace-tree"] });
+              break;
+            case "thread.updated":
+              void qc.invalidateQueries({ queryKey: ["workspace-tree"] });
+              void qc.invalidateQueries({ queryKey: ["graph"] });
+              if (parsed.thread_id) {
+                void qc.invalidateQueries({ queryKey: ["thread-detail", parsed.thread_id] });
+              }
+              if (parsed.room_id) {
+                void qc.invalidateQueries({ queryKey: ["room-detail", parsed.room_id] });
+              }
+              break;
+            case "thread.event":
+              if (parsed.thread_id) {
+                void qc.invalidateQueries({ queryKey: ["thread-events", parsed.thread_id] });
+                void qc.invalidateQueries({ queryKey: ["thread-detail", parsed.thread_id] });
+              }
+              break;
+            case "approval.updated":
+              void qc.invalidateQueries({ queryKey: ["workspace-tree"] });
+              if (parsed.thread_id) {
+                void qc.invalidateQueries({ queryKey: ["thread-detail", parsed.thread_id] });
+                void qc.invalidateQueries({ queryKey: ["thread-events", parsed.thread_id] });
+              }
+              if (parsed.room_id) {
+                void qc.invalidateQueries({ queryKey: ["room-detail", parsed.room_id] });
+              }
+              break;
+            case "git.dirty":
+              if (parsed.thread_id) {
+                void qc.invalidateQueries({ queryKey: ["thread-git-status", parsed.thread_id] });
+                void qc.invalidateQueries({ queryKey: ["thread-git-diff", parsed.thread_id] });
+                void qc.invalidateQueries({ queryKey: ["thread-detail", parsed.thread_id] });
+              }
+              break;
+            case "room.message":
+            case "room.task":
+              void qc.invalidateQueries({ queryKey: ["workspace-tree"] });
+              if (parsed.room_id) {
+                void qc.invalidateQueries({ queryKey: ["room-detail", parsed.room_id] });
+              }
+              break;
+            case "workflow.updated":
+              void qc.invalidateQueries({ queryKey: ["workspace-tree"] });
+              void qc.invalidateQueries({ queryKey: ["workflow-runs"] });
+              break;
+            case "context.updated":
+              void qc.invalidateQueries({ queryKey: ["context"] });
+              break;
+          }
+        } catch {
+          // ignore non-JSON heartbeat lines
+        }
+      };
     } catch {
-      return;
+      // EventSource unavailable in non-browser unit test env
     }
-
-    source.onmessage = (event) => {
-      let ev: LiveEventEnvelope;
-      try {
-        ev = JSON.parse(event.data) as LiveEventEnvelope;
-      } catch {
-        return;
-      }
-      if (ev.type === "managed.event" && ev.instance_id) {
-        void qc.invalidateQueries({ queryKey: ["managed-events", ev.instance_id] });
-        void qc.invalidateQueries({ queryKey: ["managed-status", ev.instance_id] });
-      } else if (ev.type === "room.message" || ev.type === "room.task") {
-        if (ev.room_id != null) {
-          void qc.invalidateQueries({ queryKey: ["room-messages", ev.room_id] });
-          void qc.invalidateQueries({ queryKey: ["room-tasks", ev.room_id] });
-        }
-        void qc.invalidateQueries({ queryKey: ["graph"] });
-      } else if (ev.type === "workflow.updated") {
-        void qc.invalidateQueries({ queryKey: ["workflow-runs"] });
-      } else if (ev.type === "context.updated") {
-        if (ev.room_id != null) {
-          void qc.invalidateQueries({ queryKey: ["room-context", ev.room_id] });
-        }
-        void qc.invalidateQueries({ queryKey: ["context"] });
-        void qc.invalidateQueries({ queryKey: ["graph"] });
-      }
-    };
-
     return () => {
       source?.close();
     };

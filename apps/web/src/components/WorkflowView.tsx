@@ -1,580 +1,436 @@
 import { useState } from "react";
-import {
-  CheckCircle2,
-  GitBranch,
-  Loader2,
-  Pin,
-  Play,
-  Plus,
-  ShieldCheck,
-  Trash2,
-  XCircle,
-} from "lucide-react";
 import type {
-  ChatRoom,
-  ContextKind,
-  GraphNode,
+  AgentThread,
+  WorkflowDefinition,
   WorkflowStepDefinition,
-  WorkflowStepStatus,
+  WorkflowStepKind,
 } from "@conflux/shared";
-import {
-  useApproveWorkflowGate,
-  useCancelWorkflowRun,
-  useCreateWorkflow,
-  usePublishContext,
-  useRoomContext,
-  useStartWorkflowRun,
-  useUpdateContext,
-  useWorkflowRuns,
-  useWorkflows,
-} from "../hooks";
-
-const STEP_STATUS_STYLE: Record<WorkflowStepStatus, string> = {
-  pending: "bg-neutral-soft text-neutral",
-  ready: "bg-info-soft text-info",
-  running: "bg-info-soft text-info",
-  waiting_human: "bg-warning-soft text-warning",
-  done: "bg-success-soft text-success",
-  failed: "bg-danger-soft text-danger",
-  skipped: "bg-neutral-soft text-ink-faint",
-};
-
-const STEP_STATUS_LABEL: Record<WorkflowStepStatus, string> = {
-  pending: "等待上游",
-  ready: "就绪",
-  running: "运行中",
-  waiting_human: "待人工审批",
-  done: "已完成",
-  failed: "失败",
-  skipped: "已跳过",
-};
+import { Check, Play, Plus, Trash2, UserCheck, X } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { api } from "../api";
+import { useWorkflowRuns } from "../hooks";
 
 interface WorkflowViewProps {
-  room: ChatRoom;
-  members: readonly GraphNode[];
-  active: boolean;
+  projectId: number | null;
+  workflows: WorkflowDefinition[];
+  allThreads: AgentThread[];
+  onSelectThread: (threadId: string) => void;
 }
 
-export function WorkflowView({ room, members, active }: WorkflowViewProps) {
-  const workflowsQuery = useWorkflows(room.id, active);
-  const runsQuery = useWorkflowRuns(room.id, active);
-  const roomCtxQuery = useRoomContext(room.id, active);
-
-  const createWf = useCreateWorkflow();
-  const startRun = useStartWorkflowRun();
-  const approveGate = useApproveWorkflowGate();
-  const cancelRun = useCancelWorkflowRun();
-  const publishMem = usePublishContext();
-  const updateMem = useUpdateContext();
+export function WorkflowView({
+  projectId,
+  workflows,
+  allThreads,
+  onSelectThread,
+}: WorkflowViewProps) {
+  const qc = useQueryClient();
+  const filtered =
+    projectId === null ? workflows : workflows.filter((w) => w.project_id === projectId);
+  const [selectedId, setSelectedId] = useState<number | null>(filtered[0]?.id ?? null);
+  const runsQuery = useWorkflowRuns(selectedId ?? undefined);
 
   const [creating, setCreating] = useState(false);
   const [wfName, setWfName] = useState("");
-  const [runInput, setRunInput] = useState("");
-  const [steps, setSteps] = useState<WorkflowStepDefinition[]>(() => [
+  const [wfDesc, setWfDesc] = useState("");
+  const [steps, setSteps] = useState<WorkflowStepDefinition[]>([
     {
       key: "plan",
-      title: "方案规划",
+      title: "方案设计",
       kind: "agent",
       depends_on: [],
-      target_session_id: members[0]?.id ?? "",
-      prompt_template: "请为以下需求给出实施计划：{{input}}",
+      target_thread_id: allThreads[0]?.id ?? null,
+      prompt_template: "根据需求 {{input}} 给出实现方案。",
       include_handoff: false,
     },
     {
-      key: "gate",
-      title: "人工评审门禁",
+      key: "review_gate",
+      title: "人工确认门控",
       kind: "human_gate",
       depends_on: ["plan"],
-      prompt_template: "核对方案后放行执行",
+      target_thread_id: null,
+      prompt_template: "确认方案后放行执行。",
       include_handoff: false,
-    },
-    {
-      key: "implement",
-      title: "执行实现",
-      kind: "agent",
-      depends_on: ["gate"],
-      target_session_id: members[1]?.id ?? members[0]?.id ?? "",
-      prompt_template: "请按上游方案与审批意见落地实现",
-      include_handoff: true,
     },
   ]);
 
-  const [gateComments, setGateComments] = useState<Record<number, string>>({});
-  const [memTitle, setMemTitle] = useState("");
-  const [memContent, setMemContent] = useState("");
-  const [memKind, setMemKind] = useState<ContextKind>("decision");
+  const [runInput, setRunInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const workflows = workflowsQuery.data?.workflows ?? [];
+  const selectedWorkflow = filtered.find((w) => w.id === selectedId) ?? filtered[0] ?? null;
   const runs = runsQuery.data?.runs ?? [];
-  const memories = roomCtxQuery.data?.entries ?? [];
 
-  const handleCreateAndRun = async () => {
+  const invalidate = () => {
+    void qc.invalidateQueries({ queryKey: ["workspace-tree"] });
+    void qc.invalidateQueries({ queryKey: ["workflow-runs"] });
+  };
+
+  const handleCreateWorkflow = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!wfName.trim() || steps.length === 0) return;
-    const created = await createWf.mutateAsync({
-      name: wfName.trim(),
-      room_id: room.id,
-      steps,
-    });
-    setCreating(false);
-    setWfName("");
-    await startRun.mutateAsync({
-      workflowId: created.workflow.id,
-      input: runInput.trim() || undefined,
-      room_id: room.id,
-    });
-    setRunInput("");
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api.createWorkflow({
+        name: wfName.trim(),
+        description: wfDesc.trim() || null,
+        project_id: projectId,
+        steps,
+      });
+      setSelectedId(res.workflow.id);
+      setCreating(false);
+      setWfName("");
+      setWfDesc("");
+      invalidate();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const handlePublishMemory = async () => {
-    if (!memTitle.trim() || !memContent.trim()) return;
-    await publishMem.mutateAsync({
-      title: memTitle.trim(),
-      content: memContent.trim(),
-      room_id: room.id,
-      kind: memKind,
-      pinned: memKind === "decision",
-    });
-    setMemTitle("");
-    setMemContent("");
+  const handleStartRun = async () => {
+    if (!selectedWorkflow) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.startWorkflowRun(selectedWorkflow.id, {
+        input: runInput.trim() || undefined,
+        project_id: projectId,
+      });
+      setRunInput("");
+      invalidate();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const nameOf = (sid: string | null) =>
-    sid ? (members.find((m) => m.id === sid)?.name ?? sid.slice(0, 8)) : "人工";
+  const handleGateDecision = async (stepId: number, approved: boolean) => {
+    await api.approveWorkflowStep(stepId, { approved });
+    invalidate();
+  };
+
+  const addStep = () => {
+    const idx = steps.length + 1;
+    const prevKey = steps[steps.length - 1]?.key;
+    setSteps((prev) => [
+      ...prev,
+      {
+        key: `step_${idx}`,
+        title: `步骤 ${idx}`,
+        kind: "agent",
+        depends_on: prevKey ? [prevKey] : [],
+        target_thread_id: allThreads[0]?.id ?? null,
+        prompt_template: "承接上游输出继续执行：{{input}}",
+        include_handoff: true,
+      },
+    ]);
+  };
 
   return (
-    <div className="h-full overflow-y-auto p-4 sm:p-5 space-y-5 bg-paper">
-      {/* Header + quick actions */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <GitBranch size={15} className="text-accent" />
-          <h3 className="text-sm font-semibold text-ink">多 Agent 协同工作流 (DAG) & 共享记忆</h3>
-        </div>
-        <button
-          type="button"
-          onClick={() => setCreating((v) => !v)}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent text-on-accent text-xs font-medium hover:bg-accent-deep"
-        >
-          <Plus size={13} />
-          {creating ? "收起编排器" : "新建工作流"}
-        </button>
-      </div>
-
-      {/* DAG Workflow builder */}
-      {creating && (
-        <section className="rounded-xl bg-surface border border-line p-4 space-y-3 shadow-card">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            <input
-              value={wfName}
-              onChange={(e) => setWfName(e.target.value)}
-              placeholder="工作流名称（如：Claude 规划 → 人工审批 → Codex/Agy 实现）"
-              className="px-2.5 py-1.5 text-xs rounded-lg bg-paper border border-line text-ink"
-            />
-            <input
-              value={runInput}
-              onChange={(e) => setRunInput(e.target.value)}
-              placeholder="本次运行的初始需求 {{input}}（可选）"
-              className="px-2.5 py-1.5 text-xs rounded-lg bg-paper border border-line text-ink"
-            />
-          </div>
-
-          <div className="space-y-2">
-            {steps.map((s, idx) => (
-              <div
-                key={`${s.key}-${idx}`}
-                className="rounded-lg border border-line bg-paper p-2.5 space-y-2"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <input
-                    value={s.key}
-                    onChange={(e) =>
-                      setSteps((prev) =>
-                        prev.map((item, i) => (i === idx ? { ...item, key: e.target.value } : item)),
-                      )
-                    }
-                    className="w-24 px-2 py-1 text-2xs font-mono rounded border border-line bg-surface text-ink"
-                    placeholder="step_key"
-                  />
-                  <input
-                    value={s.title}
-                    onChange={(e) =>
-                      setSteps((prev) =>
-                        prev.map((item, i) => (i === idx ? { ...item, title: e.target.value } : item)),
-                      )
-                    }
-                    className="flex-1 min-w-[120px] px-2 py-1 text-xs rounded border border-line bg-surface text-ink"
-                    placeholder="步骤标题"
-                  />
-                  <select
-                    value={s.kind}
-                    onChange={(e) =>
-                      setSteps((prev) =>
-                        prev.map((item, i) =>
-                          i === idx
-                            ? { ...item, kind: e.target.value as "agent" | "human_gate" }
-                            : item,
-                        ),
-                      )
-                    }
-                    className="px-2 py-1 text-2xs rounded border border-line bg-surface text-ink"
-                  >
-                    <option value="agent">Agent 节点</option>
-                    <option value="human_gate">人工门禁</option>
-                  </select>
-                  {s.kind === "agent" && (
-                    <select
-                      value={s.target_session_id ?? ""}
-                      onChange={(e) =>
-                        setSteps((prev) =>
-                          prev.map((item, i) =>
-                            i === idx ? { ...item, target_session_id: e.target.value } : item,
-                          ),
-                        )
-                      }
-                      className="px-2 py-1 text-2xs rounded border border-line bg-surface text-ink"
-                    >
-                      <option value="">选择执行会话…</option>
-                      {members.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name} ({m.runtime ?? "session"})
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setSteps((prev) => prev.filter((_, i) => i !== idx))}
-                    className="p-1 text-ink-faint hover:text-danger"
-                    title="删除步骤"
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2 text-2xs">
-                  <span className="text-ink-faint">依赖前置：</span>
-                  <input
-                    value={s.depends_on.join(",")}
-                    onChange={(e) =>
-                      setSteps((prev) =>
-                        prev.map((item, i) =>
-                          i === idx
-                            ? {
-                                ...item,
-                                depends_on: e.target.value
-                                  .split(",")
-                                  .map((v) => v.trim())
-                                  .filter(Boolean),
-                              }
-                            : item,
-                        ),
-                      )
-                    }
-                    placeholder="逗号分隔 step_key（留空为根节点）"
-                    className="flex-1 min-w-[140px] px-2 py-1 rounded border border-line bg-surface text-ink font-mono"
-                  />
-                  {s.kind === "agent" && (
-                    <label className="inline-flex items-center gap-1 text-ink-muted cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(s.include_handoff)}
-                        onChange={(e) =>
-                          setSteps((prev) =>
-                            prev.map((item, i) =>
-                              i === idx ? { ...item, include_handoff: e.target.checked } : item,
-                            ),
-                          )
-                        }
-                        className="accent-accent"
-                      />
-                      自动注入交接记忆
-                    </label>
-                  )}
-                </div>
-
-                <input
-                  value={s.prompt_template}
-                  onChange={(e) =>
-                    setSteps((prev) =>
-                      prev.map((item, i) =>
-                        i === idx ? { ...item, prompt_template: e.target.value } : item,
-                      ),
-                    )
-                  }
-                  placeholder="指令模板（支持 {{input}} 与 {{step.<key>}}）"
-                  className="w-full px-2 py-1 text-2xs rounded border border-line bg-surface text-ink"
-                />
-              </div>
-            ))}
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <button
-              type="button"
-              onClick={() =>
-                setSteps((prev) => [
-                  ...prev,
-                  {
-                    key: `step_${prev.length + 1}`,
-                    title: `步骤 ${prev.length + 1}`,
-                    kind: "agent",
-                    depends_on: prev.length > 0 ? [prev[prev.length - 1].key] : [],
-                    target_session_id: members[0]?.id ?? "",
-                    prompt_template: "继续处理上游结论",
-                    include_handoff: true,
-                  },
-                ])
-              }
-              className="px-2.5 py-1.5 rounded-lg border border-line text-xs text-ink-muted hover:bg-tile-hover"
-            >
-              + 添加步骤
-            </button>
-            <button
-              type="button"
-              disabled={!wfName.trim() || createWf.isPending || startRun.isPending}
-              onClick={() => void handleCreateAndRun()}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-accent text-on-accent text-xs font-medium hover:bg-accent-deep disabled:opacity-50"
-            >
-              {createWf.isPending || startRun.isPending ? (
-                <Loader2 size={12} className="animate-spin" />
-              ) : (
-                <Play size={12} />
-              )}
-              创建并立即运行
-            </button>
-          </div>
-          {(createWf.error || startRun.error) && (
-            <p role="alert" className="text-2xs text-danger">
-              {((createWf.error ?? startRun.error) as Error).message}
+    <div data-testid="workflow-view" className="flex-1 overflow-y-auto bg-surface px-6 py-6">
+      <div className="mx-auto max-w-4xl space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line pb-4">
+          <div>
+            <h1 className="text-[15px] font-semibold text-ink">DAG 工作流</h1>
+            <p className="mt-0.5 text-xs text-ink-faint">
+              按依赖拓扑串联多 Agent 线程与人工门控（human_gate）。
             </p>
-          )}
-        </section>
-      )}
-
-      {/* Saved templates */}
-      {workflows.length > 0 && (
-        <section className="space-y-2">
-          <div className="text-2xs font-medium text-ink-faint">已保存工作流模板</div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-            {workflows.map((wf) => (
-              <div
-                key={wf.id}
-                className="rounded-xl bg-surface border border-line p-3 flex items-center justify-between gap-2 shadow-card"
-              >
-                <div className="min-w-0">
-                  <div className="text-xs font-medium text-ink truncate">{wf.name}</div>
-                  <div className="text-2xs text-ink-faint mt-0.5">
-                    {wf.steps.length} 个步骤 · {wf.steps.map((s) => s.title).join(" → ")}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  disabled={startRun.isPending}
-                  onClick={() =>
-                    startRun.mutate({ workflowId: wf.id, room_id: room.id })
-                  }
-                  className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-accent-soft text-accent text-2xs font-medium hover:bg-accent hover:text-on-accent"
-                >
-                  <Play size={11} /> 运行
-                </button>
-              </div>
-            ))}
           </div>
-        </section>
-      )}
-
-      {/* Active & historical runs */}
-      <section className="space-y-3">
-        <div className="text-2xs font-medium text-ink-faint">工作流运行记录</div>
-        {runs.length === 0 ? (
-          <div className="rounded-xl bg-surface border border-line p-5 text-center text-xs text-ink-faint">
-            暂无运行记录。点击右上角「新建工作流」，把房间里的 Claude / Codex / Antigravity 编排成协同流水线。
-          </div>
-        ) : (
-          runs.map((run) => (
-            <div
-              key={run.id}
-              className="rounded-xl bg-surface border border-line p-3.5 space-y-3 shadow-card"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-xs font-semibold text-ink truncate">
-                    #{run.id} {run.workflow_name ?? `工作流 ${run.workflow_id}`}
-                  </span>
-                  <span className="px-2 py-0.5 rounded-md text-2xs bg-tile text-ink-muted">
-                    {run.status}
-                  </span>
-                </div>
-                {(run.status === "running" || run.status === "waiting_human") && (
-                  <button
-                    type="button"
-                    onClick={() => cancelRun.mutate(run.id)}
-                    className="text-2xs text-danger hover:underline"
-                  >
-                    取消运行
-                  </button>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                {run.steps.map((step) => (
-                  <div
-                    key={step.id}
-                    className="rounded-lg border border-line bg-paper p-2.5 space-y-1.5"
-                  >
-                    <div className="flex items-center justify-between gap-1.5">
-                      <span className="text-xs font-medium text-ink truncate">
-                        {step.kind === "human_gate" ? "🛡 " : ""}
-                        {step.title}
-                      </span>
-                      <span
-                        className={`shrink-0 px-1.5 py-0.5 rounded text-2xs ${
-                          STEP_STATUS_STYLE[step.status]
-                        }`}
-                      >
-                        {STEP_STATUS_LABEL[step.status]}
-                      </span>
-                    </div>
-                    <div className="text-2xs text-ink-faint flex flex-wrap gap-1.5">
-                      <span>执行：{nameOf(step.target_session_id)}</span>
-                      {step.depends_on.length > 0 && (
-                        <span className="font-mono">← {step.depends_on.join(", ")}</span>
-                      )}
-                    </div>
-                    {step.output && (
-                      <div className="text-2xs text-ink-muted bg-surface border border-line/60 rounded p-2 max-h-24 overflow-y-auto whitespace-pre-wrap break-words">
-                        {step.output}
-                      </div>
-                    )}
-                    {step.error && (
-                      <div className="text-2xs text-danger break-words">{step.error}</div>
-                    )}
-                    {step.status === "waiting_human" && (
-                      <div className="pt-1 space-y-1.5">
-                        <input
-                          value={gateComments[step.id] ?? ""}
-                          onChange={(e) =>
-                            setGateComments((prev) => ({ ...prev, [step.id]: e.target.value }))
-                          }
-                          placeholder="审批意见（会传递给下游步骤）…"
-                          className="w-full px-2 py-1 text-2xs rounded border border-line bg-surface text-ink"
-                        />
-                        <div className="flex gap-1.5">
-                          <button
-                            type="button"
-                            disabled={approveGate.isPending}
-                            onClick={() =>
-                              approveGate.mutate({
-                                stepId: step.id,
-                                approved: true,
-                                comment: gateComments[step.id],
-                              })
-                            }
-                            className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1 rounded-md bg-success text-on-accent text-2xs font-medium"
-                          >
-                            <CheckCircle2 size={11} /> 批准放行
-                          </button>
-                          <button
-                            type="button"
-                            disabled={approveGate.isPending}
-                            onClick={() =>
-                              approveGate.mutate({
-                                stepId: step.id,
-                                approved: false,
-                                comment: gateComments[step.id],
-                              })
-                            }
-                            className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1 rounded-md bg-danger text-on-accent text-2xs font-medium"
-                          >
-                            <XCircle size={11} /> 驳回
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))
-        )}
-      </section>
-
-      {/* Room persistent shared memory */}
-      <section className="rounded-xl bg-surface border border-line p-4 space-y-3 shadow-card">
-        <div className="flex items-center gap-1.5 text-xs font-semibold text-ink">
-          <ShieldCheck size={14} className="text-accent" />
-          房间持久共享记忆（决策 / 产物 / 交接）
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-2">
-          <select
-            value={memKind}
-            onChange={(e) => setMemKind(e.target.value as ContextKind)}
-            className="px-2 py-1.5 text-xs rounded-lg bg-paper border border-line text-ink"
-          >
-            <option value="decision">架构决策 (decision)</option>
-            <option value="artifact">产物记录 (artifact)</option>
-            <option value="note">笔记 (note)</option>
-          </select>
-          <input
-            value={memTitle}
-            onChange={(e) => setMemTitle(e.target.value)}
-            placeholder="记忆标题…"
-            className="px-2.5 py-1.5 text-xs rounded-lg bg-paper border border-line text-ink"
-          />
-        </div>
-        <div className="flex gap-2">
-          <input
-            value={memContent}
-            onChange={(e) => setMemContent(e.target.value)}
-            placeholder="写下值得长期沉淀并跨 Agent 交接的关键结论…"
-            className="flex-1 min-w-0 px-2.5 py-1.5 text-xs rounded-lg bg-paper border border-line text-ink"
-          />
           <button
             type="button"
-            disabled={!memTitle.trim() || !memContent.trim() || publishMem.isPending}
-            onClick={() => void handlePublishMemory()}
-            className="px-3 py-1.5 rounded-lg bg-accent text-on-accent text-xs font-medium hover:bg-accent-deep disabled:opacity-50"
+            data-testid="new-workflow-btn"
+            onClick={() => setCreating((v) => !v)}
+            className="inline-flex h-7 items-center gap-1 rounded-md bg-accent px-3 text-xs font-medium text-on-accent hover:bg-accent-deep"
           >
-            沉淀记忆
+            <Plus className="h-3.5 w-3.5" />
+            {creating ? "取消" : "新建工作流"}
           </button>
         </div>
 
-        {memories.length === 0 ? (
-          <p className="text-2xs text-ink-faint">该房间还没有共享记忆。</p>
-        ) : (
-          <div className="space-y-2">
-            {memories.map((m) => (
-              <div
-                key={m.id}
-                className="rounded-lg bg-paper border border-line p-2.5 flex items-start justify-between gap-2"
-              >
-                <div className="min-w-0 space-y-1">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-2xs px-1.5 py-0.5 rounded bg-accent-soft text-accent">
-                      {m.kind ?? "note"}
-                    </span>
-                    <span className="text-xs font-medium text-ink">{m.title}</span>
-                  </div>
-                  <p className="text-2xs text-ink-muted whitespace-pre-wrap break-words line-clamp-3">
-                    {m.content}
-                  </p>
-                </div>
+        {error && (
+          <div className="rounded-lg bg-danger-soft px-3 py-2 text-xs text-danger">{error}</div>
+        )}
+
+        {creating && (
+          <form
+            data-testid="workflow-builder-form"
+            onSubmit={(e) => void handleCreateWorkflow(e)}
+            className="space-y-3 border-b border-line pb-6"
+          >
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <input
+                type="text"
+                required
+                value={wfName}
+                onChange={(e) => setWfName(e.target.value)}
+                placeholder="工作流名称"
+                className="rounded-md border border-line bg-paper/60 px-2.5 py-1.5 text-xs text-ink focus:border-accent focus:outline-none"
+              />
+              <input
+                type="text"
+                value={wfDesc}
+                onChange={(e) => setWfDesc(e.target.value)}
+                placeholder="描述（可选）"
+                className="rounded-md border border-line bg-paper/60 px-2.5 py-1.5 text-xs text-ink focus:border-accent focus:outline-none"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-ink-muted">步骤 ({steps.length})</span>
                 <button
                   type="button"
-                  onClick={() => updateMem.mutate({ id: m.id, patch: { pinned: !m.pinned } })}
-                  title={m.pinned ? "取消置顶" : "置顶记忆（交接时优先携带）"}
-                  className={`p-1 rounded-md shrink-0 ${
-                    m.pinned
-                      ? "bg-warning-soft text-warning"
-                      : "text-ink-faint hover:bg-tile-hover hover:text-ink"
-                  }`}
+                  onClick={addStep}
+                  className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-2xs text-accent hover:bg-accent-soft"
                 >
-                  <Pin size={12} />
+                  <Plus className="h-3 w-3" />
+                  添加步骤
                 </button>
               </div>
-            ))}
+              {steps.map((step, idx) => (
+                <div key={idx} className="space-y-1.5 rounded-lg bg-tile p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      type="text"
+                      value={step.key}
+                      onChange={(e) =>
+                        setSteps((prev) =>
+                          prev.map((s, i) => (i === idx ? { ...s, key: e.target.value } : s)),
+                        )
+                      }
+                      className="w-24 rounded-md border border-line bg-surface px-2 py-1 font-mono text-2xs text-ink"
+                    />
+                    <input
+                      type="text"
+                      value={step.title}
+                      onChange={(e) =>
+                        setSteps((prev) =>
+                          prev.map((s, i) => (i === idx ? { ...s, title: e.target.value } : s)),
+                        )
+                      }
+                      className="min-w-0 flex-1 rounded-md border border-line bg-surface px-2 py-1 text-xs text-ink"
+                    />
+                    <select
+                      value={step.kind}
+                      onChange={(e) =>
+                        setSteps((prev) =>
+                          prev.map((s, i) =>
+                            i === idx ? { ...s, kind: e.target.value as WorkflowStepKind } : s,
+                          ),
+                        )
+                      }
+                      className="rounded-md border border-line bg-surface px-2 py-1 text-2xs text-ink"
+                    >
+                      <option value="agent">Agent</option>
+                      <option value="human_gate">人工门控</option>
+                    </select>
+                    {step.kind === "agent" && (
+                      <select
+                        value={step.target_thread_id ?? ""}
+                        onChange={(e) =>
+                          setSteps((prev) =>
+                            prev.map((s, i) =>
+                              i === idx ? { ...s, target_thread_id: e.target.value || null } : s,
+                            ),
+                          )
+                        }
+                        className="rounded-md border border-line bg-surface px-2 py-1 text-2xs text-ink"
+                      >
+                        <option value="">选择执行线程</option>
+                        {allThreads.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.name} ({t.runtime})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setSteps((prev) => prev.filter((_, i) => i !== idx))}
+                      className="rounded p-1 text-ink-faint hover:text-danger"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    value={step.prompt_template}
+                    onChange={(e) =>
+                      setSteps((prev) =>
+                        prev.map((s, i) =>
+                          i === idx ? { ...s, prompt_template: e.target.value } : s,
+                        ),
+                      )
+                    }
+                    placeholder="提示词模板，支持 {{input}} 与 {{steps.<key>.output}}"
+                    className="w-full rounded-md border border-line bg-surface px-2.5 py-1 text-xs text-ink"
+                  />
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={busy}
+                className="rounded-md bg-accent px-3.5 py-1.5 text-xs font-medium text-on-accent hover:bg-accent-deep disabled:opacity-50"
+              >
+                保存工作流
+              </button>
+            </div>
+          </form>
+        )}
+
+        {filtered.length === 0 ? (
+          <div className="py-12 text-center text-xs text-ink-faint">
+            尚未创建任何 DAG 工作流。
+          </div>
+        ) : (
+          <div className="space-y-6">
+            <div className="flex flex-wrap gap-1.5">
+              {filtered.map((wf) => (
+                <button
+                  key={wf.id}
+                  type="button"
+                  onClick={() => setSelectedId(wf.id)}
+                  className={`rounded-md px-2.5 py-1 text-xs transition-colors ${
+                    selectedWorkflow?.id === wf.id
+                      ? "bg-tile-active font-medium text-ink"
+                      : "text-ink-muted hover:bg-tile-hover hover:text-ink"
+                  }`}
+                >
+                  {wf.name} ({wf.steps.length})
+                </button>
+              ))}
+            </div>
+
+            {selectedWorkflow && (
+              <div className="space-y-3 border-b border-line pb-5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h2 className="text-sm font-medium text-ink">{selectedWorkflow.name}</h2>
+                    {selectedWorkflow.description && (
+                      <p className="text-2xs text-ink-faint">{selectedWorkflow.description}</p>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedWorkflow.steps.map((st) => (
+                      <span
+                        key={st.key}
+                        className="rounded bg-tile px-2 py-0.5 font-mono text-2xs text-ink-muted"
+                      >
+                        {st.key}: {st.title}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <input
+                    type="text"
+                    value={runInput}
+                    onChange={(e) => setRunInput(e.target.value)}
+                    placeholder="输入本次运行任务目标 ({{input}})..."
+                    className="flex-1 rounded-md border border-line bg-paper/60 px-3 py-1.5 text-xs text-ink focus:border-accent focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    disabled={busy}
+                    data-testid="start-workflow-run-btn"
+                    onClick={() => void handleStartRun()}
+                    className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-accent px-3.5 text-xs font-medium text-on-accent hover:bg-accent-deep disabled:opacity-50"
+                  >
+                    <Play className="h-3.5 w-3.5" />
+                    启动运行
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="divide-y divide-line">
+              {runs.map((run) => (
+                <div key={run.id} data-testid={`workflow-run-${run.id}`} className="space-y-3 py-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-xs font-medium text-ink">
+                      运行 #{run.id} {run.input ? `— ${run.input}` : ""}
+                    </div>
+                    <span
+                      className={`rounded px-2 py-0.5 font-mono text-2xs ${
+                        run.status === "completed"
+                          ? "bg-success-soft text-success"
+                          : run.status === "waiting_human"
+                            ? "bg-warning-soft text-warning"
+                            : run.status === "failed" || run.status === "cancelled"
+                              ? "bg-danger-soft text-danger"
+                              : "bg-accent-soft text-accent"
+                      }`}
+                    >
+                      {run.status}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                    {run.steps.map((st) => (
+                      <div key={st.id} className="space-y-1.5 rounded-lg bg-tile p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex min-w-0 items-center gap-1.5">
+                            {st.kind === "human_gate" && (
+                              <UserCheck className="h-3.5 w-3.5 shrink-0 text-warning" />
+                            )}
+                            <span className="truncate text-xs font-medium text-ink">
+                              {st.title}
+                            </span>
+                            <span className="font-mono text-2xs text-ink-faint">({st.step_key})</span>
+                          </div>
+                          <span className="font-mono text-2xs text-ink-muted">{st.status}</span>
+                        </div>
+                        {st.target_thread_id && (
+                          <button
+                            type="button"
+                            onClick={() => onSelectThread(st.target_thread_id!)}
+                            className="font-mono text-2xs text-accent hover:underline"
+                          >
+                            {st.target_thread_id}
+                          </button>
+                        )}
+                        {st.output && (
+                          <p className="line-clamp-3 whitespace-pre-wrap text-2xs text-ink-muted">
+                            {st.output}
+                          </p>
+                        )}
+                        {st.status === "waiting_human" && (
+                          <div className="flex items-center gap-1.5 pt-1">
+                            <button
+                              type="button"
+                              data-testid={`workflow-gate-approve-${st.id}`}
+                              onClick={() => void handleGateDecision(st.id, true)}
+                              className="inline-flex items-center gap-1 rounded-md bg-accent px-2.5 py-1 text-2xs font-medium text-on-accent hover:bg-accent-deep"
+                            >
+                              <Check className="h-3 w-3" />
+                              批准继续
+                            </button>
+                            <button
+                              type="button"
+                              data-testid={`workflow-gate-reject-${st.id}`}
+                              onClick={() => void handleGateDecision(st.id, false)}
+                              className="inline-flex items-center gap-1 rounded-md bg-surface px-2.5 py-1 text-2xs font-medium text-danger hover:bg-danger-soft"
+                            >
+                              <X className="h-3 w-3" />
+                              驳回
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
-      </section>
+      </div>
     </div>
   );
 }

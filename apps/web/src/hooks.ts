@@ -1,469 +1,140 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { ManagedEventPayload } from "@conflux/shared";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
 
-type ManagedEvent = ManagedEventPayload;
+export function useWorkspaceTree() {
+  return useQuery({
+    queryKey: ["workspace-tree"],
+    queryFn: api.getWorkspaceTree,
+    refetchInterval: 15_000,
+  });
+}
+
+export function useThreadDetail(threadId: string | null) {
+  return useQuery({
+    queryKey: ["thread-detail", threadId],
+    queryFn: () => api.getThreadDetail(threadId!),
+    enabled: Boolean(threadId),
+    refetchInterval: 8_000,
+  });
+}
+
+export function useThreadEvents(threadId: string | null) {
+  return useQuery({
+    queryKey: ["thread-events", threadId],
+    queryFn: () => api.listThreadEvents(threadId!),
+    enabled: Boolean(threadId),
+    refetchInterval: 4_000,
+  });
+}
+
+export function useThreadGitStatus(threadId: string | null) {
+  return useQuery({
+    queryKey: ["thread-git-status", threadId],
+    queryFn: () => api.getGitStatus(threadId!),
+    enabled: Boolean(threadId),
+    refetchInterval: 10_000,
+  });
+}
+
+export function useThreadGitDiff(threadId: string | null, filePath: string | null) {
+  return useQuery({
+    queryKey: ["thread-git-diff", threadId, filePath],
+    queryFn: () => api.getGitDiff(threadId!, filePath),
+    enabled: Boolean(threadId),
+  });
+}
+
+export function useRoomDetail(roomId: number | null) {
+  return useQuery({
+    queryKey: ["room-detail", roomId],
+    queryFn: () => api.getRoomDetail(roomId!),
+    enabled: roomId !== null,
+    refetchInterval: 6_000,
+  });
+}
+
+export function useContextEntries(opts: { project_id?: number; room_id?: number }) {
+  return useQuery({
+    queryKey: ["context", opts.project_id ?? null, opts.room_id ?? null],
+    queryFn: () => api.queryContext(opts),
+    enabled: opts.project_id !== undefined || opts.room_id !== undefined,
+  });
+}
+
+export function useWorkflowRuns(workflowId?: number) {
+  return useQuery({
+    queryKey: ["workflow-runs", workflowId ?? "all"],
+    queryFn: () => api.listWorkflowRuns(workflowId ? { workflow_id: workflowId } : {}),
+    refetchInterval: 6_000,
+  });
+}
 
 export function useGraph() {
   return useQuery({
     queryKey: ["graph"],
-    queryFn: ({ signal }) => api.getGraph("all", signal),
-    refetchInterval: 5000,
+    queryFn: api.getGraph,
+    refetchInterval: 10_000,
   });
 }
 
-/** Active sessions for the @-mention picker (and their busy/status). */
-export function useSessions(status: "active" | "all" = "active", enabled = true) {
+export function useTemplates() {
   return useQuery({
-    queryKey: ["sessions", status],
-    queryFn: ({ signal }) => api.getSessions(status, signal),
-    enabled,
-    refetchInterval: enabled ? 5000 : false,
+    queryKey: ["templates"],
+    queryFn: api.listTemplates,
   });
 }
 
-export function useMessages(filters?: { status?: string; limit?: number }, enabled = true) {
+export function useSettings() {
   return useQuery({
-    queryKey: ["messages", filters],
-    queryFn: async ({ signal }) => {
-      // Auto-mark pending messages addressed to web-console as seen. The
-      // preflight is part of the queryFn so a hidden activity page (enabled
-      // false) never fires read side effects from the background.
-      try {
-        await api.checkInbox(signal);
-      } catch {
-        // web-console might not be registered yet; ignore and proceed
-      }
-      return api.getMessages(
-        {
-          status: (filters?.status as never) ?? "all",
-          limit: filters?.limit ?? 100,
-        },
-        signal,
-      );
-    },
-    enabled,
-    refetchInterval: 3000,
+    queryKey: ["settings"],
+    queryFn: api.getSettings,
   });
 }
 
-export function useRetryMessage() {
+export function useInvalidateWorkspace() {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({ queryKey: ["workspace-tree"] });
+    void qc.invalidateQueries({ queryKey: ["graph"] });
+  };
+}
+
+export function useCreateProject() {
+  const invalidate = useInvalidateWorkspace();
+  return useMutation({
+    mutationFn: api.createProject,
+    onSuccess: invalidate,
+  });
+}
+
+export function useCreateThread() {
+  const invalidate = useInvalidateWorkspace();
+  return useMutation({
+    mutationFn: api.createThread,
+    onSuccess: invalidate,
+  });
+}
+
+export function useResolveApproval() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: api.retryMessage,
-    onSuccess: () =>
-      Promise.all([
-        qc.invalidateQueries({ queryKey: ["messages"] }),
-        qc.invalidateQueries({ queryKey: ["peer-messages"] }),
-        qc.invalidateQueries({ queryKey: ["edge-messages"] }),
-        qc.invalidateQueries({ queryKey: ["graph"] }),
-      ]),
-  });
-}
-
-export function useDaemonHealth() {
-  return useQuery({
-    queryKey: ["health"],
-    queryFn: ({ signal }) => api.health(signal),
-    refetchInterval: 10000,
-  });
-}
-
-export function useSessionContext(sessionId: string | null) {
-  return useQuery({
-    queryKey: ["context", sessionId],
-    queryFn: ({ signal }) => api.getContext({ session_id: sessionId!, limit: 20 }, signal),
-    enabled: !!sessionId,
-    refetchInterval: 10000,
-  });
-}
-
-/** Two-way message flow between the web console and one session (Drawer view). */
-export function usePeerMessages(peer: string | null, enabled = true) {
-  return useQuery({
-    queryKey: ["peer-messages", peer],
-    queryFn: ({ signal }) => api.getPeerMessages(peer!, signal),
-    enabled: !!peer && enabled,
-    refetchInterval: 5000,
-  });
-}
-
-/** One conversation channel's (edge) exchange history. */
-export function useEdgeMessages(edgeId: number | null, enabled = true) {
-  return useQuery({
-    queryKey: ["edge-messages", edgeId],
-    queryFn: ({ signal }) => api.getEdgeMessages(edgeId!, signal),
-    enabled: edgeId !== null && enabled,
-    refetchInterval: 5000,
-  });
-}
-
-/** Speak on a conversation channel. */
-export function useEdgeAsk() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ edgeId, question }: { edgeId: number; question: string }) =>
-      api.edgeAsk(edgeId, question),
-    onSuccess: (_d, vars) =>
-      Promise.all([
-        qc.invalidateQueries({ queryKey: ["edge-messages", vars.edgeId] }),
-        qc.invalidateQueries({ queryKey: ["messages"] }),
-        qc.invalidateQueries({ queryKey: ["graph"] }),
-      ]),
-  });
-}
-
-/** Configured API-backed model agents. */
-export function useAgents(enabled = true) {
-  return useQuery({
-    queryKey: ["agents"],
-    queryFn: ({ signal }) => api.getAgents(signal),
-    enabled,
-    refetchInterval: enabled ? 10000 : false,
-  });
-}
-
-export function useCreateAgent() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: api.createAgent,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["agents"] }),
-  });
-}
-
-export function useDeleteAgent() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: api.deleteAgent,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["agents"] }),
-  });
-}
-
-// ---- runtime agents (CLI presets: Claude Code / Codex) ----
-
-export function useRuntimes(enabled = true) {
-  return useQuery({
-    queryKey: ["runtimes"],
-    queryFn: ({ signal }) => api.getRuntimes(signal),
-    enabled,
-    refetchInterval: enabled ? 10000 : false,
-  });
-}
-
-export function useCreateRuntimeAgent() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: api.createRuntimeAgent,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["runtimes"] }),
-  });
-}
-
-export function useDeleteRuntimeAgent() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: api.deleteRuntimeAgent,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["runtimes"] }),
-  });
-}
-
-export function useStartRuntimeAgent() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: api.startRuntimeAgent,
-    onSuccess: () =>
-      Promise.all([
-        qc.invalidateQueries({ queryKey: ["runtimes"] }),
-        qc.invalidateQueries({ queryKey: ["runtime-instances"] }),
-        qc.invalidateQueries({ queryKey: ["sessions"] }),
-        qc.invalidateQueries({ queryKey: ["graph"] }),
-      ]),
-  });
-}
-
-export function useRuntimeInstances(enabled = true) {
-  return useQuery({
-    queryKey: ["runtime-instances"],
-    queryFn: ({ signal }) => api.getRuntimeInstances(signal),
-    enabled,
-    refetchInterval: enabled ? 5000 : false,
-  });
-}
-
-function useRuntimeInstanceMutation(
-  action: typeof api.stopRuntimeInstance | typeof api.resumeRuntimeInstance,
-) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: action,
-    onSuccess: () =>
-      Promise.all([
-        qc.invalidateQueries({ queryKey: ["runtime-instances"] }),
-        qc.invalidateQueries({ queryKey: ["runtimes"] }),
-        qc.invalidateQueries({ queryKey: ["sessions"] }),
-        qc.invalidateQueries({ queryKey: ["graph"] }),
-      ]),
-  });
-}
-
-export function useStopRuntimeInstance() {
-  return useRuntimeInstanceMutation(api.stopRuntimeInstance);
-}
-
-export function useResumeRuntimeInstance() {
-  return useRuntimeInstanceMutation(api.resumeRuntimeInstance);
-}
-
-// ---- managed Codex executor ----
-
-/** Live status of one managed instance (binding, current run, approvals).
- *  Refresh is EVENT-DRIVEN: the events query invalidates this key the
- *  moment new sequences arrive, so this interval is only a slow fallback. */
-export function useManagedStatus(instanceId: string | null, enabled = true) {
-  return useQuery({
-    queryKey: ["managed-status", instanceId],
-    queryFn: ({ signal }) => api.getManagedStatus(instanceId!, signal),
-    enabled: !!instanceId && enabled,
-    refetchInterval: enabled ? 15000 : false,
-  });
-}
-
-/** Incremental event replay: each poll fetches only sequences after the
- *  cursor, so reconnects/switches never duplicate rendered events. */
-export function useManagedEvents(instanceId: string | null, enabled = true) {
-  return useQuery<ManagedEvent[], Error>({
-    queryKey: ["managed-events", instanceId],
-    enabled: !!instanceId && enabled,
-    refetchInterval: enabled ? 2000 : false,
-    queryFn: async ({ signal, client }) => {
-      const prev = client.getQueryData<ManagedEvent[]>(["managed-events", instanceId]) ?? [];
-      const cursor = prev.reduce((max, event) => Math.max(max, event.sequence), 0);
-      const res = await api.getManagedEvents(instanceId!, cursor, signal);
-      const maxSeq = res.events.reduce((m, e) => Math.max(m, e.sequence), cursor);
-      if (maxSeq !== cursor) {
-        // Fresh sequences = state changed (approval, terminal turn, death);
-        // status must not wait out its slow fallback interval.
-        const statusKey = ["managed-status", instanceId];
-        const status = client.getQueryState(statusKey);
-        const initialFetchPending = status?.fetchStatus === "fetching" && status.data === undefined;
-        const refresh = client.invalidateQueries({ queryKey: statusKey });
-        if (initialFetchPending) {
-          // Invalidating an initial fetch joins it rather than restarting it.
-          // Follow that snapshot with one read made after the new events.
-          void refresh.then(() => {
-            if (!signal.aborted) return client.invalidateQueries({ queryKey: statusKey });
-          });
-        }
-      }
-      // Merge with whatever the cache already holds (same key), newest last.
-      const seen = new Set(prev.map((e) => e.sequence));
-      const merged = [...prev, ...res.events.filter((e) => !seen.has(e.sequence))];
-      return merged.slice(-500);
-    },
-  });
-}
-
-export function useInterruptManagedTurn() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      instanceId,
-      expectedTurnId,
-    }: {
-      instanceId: string;
-      expectedTurnId?: string | null;
-    }) => api.interruptManagedTurn(instanceId, expectedTurnId),
-    onSuccess: (_d, vars) =>
-      Promise.all([
-        qc.invalidateQueries({ queryKey: ["managed-status", vars.instanceId] }),
-        qc.invalidateQueries({ queryKey: ["managed-events", vars.instanceId] }),
-      ]),
-  });
-}
-
-export function useSteerManagedTurn() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      instanceId,
-      text,
-      expectedTurnId,
-    }: {
-      instanceId: string;
-      text: string;
-      expectedTurnId?: string | null;
-    }) => api.steerManagedTurn(instanceId, text, expectedTurnId),
-    onSuccess: (_d, vars) =>
-      Promise.all([
-        qc.invalidateQueries({ queryKey: ["managed-status", vars.instanceId] }),
-        qc.invalidateQueries({ queryKey: ["managed-events", vars.instanceId] }),
-      ]),
-  });
-}
-
-export function useResolveManagedApproval() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      instanceId,
-      approvalId,
-      decision,
-      option_id,
-      answers,
-    }: {
-      instanceId: string;
+    mutationFn: (vars: {
+      threadId: string;
       approvalId: number;
       decision: "accept" | "decline" | "cancel";
       option_id?: string;
       answers?: Record<string, string | string[]>;
     }) =>
-      api.resolveManagedApproval(instanceId, approvalId, decision, {
-        ...(option_id ? { option_id } : {}),
-        ...(answers ? { answers } : {}),
+      api.resolveApproval(vars.threadId, vars.approvalId, {
+        decision: vars.decision,
+        option_id: vars.option_id,
+        answers: vars.answers,
       }),
-    onSuccess: (_d, vars) =>
-      Promise.all([
-        qc.invalidateQueries({ queryKey: ["managed-status", vars.instanceId] }),
-        qc.invalidateQueries({ queryKey: ["managed-events", vars.instanceId] }),
-      ]),
-  });
-}
-
-// ---- Workflows, Room Memory & Handoff ----
-
-export function useWorkflows(roomId?: number, enabled = true) {
-  return useQuery({
-    queryKey: ["workflows", roomId ?? "all"],
-    queryFn: ({ signal }) => api.workflows.list(roomId, signal),
-    enabled,
-  });
-}
-
-export function useWorkflowRuns(roomId?: number, enabled = true) {
-  return useQuery({
-    queryKey: ["workflow-runs", roomId ?? "all"],
-    queryFn: ({ signal }) => api.workflows.listRuns({ roomId }, signal),
-    enabled,
-    refetchInterval: enabled ? 5000 : false,
-  });
-}
-
-export function useCreateWorkflow() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: api.workflows.create,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["workflows"] }),
-  });
-}
-
-export function useStartWorkflowRun() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ workflowId, input, room_id }: { workflowId: number; input?: string; room_id?: number | null }) =>
-      api.workflows.startRun(workflowId, { input, room_id }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["workflow-runs"] }),
-  });
-}
-
-export function useApproveWorkflowGate() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ stepId, approved, comment }: { stepId: number; approved: boolean; comment?: string }) =>
-      api.workflows.approveGate(stepId, approved, comment),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["workflow-runs"] }),
-  });
-}
-
-export function useCancelWorkflowRun() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (runId: number) => api.workflows.cancelRun(runId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["workflow-runs"] }),
-  });
-}
-
-export function useRoomContext(roomId: number | null, enabled = true) {
-  return useQuery({
-    queryKey: ["room-context", roomId],
-    queryFn: ({ signal }) => api.getRoomContext(roomId!, signal),
-    enabled: roomId !== null && enabled,
-  });
-}
-
-export function usePublishContext() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: api.publishContext,
-    onSuccess: () =>
-      Promise.all([
-        qc.invalidateQueries({ queryKey: ["room-context"] }),
-        qc.invalidateQueries({ queryKey: ["context"] }),
-        qc.invalidateQueries({ queryKey: ["graph"] }),
-      ]),
-  });
-}
-
-export function useUpdateContext() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      id,
-      patch,
-    }: {
-      id: number;
-      patch: { title?: string; content?: string; kind?: "note" | "decision" | "artifact" | "handoff"; pinned?: boolean };
-    }) => api.updateContext(id, patch),
-    onSuccess: () =>
-      Promise.all([
-        qc.invalidateQueries({ queryKey: ["room-context"] }),
-        qc.invalidateQueries({ queryKey: ["context"] }),
-      ]),
-  });
-}
-
-export function useHandoffContext() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: api.handoff,
-    onSuccess: () =>
-      Promise.all([
-        qc.invalidateQueries({ queryKey: ["room-context"] }),
-        qc.invalidateQueries({ queryKey: ["context"] }),
-        qc.invalidateQueries({ queryKey: ["messages"] }),
-        qc.invalidateQueries({ queryKey: ["graph"] }),
-      ]),
-  });
-}
-
-// ---- terminal settings + open-in-terminal ----
-
-export function useTerminalSettings(enabled = true) {
-  return useQuery({
-    queryKey: ["terminal-settings"],
-    queryFn: ({ signal }) => api.getTerminalSettings(signal),
-    enabled,
-  });
-}
-
-export function useSaveTerminalSettings() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: api.saveTerminalSettings,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["terminal-settings"] }),
-  });
-}
-
-export function useOpenSessionTerminal() {
-  return useMutation({
-    mutationFn: api.openSessionTerminal,
-  });
-}
-
-// ---- Read-only native CLI config inspection ----
-
-export function useCliProviders(enabled = true) {
-  return useQuery({
-    queryKey: ["cli-providers"],
-    queryFn: ({ signal }) => api.getCliProviders(signal),
-    enabled,
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: ["workspace-tree"] });
+      void qc.invalidateQueries({ queryKey: ["thread-detail", vars.threadId] });
+      void qc.invalidateQueries({ queryKey: ["thread-events", vars.threadId] });
+      void qc.invalidateQueries({ queryKey: ["room-detail"] });
+    },
   });
 }
