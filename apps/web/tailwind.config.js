@@ -12,9 +12,11 @@ export default {
           muted: "rgb(var(--tk-ink) / 0.76)",
           faint: "rgb(var(--tk-ink) / 0.66)",
         },
-        /** 画布底 / 卡片面的层级对 */
+        /** Paseo 四层炭黑/浅灰表面：rail → paper → surface → elev */
+        rail: "rgb(var(--tk-rail) / <alpha-value>)",
         paper: "rgb(var(--tk-paper) / <alpha-value>)",
         surface: "rgb(var(--tk-surface) / <alpha-value>)",
+        elev: "rgb(var(--tk-elev) / <alpha-value>)",
         line: {
           DEFAULT: "rgb(var(--tk-line) / <alpha-value>)",
           strong: "rgb(var(--tk-line-strong) / <alpha-value>)",
@@ -61,7 +63,7 @@ export default {
         "motion-slow": "300ms",
       },
       transitionTimingFunction: {
-        DEFAULT: "cubic-bezier(0.22, 1, 0.36, 1)",
+        DEFAULT: "cubic-bezier(0.16, 1, 0.3, 1)",
         "in-expo": "cubic-bezier(0.64, 0, 0.78, 0)",
       },
       /** 半步字阶：11px 微标签地板，12px 起用于列表正文。 */

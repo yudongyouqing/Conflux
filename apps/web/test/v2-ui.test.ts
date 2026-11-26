@@ -686,13 +686,13 @@ describe("Conflux v2 Web UI components", () => {
       setNativeTheme: (m: string) => nativeCalls.push(m),
     };
 
-    setActiveCustomTheme(BUILTIN_THEMES[5].name, dom.window.localStorage, dom.window.document.documentElement);
-    assert.equal(dom.window.document.documentElement.dataset.theme, "dark");
-    assert.equal(nativeCalls.at(-1), "dark");
-
-    setActiveCustomTheme(null, dom.window.localStorage, dom.window.document.documentElement);
+    setActiveCustomTheme(BUILTIN_THEMES[1].name, dom.window.localStorage, dom.window.document.documentElement);
     assert.equal(dom.window.document.documentElement.dataset.theme, "light");
     assert.equal(nativeCalls.at(-1), "light");
+
+    setActiveCustomTheme(null, dom.window.localStorage, dom.window.document.documentElement);
+    assert.equal(dom.window.document.documentElement.dataset.theme, "dark");
+    assert.equal(nativeCalls.at(-1), "dark");
 
     delete (globalThis as { confluxDesktop?: unknown }).confluxDesktop;
   });

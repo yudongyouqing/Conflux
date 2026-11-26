@@ -8,20 +8,26 @@ import {
   type ContextEntry,
   type ContextKind,
   type ForkHandoffResult,
+  type GitCommitResult,
   type GitCreatePrResult,
   type GitDiffResponse,
   type GitMergeResult,
+  type GitPushResult,
   type GitStatusResponse,
   type Graph,
   type HandoffResult,
+  type IncomingCallMode,
   type ManagedDeliveryMode,
   type Message,
+  type PrDetailResponse,
+  type PrMergeResult,
   type Project,
   type ProjectFileMatch,
   type Room,
   type RoomTask,
   type RuntimeId,
   type RuntimeSettings,
+  type SystemNetworkInfo,
   type ThreadApproval,
   type ThreadDetailResponse,
   type ThreadEvent,
@@ -29,6 +35,10 @@ import {
   type WorkflowDefinition,
   type WorkflowRun,
   type WorkflowStepDefinition,
+  type WorkspaceCreateMode,
+  type WorkspaceFileContent,
+  type WorkspaceFileEntry,
+  type WorkspaceTerminalRunResult,
   type WorkspaceTreeResponse,
 } from "@conflux/shared";
 
@@ -71,9 +81,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  // Workspace tree & system
+  // Workspace tree, network & system
   getWorkspaceTree: () => request<WorkspaceTreeResponse>("/workspace/tree"),
   getGraph: () => request<Graph>("/graph"),
+  getNetworkInfo: () => request<SystemNetworkInfo>("/system/network"),
   probeRuntimes: (refresh = false) =>
     request<{ runtimes: CliProbeEntry[] }>(`/runtimes/probe${refresh ? "?refresh=1" : ""}`),
   getSettings: () => request<{ settings: RuntimeSettings }>("/settings"),
@@ -81,6 +92,35 @@ export const api = {
     request<{ settings: RuntimeSettings }>("/settings", {
       method: "PUT",
       body: JSON.stringify(patch),
+    }),
+
+  // MCP Mesh Calls & Per-node Incoming Policy
+  listMeshCalls: (status: "active" | "history" | "all" = "all", limit = 100) =>
+    request<{ calls: Message[] }>(`/mesh/calls?status=${status}&limit=${limit}`),
+  createMeshCall: (body: {
+    from_thread?: string;
+    to_thread: string;
+    question: string;
+    context?: string | null;
+  }) =>
+    request<{ message: Message; delivered: boolean; delivery_method: string }>("/mesh/calls", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  approveMeshCall: (id: number) =>
+    request<{ message: Message; delivered: boolean; delivery_method: string }>(
+      `/mesh/calls/${id}/approve`,
+      { method: "POST" },
+    ),
+  hangupMeshCall: (id: number, reason?: string) =>
+    request<{ message: Message }>(`/mesh/calls/${id}/hangup`, {
+      method: "POST",
+      body: JSON.stringify({ ...(reason ? { reason } : {}) }),
+    }),
+  setIncomingCallMode: (threadId: string, incoming_call_mode: IncomingCallMode) =>
+    request<{ thread: AgentThread }>(`/threads/${threadId}/call-mode`, {
+      method: "POST",
+      body: JSON.stringify({ incoming_call_mode }),
     }),
 
   // Projects
@@ -93,24 +133,10 @@ export const api = {
       `/projects/${projectId}/files?q=${encodeURIComponent(q)}&limit=25`,
     ),
 
-  // Templates
+  // Templates (legacy compatibility)
   listTemplates: () => request<{ templates: AgentTemplate[] }>("/templates"),
-  createTemplate: (body: {
-    name: string;
-    runtime: RuntimeId;
-    model?: string | null;
-    instructions?: string | null;
-    approval_mode?: ApprovalMode;
-    use_worktree?: boolean;
-  }) =>
-    request<{ template: AgentTemplate }>("/templates", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-  deleteTemplate: (id: number) =>
-    request<{ ok: boolean }>(`/templates/${id}`, { method: "DELETE" }),
 
-  // Agent Threads
+  // Agent Threads (Workspaces)
   createThread: (body: {
     project_id?: number | null;
     workdir?: string;
@@ -120,6 +146,9 @@ export const api = {
     instructions?: string | null;
     approval_mode?: ApprovalMode;
     use_worktree?: boolean;
+    workspace_mode?: WorkspaceCreateMode;
+    branch_name?: string | null;
+    pr_number?: number | string | null;
     initial_prompt?: string | null;
   }) =>
     request<{ thread: AgentThread }>("/threads", { method: "POST", body: JSON.stringify(body) }),
@@ -196,14 +225,26 @@ export const api = {
       `/threads/${threadId}/files?q=${encodeURIComponent(q)}&limit=25`,
     ),
 
-  // Git & Worktree
+  // Full Paseo Git & PR
   getGitStatus: (threadId: string) => request<GitStatusResponse>(`/threads/${threadId}/git/status`),
   getGitDiff: (threadId: string, path?: string | null) =>
     request<GitDiffResponse>(
       `/threads/${threadId}/git/diff${path ? `?path=${encodeURIComponent(path)}` : ""}`,
     ),
-  mergeWorktree: (threadId: string) =>
-    request<GitMergeResult>(`/threads/${threadId}/git/merge`, { method: "POST" }),
+  stageGitFiles: (threadId: string, body: { paths?: string[]; staged: boolean }) =>
+    request<GitStatusResponse>(`/threads/${threadId}/git/stage`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  commitGitChanges: (threadId: string, message: string) =>
+    request<GitCommitResult>(`/threads/${threadId}/git/commit`, {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    }),
+  pushGitBranch: (threadId: string) =>
+    request<GitPushResult>(`/threads/${threadId}/git/push`, { method: "POST" }),
+  getPrDetail: (threadId: string) =>
+    request<PrDetailResponse>(`/threads/${threadId}/git/pr-detail`),
   createWorktreePr: (
     threadId: string,
     body: { title?: string; body?: string; draft?: boolean } = {},
@@ -212,33 +253,54 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  mergeGitPr: (
+    threadId: string,
+    body: { method?: "squash" | "merge" | "rebase"; cleanup_worktree?: boolean } = {},
+  ) =>
+    request<PrMergeResult>(`/threads/${threadId}/git/pr/merge`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  mergeWorktree: (threadId: string) =>
+    request<GitMergeResult>(`/threads/${threadId}/git/merge`, { method: "POST" }),
   cleanupWorktree: (threadId: string) =>
     request<{ thread: AgentThread }>(`/threads/${threadId}/worktree/cleanup`, { method: "POST" }),
 
-  // Rooms
-  createRoom: (body: {
-    name: string;
-    description?: string;
-    project_id?: number | null;
-    members?: string[];
-  }) => request<{ room: Room }>("/rooms", { method: "POST", body: JSON.stringify(body) }),
+  // Full Paseo Workspace Tools: Embedded Terminal, File Explorer, Live Preview
+  execTerminalCommand: (threadId: string, command: string) =>
+    request<WorkspaceTerminalRunResult>(`/threads/${threadId}/terminal/exec`, {
+      method: "POST",
+      body: JSON.stringify({ command }),
+    }),
+  listWorkspaceFiles: (threadId: string, path = "") =>
+    request<{ entries: WorkspaceFileEntry[] }>(
+      `/threads/${threadId}/fs/tree${path ? `?path=${encodeURIComponent(path)}` : ""}`,
+    ),
+  readWorkspaceFile: (threadId: string, path: string) =>
+    request<WorkspaceFileContent>(
+      `/threads/${threadId}/fs/read?path=${encodeURIComponent(path)}`,
+    ),
+  savePreviewUrl: (threadId: string, preview_url: string | null) =>
+    request<{ thread: AgentThread }>(`/threads/${threadId}/preview`, {
+      method: "PUT",
+      body: JSON.stringify({ preview_url }),
+    }),
+  detectPreviewUrls: (threadId: string) =>
+    request<{ detected: Array<{ port: number; url: string }>; saved_url: string | null }>(
+      `/threads/${threadId}/preview/detect`,
+    ),
+
+  // Legacy room/context/workflow endpoints kept typed for non-breaking migration
+  createRoom: (body: { name: string; description?: string; project_id?: number | null; members?: string[] }) =>
+    request<{ room: Room }>("/rooms", { method: "POST", body: JSON.stringify(body) }),
   getRoomDetail: (roomId: number) =>
-    request<{
-      room: Room;
-      tasks: RoomTask[];
-      messages: Message[];
-      pending_approvals: ThreadApproval[];
-    }>(`/rooms/${roomId}`),
+    request<{ room: Room; tasks: RoomTask[]; messages: Message[]; pending_approvals: ThreadApproval[] }>(
+      `/rooms/${roomId}`,
+    ),
   deleteRoom: (roomId: number) => request<{ ok: boolean }>(`/rooms/${roomId}`, { method: "DELETE" }),
   joinRoom: (roomId: number, thread_id: string) =>
-    request<{ room: Room }>(`/rooms/${roomId}/join`, {
-      method: "POST",
-      body: JSON.stringify({ thread_id }),
-    }),
-  summonRoom: (
-    roomId: number,
-    body: { executor_thread_id: string; prompt: string; delivery_mode?: ManagedDeliveryMode },
-  ) =>
+    request<{ room: Room }>(`/rooms/${roomId}/join`, { method: "POST", body: JSON.stringify({ thread_id }) }),
+  summonRoom: (roomId: number, body: { executor_thread_id: string; prompt: string; delivery_mode?: ManagedDeliveryMode }) =>
     request<{ task: RoomTask; message_id: number; delivered: boolean; delivery_method: string }>(
       `/rooms/${roomId}/summon`,
       { method: "POST", body: JSON.stringify(body) },
@@ -248,15 +310,12 @@ export const api = {
       `/rooms/${roomId}/broadcast`,
       { method: "POST", body: JSON.stringify({ prompt }) },
     ),
-
-  // Context shared memory
   queryContext: (opts: { project_id?: number; room_id?: number; query?: string } = {}) => {
     const qs = new URLSearchParams();
     if (opts.project_id !== undefined) qs.set("project_id", String(opts.project_id));
     if (opts.room_id !== undefined) qs.set("room_id", String(opts.room_id));
     if (opts.query) qs.set("query", opts.query);
-    const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    return request<{ entries: ContextEntry[] }>(`/context${suffix}`);
+    return request<{ entries: ContextEntry[] }>(`/context${qs.toString() ? `?${qs}` : ""}`);
   },
   publishContext: (body: {
     title: string;
@@ -269,34 +328,17 @@ export const api = {
   }) => request<{ entry: ContextEntry }>("/context", { method: "POST", body: JSON.stringify(body) }),
   updateContext: (
     id: number,
-    body: {
-      title?: string;
-      content?: string;
-      pinned?: boolean;
-      kind?: ContextKind;
-      expected_version?: number;
-    },
-  ) =>
-    request<{ entry: ContextEntry }>(`/context/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
+    body: { title?: string; content?: string; pinned?: boolean; kind?: ContextKind; expected_version?: number },
+  ) => request<{ entry: ContextEntry }>(`/context/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   deleteContext: (id: number) => request<{ ok: boolean }>(`/context/${id}`, { method: "DELETE" }),
-
-  // Workflows & Handoff
   createWorkflow: (body: {
     name: string;
     description?: string | null;
     project_id?: number | null;
     room_id?: number | null;
     steps: WorkflowStepDefinition[];
-  }) =>
-    request<{ workflow: WorkflowDefinition }>("/workflows", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-  deleteWorkflow: (id: number) =>
-    request<{ ok: boolean }>(`/workflows/${id}`, { method: "DELETE" }),
+  }) => request<{ workflow: WorkflowDefinition }>("/workflows", { method: "POST", body: JSON.stringify(body) }),
+  deleteWorkflow: (id: number) => request<{ ok: boolean }>(`/workflows/${id}`, { method: "DELETE" }),
   listWorkflowRuns: (opts: { project_id?: number; workflow_id?: number } = {}) => {
     const qs = new URLSearchParams();
     if (opts.project_id !== undefined) qs.set("project_id", String(opts.project_id));
@@ -304,15 +346,9 @@ export const api = {
     return request<{ runs: WorkflowRun[] }>(`/workflow-runs${qs.toString() ? `?${qs}` : ""}`);
   },
   startWorkflowRun: (workflowId: number, body: { input?: string; project_id?: number | null; room_id?: number | null }) =>
-    request<{ run: WorkflowRun }>(`/workflows/${workflowId}/runs`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
+    request<{ run: WorkflowRun }>(`/workflows/${workflowId}/runs`, { method: "POST", body: JSON.stringify(body) }),
   approveWorkflowStep: (stepId: number, body: { approved: boolean; comment?: string }) =>
-    request<{ run: WorkflowRun }>(`/workflow-steps/${stepId}/approve`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
+    request<{ run: WorkflowRun }>(`/workflow-steps/${stepId}/approve`, { method: "POST", body: JSON.stringify(body) }),
   handoffContext: (body: {
     from_thread: string;
     to_thread: string;

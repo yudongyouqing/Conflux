@@ -1,688 +1,516 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
-  ArrowRightLeft,
-  ExternalLink,
-  FolderPlus,
+  Columns2,
+  Folder,
   GitBranch,
-  GitMerge,
-  GitPullRequest,
-  MessageSquarePlus,
-  Play,
-  Square,
+  Globe,
+  MessageSquare,
   Terminal,
   X,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
+import type { IncomingCallMode } from "@conflux/shared";
 import { api } from "./api";
 import {
-  useContextEntries,
-  useCreateProject,
-  useResolveApproval,
-  useTemplates,
-  useThreadDetail,
+  useGraph,
+  useMeshCalls,
+  useNetworkInfo,
   useThreadGitStatus,
+  useThreadPrDetail,
   useWorkspaceTree,
 } from "./hooks";
 import { useLiveEvents } from "./use-live-events";
 import { BUILTIN_THEMES, setActiveCustomTheme } from "./theme";
-import { TopBar } from "./components/TopBar";
-import { ProjectTreeSidebar, type ActiveView } from "./components/ProjectTreeSidebar";
-import { NewAgentModal } from "./components/NewAgentModal";
+import { ActivityRail, type MainScreen } from "./components/ActivityRail";
+import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { AgentWorkbench } from "./components/AgentWorkbench";
-import { RightInspector, type InspectorTab } from "./components/RightInspector";
-import { RoomView } from "./components/RoomView";
-import { WorkflowView } from "./components/WorkflowView";
-import { GraphOverview } from "./components/GraphOverview";
+import { PaseoToolPane, type PaseoToolTab } from "./components/PaseoToolPane";
+import {
+  incomingModeClass,
+  incomingModeLabel,
+  LiveMeshGraph,
+} from "./components/LiveMeshGraph";
+import { NewWorkspaceModal } from "./components/NewWorkspaceModal";
+import {
+  CallHistoryModal,
+  ConnectRemoteModal,
+} from "./components/ConnectAndHistoryModals";
 import { SettingsView } from "./components/SettingsView";
 
-const DARK_THEME_NAME = BUILTIN_THEMES[5].name;
-type ThreadStageTab = "chat" | InspectorTab;
+const PASEO_DARK_THEME = BUILTIN_THEMES[0].name;
+const PASEO_LIGHT_THEME = BUILTIN_THEMES[1].name;
 
-function ActiveThreadStagePanel({
-  threadId,
-  activeTab,
-  defaultPrFormOpen,
-  allThreads,
-  onOpenForkModal,
-  onSelectThread,
-}: {
-  threadId: string;
-  activeTab: InspectorTab;
-  defaultPrFormOpen: boolean;
-  allThreads: ReturnType<typeof useWorkspaceTree>["data"] extends infer D
-    ? D extends { threads: infer T }
-      ? T
-      : never
-    : never;
-  onOpenForkModal: () => void;
-  onSelectThread: (threadId: string) => void;
-}) {
-  const qc = useQueryClient();
-  const detail = useThreadDetail(threadId);
-  const thread = detail.data?.thread;
-  if (!thread) {
-    return (
-      <div className="flex flex-1 items-center justify-center bg-surface text-xs text-ink-faint">
-        加载面板...
-      </div>
-    );
-  }
+type LeftTab = "chat" | PaseoToolTab;
 
-  return (
-    <RightInspector
-      key={`${thread.id}-${defaultPrFormOpen ? "pr" : "view"}`}
-      mode="stage"
-      activeTab={activeTab}
-      defaultPrFormOpen={defaultPrFormOpen}
-      thread={thread}
-      checkpoints={detail.data?.checkpoints ?? []}
-      allThreads={allThreads}
-      onRollbackCheckpoint={async (cpId) => {
-        await api.rollbackCheckpoint(thread.id, cpId);
-        void qc.invalidateQueries({ queryKey: ["thread-detail", thread.id] });
-        void qc.invalidateQueries({ queryKey: ["thread-git-status", thread.id] });
-        void qc.invalidateQueries({ queryKey: ["thread-git-diff", thread.id] });
-      }}
-      onOpenForkModal={onOpenForkModal}
-      onSelectThread={onSelectThread}
-    />
-  );
+function nextCallMode(m: IncomingCallMode): IncomingCallMode {
+  if (m === "auto") return "ask";
+  if (m === "ask") return "dnd";
+  return "auto";
+}
+
+function shortDirName(workdir: string): string {
+  const cleaned = workdir.replace(/[\\/]+$/, "");
+  const parts = cleaned.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] || cleaned;
 }
 
 export default function App() {
   useLiveEvents(true);
   const qc = useQueryClient();
+
   const treeQuery = useWorkspaceTree();
-  const templatesQuery = useTemplates();
-  const createProject = useCreateProject();
-  const resolveApproval = useResolveApproval();
+  const graphQuery = useGraph();
+  const networkQuery = useNetworkInfo();
+  const activeCallsQuery = useMeshCalls("active");
+  const allCallsQuery = useMeshCalls("all");
+  const historyCallsQuery = useMeshCalls("history");
 
   const projects = treeQuery.data?.projects ?? [];
   const threads = treeQuery.data?.threads ?? [];
-  const rooms = treeQuery.data?.rooms ?? [];
-  const workflows = treeQuery.data?.workflows ?? [];
-  const pendingApprovals = treeQuery.data?.pending_approvals ?? [];
   const cliProbes = treeQuery.data?.cli_probes ?? [];
-  const templates = templatesQuery.data?.templates ?? [];
+  const activeCalls = activeCallsQuery.data?.calls ?? [];
+  const allCalls = allCallsQuery.data?.calls ?? [];
+  const historyCalls = historyCallsQuery.data?.calls ?? [];
+  const network = networkQuery.data;
+  const localHostname = network?.hostname ?? "localhost";
 
-  const [activeView, setActiveView] = useState<ActiveView>({ kind: "graph" });
-  const [threadStageTab, setThreadStageTab] = useState<ThreadStageTab>("chat");
-  const [prQuickOpen, setPrQuickOpen] = useState(false);
-  const [initializedSelection, setInitializedSelection] = useState(false);
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [newAgentModal, setNewAgentModal] = useState<{ open: boolean; projectId: number | null }>({
-    open: false,
-    projectId: null,
-  });
+  const [screen, setScreen] = useState<MainScreen>("workspace");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  const [isSplit, setIsSplit] = useState(true);
+  const [leftTab, setLeftTab] = useState<LeftTab>("chat");
+  const [rightTool, setRightTool] = useState<PaseoToolTab>("git");
   const [forkModalOpen, setForkModalOpen] = useState(false);
 
-  // Add project dialog (web fallback or manual path)
-  const [addProjectOpen, setAddProjectOpen] = useState(false);
-  const [projectPathInput, setProjectPathInput] = useState("");
-  const [projectNameInput, setProjectNameInput] = useState("");
-  const [projectError, setProjectError] = useState<string | null>(null);
-
-  // New room dialog
-  const [newRoomState, setNewRoomState] = useState<{ open: boolean; projectId: number | null }>({
+  const [newWsModal, setNewWsModal] = useState<{ open: boolean; prefillDir?: string }>({
     open: false,
-    projectId: null,
   });
-  const [roomNameInput, setRoomNameInput] = useState("");
-  const [roomMemberIds, setRoomMemberIds] = useState<string[]>([]);
+  const [connectOpen, setConnectOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const [isDark, setIsDark] = useState<boolean>(() =>
-    typeof document !== "undefined" ? document.documentElement.dataset.theme === "dark" : false,
+    typeof document !== "undefined" ? document.documentElement.dataset.theme !== "light" : true,
   );
 
-  // Auto-open first thread once data arrives
+  // Auto-select first local managed workspace (falling back to first live peer)
   useEffect(() => {
-    if (initializedSelection || treeQuery.isLoading) return;
+    if (activeThreadId && threads.some((t) => t.id === activeThreadId)) return;
     if (threads.length > 0) {
-      setActiveView({ kind: "thread", threadId: threads[0].id });
+      const preferred = threads.find((t) => t.kind === "managed") ?? threads[0];
+      setActiveThreadId(preferred.id);
     }
-    setInitializedSelection(true);
-  }, [initializedSelection, treeQuery.isLoading, threads]);
+  }, [activeThreadId, threads]);
 
-  const activeThread =
-    activeView.kind === "thread"
-      ? threads.find((x) => x.id === activeView.threadId) ?? null
-      : null;
+  // Global ⌘B / Ctrl+B sidebar collapse shortcut
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
+        e.preventDefault();
+        setSidebarCollapsed((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
-  // Live counts for the Conductor segmented stage tabs (shared React Query cache)
-  const activeGitStatus = useThreadGitStatus(activeThread?.id ?? null);
-  const activeContext = useContextEntries(
-    activeThread && activeThread.project_id !== null
-      ? { project_id: activeThread.project_id }
-      : {},
+  const activeThread = useMemo(
+    () => threads.find((t) => t.id === activeThreadId) ?? null,
+    [threads, activeThreadId],
   );
-  const changedFilesCount = activeGitStatus.data?.files.length ?? 0;
-  const memoryCount = activeContext.data?.entries.length ?? 0;
 
-  const selectView = (next: ActiveView) => {
-    setActiveView(next);
-    if (next.kind === "thread") {
-      setThreadStageTab("chat");
-      setPrQuickOpen(false);
+  const gitStatus = useThreadGitStatus(activeThread?.id ?? null);
+  const prDetail = useThreadPrDetail(activeThread?.id ?? null);
+
+  const changedCount = gitStatus.data?.files.length ?? 0;
+  const diffTotals = useMemo(() => {
+    let add = 0;
+    let del = 0;
+    for (const f of gitStatus.data?.files ?? []) {
+      add += f.additions ?? 0;
+      del += f.deletions ?? 0;
     }
-  };
+    return { add, del };
+  }, [gitStatus.data]);
 
-  const applyThemeChoice = (themeName: string | null) => {
-    setActiveCustomTheme(themeName);
-    setIsDark(document.documentElement.dataset.theme === "dark");
-  };
+  const previewPortLabel = useMemo(() => {
+    const url = activeThread?.preview_url;
+    if (!url) return "";
+    const m = url.match(/:(\d{2,5})/);
+    return m ? ` :${m[1]}` : "";
+  }, [activeThread?.preview_url]);
 
   const handleToggleTheme = () => {
     const nextDark = !isDark;
-    setActiveCustomTheme(nextDark ? DARK_THEME_NAME : null);
+    setActiveCustomTheme(nextDark ? PASEO_DARK_THEME : PASEO_LIGHT_THEME);
     setIsDark(nextDark);
   };
 
-  const handleAddProjectClick = async () => {
-    const picker =
-      window.confluxDesktop?.pickProjectDirectory ?? window.confluxDesktop?.pickDirectory;
-    if (picker) {
-      const picked = await picker();
-      if (picked) {
-        await createProject.mutateAsync({ root_path: picked });
-        return;
-      }
-    }
-    setProjectError(null);
-    setAddProjectOpen(true);
+  const handleApplyThemeChoice = (themeName: string | null) => {
+    setActiveCustomTheme(themeName);
+    setIsDark(document.documentElement.dataset.theme !== "light");
   };
 
-  const handleSubmitProject = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!projectPathInput.trim()) return;
-    setProjectError(null);
-    try {
-      await createProject.mutateAsync({
-        root_path: projectPathInput.trim(),
-        name: projectNameInput.trim() || undefined,
-      });
-      setProjectPathInput("");
-      setProjectNameInput("");
-      setAddProjectOpen(false);
-    } catch (err) {
-      setProjectError(err instanceof Error ? err.message : String(err));
+  const handleEnterWorkspace = (threadId: string) => {
+    setActiveThreadId(threadId);
+    setScreen("workspace");
+    if (isSplit) setLeftTab("chat");
+  };
+
+  const handleToggleSplit = (force?: boolean) => {
+    const next = typeof force === "boolean" ? force : !isSplit;
+    setIsSplit(next);
+    if (next) {
+      setLeftTab("chat");
     }
   };
 
-  const handleSubmitRoom = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!roomNameInput.trim()) return;
-    const res = await api.createRoom({
-      name: roomNameInput.trim(),
-      project_id: newRoomState.projectId,
-      members: roomMemberIds,
-    });
-    setRoomNameInput("");
-    setRoomMemberIds([]);
-    setNewRoomState({ open: false, projectId: null });
-    void qc.invalidateQueries({ queryKey: ["workspace-tree"] });
-    selectView({ kind: "room", roomId: res.room.id });
-  };
-
-  const handleStopOrResumeActive = async () => {
+  const handleCycleActiveCallMode = async () => {
     if (!activeThread) return;
-    if (activeThread.state === "stopped" || activeThread.state === "error") {
-      await api.resumeThread(activeThread.id);
-    } else {
-      await api.stopThread(activeThread.id);
-    }
+    const next = nextCallMode(activeThread.incoming_call_mode ?? "auto");
+    await api.setIncomingCallMode(activeThread.id, next);
     void qc.invalidateQueries({ queryKey: ["workspace-tree"] });
-    void qc.invalidateQueries({ queryKey: ["thread-detail", activeThread.id] });
+    void qc.invalidateQueries({ queryKey: ["graph"] });
   };
 
-  // Compute unified Stage Header breadcrumb & subtitle
-  let breadcrumb = "态势图谱";
-  let subtitle: ReactNode = null;
-  let subtitleTitle: string | undefined;
-  if (activeView.kind === "thread") {
-    const p = projects.find((x) => x.id === activeThread?.project_id);
-    breadcrumb = activeThread ? activeThread.name : "Agent 工作台";
-    if (activeThread) {
-      subtitleTitle = activeThread.workdir;
-      subtitle = (
-        <>
-          <span
-            data-testid="workbench-thread-state"
-            className={
-              activeThread.state === "waiting_approval"
-                ? "font-medium text-warning"
-                : activeThread.state === "running"
-                  ? "font-medium text-info"
-                  : activeThread.state === "error"
-                    ? "font-medium text-danger"
-                    : "text-ink-faint"
-            }
-          >
-            {activeThread.state}
-          </span>
-          {p && <span>· {p.name}</span>}
-          <span className="truncate">· {activeThread.model ?? activeThread.runtime}</span>
-        </>
-      );
+  const handleSendPromptToActiveAgent = async (promptText: string) => {
+    if (!activeThread || !promptText.trim()) return;
+    if (activeThread.kind === "external") {
+      await api.createMeshCall({ to_thread: activeThread.id, question: promptText.trim() });
+    } else {
+      await api.sendPrompt(activeThread.id, { prompt: promptText.trim(), delivery_mode: "queue" });
     }
-  } else if (activeView.kind === "room") {
-    const r = rooms.find((x) => x.id === activeView.roomId);
-    breadcrumb = r ? `# ${r.name}` : "协作房间";
-    subtitle = r?.description ?? "多 Agent 双向协作房间";
-  } else if (activeView.kind === "workflow") {
-    const p = projects.find((x) => x.id === activeView.projectId);
-    breadcrumb = p ? `${p.name} · DAG 工作流` : "DAG 工作流";
-  } else if (activeView.kind === "settings") {
-    breadcrumb = "系统设置";
-  }
+    if (!isSplit) setLeftTab("chat");
+    void qc.invalidateQueries({ queryKey: ["thread-detail", activeThread.id] });
+    void qc.invalidateQueries({ queryKey: ["thread-events", activeThread.id] });
+    void qc.invalidateQueries({ queryKey: ["mesh-calls"] });
+  };
 
-  const isStopped = activeThread?.state === "stopped" || activeThread?.state === "error";
+  const toolTabDefs: Array<{
+    id: PaseoToolTab;
+    label: string;
+    icon: typeof GitBranch;
+  }> = [
+    {
+      id: "git",
+      label: changedCount > 0 ? `Git & PR (${changedCount})` : "Git & PR",
+      icon: GitBranch,
+    },
+    { id: "term", label: "终端", icon: Terminal },
+    { id: "files", label: "文件", icon: Folder },
+    { id: "preview", label: `预览${previewPortLabel}`, icon: Globe },
+  ];
 
-  const threadLeftExtra = activeThread ? (
-    <div className="hidden items-center gap-1.5 sm:flex">
-      {activeThread.worktree_branch && (
-        <span className="inline-flex max-w-[160px] items-center gap-1 truncate rounded-md border border-line bg-paper px-2 py-0.5 font-mono text-2xs text-ink-muted">
-          <GitBranch className="h-3 w-3 shrink-0" />
-          <span className="truncate">{activeThread.worktree_branch}</span>
-        </span>
-      )}
-      {activeThread.kind === "external" && (
-        <span className="inline-flex items-center gap-1 rounded-md bg-info-soft px-1.5 py-0.5 text-2xs text-info">
-          <Terminal className="h-3 w-3" />
-          外部
-        </span>
-      )}
-      {activeThread.pr_url && (
-        <a
-          href={activeThread.pr_url}
-          target="_blank"
-          rel="noreferrer"
-          data-testid="topbar-pr-link"
-          className="inline-flex items-center gap-1 rounded-md bg-accent-soft px-2 py-0.5 font-mono text-2xs font-semibold text-accent hover:underline"
-        >
-          <GitPullRequest className="h-3 w-3 shrink-0" />
-          <span>
-            {activeThread.pr_url.match(/\/pull\/(\d+)/)?.[1]
-              ? `PR #${activeThread.pr_url.match(/\/pull\/(\d+)/)![1]}`
-              : "PR"}
-          </span>
-          <ExternalLink className="h-2.5 w-2.5 shrink-0" />
-        </a>
-      )}
-    </div>
-  ) : null;
-
-  const threadCenterSegmented = activeThread ? (
-    <div
-      data-testid="stage-segmented-tabs"
-      className="inline-flex items-center rounded-lg border border-line bg-paper p-0.5"
-    >
-      {(
-        [
-          { id: "chat", label: "执行流", count: null },
-          { id: "git", label: "代码 Diff", count: changedFilesCount },
-          { id: "memory", label: "共享记忆", count: memoryCount },
-          { id: "handoff", label: "交接", count: null },
-        ] as const
-      ).map((item) => {
-        const active = threadStageTab === item.id;
-        return (
-          <button
-            key={item.id}
-            type="button"
-            data-testid={`stage-tab-${item.id}`}
-            onClick={() => {
-              setThreadStageTab(item.id);
-              if (item.id !== "git") setPrQuickOpen(false);
-            }}
-            className={`inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-md px-2.5 text-xs transition-colors ${
-              active
-                ? "bg-surface font-semibold text-ink shadow-card"
-                : "text-ink-muted hover:text-ink"
-            }`}
-          >
-            <span>{item.label}</span>
-            {item.count !== null && item.count > 0 && (
-              <span className="font-mono text-2xs text-ink-faint tabular-nums">({item.count})</span>
-            )}
-          </button>
-        );
-      })}
-    </div>
-  ) : null;
-
-  const threadRightExtra = activeThread ? (
-    <div className="hidden items-center gap-1.5 sm:flex">
-      {activeThread.worktree_path && threadStageTab !== "git" && (
-        <>
-          <button
-            type="button"
-            data-testid="stage-quick-pr-btn"
-            onClick={() => {
-              setPrQuickOpen(true);
-              setThreadStageTab("git");
-            }}
-            className="inline-flex h-8 items-center gap-1 whitespace-nowrap rounded-lg border border-line bg-paper/60 px-2.5 text-xs font-medium text-ink hover:border-line-strong hover:bg-tile-hover transition-colors"
-          >
-            <GitPullRequest className="h-3.5 w-3.5" />
-            <span>{activeThread.pr_url ? "更新 PR" : "建 PR"}</span>
-          </button>
-          <button
-            type="button"
-            data-testid="stage-quick-merge-btn"
-            onClick={() => {
-              setPrQuickOpen(false);
-              setThreadStageTab("git");
-            }}
-            className="inline-flex h-8 items-center gap-1 whitespace-nowrap rounded-lg bg-accent px-2.5 text-xs font-semibold text-on-accent hover:bg-accent-deep transition-colors"
-          >
-            <GitMerge className="h-3.5 w-3.5" />
-            <span>合并</span>
-          </button>
-        </>
-      )}
-
-      <button
-        type="button"
-        data-testid="workbench-fork-btn"
-        onClick={() => setForkModalOpen(true)}
-        title="原地换引擎接力 (Fork & Handoff)"
-        aria-label="原地换引擎接力"
-        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-paper/60 text-ink-muted hover:border-line-strong hover:text-ink transition-colors"
-      >
-        <ArrowRightLeft className="h-3.5 w-3.5" />
-      </button>
-
-      {activeThread.kind === "managed" && (
-        <button
-          type="button"
-          data-testid="workbench-stop-resume-btn"
-          onClick={() => void handleStopOrResumeActive()}
-          title={isStopped ? "恢复进程" : "停止进程"}
-          aria-label={isStopped ? "恢复进程" : "停止进程"}
-          className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${
-            isStopped
-              ? "border-success/40 bg-success-soft text-success"
-              : "border-line bg-paper/60 text-ink-muted hover:border-danger/40 hover:text-danger"
-          }`}
-        >
-          {isStopped ? <Play className="h-3.5 w-3.5" /> : <Square className="h-3 w-3" />}
-        </button>
-      )}
-    </div>
-  ) : null;
+  const prChecksSummary = useMemo(() => {
+    const pr = prDetail.data?.pr;
+    if (!pr) return null;
+    const passed = pr.checks.filter((c) => c.status === "pass").length;
+    return { number: pr.number, passed, total: pr.checks.length };
+  }, [prDetail.data]);
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-paper text-ink">
-      {/* Left: 312px Conductor Rich Thread Inbox */}
-      <ProjectTreeSidebar
-        projects={projects}
-        threads={threads}
-        rooms={rooms}
-        workflows={workflows}
-        activeView={activeView}
-        mobileOpen={mobileSidebarOpen}
-        onCloseMobile={() => setMobileSidebarOpen(false)}
-        onSelectView={selectView}
-        onAddProjectClick={() => void handleAddProjectClick()}
-        onNewAgentForProject={(projectId) => setNewAgentModal({ open: true, projectId })}
-        onNewRoomClick={(projectId) => {
-          setRoomMemberIds(
-            threads
-              .filter((t) => projectId === null || t.project_id === projectId)
-              .slice(0, 4)
-              .map((t) => t.id),
-          );
-          setNewRoomState({ open: true, projectId });
-        }}
-      />
-
-      {/* Right: 100%-Width Conductor Single-Focus Stage (zero 3-column squeeze) */}
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-surface">
-        <TopBar
-          breadcrumb={breadcrumb}
-          subtitle={subtitle}
-          subtitleTitle={subtitleTitle}
-          leftExtra={threadLeftExtra}
-          centerExtra={threadCenterSegmented}
-          rightExtra={threadRightExtra}
-          pendingApprovals={pendingApprovals}
-          isDark={isDark}
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-rail text-ink">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        {/* 1. Far-Left 46px Paseo Activity Rail */}
+        <ActivityRail
+          screen={screen}
+          activeCallCount={activeCalls.length}
+          sidebarCollapsed={sidebarCollapsed}
+          onSelectScreen={setScreen}
+          onOpenHistory={() => setHistoryOpen(true)}
+          onOpenConnect={() => setConnectOpen(true)}
           onToggleTheme={handleToggleTheme}
-          onOpenNewAgent={() =>
-            setNewAgentModal({
-              open: true,
-              projectId:
-                activeView.kind === "thread"
-                  ? (activeThread?.project_id ?? projects[0]?.id ?? null)
-                  : (projects[0]?.id ?? null),
-            })
-          }
-          onOpenSettings={() => selectView({ kind: "settings" })}
-          onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
-          showNewAgentButton={activeView.kind !== "thread"}
-          onResolveApproval={(params) => resolveApproval.mutateAsync(params)}
-          onSelectThread={(threadId) => selectView({ kind: "thread", threadId })}
+          onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
         />
 
-        <main className="relative flex min-h-0 flex-1 overflow-hidden">
-          {activeView.kind === "thread" && (
-            <>
-              <AgentWorkbench
-                threadId={activeView.threadId}
-                cliProbes={cliProbes}
-                allThreads={threads}
-                onResolveApproval={(params) => resolveApproval.mutateAsync(params)}
-                onSelectThread={(threadId) => selectView({ kind: "thread", threadId })}
-                forkModalOpen={forkModalOpen}
-                onSetForkModalOpen={setForkModalOpen}
-                hidden={threadStageTab !== "chat"}
-              />
-              {threadStageTab !== "chat" && (
-                <ActiveThreadStagePanel
-                  threadId={activeView.threadId}
-                  activeTab={threadStageTab}
-                  defaultPrFormOpen={prQuickOpen}
-                  allThreads={threads}
-                  onOpenForkModal={() => setForkModalOpen(true)}
-                  onSelectThread={(threadId) => selectView({ kind: "thread", threadId })}
-                />
+        {/* 2. Smooth Collapsible 272px Host -> Dir -> Workspace Sidebar */}
+        <WorkspaceSidebar
+          collapsed={sidebarCollapsed}
+          projects={projects}
+          threads={threads}
+          activeCalls={activeCalls}
+          activeThreadId={activeThreadId}
+          localHostname={localHostname}
+          onSelectThread={handleEnterWorkspace}
+          onOpenNewWorkspace={(prefillDir) => setNewWsModal({ open: true, prefillDir })}
+        />
+
+        {/* 3. Main Area */}
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-surface">
+          {/* SCREEN A: FULL PASEO WORKSPACE (ZERO DUPLICATE TABS) */}
+          {screen === "workspace" && (
+            <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              {/* Top 40px IDE Tab Bar */}
+              <header className="flex h-10 shrink-0 items-stretch justify-between gap-2 border-b border-line bg-paper pr-2.5">
+                <div
+                  data-testid="workspace-top-tabstrip"
+                  className="flex min-w-0 items-stretch overflow-x-auto"
+                >
+                  <div className="flex shrink-0 items-center gap-2 border-r border-line px-3 text-xs text-ink-muted">
+                    <strong className="font-semibold text-ink">
+                      {activeThread ? activeThread.name : "未选择工作区"}
+                    </strong>
+                    {activeThread && (
+                      <span className="hidden font-mono text-2xs text-ink-faint sm:inline">
+                        {shortDirName(activeThread.workdir)} /{" "}
+                        {activeThread.worktree_branch || activeThread.base_branch || activeThread.runtime}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Chat tab always shown */}
+                  <button
+                    type="button"
+                    data-testid="top-tab-chat"
+                    onClick={() => setLeftTab("chat")}
+                    className={`inline-flex items-center gap-1.5 whitespace-nowrap border-r border-line border-t-2 px-3 text-xs transition-colors ${
+                      leftTab === "chat"
+                        ? "border-t-ink bg-surface font-semibold text-ink"
+                        : "border-t-transparent text-ink-faint hover:bg-tile-hover hover:text-ink"
+                    }`}
+                  >
+                    <MessageSquare className="h-3.5 w-3.5" />
+                    <span>对话</span>
+                  </button>
+
+                  {/* Zero duplicate tabs: tool tabs appear in top bar ONLY when split is OFF */}
+                  {!isSplit &&
+                    activeThread &&
+                    toolTabDefs.map((tab) => {
+                      const Icon = tab.icon;
+                      const active = leftTab === tab.id;
+                      return (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          data-testid={`top-tab-${tab.id}`}
+                          onClick={() => setLeftTab(tab.id)}
+                          className={`inline-flex items-center gap-1.5 whitespace-nowrap border-r border-line border-t-2 px-3 text-xs transition-colors ${
+                            active
+                              ? "border-t-ink bg-surface font-semibold text-ink"
+                              : "border-t-transparent text-ink-faint hover:bg-tile-hover hover:text-ink"
+                          }`}
+                        >
+                          <Icon className="h-3.5 w-3.5" />
+                          <span>{tab.label}</span>
+                        </button>
+                      );
+                    })}
+                </div>
+
+                {/* Right Controls: Per-node Incoming Call Mode + Split Toggle */}
+                {activeThread && (
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <button
+                      type="button"
+                      data-testid="topbar-call-mode-btn"
+                      title="仅控制他人来电策略，不影响主动外呼"
+                      onClick={() => void handleCycleActiveCallMode()}
+                      className={`h-6 rounded-full border px-2.5 text-2xs font-medium transition-colors ${incomingModeClass(
+                        activeThread.incoming_call_mode ?? "auto",
+                      )}`}
+                    >
+                      {incomingModeLabel(activeThread.incoming_call_mode ?? "auto", true)}
+                    </button>
+
+                    <button
+                      type="button"
+                      data-testid="split-toggle-btn"
+                      onClick={() => handleToggleSplit()}
+                      className={`inline-flex h-[26px] items-center gap-1.5 rounded-md border px-2.5 text-2xs transition-colors ${
+                        isSplit
+                          ? "border-line-strong bg-tile-active font-semibold text-ink"
+                          : "border-line-strong bg-elev text-ink-muted hover:text-ink"
+                      }`}
+                    >
+                      <Columns2 className="h-3.5 w-3.5" />
+                      <span>{isSplit ? "分屏已开" : "开启分屏"}</span>
+                    </button>
+                  </div>
+                )}
+              </header>
+
+              {/* Workspace Split Container */}
+              {!activeThread ? (
+                <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+                  <div className="text-sm font-semibold text-ink">还没有打开的工作区</div>
+                  <p className="max-w-md text-xs text-ink-faint">
+                    点击左侧「+ 新建」选择一个本地目录（支持直连、Worktree 新分支或检出 PR），即可进入全量 Paseo 对话 + Git/PR + 终端 + 文件 + 预览工作区。
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setNewWsModal({ open: true })}
+                    className="h-8 rounded-md bg-accent px-4 text-xs font-semibold text-on-accent hover:bg-accent-deep"
+                  >
+                    + 新建工作区
+                  </button>
+                </div>
+              ) : (
+                <div className="flex min-h-0 flex-1 overflow-hidden">
+                  {/* LEFT PANE */}
+                  <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-surface">
+                    <AgentWorkbench
+                      threadId={activeThread.id}
+                      cliProbes={cliProbes}
+                      allThreads={threads}
+                      onResolveApproval={(params) =>
+                        api.resolveApproval(params.threadId, params.approvalId, {
+                          decision: params.decision,
+                          option_id: params.option_id,
+                          answers: params.answers,
+                        }).then(() => {
+                          void qc.invalidateQueries({ queryKey: ["workspace-tree"] });
+                          void qc.invalidateQueries({ queryKey: ["thread-detail", params.threadId] });
+                        })
+                      }
+                      onSelectThread={handleEnterWorkspace}
+                      forkModalOpen={forkModalOpen}
+                      onSetForkModalOpen={setForkModalOpen}
+                      hidden={!isSplit && leftTab !== "chat"}
+                    />
+
+                    {!isSplit && leftTab !== "chat" && (
+                      <PaseoToolPane
+                        thread={activeThread}
+                        tool={leftTab}
+                        layout="full"
+                        onSendPromptToAgent={handleSendPromptToActiveAgent}
+                      />
+                    )}
+                  </div>
+
+                  {/* RIGHT 50/50 SPLIT PANE (Owns Git & PR | Terminal | Files | Preview when Split is ON) */}
+                  <div
+                    data-testid="paseo-split-right"
+                    data-open={isSplit ? "true" : "false"}
+                    className="paseo-split-right flex shrink-0 flex-col bg-paper"
+                  >
+                    <div className="flex h-[34px] shrink-0 items-center justify-between border-b border-line bg-rail px-2">
+                      <div className="flex items-center gap-0.5 overflow-x-auto">
+                        {toolTabDefs.map((tab) => {
+                          const Icon = tab.icon;
+                          const active = rightTool === tab.id;
+                          return (
+                            <button
+                              key={tab.id}
+                              type="button"
+                              data-testid={`split-tab-${tab.id}`}
+                              onClick={() => setRightTool(tab.id)}
+                              className={`inline-flex h-6 items-center gap-1.5 whitespace-nowrap rounded-[5px] px-2 text-2xs transition-colors ${
+                                active
+                                  ? "bg-elev font-semibold text-ink"
+                                  : "text-ink-faint hover:bg-tile-hover hover:text-ink"
+                              }`}
+                            >
+                              <Icon className="h-3.5 w-3.5" />
+                              <span>{tab.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <button
+                        type="button"
+                        title="关闭分屏"
+                        onClick={() => handleToggleSplit(false)}
+                        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink-faint hover:bg-tile-hover hover:text-ink"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+
+                    {isSplit && (
+                      <PaseoToolPane
+                        thread={activeThread}
+                        tool={rightTool}
+                        layout="split"
+                        onSendPromptToAgent={handleSendPromptToActiveAgent}
+                      />
+                    )}
+                  </div>
+                </div>
               )}
-            </>
+            </section>
           )}
 
-          {activeView.kind === "room" && (
-            <RoomView
-              roomId={activeView.roomId}
-              allThreads={threads}
-              onSelectThread={(threadId) => selectView({ kind: "thread", threadId })}
-              onResolveApproval={(params) => resolveApproval.mutateAsync(params)}
+          {/* SCREEN B: CONFLUX LIVE MCP TOPOLOGY GRAPH */}
+          {screen === "graph" && (
+            <LiveMeshGraph
+              graph={graphQuery.data ?? { nodes: [], edges: [] }}
+              activeCalls={activeCalls}
+              allCalls={allCalls}
+              localHostname={localHostname}
+              onEnterWorkspace={handleEnterWorkspace}
             />
           )}
 
-          {activeView.kind === "workflow" && (
-            <WorkflowView
-              projectId={activeView.projectId}
-              workflows={workflows}
-              allThreads={threads}
-              onSelectThread={(threadId) => selectView({ kind: "thread", threadId })}
-            />
-          )}
-
-          {activeView.kind === "graph" && (
-            <GraphOverview
-              onSelectThread={(threadId) => selectView({ kind: "thread", threadId })}
-              onNewAgentClick={() =>
-                setNewAgentModal({ open: true, projectId: projects[0]?.id ?? null })
-              }
-            />
-          )}
-
-          {activeView.kind === "settings" && (
-            <SettingsView cliProbes={cliProbes} onSelectTheme={applyThemeChoice} />
+          {/* SCREEN C: SETTINGS */}
+          {screen === "settings" && (
+            <SettingsView cliProbes={cliProbes} onSelectTheme={handleApplyThemeChoice} />
           )}
         </main>
       </div>
 
+      {/* 4. Bottom 24px Native Paseo Status Bar */}
+      <footer
+        data-testid="paseo-statusbar"
+        className="flex h-6 shrink-0 select-none items-center justify-between gap-4 border-t border-line bg-rail px-2.5 font-mono text-2xs text-ink-faint"
+      >
+        <div className="flex items-center gap-3 overflow-hidden">
+          <span className="truncate">
+            ⎇ {gitStatus.data?.branch || activeThread?.worktree_branch || activeThread?.base_branch || "—"}
+          </span>
+          {(diffTotals.add > 0 || diffTotals.del > 0) && (
+            <span>
+              <span className="text-success">+{diffTotals.add}</span>{" "}
+              <span className="text-danger">-{diffTotals.del}</span>
+            </span>
+          )}
+          {prChecksSummary && (
+            <span className={prChecksSummary.passed < prChecksSummary.total ? "text-warning" : "text-success"}>
+              PR #{prChecksSummary.number} · {prChecksSummary.passed}/{prChecksSummary.total} checks
+            </span>
+          )}
+          {previewPortLabel && <span>●{previewPortLabel}</span>}
+        </div>
+
+        <div className="hidden items-center gap-3 sm:flex">
+          {cliProbes
+            .filter((p) => p.available && p.runtime !== "acp")
+            .slice(0, 3)
+            .map((p) => (
+              <span key={p.runtime}>
+                {p.label.split(" ")[0]} {p.version || "ok"}
+              </span>
+            ))}
+          <span className="text-success">
+            ● MCP {network ? `${network.preferred_ip}:${network.port}` : "localhost:9527"}
+          </span>
+        </div>
+      </footer>
+
       {/* Modals */}
-      <NewAgentModal
-        open={newAgentModal.open}
-        onClose={() => setNewAgentModal({ open: false, projectId: null })}
+      <NewWorkspaceModal
+        open={newWsModal.open}
+        onClose={() => setNewWsModal({ open: false })}
         projects={projects}
-        defaultProjectId={newAgentModal.projectId}
+        defaultDir={newWsModal.prefillDir}
         cliProbes={cliProbes}
-        templates={templates}
         onCreated={(thread) => {
           void qc.invalidateQueries({ queryKey: ["workspace-tree"] });
-          selectView({ kind: "thread", threadId: thread.id });
+          handleEnterWorkspace(thread.id);
         }}
       />
 
-      {addProjectOpen && (
-        <div
-          data-testid="add-project-modal"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-4"
-        >
-          <div className="w-full max-w-md rounded-xl border border-line-strong bg-surface p-4 shadow-overlay">
-            <div className="flex items-center justify-between">
-              <h2 className="flex items-center gap-2 text-[13.5px] font-semibold text-ink">
-                <FolderPlus className="h-4 w-4 text-ink-muted" />
-                添加项目目录
-              </h2>
-              <button
-                type="button"
-                onClick={() => setAddProjectOpen(false)}
-                className="rounded-md p-1 text-ink-muted hover:bg-tile-hover"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <form onSubmit={(e) => void handleSubmitProject(e)} className="mt-3.5 space-y-3">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-ink-muted">目录路径</label>
-                <input
-                  type="text"
-                  required
-                  data-testid="add-project-path-input"
-                  value={projectPathInput}
-                  onChange={(e) => setProjectPathInput(e.target.value)}
-                  placeholder="C:\Project folder\my-project"
-                  className="w-full rounded-md border border-line bg-paper/60 px-2.5 py-1.5 font-mono text-xs text-ink focus:border-accent focus:outline-none"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-ink-muted">显示名称（可选）</label>
-                <input
-                  type="text"
-                  value={projectNameInput}
-                  onChange={(e) => setProjectNameInput(e.target.value)}
-                  placeholder="留空默认目录名"
-                  className="w-full rounded-md border border-line bg-paper/60 px-2.5 py-1.5 text-xs text-ink focus:border-accent focus:outline-none"
-                />
-              </div>
-              {projectError && <div className="text-xs text-danger">{projectError}</div>}
-              <div className="flex justify-end gap-2 border-t border-line pt-3">
-                <button
-                  type="button"
-                  onClick={() => setAddProjectOpen(false)}
-                  className="rounded-md px-3 py-1.5 text-xs text-ink-muted hover:bg-tile-hover"
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  data-testid="add-project-submit-btn"
-                  className="rounded-md bg-accent px-3.5 py-1.5 text-xs font-semibold text-on-accent hover:bg-accent-deep"
-                >
-                  添加
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <ConnectRemoteModal
+        open={connectOpen}
+        onClose={() => setConnectOpen(false)}
+        network={network}
+      />
 
-      {newRoomState.open && (
-        <div
-          data-testid="new-room-modal"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 p-4"
-        >
-          <div className="w-full max-w-md rounded-xl border border-line-strong bg-surface p-4 shadow-overlay">
-            <div className="flex items-center justify-between">
-              <h2 className="flex items-center gap-2 text-[13.5px] font-semibold text-ink">
-                <MessageSquarePlus className="h-4 w-4 text-ink-muted" />
-                新建{newRoomState.projectId === null ? "跨项目" : "项目"}房间
-              </h2>
-              <button
-                type="button"
-                onClick={() => setNewRoomState({ open: false, projectId: null })}
-                className="rounded-md p-1 text-ink-muted hover:bg-tile-hover"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <form onSubmit={(e) => void handleSubmitRoom(e)} className="mt-3.5 space-y-3">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-ink-muted">房间名称</label>
-                <input
-                  type="text"
-                  required
-                  value={roomNameInput}
-                  onChange={(e) => setRoomNameInput(e.target.value)}
-                  placeholder="例如：架构联调室"
-                  className="w-full rounded-md border border-line bg-paper/60 px-2.5 py-1.5 text-xs text-ink focus:border-accent focus:outline-none"
-                />
-              </div>
-              {threads.length > 0 && (
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-ink-muted">初始成员</label>
-                  <div className="max-h-36 space-y-0.5 overflow-y-auto rounded-md border border-line bg-paper/60 p-1.5">
-                    {threads.map((t) => {
-                      const checked = roomMemberIds.includes(t.id);
-                      return (
-                        <label
-                          key={t.id}
-                          className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-xs text-ink hover:bg-tile-hover"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={(e) =>
-                              setRoomMemberIds((prev) =>
-                                e.target.checked
-                                  ? [...prev, t.id]
-                                  : prev.filter((id) => id !== t.id),
-                              )
-                            }
-                          />
-                          <span>{t.name}</span>
-                          <span className="ml-auto font-mono text-2xs text-ink-faint">
-                            {t.runtime}
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-              <div className="flex justify-end gap-2 border-t border-line pt-3">
-                <button
-                  type="button"
-                  onClick={() => setNewRoomState({ open: false, projectId: null })}
-                  className="rounded-md px-3 py-1.5 text-xs text-ink-muted hover:bg-tile-hover"
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  className="rounded-md bg-accent px-3.5 py-1.5 text-xs font-semibold text-on-accent hover:bg-accent-deep"
-                >
-                  创建
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <CallHistoryModal
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        calls={historyCalls}
+      />
     </div>
   );
 }

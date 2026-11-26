@@ -4,9 +4,9 @@ import type { LiveEventEnvelope } from "@conflux/shared";
 import { apiUrl } from "./api";
 
 /**
- * Subscribe to the unified `/live/events` SSE stream and invalidate the matching
- * React Query caches in real time across projects, agent threads, approvals,
- * rooms, workflows, shared memory, and git diffs.
+ * Subscribe to the unified `/live/events` SSE stream and invalidate matching
+ * React Query caches in real time across workspaces, peer MCP calls, approvals,
+ * live topology graph, and git/PR state.
  */
 export function useLiveEvents(enabled = true): void {
   const qc = useQueryClient();
@@ -29,9 +29,6 @@ export function useLiveEvents(enabled = true): void {
               if (parsed.thread_id) {
                 void qc.invalidateQueries({ queryKey: ["thread-detail", parsed.thread_id] });
               }
-              if (parsed.room_id) {
-                void qc.invalidateQueries({ queryKey: ["room-detail", parsed.room_id] });
-              }
               break;
             case "thread.event":
               if (parsed.thread_id) {
@@ -45,14 +42,17 @@ export function useLiveEvents(enabled = true): void {
                 void qc.invalidateQueries({ queryKey: ["thread-detail", parsed.thread_id] });
                 void qc.invalidateQueries({ queryKey: ["thread-events", parsed.thread_id] });
               }
-              if (parsed.room_id) {
-                void qc.invalidateQueries({ queryKey: ["room-detail", parsed.room_id] });
-              }
+              break;
+            case "peer.message":
+              void qc.invalidateQueries({ queryKey: ["mesh-calls"] });
+              void qc.invalidateQueries({ queryKey: ["graph"] });
+              void qc.invalidateQueries({ queryKey: ["workspace-tree"] });
               break;
             case "git.dirty":
               if (parsed.thread_id) {
                 void qc.invalidateQueries({ queryKey: ["thread-git-status", parsed.thread_id] });
                 void qc.invalidateQueries({ queryKey: ["thread-git-diff", parsed.thread_id] });
+                void qc.invalidateQueries({ queryKey: ["thread-pr-detail", parsed.thread_id] });
                 void qc.invalidateQueries({ queryKey: ["thread-detail", parsed.thread_id] });
               }
               break;

@@ -1,15 +1,9 @@
 import { useEffect, useState } from "react";
-import type {
-  AgentTemplate,
-  ApprovalMode,
-  CliProbeEntry,
-  RuntimeId,
-  RuntimeSettings,
-} from "@conflux/shared";
-import { Plus, RefreshCw, Save, Trash2 } from "lucide-react";
+import type { CliProbeEntry, RuntimeSettings } from "@conflux/shared";
+import { RefreshCw, Save } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import { useSettings, useTemplates } from "../hooks";
+import { useSettings } from "../hooks";
 import { BUILTIN_THEMES, getActiveCustomThemeName } from "../theme";
 import { RuntimeGlyph } from "./brand-icons";
 
@@ -21,7 +15,6 @@ interface SettingsViewProps {
 export function SettingsView({ cliProbes, onSelectTheme }: SettingsViewProps) {
   const qc = useQueryClient();
   const settingsQuery = useSettings();
-  const templatesQuery = useTemplates();
 
   const [form, setForm] = useState<RuntimeSettings | null>(null);
   const [saving, setSaving] = useState(false);
@@ -31,21 +24,11 @@ export function SettingsView({ cliProbes, onSelectTheme }: SettingsViewProps) {
     () => getActiveCustomThemeName() ?? BUILTIN_THEMES[0].name,
   );
 
-  // Template creator
-  const [tplName, setTplName] = useState("");
-  const [tplRuntime, setTplRuntime] = useState<RuntimeId>("claude");
-  const [tplModel, setTplModel] = useState("");
-  const [tplInstructions, setTplInstructions] = useState("");
-  const [tplApproval, setTplApproval] = useState<ApprovalMode>("ask");
-  const [tplWorktree, setTplWorktree] = useState(false);
-
   useEffect(() => {
     if (settingsQuery.data?.settings && !form) {
       setForm(settingsQuery.data.settings);
     }
   }, [settingsQuery.data, form]);
-
-  const templates: AgentTemplate[] = templatesQuery.data?.templates ?? [];
 
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,28 +57,6 @@ export function SettingsView({ cliProbes, onSelectTheme }: SettingsViewProps) {
     }
   };
 
-  const handleCreateTemplate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!tplName.trim()) return;
-    await api.createTemplate({
-      name: tplName.trim(),
-      runtime: tplRuntime,
-      model: tplModel.trim() || null,
-      instructions: tplInstructions.trim() || null,
-      approval_mode: tplApproval,
-      use_worktree: tplWorktree,
-    });
-    setTplName("");
-    setTplModel("");
-    setTplInstructions("");
-    void qc.invalidateQueries({ queryKey: ["templates"] });
-  };
-
-  const handleDeleteTemplate = async (id: number) => {
-    await api.deleteTemplate(id);
-    void qc.invalidateQueries({ queryKey: ["templates"] });
-  };
-
   return (
     <div data-testid="settings-view" className="flex-1 overflow-y-auto bg-surface px-6 py-6">
       <div className="mx-auto max-w-2xl space-y-8">
@@ -103,7 +64,7 @@ export function SettingsView({ cliProbes, onSelectTheme }: SettingsViewProps) {
           <div>
             <h1 className="text-[15px] font-semibold text-ink">系统设置</h1>
             <p className="mt-0.5 text-xs text-ink-faint">
-              主题色板、本机 CLI 引擎路径、自主互调护栏与 Agent 模板。
+              Paseo 主题色板、本机 CLI 引擎路径与自主互调防循环护栏。
             </p>
           </div>
           {notice && (
@@ -130,8 +91,8 @@ export function SettingsView({ cliProbes, onSelectTheme }: SettingsViewProps) {
                   }}
                   className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left transition-colors ${
                     selected
-                      ? "border-accent bg-accent-soft font-medium text-accent"
-                      : "border-line bg-paper/50 text-ink-muted hover:bg-tile-hover"
+                      ? "border-line-strong bg-tile-active font-semibold text-ink"
+                      : "border-line bg-elev text-ink-muted hover:bg-tile-hover hover:text-ink"
                   }`}
                 >
                   <span
@@ -146,7 +107,7 @@ export function SettingsView({ cliProbes, onSelectTheme }: SettingsViewProps) {
         </section>
 
         {/* Local CLIs & Guardrails */}
-        <section className="space-y-4 border-b border-line pb-6">
+        <section className="space-y-4">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-ink">本机 CLI 探测与路径</span>
             <button
@@ -206,7 +167,7 @@ export function SettingsView({ cliProbes, onSelectTheme }: SettingsViewProps) {
                       value={form[key]}
                       placeholder={placeholder}
                       onChange={(e) => setForm({ ...form, [key]: e.target.value })}
-                      className="w-full rounded-md border border-line bg-paper/60 px-2.5 py-1.5 font-mono text-xs text-ink focus:border-accent focus:outline-none"
+                      className="w-full rounded-md border border-line bg-elev px-2.5 py-1.5 font-mono text-xs text-ink focus:border-ink-muted focus:outline-none"
                     />
                   </div>
                 ))}
@@ -215,7 +176,7 @@ export function SettingsView({ cliProbes, onSelectTheme }: SettingsViewProps) {
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
                   <label className="mb-1 block text-2xs text-ink-muted">
-                    自主互调最大跳数
+                    自主互调最大跳数（trace_id 上限）
                   </label>
                   <input
                     type="number"
@@ -225,7 +186,7 @@ export function SettingsView({ cliProbes, onSelectTheme }: SettingsViewProps) {
                     onChange={(e) =>
                       setForm({ ...form, max_autonomous_hops: Number(e.target.value) || 5 })
                     }
-                    className="w-full rounded-md border border-line bg-paper/60 px-2.5 py-1.5 font-mono text-xs text-ink"
+                    className="w-full rounded-md border border-line bg-elev px-2.5 py-1.5 font-mono text-xs text-ink"
                   />
                 </div>
                 <div>
@@ -240,7 +201,7 @@ export function SettingsView({ cliProbes, onSelectTheme }: SettingsViewProps) {
                     onChange={(e) =>
                       setForm({ ...form, pair_cooldown_ms: Number(e.target.value) || 0 })
                     }
-                    className="w-full rounded-md border border-line bg-paper/60 px-2.5 py-1.5 font-mono text-xs text-ink"
+                    className="w-full rounded-md border border-line bg-elev px-2.5 py-1.5 font-mono text-xs text-ink"
                   />
                 </div>
               </div>
@@ -249,110 +210,13 @@ export function SettingsView({ cliProbes, onSelectTheme }: SettingsViewProps) {
                 <button
                   type="submit"
                   disabled={saving}
-                  className="inline-flex h-7 items-center gap-1.5 rounded-md bg-accent px-3 text-xs font-medium text-on-accent hover:bg-accent-deep disabled:opacity-50"
+                  className="inline-flex h-7 items-center gap-1.5 rounded-md bg-accent px-3 text-xs font-semibold text-on-accent hover:bg-accent-deep disabled:opacity-50"
                 >
                   <Save className="h-3.5 w-3.5" />
                   {saving ? "保存中..." : "保存配置"}
                 </button>
               </div>
             </form>
-          )}
-        </section>
-
-        {/* Agent Templates */}
-        <section className="space-y-3">
-          <div className="text-xs font-medium text-ink">Agent 模板 ({templates.length})</div>
-
-          <form
-            onSubmit={(e) => void handleCreateTemplate(e)}
-            className="grid grid-cols-1 gap-2 rounded-lg bg-tile p-3 sm:grid-cols-3"
-          >
-            <input
-              type="text"
-              value={tplName}
-              onChange={(e) => setTplName(e.target.value)}
-              placeholder="模板名称"
-              className="rounded-md border border-line bg-surface px-2.5 py-1.5 text-xs text-ink"
-            />
-            <select
-              value={tplRuntime}
-              onChange={(e) => setTplRuntime(e.target.value as RuntimeId)}
-              className="rounded-md border border-line bg-surface px-2.5 py-1.5 text-xs text-ink"
-            >
-              <option value="antigravity">antigravity</option>
-              <option value="claude">claude</option>
-              <option value="codex">codex</option>
-              <option value="acp">acp (自定义)</option>
-            </select>
-            <input
-              type="text"
-              value={tplModel}
-              onChange={(e) => setTplModel(e.target.value)}
-              placeholder="默认模型（可选）"
-              className="rounded-md border border-line bg-surface px-2.5 py-1.5 font-mono text-xs text-ink"
-            />
-            <input
-              type="text"
-              value={tplInstructions}
-              onChange={(e) => setTplInstructions(e.target.value)}
-              placeholder="固定系统指令..."
-              className="rounded-md border border-line bg-surface px-2.5 py-1.5 text-xs text-ink sm:col-span-2"
-            />
-            <div className="flex items-center justify-between gap-2">
-              <select
-                value={tplApproval}
-                onChange={(e) => setTplApproval(e.target.value as ApprovalMode)}
-                className="rounded border border-line bg-surface px-2 py-1 text-2xs text-ink"
-              >
-                <option value="ask">Ask</option>
-                <option value="auto">Auto</option>
-              </select>
-              <label className="inline-flex items-center gap-1 text-2xs text-ink-muted">
-                <input
-                  type="checkbox"
-                  checked={tplWorktree}
-                  onChange={(e) => setTplWorktree(e.target.checked)}
-                />
-                Worktree
-              </label>
-              <button
-                type="submit"
-                disabled={!tplName.trim()}
-                className="inline-flex h-7 items-center gap-1 rounded-md bg-accent px-2.5 text-2xs font-medium text-on-accent hover:bg-accent-deep disabled:opacity-50"
-              >
-                <Plus className="h-3 w-3" />
-                添加
-              </button>
-            </div>
-          </form>
-
-          {templates.length > 0 && (
-            <div className="divide-y divide-line border-t border-line">
-              {templates.map((tpl) => (
-                <div key={tpl.id} className="flex items-center justify-between gap-2 py-2.5">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 text-xs font-medium text-ink">
-                      <RuntimeGlyph runtime={tpl.runtime} size={13} />
-                      <span>{tpl.name}</span>
-                      <span className="font-mono text-2xs text-ink-faint">
-                        {tpl.runtime}
-                        {tpl.model ? ` / ${tpl.model}` : ""}
-                      </span>
-                    </div>
-                    {tpl.instructions && (
-                      <div className="truncate text-2xs text-ink-faint">{tpl.instructions}</div>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void handleDeleteTemplate(tpl.id)}
-                    className="rounded p-1 text-ink-faint hover:text-danger"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
           )}
         </section>
       </div>

@@ -51,30 +51,57 @@ body,
   margin: 0;
 }
 
-/* Design tokens as channel triplets (rgb(var(--tk-x) / α) pattern) so any
- * alpha modifier works and custom themes can override at :root style level.
- * Defaults = Conductor Mission Control light emerald-slate baseline. */
+/* Design tokens as channel triplets (rgb(var(--tk-x) / α) pattern).
+ * Light Paseo Zinc baseline (:root) + Dark Paseo Zinc-Obsidian (data-theme="dark"). */
 :root {
-  --tk-ink: 15 23 42;
-  --tk-paper: 243 246 249;
+  --ease-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --tk-ink: 9 9 11;
+  --tk-rail: 236 238 242;
+  --tk-paper: 244 245 247;
   --tk-surface: 255 255 255;
-  --tk-line: 226 232 240;
-  --tk-line-strong: 203 213 225;
-  --tk-accent: 4 120 87;
-  --tk-accent-deep: 6 95 70;
-  --tk-accent-soft: 236 253 245;
+  --tk-elev: 246 247 249;
+  --tk-line: 228 229 234;
+  --tk-line-strong: 207 210 220;
+  --tk-accent: 24 24 27;
+  --tk-accent-deep: 9 9 11;
+  --tk-accent-soft: 228 229 234;
   --tk-on-accent: 255 255 255;
-  --tk-success: 5 122 85;
-  --tk-success-soft: 232 248 238;
-  --tk-warning: 161 98 7;
+  --tk-success: 21 128 61;
+  --tk-success-soft: 220 252 231;
+  --tk-warning: 180 83 9;
   --tk-warning-soft: 254 243 199;
   --tk-danger: 185 28 28;
-  --tk-danger-soft: 254 236 236;
-  --tk-info: 29 78 216;
-  --tk-info-soft: 235 242 254;
-  --tk-neutral: 100 116 139;
-  --tk-neutral-soft: 241 245 249;
+  --tk-danger-soft: 254 226 226;
+  --tk-info: 79 70 229;
+  --tk-info-soft: 238 242 255;
+  --tk-neutral: 113 113 122;
+  --tk-neutral-soft: 244 244 245;
   color-scheme: light;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --tk-ink: 244 244 245;
+  --tk-rail: 9 9 11;
+  --tk-paper: 13 13 16;
+  --tk-surface: 17 17 21;
+  --tk-elev: 23 23 28;
+  --tk-line: 32 32 39;
+  --tk-line-strong: 45 45 55;
+  --tk-accent: 244 244 245;
+  --tk-accent-deep: 255 255 255;
+  --tk-accent-soft: 39 39 47;
+  --tk-on-accent: 9 9 11;
+  --tk-success: 34 197 94;
+  --tk-success-soft: 20 44 30;
+  --tk-warning: 245 158 11;
+  --tk-warning-soft: 54 39 16;
+  --tk-danger: 239 68 68;
+  --tk-danger-soft: 56 23 26;
+  --tk-info: 129 140 248;
+  --tk-info-soft: 30 33 62;
+  --tk-neutral: 161 161 170;
+  --tk-neutral-soft: 32 32 39;
 }
 
 body {
@@ -89,11 +116,14 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: rgb(var(--tk-paper));
+  background: rgb(var(--tk-rail));
   color: rgb(var(--tk-ink));
 }
 
-/* Subtle Linear-style scrollbars */
+button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -102,21 +132,132 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgb(var(--tk-ink) / 0.14);
+  background: rgb(var(--tk-ink) / 0.16);
   border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgb(var(--tk-ink) / 0.26);
+  background: rgb(var(--tk-ink) / 0.28);
 }
 
-/* React Flow 默认底色（--xy-background-color 默认 #E2E2E2）会盖出"画布比
-   侧栏/内容深一截"的色差——统一钉到 paper 令牌 */
+/* ---- Smooth Collapsible Motion Primitives (Emil Kowalski expo-out + CSS Grid) ---- */
+
+.paseo-sidebar {
+  width: 272px;
+  flex-shrink: 0;
+  overflow: hidden;
+  transition:
+    width 280ms var(--ease-expo),
+    opacity 220ms ease,
+    border-color 220ms ease;
+  will-change: width;
+}
+.paseo-sidebar.is-collapsed {
+  width: 0;
+  opacity: 0;
+  border-right-color: transparent;
+  pointer-events: none;
+}
+.paseo-sidebar-inner {
+  width: 272px;
+  height: 100%;
+  transition: transform 280ms var(--ease-expo);
+}
+.paseo-sidebar.is-collapsed .paseo-sidebar-inner {
+  transform: translateX(-18px);
+}
+
+.paseo-acc-chevron {
+  transition: transform 240ms var(--ease-expo);
+}
+.paseo-acc-group[data-open="false"] > .paseo-acc-head .paseo-acc-chevron {
+  transform: rotate(-90deg);
+}
+.paseo-acc-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition:
+    grid-template-rows 260ms var(--ease-expo),
+    opacity 200ms ease;
+}
+.paseo-acc-group[data-open="false"] > .paseo-acc-body {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  pointer-events: none;
+}
+.paseo-acc-inner {
+  overflow: hidden;
+  min-height: 0;
+  transform: translateY(0);
+  transition: transform 260ms var(--ease-expo);
+}
+.paseo-acc-group[data-open="false"] > .paseo-acc-body > .paseo-acc-inner {
+  transform: translateY(-5px);
+}
+
+.paseo-split-right {
+  width: 0;
+  opacity: 0;
+  overflow: hidden;
+  border-left: 1px solid transparent;
+  transition:
+    width 280ms var(--ease-expo),
+    opacity 220ms ease,
+    border-color 220ms ease;
+  will-change: width;
+}
+.paseo-split-right[data-open="true"] {
+  width: 49%;
+  opacity: 1;
+  border-left-color: rgb(var(--tk-line));
+}
+
+.paseo-audit-drawer {
+  width: 368px;
+  flex-shrink: 0;
+  overflow: hidden;
+  transition:
+    width 280ms var(--ease-expo),
+    opacity 220ms ease,
+    border-color 220ms ease;
+}
+.paseo-audit-drawer[data-open="false"] {
+  width: 0;
+  opacity: 0;
+  border-left-color: transparent;
+  pointer-events: none;
+}
+.paseo-audit-drawer-inner {
+  width: 368px;
+  height: 100%;
+  transition: transform 280ms var(--ease-expo);
+}
+.paseo-audit-drawer[data-open="false"] .paseo-audit-drawer-inner {
+  transform: translateX(20px);
+}
+
+/* Dot-grid canvas & animated flowing call edges for Live MCP Topology Graph */
+.paseo-dot-grid {
+  background-color: rgb(var(--tk-rail));
+  background-image: radial-gradient(rgb(var(--tk-ink) / 0.1) 1.2px, transparent 1.2px);
+  background-size: 20px 20px;
+}
+
+@keyframes paseo-dashflow {
+  to {
+    stroke-dashoffset: -12;
+  }
+}
+.paseo-edge-flow {
+  stroke-dasharray: 6 6;
+  animation: paseo-dashflow 0.75s linear infinite;
+}
+
+/* React Flow surface alignment */
 .react-flow {
-  --xy-background-color: rgb(var(--tk-paper));
-  background-color: rgb(var(--tk-paper));
+  --xy-background-color: rgb(var(--tk-rail));
+  background-color: rgb(var(--tk-rail));
 }
-
-/* React Flow light theme overrides */
 .react-flow__node {
   font-size: 12px;
   cursor: grab;
@@ -124,7 +265,6 @@ body {
 .react-flow__node.dragging {
   cursor: grabbing;
 }
-/* Kill transition on drag so nodes track the cursor 1:1 (Dify-like) */
 .react-flow__node.draggable.dragging {
   transition: none;
 }
@@ -132,53 +272,21 @@ body {
   border: none !important;
 }
 
-/* Dify/n8n-style animated dot-flow on edges (see CurvedPairEdge) */
-@keyframes edge-flow {
+@keyframes smooth-caret-blink {
   to {
-    stroke-dashoffset: -8.5;
+    visibility: hidden;
   }
 }
-.rf-flow-dots {
-  stroke-dasharray: 0.5 8;
-  stroke-linecap: round;
-  animation: edge-flow 0.9s linear infinite;
+.smooth-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  background: rgb(var(--tk-ink) / 0.7);
+  animation: smooth-caret-blink 1s steps(2, start) infinite;
 }
 
-/* 深色主题：Conductor 指挥台暗色翡翠令牌（设置页或顶栏 data-theme=dark 驱动）。
- * 自定义主题（导入/预设）在其上再覆写。 */
-html[data-theme="dark"] {
-  color-scheme: dark;
-  --tk-ink: 241 245 249;
-  --tk-paper: 14 16 21;
-  --tk-surface: 23 26 35;
-  --tk-line: 35 40 54;
-  --tk-line-strong: 50 58 78;
-  --tk-accent: 16 185 129;
-  --tk-accent-deep: 5 150 105;
-  --tk-accent-soft: 16 54 44;
-  --tk-on-accent: 4 32 20;
-  --tk-success: 52 211 153;
-  --tk-success-soft: 16 54 44;
-  --tk-warning: 245 158 11;
-  --tk-warning-soft: 61 45 20;
-  --tk-danger: 248 113 113;
-  --tk-danger-soft: 68 32 39;
-  --tk-info: 129 140 248;
-  --tk-info-soft: 34 39 74;
-  --tk-neutral: 148 163 184;
-  --tk-neutral-soft: 35 40 54;
-  font-weight: 450;
-}
-html[data-theme="dark"] .workspace-frame {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-}
-html[data-theme="dark"] .font-normal { font-weight: 500; }
-html[data-theme="dark"] .font-medium { font-weight: 600; }
-
-
-/* ---- Motion tokens: durations/easings live in tailwind config as
-   DEFAULTS so every transition-* shares one beat. Reduced motion gets out
-   of the way entirely. ---------------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -189,173 +297,19 @@ html[data-theme="dark"] .font-medium { font-weight: 600; }
   }
 }
 
-/* 毛玻璃侧栏（darwin vibrancy）：透出窗口材质，色相跟色板走 */
-.glass-sidebar {
-  background: rgb(var(--tk-paper) / 0.72);
-}
-.app-drag {
-  -webkit-app-region: drag;
-}
-.app-no-drag {
-  -webkit-app-region: no-drag;
-}
-
-/* 流式打字机末尾光标：跟在最后一个块级内容之后呼吸 */
-.smooth-caret {
-  display: inline-block;
-  width: 2px;
-  height: 1em;
-  margin-left: 2px;
-  vertical-align: -0.15em;
-  background: rgb(var(--tk-ink) / 0.7);
-  animation: smooth-caret-blink 1s steps(2, start) infinite;
-}
-@keyframes smooth-caret-blink {
-  to {
-    visibility: hidden;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .smooth-caret {
-    animation: none;
-    opacity: 0.7;
-  }
-}
-
-/* ---- Tab keep-alive: views stay mounted so viewport/scroll state
-   survives switching; hidden views skip paint and hit-testing. ---------- */
-.tab-surface {
-  position: absolute;
-  inset: 0;
-}
-.tab-surface[data-active="false"] {
-  visibility: hidden;
-  content-visibility: hidden;
-  pointer-events: none;
-}
-
-.mobile-topbar,
-.mobile-sidebar-backdrop {
-  display: none;
-}
-
+/* Responsive mobile sidebar slide-over */
 @media (max-width: 767px) {
-  .mobile-sidebar {
+  .paseo-sidebar {
     position: fixed;
-    inset: 0 auto 0 0;
-    z-index: 50;
-    width: min(82vw, 300px);
-    transform: translateX(-105%);
-    transition: transform 180ms ease;
-    box-shadow: 12px 0 30px rgb(24 34 52 / 0.14);
+    inset: 0 auto 0 46px;
+    z-index: 45;
+    width: min(78vw, 276px);
+    box-shadow: 12px 0 30px rgb(0 0 0 / 0.35);
   }
-
-  .mobile-sidebar.is-open {
-    transform: translateX(0);
-  }
-
-  .mobile-sidebar-backdrop {
+  .paseo-split-right[data-open="true"] {
     position: fixed;
-    inset: 0;
-    z-index: 40;
-    border: 0;
-    background: rgb(24 34 52 / 0.28);
+    inset: 40px 0 24px 46px;
+    width: auto;
+    z-index: 35;
   }
-
-  .mobile-sidebar-backdrop.is-open {
-    display: block;
-  }
-
-  .mobile-topbar {
-    position: absolute;
-    inset: 0 0 auto;
-    z-index: 20;
-    height: 48px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 0 12px;
-    border-bottom: 1px solid rgb(var(--tk-line));
-    background: rgb(var(--tk-surface) / 0.94);
-    color: rgb(var(--tk-ink));
-  }
-
-  .mobile-menu-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    border: 1px solid rgb(var(--tk-line));
-    border-radius: 8px;
-    color: rgb(var(--tk-ink) / 0.76);
-  }
-
-  .mobile-main .tab-surface {
-    top: 48px;
-  }
-
-  .room-chat-header {
-    min-height: 52px;
-  }
-
-  .room-composer-meta {
-    flex-wrap: wrap;
-  }
-
-  .room-composer-meta select {
-    max-width: min(100%, 220px);
-  }
-
-  .room-composer-row input,
-  .room-composer-row textarea {
-    min-width: 0;
-  }
-
-  .room-composer-row button {
-    flex-shrink: 0;
-    padding-inline: 12px;
-  }
-}
-
-/* ---- Chat-first workspace details rail ----------------------------------
-   >=1280px it is a stable third column (default 320px, collapsible);
-   below that it becomes an overlay drawer over the main area. The nav
-   drawer and this drawer are mutually exclusive on narrow screens
-   (enforced in JS). ------------------------------------------------------ */
-.workspace-details {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  min-width: 0;
-}
-
-@media (min-width: 1280px) {
-  .workspace-details {
-    position: relative;
-    width: 320px;
-    flex-shrink: 0;
-  }
-}
-
-@media (max-width: 1279.98px) {
-  .workspace-details {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 30;
-    width: min(400px, 92vw);
-    border-left: 1px solid rgb(var(--tk-line));
-    box-shadow: -12px 0 30px rgb(24 34 52 / 0.14);
-  }
-}
-
-/* Visible keyboard focus for the workspace controls (buttons/selects get
-   the shared accent ring; inputs already use focus:border-accent). */
-.workspace-details button:focus-visible,
-.room-composer-row button:focus-visible,
-.room-chat-header button:focus-visible {
-  outline: 2px solid rgb(var(--tk-accent) / 0.55);
-  outline-offset: 1px;
 }

@@ -435,7 +435,10 @@ export function AgentWorkbench({
     setSending(true);
     setActionError(null);
     try {
-      if (deliveryMode === "steer") {
+      if (thread?.kind === "external") {
+        await api.createMeshCall({ to_thread: threadId, question: trimmed });
+        setActionNotice("已发送到外部终端 MCP 收件箱（将在原目录 Hook 唤醒回复）");
+      } else if (deliveryMode === "steer") {
         await api.steerThread(threadId, trimmed);
       } else {
         await api.sendPrompt(threadId, { prompt: trimmed, delivery_mode: deliveryMode });
