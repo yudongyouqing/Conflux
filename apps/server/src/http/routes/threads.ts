@@ -1,12 +1,29 @@
 import type { FastifyInstance } from "fastify";
-import type { ApprovalMode, ManagedDeliveryMode, RuntimeId } from "@conflux/shared";
+import type {
+  ApprovalMode,
+  ManagedDeliveryMode,
+  RuntimeId,
+  WorkspaceCreateMode,
+} from "@conflux/shared";
 import { getProject, searchProjectFiles } from "../../core/projects.js";
 import {
+  commitGitChanges,
   createWorktreePr,
+  getCurrentBranch,
   getGitDiff,
   getGitStatus,
+  getPrDetail,
+  mergeGitPr,
   mergeWorktreeBack,
+  pushGitBranch,
+  stageGitFiles,
 } from "../../core/git-worktree.js";
+import {
+  detectLocalPreviewUrls,
+  execWorkspaceCommand,
+  listWorkspaceDirectory,
+  readWorkspaceFile,
+} from "../../core/workspace-tools.js";
 import {
   getThread,
   listPendingThreadApprovals,
@@ -53,6 +70,9 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: ServerContext): 
       extra_env?: string | null;
       approval_mode?: ApprovalMode;
       use_worktree?: boolean;
+      workspace_mode?: WorkspaceCreateMode;
+      branch_name?: string | null;
+      pr_number?: number | string | null;
       initial_prompt?: string | null;
     };
   }>("/threads", async (req, reply) => {
@@ -236,23 +256,69 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: ServerContext): 
     return reply.send(result);
   });
 
+  app.post<{ Params: { id: string }; Body: { paths?: string[]; staged: boolean } }>(
+    "/threads/:id/git/stage",
+    async (req, reply) => {
+      const thread = getThread(db, req.params.id);
+      if (!thread) return sendHttpError(reply, 404, "thread not found");
+      const status = stageGitFiles(thread.workdir, req.body?.paths ?? null, Boolean(req.body?.staged));
+      publishLiveEvent({
+        type: "git.dirty",
+        project_id: thread.project_id,
+        thread_id: thread.id,
+        payload: { reason: "staged_updated" },
+      });
+      return reply.send(status);
+    },
+  );
+
+  app.post<{ Params: { id: string }; Body: { message: string } }>(
+    "/threads/:id/git/commit",
+    async (req, reply) => {
+      const thread = getThread(db, req.params.id);
+      if (!thread) return sendHttpError(reply, 404, "thread not found");
+      const result = commitGitChanges(thread.workdir, req.body?.message ?? "");
+      if (result.ok) {
+        publishLiveEvent({
+          type: "git.dirty",
+          project_id: thread.project_id,
+          thread_id: thread.id,
+          payload: { reason: "committed", result },
+        });
+      }
+      return reply.send(result);
+    },
+  );
+
+  app.post<{ Params: { id: string } }>("/threads/:id/git/push", async (req, reply) => {
+    const thread = getThread(db, req.params.id);
+    if (!thread) return sendHttpError(reply, 404, "thread not found");
+    return reply.send(pushGitBranch(thread.workdir));
+  });
+
+  app.get<{ Params: { id: string } }>("/threads/:id/git/pr-detail", async (req, reply) => {
+    const thread = getThread(db, req.params.id);
+    if (!thread) return sendHttpError(reply, 404, "thread not found");
+    const detail = getPrDetail(thread.workdir, thread.worktree_branch);
+    if (detail.pr?.url && detail.pr.url !== thread.pr_url) {
+      updateThread(db, thread.id, { pr_url: detail.pr.url });
+    }
+    return reply.send(detail);
+  });
+
   app.post<{
     Params: { id: string };
     Body: { title?: string; body?: string; draft?: boolean };
   }>("/threads/:id/git/pr", async (req, reply) => {
     const thread = getThread(db, req.params.id);
     if (!thread) return sendHttpError(reply, 404, "thread not found");
-    if (!thread.worktree_path || !thread.worktree_branch) {
-      return sendHttpError(reply, 400, "只有独立 Worktree 分支的 Agent 支持直接推送创建 PR");
+    const branch = thread.worktree_branch || getCurrentBranch(thread.workdir);
+    if (!branch) {
+      return sendHttpError(reply, 400, "当前工作区不在有效的 Git 分支上，无法创建 PR");
     }
     const project = thread.project_id ? getProject(db, thread.project_id) : null;
     const targetBranch = thread.base_branch || project?.default_branch || "main";
-    const result = createWorktreePr(
-      thread.worktree_path,
-      thread.worktree_branch,
-      targetBranch,
-      req.body ?? {},
-    );
+    const result = createWorktreePr(thread.workdir, branch, targetBranch, req.body ?? {});
     if (result.ok && result.pr_url) {
       const updated = updateThread(db, thread.id, { pr_url: result.pr_url });
       if (updated) {
@@ -267,7 +333,88 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: ServerContext): 
     return reply.send(result);
   });
 
+  app.post<{
+    Params: { id: string };
+    Body: { method?: "squash" | "merge" | "rebase"; cleanup_worktree?: boolean };
+  }>("/threads/:id/git/pr/merge", async (req, reply) => {
+    const thread = getThread(db, req.params.id);
+    if (!thread) return sendHttpError(reply, 404, "thread not found");
+    const result = mergeGitPr(thread.workdir, {
+      method: req.body?.method ?? "squash",
+      deleteBranch: Boolean(thread.worktree_path),
+    });
+    if (result.ok) {
+      if (req.body?.cleanup_worktree && thread.worktree_path) {
+        await requireManager().cleanupThreadWorktree(thread.id);
+      }
+      publishLiveEvent({
+        type: "git.dirty",
+        project_id: thread.project_id,
+        thread_id: thread.id,
+        payload: { reason: "pr_merged", result },
+      });
+    }
+    return reply.send(result);
+  });
+
   app.post<{ Params: { id: string } }>("/threads/:id/worktree/cleanup", async (req, reply) =>
     reply.send({ thread: await requireManager().cleanupThreadWorktree(req.params.id) }),
   );
+
+  // ---- Paseo Workspace Tools: Embedded Terminal, File Explorer & Live Preview ----
+
+  app.post<{ Params: { id: string }; Body: { command: string } }>(
+    "/threads/:id/terminal/exec",
+    async (req, reply) => {
+      const thread = getThread(db, req.params.id);
+      if (!thread) return sendHttpError(reply, 404, "thread not found");
+      const result = await execWorkspaceCommand(thread.workdir, req.body?.command ?? "");
+      return reply.send(result);
+    },
+  );
+
+  app.get<{ Params: { id: string }; Querystring: { path?: string } }>(
+    "/threads/:id/fs/tree",
+    async (req, reply) => {
+      const thread = getThread(db, req.params.id);
+      if (!thread) return sendHttpError(reply, 404, "thread not found");
+      return reply.send({ entries: listWorkspaceDirectory(thread.workdir, req.query.path ?? "") });
+    },
+  );
+
+  app.get<{ Params: { id: string }; Querystring: { path?: string } }>(
+    "/threads/:id/fs/read",
+    async (req, reply) => {
+      const thread = getThread(db, req.params.id);
+      if (!thread) return sendHttpError(reply, 404, "thread not found");
+      if (!req.query.path?.trim()) return sendHttpError(reply, 400, "path is required");
+      return reply.send(readWorkspaceFile(thread.workdir, req.query.path));
+    },
+  );
+
+  app.put<{ Params: { id: string }; Body: { preview_url: string | null } }>(
+    "/threads/:id/preview",
+    async (req, reply) => {
+      const thread = getThread(db, req.params.id);
+      if (!thread) return sendHttpError(reply, 404, "thread not found");
+      const nextUrl = req.body?.preview_url?.trim() || null;
+      const updated = updateThread(db, thread.id, { preview_url: nextUrl });
+      if (!updated) return sendHttpError(reply, 404, "thread not found");
+      const decorated = requireManager().decorateThread(updated);
+      publishLiveEvent({
+        type: "thread.updated",
+        project_id: decorated.project_id,
+        thread_id: decorated.id,
+        payload: { action: "preview_updated", thread: decorated },
+      });
+      return reply.send({ thread: decorated });
+    },
+  );
+
+  app.get<{ Params: { id: string } }>("/threads/:id/preview/detect", async (req, reply) => {
+    const thread = getThread(db, req.params.id);
+    if (!thread) return sendHttpError(reply, 404, "thread not found");
+    const detected = await detectLocalPreviewUrls();
+    return reply.send({ detected, saved_url: thread.preview_url ?? null });
+  });
 }

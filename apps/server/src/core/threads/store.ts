@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { hostname } from "node:os";
 import { resolve } from "node:path";
 import type {
   AgentThread,
   ApprovalDecision,
   ApprovalMode,
   ApprovalState,
+  IncomingCallMode,
   ManagedApprovalKind,
   RuntimeId,
   ThreadApproval,
@@ -21,6 +23,11 @@ import { normalizePathKey } from "../git-worktree.js";
 import type { ApprovalResponseExtra } from "../managed-codex/approvals.js";
 
 const VALID_RUNTIMES = new Set<RuntimeId>(["claude", "codex", "antigravity", "acp"]);
+const LOCAL_HOST = hostname() || "localhost";
+
+export function isValidIncomingCallMode(v: unknown): v is IncomingCallMode {
+  return v === "auto" || v === "ask" || v === "dnd";
+}
 
 interface ThreadRow {
   id: string;
@@ -30,11 +37,15 @@ interface ThreadRow {
   runtime: string;
   state: string;
   approval_mode: string;
+  incoming_call_mode: string | null;
+  host: string | null;
   workdir: string;
   worktree_path: string | null;
   worktree_branch: string | null;
   base_branch: string | null;
   pr_url: string | null;
+  preview_url: string | null;
+  external_session_id: string | null;
   model: string | null;
   instructions: string | null;
   extra_env: string | null;
@@ -136,11 +147,17 @@ function toThread(db: DB, row: ThreadRow): AgentThread {
     runtime: (isValidRuntime(row.runtime) ? row.runtime : "claude") as RuntimeId,
     state: row.state as ThreadState,
     approval_mode: (row.approval_mode === "auto" ? "auto" : "ask") as ApprovalMode,
+    incoming_call_mode: isValidIncomingCallMode(row.incoming_call_mode)
+      ? row.incoming_call_mode
+      : "auto",
+    host: row.host?.trim() || LOCAL_HOST,
     workdir: row.workdir,
     worktree_path: row.worktree_path,
     worktree_branch: row.worktree_branch,
     base_branch: row.base_branch,
     pr_url: row.pr_url ?? null,
+    preview_url: row.preview_url ?? null,
+    external_session_id: row.external_session_id ?? null,
     model: row.model,
     instructions: row.instructions,
     extra_env: row.extra_env,
@@ -274,10 +291,15 @@ export function insertThread(
     runtime: RuntimeId;
     state?: ThreadState;
     approval_mode?: ApprovalMode;
+    incoming_call_mode?: IncomingCallMode;
+    host?: string;
     workdir: string;
     worktree_path?: string | null;
     worktree_branch?: string | null;
     base_branch?: string | null;
+    pr_url?: string | null;
+    preview_url?: string | null;
+    external_session_id?: string | null;
     model?: string | null;
     instructions?: string | null;
     extra_env?: string | null;
@@ -290,13 +312,21 @@ export function insertThread(
 ): AgentThread {
   const id = input.id ?? randomUUID();
   const now = nowIso();
+  const host = input.host?.trim() || LOCAL_HOST;
+  const incomingCallMode: IncomingCallMode = isValidIncomingCallMode(input.incoming_call_mode)
+    ? input.incoming_call_mode
+    : "auto";
+  // Preserve remote POSIX paths verbatim instead of resolving them against a local Windows drive.
+  const isRemoteHost = host.toLowerCase() !== LOCAL_HOST.toLowerCase();
+  const storedWorkdir = isRemoteHost ? input.workdir.trim() : resolve(input.workdir);
   db.prepare(
     `INSERT INTO agent_threads (
-       id, project_id, name, kind, runtime, state, approval_mode, workdir,
-       worktree_path, worktree_branch, base_branch, model, instructions, extra_env,
+       id, project_id, name, kind, runtime, state, approval_mode, incoming_call_mode, host, workdir,
+       worktree_path, worktree_branch, base_branch, pr_url, preview_url, external_session_id,
+       model, instructions, extra_env,
        provider_thread_id, owner_token, active_turn_id, pid, parent_thread_id,
        last_synced_context_id, last_seen_at, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     input.project_id,
@@ -305,10 +335,15 @@ export function insertThread(
     input.runtime,
     input.state ?? "idle",
     input.approval_mode ?? "ask",
-    resolve(input.workdir),
+    incomingCallMode,
+    host,
+    storedWorkdir,
     input.worktree_path ?? null,
     input.worktree_branch ?? null,
     input.base_branch ?? null,
+    input.pr_url ?? null,
+    input.preview_url ?? null,
+    input.external_session_id ?? null,
     input.model?.trim() || null,
     input.instructions?.trim() || null,
     input.extra_env?.trim() || null,
@@ -332,11 +367,15 @@ export function updateThread(
     name: string;
     state: ThreadState;
     approval_mode: ApprovalMode;
+    incoming_call_mode: IncomingCallMode;
+    host: string;
     workdir: string;
     worktree_path: string | null;
     worktree_branch: string | null;
     base_branch: string | null;
     pr_url: string | null;
+    preview_url: string | null;
+    external_session_id: string | null;
     model: string | null;
     instructions: string | null;
     provider_thread_id: string | null;

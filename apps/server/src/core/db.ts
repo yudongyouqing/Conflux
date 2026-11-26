@@ -27,7 +27,7 @@ export interface PublicErrorContext {
   port?: number;
 }
 
-export const SCHEMA_VERSION = 21;
+export const SCHEMA_VERSION = 22;
 export const BUSY_TIMEOUT_MS = 5000;
 export const WAL_CHECKPOINT_INTERVAL_MS = 5 * 60 * 1000;
 export const WAL_CHECKPOINT_THRESHOLD_BYTES = 10 * 1024 * 1024;
@@ -147,11 +147,15 @@ CREATE TABLE IF NOT EXISTS agent_threads (
   runtime                TEXT NOT NULL,
   state                  TEXT NOT NULL DEFAULT 'idle',
   approval_mode          TEXT NOT NULL DEFAULT 'ask',
+  incoming_call_mode     TEXT NOT NULL DEFAULT 'auto',
+  host                   TEXT NOT NULL DEFAULT 'localhost',
   workdir                TEXT NOT NULL,
   worktree_path          TEXT,
   worktree_branch        TEXT,
   base_branch            TEXT,
   pr_url                 TEXT,
+  preview_url            TEXT,
+  external_session_id    TEXT,
   model                  TEXT,
   instructions           TEXT,
   extra_env              TEXT,
@@ -226,9 +230,11 @@ CREATE TABLE IF NOT EXISTS messages (
   from_thread  TEXT NOT NULL,
   to_thread    TEXT NOT NULL,
   question     TEXT NOT NULL,
+  context      TEXT,
   reply        TEXT,
   status       TEXT NOT NULL DEFAULT 'pending',
   room_id      INTEGER REFERENCES rooms(id) ON DELETE SET NULL,
+  trace_id     TEXT,
   hop_count    INTEGER NOT NULL DEFAULT 0,
   created_at   TEXT NOT NULL,
   replied_at   TEXT
@@ -386,9 +392,32 @@ export function openDb(config: Config): DB {
   const current = (db.pragma("user_version", { simple: true }) as number) ?? 0;
   if (current < SCHEMA_VERSION) {
     db.exec(SCHEMA_SQL);
-    const cols = db.pragma("table_info(agent_threads)") as Array<{ name: string }>;
-    if (!cols.some((c) => c.name === "pr_url")) {
+    const threadCols = new Set(
+      (db.pragma("table_info(agent_threads)") as Array<{ name: string }>).map((c) => c.name),
+    );
+    if (!threadCols.has("pr_url")) {
       db.exec(`ALTER TABLE agent_threads ADD COLUMN pr_url TEXT`);
+    }
+    if (!threadCols.has("incoming_call_mode")) {
+      db.exec(`ALTER TABLE agent_threads ADD COLUMN incoming_call_mode TEXT NOT NULL DEFAULT 'auto'`);
+    }
+    if (!threadCols.has("host")) {
+      db.exec(`ALTER TABLE agent_threads ADD COLUMN host TEXT NOT NULL DEFAULT 'localhost'`);
+    }
+    if (!threadCols.has("preview_url")) {
+      db.exec(`ALTER TABLE agent_threads ADD COLUMN preview_url TEXT`);
+    }
+    if (!threadCols.has("external_session_id")) {
+      db.exec(`ALTER TABLE agent_threads ADD COLUMN external_session_id TEXT`);
+    }
+    const msgCols = new Set(
+      (db.pragma("table_info(messages)") as Array<{ name: string }>).map((c) => c.name),
+    );
+    if (!msgCols.has("context")) {
+      db.exec(`ALTER TABLE messages ADD COLUMN context TEXT`);
+    }
+    if (!msgCols.has("trace_id")) {
+      db.exec(`ALTER TABLE messages ADD COLUMN trace_id TEXT`);
     }
     db.pragma(`user_version = ${SCHEMA_VERSION}`);
     logger.info({ from: current, to: SCHEMA_VERSION, dbPath: config.dbPath }, "conflux v2 db initialized");

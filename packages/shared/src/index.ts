@@ -16,6 +16,10 @@ export type ThreadState = "idle" | "running" | "waiting_approval" | "stopped" | 
 
 export type ApprovalMode = "ask" | "auto";
 
+export type IncomingCallMode = "auto" | "ask" | "dnd";
+
+export type WorkspaceCreateMode = "direct" | "worktree" | "pr";
+
 export type ManagedDeliveryMode = "queue" | "steer" | "interrupt";
 
 export type ManagedApprovalKind = "commandExecution" | "fileChange" | "userInput" | "toolCall";
@@ -45,7 +49,13 @@ export type ThreadEventType =
 
 export type ContextKind = "note" | "decision" | "artifact" | "summary" | "handoff";
 
-export type MessageStatus = "pending" | "seen" | "replied" | "read";
+export type MessageStatus =
+  | "pending"
+  | "awaiting_approval"
+  | "seen"
+  | "replied"
+  | "read"
+  | "cancelled";
 
 export type RoomTaskStatus = "pending" | "running" | "done" | "failed";
 
@@ -73,6 +83,7 @@ export type LiveEventType =
   | "thread.updated"
   | "thread.event"
   | "approval.updated"
+  | "peer.message"
   | "room.message"
   | "room.task"
   | "workflow.updated"
@@ -102,11 +113,15 @@ export interface AgentThread {
   runtime: RuntimeId;
   state: ThreadState;
   approval_mode: ApprovalMode;
+  incoming_call_mode: IncomingCallMode;
+  host: string;
   workdir: string;
   worktree_path: string | null;
   worktree_branch: string | null;
   base_branch: string | null;
   pr_url?: string | null;
+  preview_url?: string | null;
+  external_session_id?: string | null;
   model: string | null;
   instructions: string | null;
   extra_env: string | null;
@@ -242,6 +257,94 @@ export interface GitCreatePrResult {
   message: string;
 }
 
+export interface GitCommitResult {
+  ok: boolean;
+  commit_sha: string | null;
+  message: string;
+}
+
+export interface GitPushResult {
+  ok: boolean;
+  branch: string | null;
+  message: string;
+}
+
+export interface PrCheckItem {
+  name: string;
+  status: "pass" | "fail" | "pending";
+  duration?: string | null;
+  url?: string | null;
+  description?: string | null;
+}
+
+export interface PrReviewComment {
+  id: string;
+  author: string;
+  path?: string | null;
+  line?: number | null;
+  body: string;
+  created_at?: string | null;
+  url?: string | null;
+}
+
+export interface PrDetailInfo {
+  number: number;
+  title: string;
+  state: string;
+  url: string;
+  head_branch: string;
+  base_branch: string;
+  is_draft: boolean;
+  checks: PrCheckItem[];
+  comments: PrReviewComment[];
+}
+
+export interface PrDetailResponse {
+  gh_available: boolean;
+  pr: PrDetailInfo | null;
+  message?: string | null;
+}
+
+export interface PrMergeResult {
+  ok: boolean;
+  message: string;
+  pr_number?: number | null;
+}
+
+export interface WorkspaceTerminalRunResult {
+  ok: boolean;
+  command: string;
+  cwd: string;
+  stdout: string;
+  stderr: string;
+  exit_code: number | null;
+  duration_ms: number;
+}
+
+export interface WorkspaceFileEntry {
+  name: string;
+  path: string;
+  kind: "file" | "dir";
+  size?: number;
+}
+
+export interface WorkspaceFileContent {
+  path: string;
+  content: string;
+  size: number;
+  truncated: boolean;
+  binary: boolean;
+}
+
+export interface SystemNetworkInfo {
+  hostname: string;
+  addresses: string[];
+  preferred_ip: string;
+  port: number;
+  mcp_http_url: string;
+  hub_url: string;
+}
+
 export interface CliProbeEntry {
   runtime: RuntimeId;
   label: string;
@@ -292,10 +395,14 @@ export interface Message {
   to_session: string;
   from_name?: string;
   to_name?: string;
+  from_host?: string;
+  to_host?: string;
   question: string;
+  context?: string | null;
   reply: string | null;
   status: MessageStatus;
   room_id: number | null;
+  trace_id?: string | null;
   hop_count: number;
   created_at: string;
   replied_at: string | null;
@@ -392,6 +499,9 @@ export interface GraphNode {
   kind: ThreadKind | "console";
   runtime: RuntimeId | "web";
   state: ThreadState;
+  host: string;
+  incoming_call_mode: IncomingCallMode;
+  external_session_id?: string | null;
   project_id: number | null;
   project_name: string | null;
   workdir: string | null;
@@ -399,6 +509,7 @@ export interface GraphNode {
   pending_approvals: number;
   context_count: number;
   room_ids: number[];
+  live?: boolean;
 }
 
 export interface GraphEdge {
@@ -408,6 +519,10 @@ export interface GraphEdge {
   weight: number;
   last_interact_at: string;
   last_message?: string | null;
+  last_message_id?: number | null;
+  last_status?: MessageStatus | null;
+  trace_id?: string | null;
+  hop_count?: number;
 }
 
 export interface Graph {

@@ -1,14 +1,22 @@
 import { Command } from "commander";
+import { hostname } from "node:os";
+import { readFileSync } from "node:fs";
 import { APP_VERSION } from "../version.js";
 import { resolveConfig, resolveHttpHost, resolveHttpPort, type Scope } from "../config.js";
 import { openDb, stopWalCheckpoint } from "../core/db.js";
 import { startHttpServer } from "../http/server.js";
 import { startMcpServer } from "../mcp/server.js";
 import { createProject, listProjects } from "../core/projects.js";
-import { listThreads } from "../core/threads/store.js";
+import { isValidRuntime, listThreads } from "../core/threads/store.js";
 import { probeLocalClis } from "../core/cli-probe.js";
 import { approveHumanGate, getWorkflowRun, listWorkflows, startWorkflowRun } from "../core/workflows.js";
 import { handoffContext } from "../core/handoff.js";
+import {
+  detectLocalNetworkInfo,
+  executeOriginalDirectoryWake,
+  installCliHook,
+  type HookTargetCli,
+} from "../core/hooks.js";
 import { WEB_CONSOLE_ID } from "@conflux/shared";
 
 interface GlobalOpts {
@@ -183,6 +191,131 @@ export function buildCli(_argv?: string[]): Command {
         process.stdout.write(`${JSON.stringify(res, null, 2)}\n`);
       });
     });
+
+  // ---- Original-Directory Hook & Idle Wakeup CLI ----
+
+  const hookCmd = program.command("hook").description("Install or run original-directory CLI hooks");
+  hookCmd
+    .command("install <cli>")
+    .option("--hub <url>", "Conflux Hub URL (auto-detects local LAN/Tailscale IP if omitted)")
+    .description("Install Tier-1 native CLI hooks (claude | codex | agy)")
+    .action((cliArg: string, cmdOpts: { hub?: string }) => {
+      const normalized = cliArg.trim().toLowerCase();
+      if (normalized !== "claude" && normalized !== "codex" && normalized !== "agy") {
+        throw new Error(`Unsupported CLI '${cliArg}'. Expected: claude | codex | agy`);
+      }
+      const hubUrl = cmdOpts.hub?.trim() || detectLocalNetworkInfo(resolveHttpPort()).hub_url;
+      const result = installCliHook(normalized as HookTargetCli, { hubUrl });
+      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    });
+
+  hookCmd
+    .command("check")
+    .option("--hub <url>", "Conflux Hub URL", `http://127.0.0.1:${resolveHttpPort()}`)
+    .option("--runtime <runtime>", "CLI runtime: claude | codex | antigravity", "claude")
+    .option("--session-id <id>", "Explicit session_id (falls back to stdin hook JSON)")
+    .option("--cwd <dir>", "Explicit working directory (falls back to stdin hook JSON or cwd)")
+    .option("--offline", "Mark this session offline (for SessionEnd hooks)")
+    .description("Heartbeat 1:1 external session and check pending Conflux peer calls")
+    .action(
+      async (cmdOpts: {
+        hub: string;
+        runtime: string;
+        sessionId?: string;
+        cwd?: string;
+        offline?: boolean;
+      }) => {
+        let stdinPayload: Record<string, unknown> = {};
+        if (!process.stdin.isTTY) {
+          try {
+            const raw = readFileSync(0, "utf8").trim();
+            if (raw) stdinPayload = JSON.parse(raw) as Record<string, unknown>;
+          } catch {
+            // non-JSON or empty stdin
+          }
+        }
+        const sessionId =
+          cmdOpts.sessionId?.trim() ||
+          (typeof stdinPayload.session_id === "string" ? stdinPayload.session_id.trim() : "") ||
+          process.env.CONFLUX_SESSION_ID?.trim() ||
+          "";
+        const cwd =
+          cmdOpts.cwd?.trim() ||
+          (typeof stdinPayload.cwd === "string" ? stdinPayload.cwd.trim() : "") ||
+          process.cwd();
+        if (!sessionId) return;
+
+        const hub = cmdOpts.hub.replace(/\/+$/, "");
+        if (cmdOpts.offline) {
+          await fetch(`${hub}/mesh/peers/offline`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: sessionId }),
+          }).catch(() => {});
+          return;
+        }
+
+        const runtime = isValidRuntime(cmdOpts.runtime) ? cmdOpts.runtime : "claude";
+        try {
+          const res = await fetch(`${hub}/mesh/peers/heartbeat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              session_id: sessionId,
+              cwd,
+              host: hostname() || "localhost",
+              runtime,
+            }),
+          });
+          if (!res.ok) return;
+          const data = (await res.json()) as {
+            inbox?: Array<{ id: number; from_name?: string; question: string; context?: string }>;
+          };
+          const inbox = data.inbox ?? [];
+          if (inbox.length > 0) {
+            const summary = inbox
+              .map(
+                (m) =>
+                  `[Conflux 来电 #${m.id} 来自 ${m.from_name ?? "peer"}] ${m.question}${
+                    m.context ? `\n附带上下文:\n${m.context}` : ""
+                  }`,
+              )
+              .join("\n\n");
+            process.stdout.write(
+              `${JSON.stringify({
+                decision: "block",
+                reason: `你有 ${inbox.length} 条未回复的 Conflux 同伴来电，请在当前上下文中回答并调用 reply_peer 回复：\n\n${summary}`,
+              })}\n`,
+            );
+          }
+        } catch {
+          // Hub unreachable — fail silently so user CLI stays snappy
+        }
+      },
+    );
+
+  program
+    .command("wake <sessionId>")
+    .requiredOption("--cwd <dir>", "Exact original working directory (never spawns orphan headless threads)")
+    .option("--runtime <runtime>", "Target CLI runtime: claude | codex | antigravity", "claude")
+    .requiredOption("-p, --prompt <text>", "Prompt to deliver into the resumed original session")
+    .description("Tier-2 idle wakeup: cd into original directory and resume exact session_id")
+    .action(
+      (
+        sessionId: string,
+        cmdOpts: { cwd: string; runtime: string; prompt: string },
+      ) => {
+        const runtime = isValidRuntime(cmdOpts.runtime) ? cmdOpts.runtime : "claude";
+        const result = executeOriginalDirectoryWake({
+          runtime,
+          sessionId,
+          cwd: cmdOpts.cwd,
+          prompt: cmdOpts.prompt,
+        });
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        if (!result.ok) process.exitCode = 1;
+      },
+    );
 
   return program;
 }

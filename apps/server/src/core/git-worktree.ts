@@ -11,11 +11,17 @@ import { tmpdir } from "node:os";
 import { basename, join, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import type {
+  GitCommitResult,
   GitCreatePrResult,
   GitDiffResponse,
   GitFileChange,
   GitMergeResult,
+  GitPushResult,
   GitStatusResponse,
+  PrCheckItem,
+  PrDetailResponse,
+  PrMergeResult,
+  PrReviewComment,
 } from "@conflux/shared";
 import { logger } from "../log.js";
 
@@ -178,7 +184,11 @@ export interface CreatedWorktree {
  * on branch `conflux/<slug>` from HEAD, excluding `.conflux-worktrees/` via
  * `.git/info/exclude` so the repository's `.gitignore` stays untouched.
  */
-export function createWorktree(projectRoot: string, nameHint: string): CreatedWorktree {
+export function createWorktree(
+  projectRoot: string,
+  nameHint: string,
+  customBranchName?: string | null,
+): CreatedWorktree {
   if (!isGitRepo(projectRoot)) {
     throw Object.assign(new Error("当前项目目录不是 Git 仓库，无法创建独立 Worktree"), {
       statusCode: 400,
@@ -192,13 +202,198 @@ export function createWorktree(projectRoot: string, nameHint: string): CreatedWo
   }
   ensureWorktreeExcluded(projectRoot);
   const baseBranch = getCurrentBranch(projectRoot) ?? "HEAD";
-  const slug = slugifyWorktreeName(nameHint);
-  const branch = `conflux/${slug}`;
+  const slug = slugifyWorktreeName(customBranchName?.trim() || nameHint);
+  const branch = customBranchName?.trim()
+    ? customBranchName.trim().replace(/\s+/g, "-")
+    : `conflux/${slug}`;
   const containerDir = join(projectRoot, ".conflux-worktrees");
   mkdirSync(containerDir, { recursive: true });
   const worktreePath = join(containerDir, slug);
-  runGit(projectRoot, ["worktree", "add", "-b", branch, worktreePath, "HEAD"]);
+  const existingBranch = runGit(projectRoot, ["rev-parse", "--verify", `refs/heads/${branch}`], {
+    allowFailure: true,
+  });
+  if (existingBranch.ok) {
+    runGit(projectRoot, ["worktree", "add", worktreePath, branch]);
+  } else {
+    runGit(projectRoot, ["worktree", "add", "-b", branch, worktreePath, "HEAD"]);
+  }
   return { worktreePath, branch, baseBranch };
+}
+
+/**
+ * Paseo PR checkout mode: fetch an existing GitHub PR into a dedicated worktree
+ * under `.conflux-worktrees/pr-<number>` and return its branch & PR URL.
+ */
+export function checkoutPrWorktree(
+  projectRoot: string,
+  prNumberInput: number | string,
+  ghPath?: string,
+): CreatedWorktree & { prUrl: string | null } {
+  if (!isGitRepo(projectRoot)) {
+    throw Object.assign(new Error("当前项目目录不是 Git 仓库，无法检出 PR"), { statusCode: 400 });
+  }
+  const prNum = Number.parseInt(String(prNumberInput).replace(/^#/, "").trim(), 10);
+  if (!Number.isInteger(prNum) || prNum <= 0) {
+    throw Object.assign(new Error("请输入合法的 PR 编号（例如 42）"), { statusCode: 400 });
+  }
+  ensureWorktreeExcluded(projectRoot);
+
+  let baseBranch = getDefaultBranch(projectRoot) ?? getCurrentBranch(projectRoot) ?? "main";
+  let prUrl: string | null = null;
+  let localBranch = `pr-${prNum}`;
+  const ghBin = resolveGhBinary(ghPath);
+  if (ghBin) {
+    const view = runGh(projectRoot, ghBin, [
+      "pr",
+      "view",
+      String(prNum),
+      "--json",
+      "headRefName,baseRefName,url",
+    ]);
+    if (view.ok) {
+      try {
+        const parsed = JSON.parse(view.stdout) as {
+          headRefName?: string;
+          baseRefName?: string;
+          url?: string;
+        };
+        if (parsed.baseRefName) baseBranch = parsed.baseRefName;
+        if (parsed.url) prUrl = parsed.url;
+        if (parsed.headRefName) localBranch = parsed.headRefName;
+      } catch {
+        // fallback to pr-<num>
+      }
+    }
+  }
+
+  const fetchBranch = `pr-${prNum}-${randomUUID().slice(0, 4)}`;
+  const fetchRes = runGit(
+    projectRoot,
+    ["fetch", "origin", `pull/${prNum}/head:refs/heads/${fetchBranch}`],
+    { allowFailure: true, timeoutMs: 30_000 },
+  );
+  if (!fetchRes.ok) {
+    throw Object.assign(
+      new Error(`拉取 PR #${prNum} 失败：${(fetchRes.stderr || fetchRes.stdout).trim()}`),
+      { statusCode: 400 },
+    );
+  }
+
+  const containerDir = join(projectRoot, ".conflux-worktrees");
+  mkdirSync(containerDir, { recursive: true });
+  const worktreePath = join(containerDir, `pr-${prNum}-${randomUUID().slice(0, 4)}`);
+  runGit(projectRoot, ["worktree", "add", worktreePath, fetchBranch]);
+  return {
+    worktreePath,
+    branch: localBranch || fetchBranch,
+    baseBranch,
+    prUrl,
+  };
+}
+
+function assertSafeRelativeGitPath(workdir: string, relPath: string): string {
+  const trimmed = relPath.trim();
+  if (!trimmed) throw Object.assign(new Error("path is required"), { statusCode: 400 });
+  const resolved = resolve(workdir, trimmed);
+  const rel = relative(resolve(workdir), resolved);
+  if (rel.startsWith("..") || rel === "") {
+    throw Object.assign(new Error(`invalid path outside workspace: ${relPath}`), { statusCode: 400 });
+  }
+  return trimmed;
+}
+
+export function stageGitFiles(
+  workdir: string,
+  paths: string[] | null,
+  staged: boolean,
+): GitStatusResponse {
+  if (!isGitRepo(workdir)) {
+    throw Object.assign(new Error("当前目录不是 Git 仓库"), { statusCode: 400 });
+  }
+  if (!paths || paths.length === 0) {
+    if (staged) {
+      runGit(workdir, ["add", "-A", "--", ".", ":!.conflux-worktrees"]);
+    } else {
+      runGit(workdir, ["reset", "HEAD"], { allowFailure: true });
+    }
+    return getGitStatus(workdir);
+  }
+  const safePaths = paths.map((p) => assertSafeRelativeGitPath(workdir, p));
+  if (staged) {
+    runGit(workdir, ["add", "--", ...safePaths]);
+  } else {
+    const res = runGit(workdir, ["reset", "HEAD", "--", ...safePaths], { allowFailure: true });
+    if (!res.ok) {
+      // Unborn HEAD fallback
+      runGit(workdir, ["rm", "--cached", "--", ...safePaths], { allowFailure: true });
+    }
+  }
+  return getGitStatus(workdir);
+}
+
+export function commitGitChanges(workdir: string, message: string): GitCommitResult {
+  if (!isGitRepo(workdir)) {
+    throw Object.assign(new Error("当前目录不是 Git 仓库"), { statusCode: 400 });
+  }
+  const msg = message.trim();
+  if (!msg) {
+    throw Object.assign(new Error("请输入 Commit 提交信息"), { statusCode: 400 });
+  }
+  const stagedCheck = runGit(workdir, ["diff", "--cached", "--quiet"], { allowFailure: true });
+  if (stagedCheck.ok) {
+    // Nothing explicitly staged yet — stage all workspace changes except .conflux-worktrees
+    const status = getGitStatus(workdir);
+    if (!status.dirty) {
+      return { ok: false, commit_sha: null, message: "工作区没有可提交的改动" };
+    }
+    runGit(workdir, ["add", "-A", "--", ".", ":!.conflux-worktrees"]);
+  }
+
+  const hasName = runGit(workdir, ["config", "user.name"], { allowFailure: true }).stdout.trim();
+  const hasEmail = runGit(workdir, ["config", "user.email"], { allowFailure: true }).stdout.trim();
+  const commitArgs = [
+    ...(!hasName ? ["-c", "user.name=Conflux"] : []),
+    ...(!hasEmail ? ["-c", "user.email=conflux@local"] : []),
+    "commit",
+    "-m",
+    msg,
+  ];
+  const res = runGit(workdir, commitArgs, { allowFailure: true });
+  if (!res.ok) {
+    return {
+      ok: false,
+      commit_sha: null,
+      message: (res.stderr || res.stdout).trim() || "git commit 失败",
+    };
+  }
+  const sha = runGit(workdir, ["rev-parse", "--short", "HEAD"], { allowFailure: true }).stdout.trim();
+  return {
+    ok: true,
+    commit_sha: sha || null,
+    message: sha ? `已提交 ${sha}：${msg}` : `已提交：${msg}`,
+  };
+}
+
+export function pushGitBranch(workdir: string): GitPushResult {
+  if (!isGitRepo(workdir)) {
+    throw Object.assign(new Error("当前目录不是 Git 仓库"), { statusCode: 400 });
+  }
+  const branch = getCurrentBranch(workdir);
+  if (!branch) {
+    return { ok: false, branch: null, message: "当前处于游离 HEAD 状态，无法推送分支" };
+  }
+  const res = runGit(workdir, ["push", "-u", "origin", branch], {
+    allowFailure: true,
+    timeoutMs: 30_000,
+  });
+  if (!res.ok) {
+    return {
+      ok: false,
+      branch,
+      message: `推送失败：${(res.stderr || res.stdout).trim().slice(0, 300)}`,
+    };
+  }
+  return { ok: true, branch, message: `已推送分支 ${branch} 到 origin` };
 }
 
 function parsePorcelainStatus(output: string): GitFileChange[] {
@@ -576,6 +771,204 @@ export function createWorktreePr(
     existing: false,
     message: prUrl ? "已推送分支并创建 PR" : "已执行 gh pr create",
   };
+}
+
+function normalizeCheckStatus(raw: Record<string, unknown>): PrCheckItem["status"] {
+  const conclusion = String(raw.conclusion ?? raw.state ?? "").toUpperCase();
+  const status = String(raw.status ?? "").toUpperCase();
+  if (["SUCCESS", "NEUTRAL", "SKIPPED", "PASS"].includes(conclusion)) return "pass";
+  if (
+    ["FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "ERROR", "STARTUP_FAILURE", "FAIL"].includes(
+      conclusion,
+    )
+  ) {
+    return "fail";
+  }
+  if (["IN_PROGRESS", "QUEUED", "PENDING", "EXPECTED", "WAITING"].includes(status || conclusion)) {
+    return "pending";
+  }
+  return "pending";
+}
+
+/**
+ * Full Paseo PR Detail inspection via local `gh`: fetches PR metadata, CI checks
+ * (`statusCheckRollup`), and review/issue comments so the user can review checks
+ * and send comments directly to the active Agent with one click.
+ */
+export function getPrDetail(
+  workdir: string,
+  branchOverride?: string | null,
+  ghPath?: string,
+): PrDetailResponse {
+  const ghBin = resolveGhBinary(ghPath);
+  if (!ghBin) {
+    return {
+      gh_available: false,
+      pr: null,
+      message: "未检测到 GitHub CLI (gh)，请先安装并执行 gh auth login。",
+    };
+  }
+  if (!isGitRepo(workdir)) {
+    return { gh_available: true, pr: null, message: "当前目录不是 Git 仓库" };
+  }
+
+  const branch = branchOverride?.trim() || getCurrentBranch(workdir);
+  const args = [
+    "pr",
+    "view",
+    ...(branch ? [branch] : []),
+    "--json",
+    "number,title,state,url,headRefName,baseRefName,isDraft,statusCheckRollup,comments,reviews",
+  ];
+  const view = runGh(workdir, ghBin, args);
+  if (!view.ok) {
+    return {
+      gh_available: true,
+      pr: null,
+      message: branch ? `分支 ${branch} 尚未关联 Pull Request` : "当前分支尚未关联 Pull Request",
+    };
+  }
+
+  try {
+    const data = JSON.parse(view.stdout) as {
+      number: number;
+      title: string;
+      state: string;
+      url: string;
+      headRefName: string;
+      baseRefName: string;
+      isDraft?: boolean;
+      statusCheckRollup?: Array<Record<string, unknown>>;
+      comments?: Array<{
+        id?: string;
+        author?: { login?: string };
+        body?: string;
+        createdAt?: string;
+        url?: string;
+      }>;
+      reviews?: Array<{
+        id?: string;
+        author?: { login?: string };
+        body?: string;
+        submittedAt?: string;
+        state?: string;
+      }>;
+    };
+
+    const checks: PrCheckItem[] = (data.statusCheckRollup ?? []).map((item, idx) => ({
+      name: String(item.name ?? item.context ?? `check-${idx + 1}`),
+      status: normalizeCheckStatus(item),
+      duration: null,
+      url: typeof item.detailsUrl === "string"
+        ? item.detailsUrl
+        : typeof item.targetUrl === "string"
+          ? item.targetUrl
+          : null,
+      description: typeof item.description === "string" ? item.description : null,
+    }));
+
+    const comments: PrReviewComment[] = [];
+    // Inline diff review comments via gh api (best-effort)
+    const inlineRes = runGh(workdir, ghBin, [
+      "api",
+      `repos/{owner}/{repo}/pulls/${data.number}/comments`,
+    ]);
+    if (inlineRes.ok) {
+      try {
+        const inlineList = JSON.parse(inlineRes.stdout) as Array<{
+          id?: number;
+          user?: { login?: string };
+          path?: string;
+          line?: number;
+          original_line?: number;
+          body?: string;
+          created_at?: string;
+          html_url?: string;
+        }>;
+        if (Array.isArray(inlineList)) {
+          for (const c of inlineList) {
+            if (!c.body?.trim()) continue;
+            comments.push({
+              id: `inline-${c.id ?? comments.length}`,
+              author: c.user?.login ? `@${c.user.login}` : "@reviewer",
+              path: c.path ?? null,
+              line: c.line ?? c.original_line ?? null,
+              body: c.body.trim(),
+              created_at: c.created_at ?? null,
+              url: c.html_url ?? null,
+            });
+          }
+        }
+      } catch {
+        // ignore inline comment parse error
+      }
+    }
+
+    for (const r of data.reviews ?? []) {
+      if (!r.body?.trim()) continue;
+      comments.push({
+        id: `review-${r.id ?? comments.length}`,
+        author: r.author?.login ? `@${r.author.login}` : "@reviewer",
+        path: null,
+        line: null,
+        body: r.body.trim(),
+        created_at: r.submittedAt ?? null,
+        url: data.url,
+      });
+    }
+
+    for (const c of data.comments ?? []) {
+      if (!c.body?.trim()) continue;
+      comments.push({
+        id: `comment-${c.id ?? comments.length}`,
+        author: c.author?.login ? `@${c.author.login}` : "@reviewer",
+        path: null,
+        line: null,
+        body: c.body.trim(),
+        created_at: c.createdAt ?? null,
+        url: c.url ?? data.url,
+      });
+    }
+
+    return {
+      gh_available: true,
+      pr: {
+        number: data.number,
+        title: data.title,
+        state: data.state,
+        url: data.url,
+        head_branch: data.headRefName,
+        base_branch: data.baseRefName,
+        is_draft: Boolean(data.isDraft),
+        checks,
+        comments,
+      },
+      message: null,
+    };
+  } catch {
+    return { gh_available: true, pr: null, message: "解析 gh pr view 输出失败" };
+  }
+}
+
+export function mergeGitPr(
+  workdir: string,
+  opts: { method?: "squash" | "merge" | "rebase"; deleteBranch?: boolean; ghPath?: string } = {},
+): PrMergeResult {
+  const ghBin = resolveGhBinary(opts.ghPath);
+  if (!ghBin) {
+    return { ok: false, message: "未检测到 GitHub CLI (gh)" };
+  }
+  const flag =
+    opts.method === "merge" ? "--merge" : opts.method === "rebase" ? "--rebase" : "--squash";
+  const args = ["pr", "merge", flag, ...(opts.deleteBranch ? ["--delete-branch"] : [])];
+  const res = runGh(workdir, ghBin, args);
+  if (!res.ok) {
+    return {
+      ok: false,
+      message: `合并 PR 失败：${(res.stderr || res.stdout).trim().slice(0, 300)}`,
+    };
+  }
+  return { ok: true, message: "已通过 gh pr merge 合并 PR" };
 }
 
 export function cleanupWorktree(

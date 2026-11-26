@@ -16,6 +16,8 @@ import { registerThreadRoutes } from "./routes/threads.js";
 import { registerRoomAndMemoryRoutes } from "./routes/rooms.js";
 import { registerWorkflowRoutes } from "./routes/workflows.js";
 import { registerLiveEventsRoutes } from "./routes/live-events.js";
+import { registerMcpHttpRoutes } from "./routes/mcp.js";
+import { registerMeshRoutes } from "./routes/mesh.js";
 import { installRoomOrchestrationHooks } from "../core/rooms.js";
 import { installWorkflowHooks } from "../core/workflows.js";
 import {
@@ -33,11 +35,12 @@ export interface HttpServerOptions {
   threadManagerOptions?: ThreadManagerOptions;
 }
 
-const LOCAL_CORS_ORIGIN_RE = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i;
+const TRUSTED_LOCAL_OR_LAN_CORS_RE =
+  /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d+\.\d+|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|[a-z0-9-]+\.ts\.net)(?::\d+)?$/i;
 
 export function isAllowedCorsOrigin(origin: string | undefined): boolean {
   if (!origin) return true;
-  return LOCAL_CORS_ORIGIN_RE.test(origin);
+  return TRUSTED_LOCAL_OR_LAN_CORS_RE.test(origin);
 }
 
 export async function startHttpServer(opts: HttpServerOptions = {}): Promise<FastifyInstance> {
@@ -109,6 +112,8 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   registerRoomAndMemoryRoutes(app, ctx);
   registerWorkflowRoutes(app, ctx);
   registerLiveEventsRoutes(app);
+  registerMcpHttpRoutes(app, ctx);
+  registerMeshRoutes(app, ctx);
 
   try {
     await app.listen({ host, port });

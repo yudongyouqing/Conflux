@@ -8,6 +8,7 @@ import type {
   RuntimeId,
   ThreadDetailResponse,
   ThreadRun,
+  WorkspaceCreateMode,
 } from "@conflux/shared";
 import { nowIso, type DB } from "../db.js";
 import { logger } from "../../log.js";
@@ -23,6 +24,7 @@ import type { ThreadLaunchSpec } from "../runtime-env.js";
 import { collectIncrementalPinnedMemory, publishContext } from "../context.js";
 import { ensureProjectForDir, getProject } from "../projects.js";
 import {
+  checkoutPrWorktree,
   cleanupWorktree,
   createInvisibleCheckpoint,
   createWorktree,
@@ -210,6 +212,9 @@ export class ThreadManager {
     extra_env?: string | null;
     approval_mode?: ApprovalMode;
     use_worktree?: boolean;
+    workspace_mode?: WorkspaceCreateMode;
+    branch_name?: string | null;
+    pr_number?: number | string | null;
     parent_thread_id?: string | null;
     initial_prompt?: string | null;
   }): Promise<AgentThread> {
@@ -232,9 +237,23 @@ export class ThreadManager {
     let worktreePath: string | null = null;
     let worktreeBranch: string | null = null;
     let baseBranch: string | null = isGitRepo(baseDir) ? getCurrentBranch(baseDir) : null;
+    let prUrl: string | null = null;
 
-    if (input.use_worktree) {
-      const wt = createWorktree(project?.root_path ?? baseDir, name);
+    const mode: WorkspaceCreateMode =
+      input.workspace_mode ?? (input.use_worktree ? "worktree" : "direct");
+
+    if (mode === "pr") {
+      if (!input.pr_number) {
+        throw Object.assign(new Error("检出 PR 模式必须提供 pr_number"), { statusCode: 400 });
+      }
+      const wt = checkoutPrWorktree(project?.root_path ?? baseDir, input.pr_number);
+      workdir = wt.worktreePath;
+      worktreePath = wt.worktreePath;
+      worktreeBranch = wt.branch;
+      baseBranch = wt.baseBranch;
+      prUrl = wt.prUrl;
+    } else if (mode === "worktree") {
+      const wt = createWorktree(project?.root_path ?? baseDir, name, input.branch_name);
       workdir = wt.worktreePath;
       worktreePath = wt.worktreePath;
       worktreeBranch = wt.branch;
@@ -254,6 +273,7 @@ export class ThreadManager {
       worktree_path: worktreePath,
       worktree_branch: worktreeBranch,
       base_branch: baseBranch,
+      pr_url: prUrl,
       model: input.model ?? null,
       instructions: input.instructions ?? null,
       extra_env: input.extra_env ?? null,
