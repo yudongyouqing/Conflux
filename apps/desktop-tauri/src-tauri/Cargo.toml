@@ -1,0 +1,26 @@
+[package]
+name = "conflux-tauri"
+version = "0.3.1"
+description = "Lightweight Tauri v2 desktop shell for Conflux Personal Agent Mesh"
+authors = ["Conflux contributors"]
+edition = "2021"
+
+[lib]
+name = "conflux_tauri_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+rfd = "0.15"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

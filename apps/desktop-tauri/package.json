@@ -1,0 +1,12 @@
+{
+  "name": "conflux-desktop-tauri",
+  "private": true,
+  "version": "0.3.1",
+  "description": "Lightweight Tauri v2 desktop shell for Conflux (reuses local Node server + system WebView)",
+  "scripts": {
+    "check": "node scripts/run-cargo.mjs check",
+    "test": "node scripts/run-cargo.mjs test",
+    "build": "node scripts/run-cargo.mjs build --release",
+    "dev": "node scripts/run-cargo.mjs run"
+  }
+}

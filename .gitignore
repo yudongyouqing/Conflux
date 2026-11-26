@@ -25,3 +25,7 @@ test-results/
 # local acceptance-screenshot output (scripts/acceptance/*-screenshots.mjs)
 managed-panel-shots/
 sidebar-shots/
+
+# Tauri v2 Rust build artifacts
+apps/desktop-tauri/src-tauri/target/
+apps/desktop-tauri/src-tauri/gen/
