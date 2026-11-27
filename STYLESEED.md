@@ -1,0 +1,28 @@
+# StyleSeed — Design Lock
+<!-- Selections persist here. This file cannot waive StyleSeed core invariants. -->
+- App domain: developer-tools
+- Surface: desktop-app
+- Surface adapter: product-ui
+- Page type: dashboard
+- Output grammar: technical-instrument
+- Grammar path: built-in:engine/RULESETS.md
+- Grammar fallback: technical-instrument
+- Reference confidence: n/a
+- Brand recipe: developer-platform
+- Palette recipe: auto
+- Key color: #18181B
+- Palette character: calm
+- Palette mode: dark
+- Palette harmony: auto
+- Surface temperature: neutral
+- Aesthetic profile: minimal-mono
+- Skin: custom
+- Primary action: #F4F4F5
+- Font: IBM Plex Sans
+- Radius: crisp
+- Elevation: light=tonal grouping + hairline · dark=tonal ramp + hairline
+- Density: compact
+- Motion: Spring restrained
+- Imagery/data role: live agent workspace, git diff, and cross-host MCP topology first
+- Signature move: zero-duplicate-tab Paseo split workbench with inline diff annotations and live cross-host MCP call graph
+- Locked: 2026-11-27

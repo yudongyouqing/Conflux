@@ -1,47 +1,61 @@
 {
-  "version": 1,
+  "version": 2,
   "skills": {
-    "grill-me": {
-      "source": "mattpocock/skills",
+    "code-reviewer": {
+      "source": "google-gemini/gemini-cli",
       "sourceType": "github",
-      "skillPath": "skills/productivity/grill-me/SKILL.md",
-      "computedHash": "7edd436132b43ea2973710f0c28a9879c9b0910651eb89a991a7e98cb6dbbacb"
-    },
-    "webapp-testing": {
-      "source": "anthropics/skills",
-      "sourceType": "github",
-      "skillPath": "skills/webapp-testing/SKILL.md",
-      "computedHash": "3f14af7f5690695209c22fbf8c8d133769a86d64892602c09bb13f135e14e857"
-    },
-    "frontend-design": {
-      "source": "anthropics/claude-code",
-      "sourceType": "github",
-      "skillPath": "plugins/frontend-design/skills/frontend-design/SKILL.md",
-      "computedHash": "d91970639e9f5c37682ac7ab60094d35f1c7c1f38d731bd56396563aee10c1d3"
+      "skillPath": ".gemini/skills/code-reviewer/SKILL.md",
+      "computedHash": ""
     },
     "electron-development": {
       "source": "sickn33/antigravity-awesome-skills",
       "sourceType": "github",
       "skillPath": "skills/electron-development/SKILL.md",
-      "computedHash": "dfc11196c7faf2cb72df4da39518bfa086743e20f6c03bea1dd1efcb3a015509"
+      "computedHash": ""
     },
-    "theme-factory": {
-      "source": "anthropics/skills",
+    "frontend-design": {
+      "source": "anthropics/claude-code",
       "sourceType": "github",
-      "skillPath": "skills/theme-factory/SKILL.md",
-      "computedHash": "c35893e221e28895c52143cc11bf30e41a44817796b39d4b15727dadc9796552"
+      "skillPath": "plugins/frontend-design/skills/frontend-design/SKILL.md",
+      "computedHash": ""
     },
-    "code-reviewer": {
-      "source": "google-gemini/gemini-cli",
+    "grill-me": {
+      "source": "mattpocock/skills",
       "sourceType": "github",
-      "skillPath": ".gemini/skills/code-reviewer/SKILL.md",
-      "computedHash": "d2bd763e7cfa424845c54639d4a97cdb0aa03b5eedeabb1d171a16086584cec9"
+      "skillPath": "skills/productivity/grill-me/SKILL.md",
+      "computedHash": "056d334e5d235e66ecd359f096d1b3d63f31500ec0d97504775351014869d465"
     },
     "pr-creator": {
       "source": "google-gemini/gemini-cli",
       "sourceType": "github",
       "skillPath": ".gemini/skills/pr-creator/SKILL.md",
-      "computedHash": "55b90da8be524f5f2f8e112e914de0d85b416576e221177835532bcf836e9af7"
+      "computedHash": ""
+    },
+    "ste80-humanizer": {
+      "source": "Dodaios/ste80-humanizer",
+      "commit": "dc94757522792c4af70371a81a01465a6079ec28",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "0006bdd357980414a51a2299f12b6dd01ec57bccdad45116e9caf434763f8108"
+    },
+    "styleseed": {
+      "source": "bitjaru/styleseed",
+      "commit": "4aafc74c9ffa31661f4e5213e18a00b29ca14473",
+      "sourceType": "github",
+      "skillPath": "skills/styleseed/SKILL.md",
+      "computedHash": "78c833ddde88fd34b76064c14263b14d4ca1a40d1dc178b3f1bc5fb0328e45d1"
+    },
+    "theme-factory": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/theme-factory/SKILL.md",
+      "computedHash": ""
+    },
+    "webapp-testing": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/webapp-testing/SKILL.md",
+      "computedHash": ""
     }
   }
 }

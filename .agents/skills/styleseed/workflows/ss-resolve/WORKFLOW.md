@@ -1,0 +1,135 @@
+---
+name: ss-resolve
+description: Compile the effective StyleSeed rule bundle for one artifact, or inspect install and evidence health read-only. Use before setup or build, or to diagnose rule drift.
+---
+
+Before this workflow, follow the once-per-session [update preflight](../ss-update/references/update-preflight.md).
+
+
+# Resolve effective StyleSeed context
+
+Use the bundled `scripts/resolve-context.mjs`; do not hand-compose the rule stack.
+
+1. Resolve the project boundary first: if either `.styleseed/project.json` or
+   `.styleseed/artifacts/index.json` exists, require a complete, valid registry. Do not fall back
+   to `STYLESEED.md` on a registry error. Only use that lock when no registry exists.
+2. Keep the working directory at the user's project root. Invoke the script by its installed
+   path; do not `cd` into the skill directory.
+3. Legacy single-artifact projects should prefer `--from-lock STYLESEED.md`. Registry projects use
+   `.styleseed/project.json` plus `.styleseed/artifacts/*.json` and must resolve with `--artifact`
+   or `--all`; in registry mode, edit project-owned config instead of passing selection overrides.
+4. Read the emitted bundle before building: legacy writes `.styleseed/effective-rules.md`; registry
+   writes `.styleseed/bundles/<artifact-id>.md`.
+5. Preserve the manifest output: legacy uses `.styleseed/manifest.json`; registry uses
+   `.styleseed/manifests/<artifact-id>.json`.
+6. Use `--check` to detect context drift without rewriting files.
+
+A project with an existing design system imports its own token file instead of generating a palette:
+optional project `tokens` (`source`, `format` dtcg · tokens-studio · figma-variables, `modes`, `roles`)
+maps StyleSeed's roles onto the imported tokens, checks aliases, layering, modes and contrast, and
+compiles only imported values into the bundle, palette JSON and CSS. A role the file cannot supply is
+an error naming the mapping to add, never a generated colour. Preview read-only with
+`import-tokens.mjs`; see the [token canon guide](references/tokens.md).
+
+A project records approved decisions and approved exceptions in optional project `decisions` (id,
+`decision` or `exception`, optional `rule`/`to`, `axis` + `values` (a measured axis, or one of two
+corner axes the ledger records and nothing checks), `scope`, statement,
+`approvedBy`, date). The resolver compiles the entries that apply to an artifact into the bundle's
+**Rules in scope** section, where a decision outranks a default and never an invariant; an exception
+against an invariant fails the resolve. The drift report reads the same ledger. See the
+[decisions ledger guide](references/decisions.md).
+
+To propose the values a person may record, run `propose-system.mjs --project-root . --surface pointer --write`
+(`--surface touch` for a touch-first product, `--reference <slug>` for each measured reference). For control height,
+type sizes, corner radius, table row height, and spacing unit it gives a value and its basis, strongest first: the
+project's recorded decision, the person's own measurement, counts over the measured design systems that ship with
+this skill, and the engine default, labelled not measured. Its `SYSTEM.md` opens with the system the project starts
+with: one table of what the shipped components draw with the project's look and what its ledger records, then one
+entry to take it or the reason there is none. It writes no ledger and no name. See
+[system proposals](references/proposals.md).
+
+For spacing recommendations and scoped control, see the [spatial roles guide](references/spacing.md).
+Optional project/artifact `spacing` compiles into a role table and artifact-scoped CSS in the bundle.
+`recommend-spacing.mjs --project-root . --artifact <id>` emits a read-only starting proposal; it does
+not inspect or rewrite implementation tokens and does not establish design acceptance. Optional
+`--measurement <project-relative-report.json>` adds source-bound rendered diagnostics; stale or
+inconsistent reports are rejected, and starting values remain explicitly heuristic.
+
+For installation or project-health questions, run the read-only diagnostic first:
+
+For a requested legacy-to-registry migration, inspect `migrate-project.mjs --dry-run` first.
+Follow the [reviewed migration guide](references/migration.md) for the plan format and apply sequence.
+The bare `--write` path deliberately refuses unreviewed defaults. Applying a migration requires
+a complete human-reviewed plan, the current lock hash, a one-to-one section-to-artifact mapping,
+and `--confirm-plan` matching that plan's exact hash. A valid schema or dry-run is not proof that
+the design decisions were preserved; never infer approval or run a write from a diagnosis request.
+
+```bash
+node <installed-ss-resolve>/scripts/styleseed-doctor.mjs --project-root . --json
+```
+
+It checks the local distribution inventory, project configuration, compiled rules, and stored
+evidence against current inputs. Use `--artifact <id>` to narrow a registry check. It never
+sets up, migrates, recompiles, renders, or updates the project. Follow its `next` actions only
+within the user's authorization. Exit 0 means current evidence for all selected artifacts,
+not an independent visual judgment; exit 1 means attention needed; exit 2 means invalid invocation.
+Legacy projects can have current rules while evidence remains `unsupported`. Installation
+integrity does not prove host discovery, publisher authenticity, or the latest upstream revision.
+
+```bash
+node <installed-ss-resolve>/scripts/resolve-context.mjs \
+  --from-lock STYLESEED.md \
+  --agent codex
+```
+
+Registry project:
+
+```bash
+node <installed-ss-resolve>/scripts/resolve-context.mjs \
+  --project-root . \
+  --artifact app-dashboard \
+  --agent codex
+```
+
+Without a lock:
+
+```bash
+node <installed-ss-resolve>/scripts/resolve-context.mjs \
+  --agent claude \
+  --grammar operations-console \
+  --adapter product-ui \
+  --domain saas \
+  --page dashboard \
+  --recipe enterprise-workbench \
+  --palette cobalt-instrument \
+  --key-color "#175CD3" \
+  --palette-character balanced \
+  --palette-mode light \
+  --palette-harmony auto \
+  --surface-temperature cool \
+  --profile swiss
+```
+
+Use `--list` to print supported IDs. `--recipe auto` maps the selected grammar to a maintained
+default; `--palette auto` maps that recipe to a contrast-verified semantic palette. Pass explicit
+values when the product needs a different morphology or color posture. The default
+output directory is `.styleseed/` in the
+project root. For a project-local reference grammar, pass `reference:<slug>` and ensure
+`.styleseed/rulesets/<slug>/RULESET.md` exists. Registry projects require the full six-file
+reference contract: `RULESET.md`, `tokens.json`, `evidence.json`, `checks.md`,
+`reference-board.html`, and `adapter.json`.
+
+When a key color is present in flags or the lock, the resolver uses the shared OKLCH generator and
+writes `.styleseed/palette.json` plus `.styleseed/palette.css`. The manifest records the generation
+inputs. The maintained recipe still supplies product posture and semantic restrictions; its fixed
+hex values become fallbacks rather than overriding the generated system.
+
+A project without a registry also gets `.styleseed/system.css` on every resolve, listed in the manifest and
+checked by `--check` like the other outputs. It draws the default control height the ledger records (`controlHeights`:
+the height in the project-wide entry's `default-height:<px>; ` token, unless the entry took the brand recipe's own
+default) and the control and field corners (`controlRadius`, `fieldRadius`), and holds one comment line when there is
+none. It is never removed, because the project imports it once in its global stylesheet, outside every `@layer`. A
+registry compile does not write it.
+
+Do not load `llms-full.txt` after a bundle resolves successfully. Load a larger source document
+only when the bundle names an unresolved ambiguity that requires it.

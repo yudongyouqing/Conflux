@@ -1,0 +1,228 @@
+---
+name: ss-setup
+description: Configure StyleSeed by selecting the output grammar, domain, page type, brand recipe, semantic palette recipe, optional aesthetic profile, and bounded brand tokens before scaffolding a first screen.
+argument-hint: "(no arguments needed)"
+allowed-tools: Read, Write, Edit, Grep, Glob, Bash, WebFetch
+---
+
+Before this workflow, follow the once-per-session [update preflight](../ss-update/references/update-preflight.md).
+
+
+# StyleSeed setup
+
+StyleSeed setup chooses a **design method for the result**, not a favorite brand to imitate.
+Use `/ss-resolve --list` (Claude Code) or `$ss-resolve --list` (Codex) to inspect the supported
+grammar, adapter, domain, page, recipe, palette, and profile IDs without loading the full handbook.
+
+## When not to use
+
+- Project already has a valid `STYLESEED.md` → use `/ss-update`.
+- User supplied references that are not represented by a built-in grammar → run
+  `/ss-reference` before setup, then select the compiled grammar.
+- One component inside an established system → `/ss-component`.
+
+The method, review, and reference compiler are framework-agnostic. The bundled component
+scaffold currently targets React and Tailwind v4; on another stack configure the lock and
+apply the method without pretending the scaffold is portable.
+
+## Wizard — one decision at a time
+
+### 1. Product job and surface
+
+Ask what is being built, who uses it, and whether it is a mobile/desktop product, website,
+social carousel, slide deck, document/report, or single-frame graphic. Select a surface adapter
+from `ADAPTERS.md`, then infer domain and page/artifact type.
+
+### 2. Output grammar
+
+Recommend exactly one grammar from `RULESETS.md` and explain the job match in one sentence:
+
+- `consumer-service`
+- `operations-console`
+- `technical-instrument`
+- `editorial-reading`
+- `commerce-conversion`
+- `institutional-service`
+- `expressive-marketing`
+- `sequential-story`
+- `reference:<slug>` when `/ss-reference` already compiled one
+
+Do not recommend Toss as the universal default. It is one reference family for
+`consumer-service`. If none fits and the user has references, route to `/ss-reference`.
+
+### 3. Page type and domain bias
+
+Confirm the concrete page (dashboard, form, landing, detail, list, settings, onboarding) and
+read its domain × page intersection. This controls composition; the aesthetic profile does not.
+
+### 4. Brand recipe
+
+Recommend one morphology from `BRAND-RECIPES.md`. Use `auto` when the maintained grammar mapping
+fits. Use an explicit recipe when the product needs a different geometry, containment,
+navigation, control, or collection language. A recipe is not a company clone and does not
+select colors.
+
+Say where the recommendation comes from in the same message. When the choice is `auto`:
+`This is StyleSeed's default for <kind of product>. It is not measured.` When you recommend an
+explicit recipe: `This is my recommendation from StyleSeed's built-in looks. It is not measured.`
+Then give the link once: `Design systems we measured: https://styleseed-demo.vercel.app/systems`.
+Say it in the person's language. Never call a recipe measured, typical of an industry, official,
+or endorsed.
+
+### 5. Palette recipe
+
+Recommend one semantic palette from `PALETTE-RECIPES.md`. Use `auto` when its maintained recipe
+mapping fits. An explicit palette must still preserve semantic roles, surface/chrome separation,
+status cues, and validated contrast. The recipe is a product posture, not a finite swatch list.
+When the user supplies a key color, select perceptual character, light/dark environment, surface
+temperature, and accent relationship; `$ss-resolve` then derives the actual OKLCH ramps and roles.
+Palette selection is not permission to recolor every surface.
+When the team already has a design system, pick no palette and no key colour: record its token file
+as the canon (`tokens` in `.styleseed/project.json`, DTCG · Tokens Studio · Figma Variables) so the
+resolver maps roles onto the imported values and the generator does not run. Roles the file cannot
+supply are mapped explicitly, never generated. See the resolver's
+[token canon guide](../ss-resolve/references/tokens.md).
+
+### 6. Optional aesthetic profile
+
+Recommend one profile from `PRESETS.md` only when it strengthens the product. `none` is a good
+default. A profile modifies coordinated visual axes but cannot replace the output grammar.
+
+### 7. Brand and bounded axes
+
+Lock a real brand color if supplied; otherwise start from the selected palette's primary role. For
+a supplied key, recommend `calm|balanced|vivid|deep` from the product posture rather than asking for
+an unbounded mood word. Then confirm light/dark mode, `neutral|warm|cool` surfaces, and
+`auto|tonal|adjacent|contrast` accent relationship. Confirm font/language, density, radius,
+elevation, imagery/data role, and motion inside the grammar's allowed ranges. Do not use generic
+indigo or a stale purple mislabeled as Toss. The words chosen here (density, radius) are postures. The
+numbers for control height, type sizes, corner radius, row height, and spacing unit are proposed with
+their basis in step 9a.
+
+### 7a. Spatial relationships
+
+Explain the intended groups and spacing tradeoff before selecting numbers. Preserve existing
+spacing tokens. For registry product UI, use the resolver's [spatial roles guide](../ss-resolve/references/spacing.md)
+to recommend and persist page inset, section/group/stack/inline gaps, and component inset separately.
+Keep typography and hit targets independent. Legacy setup keeps native tokens; do not invent
+unparsed lock fields. Spatial-role recommendations are heuristic starting values and are not measured.
+The measured proposals are in step 9a.
+
+### 8. Write the design lock
+
+Create `STYLESEED.md`:
+
+```markdown
+# StyleSeed — Design Lock
+<!-- Selections persist here. This file cannot waive StyleSeed core invariants. -->
+- App domain: fintech
+- Surface: mobile-app
+- Surface adapter: product-ui
+- Page type: dashboard
+- Output grammar: consumer-service
+- Grammar path: built-in:engine/RULESETS.md
+- Grammar fallback: consumer-service
+- Reference confidence: n/a
+- Brand recipe: calm-consumer
+- Palette recipe: quiet-mineral
+- Key color: #3182F6
+- Palette character: calm
+- Palette mode: light
+- Palette harmony: auto
+- Surface temperature: neutral
+- Aesthetic profile: none
+- Skin: custom
+- Primary action: #3182F6
+- Font: Pretendard
+- Radius: soft
+- Elevation: light=tonal grouping + restrained shadow · dark=tonal ramp + hairline
+- Density: comfortable
+- Motion: Spring restrained
+- Imagery/data role: personal state first; charts only for a decision
+- Signature move: one calm contextual briefing above the account summary
+- Locked: YYYY-MM-DD
+```
+
+For a compiled grammar use its actual path and confidence. Reject unknown enum values rather
+than treating the lock as an exemption. The lock holds selections. Decided values go to the
+decisions ledger in step 9a; do not add lock lines for them.
+
+### 9. Scaffold and prove
+
+Compile the selected method before code:
+
+```bash
+node <installed-ss-resolve>/scripts/resolve-context.mjs \
+  --project-root . --from-lock STYLESEED.md --agent claude
+```
+
+Use `--agent codex` in Codex. The resolver writes `.styleseed/effective-rules.md`, `.styleseed/system.css`
+(which draws nothing until the ledger records a default control height or a corner), and a hash-verifiable
+`.styleseed/manifest.json`. Read the effective bundle, not `llms-full.txt`.
+
+### 9a. Propose the system values and record what the person decides
+
+For product UI, after the first resolve and before any code:
+
+```bash
+node <installed-ss-resolve>/scripts/propose-system.mjs --project-root . --surface pointer --write
+```
+
+Use `--surface touch` when the product is used by touch first, `--artifact <id>` in a registry project, and
+`--reference <slug>` for each reference the person measured with `/ss-reference`. It writes
+`.styleseed/proposals/SYSTEM.md` and `system.json`. For control height, type sizes, corner radius, table row height,
+and spacing unit, each block gives a value and its basis, strongest first: what the project already recorded, what the
+person measured, counts over the measured design systems that ship with this skill ("32px on 3 of 4 measured
+systems"), and last the engine default, which is labelled not measured.
+
+The document opens with "The system this project starts with", one table of what the look draws and what the
+ledger records, and under "To take it" one entry or the reason there is none; present that first, then the blocks.
+For a control height taken from the corpus or chosen by the person, get the entry from `--default-height <px>`: one
+height recorded alone flags the other sizes of the shipped components.
+
+Present one axis at a time with its counts as printed. Where the counts split or are thin, show the distribution and
+what the choice depends on; do not pick for the person. The person takes the proposed value, another option, a value
+of their own, or skips the axis. For anything other than the printed entry, get the entry from
+`--entry <axis>=<values>`; for an entry marked as one part of a set, ask for the remaining values first. Record only
+what the person chose: append the entries to the ledger (`decisions` in `.styleseed/project.json`, or the array in
+`.styleseed/decisions.json` when the project has no registry), number them from the next free `D-` id, and set
+`approvedBy` to the name the person gives and `date` to today. Never fill in a name yourself and never record a
+skipped axis. If nobody can answer, record nothing and report the proposals as open.
+
+Resolve again. The bundle lists the entries under "Project decisions", where they outrank the defaults. A proposal
+is a count and a choice; it does not review the product. Details and limits:
+[system proposals](../ss-resolve/references/proposals.md).
+
+The resolver also writes `.styleseed/system.css`, which draws the default control height and the button and field
+corners the ledger records and holds one comment line while the ledger records none. A default height the person took
+from the brand recipe's own default is left to the recipe, so it is not in the file. Import it once in the project's
+global stylesheet, with the other `@import` lines, as plain CSS: not inside `@layer` and not through
+`@import … layer(…)`. When the project has no global stylesheet yet, add the import when the stylesheet is created.
+The path is relative to that stylesheet, for example `@import "../.styleseed/system.css";` from a Next.js
+`app/globals.css`, or `@import "../../.styleseed/system.css";` from `src/styles/`. A layered import shows as fields
+that take the recorded corner while buttons keep the recipe's corner and every control keeps the recipe's height.
+
+### 9b. First screen
+
+If the user asked for a first screen, build from that bundle, run `/ss-score` to the gate floor,
+and finish with `/ss-verify` when renderable. When decisions were recorded, measure the built screen
+against them: `drift-report.mjs <url> --out .styleseed/evidence/drift/<date> --project-root . --structure`.
+If visual rendering is unavailable, disclose that it was skipped.
+
+## Completion report
+
+Report the selected grammar and why, page/domain intersection, brand recipe, palette recipe,
+optional profile, lock path,
+compiled bundle and manifest paths, files changed, score, visual verification status, and
+the ledger entries recorded (id, axis, basis) and the axes left open.
+Mention `/ss-reference` as the path for future references that need their own grammar.
+
+## Rules
+
+- Ask one question at a time and recommend a concrete default.
+- Output grammar is required; aesthetic profile is optional.
+- Brand recipe is required; `auto` resolves to a concrete maintained recipe.
+- Palette recipe is required; `auto` resolves to a contrast-verified semantic palette.
+- A skin is tokens, not design judgment.
+- Never fetch a brand `DESIGN.md` and treat its palette as a complete rule set.
+- Never scaffold an unscored first page or claim visual verification without a screenshot.
