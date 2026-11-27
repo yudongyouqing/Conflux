@@ -6,6 +6,7 @@ import {
   PanelLeft,
   PanelLeftClose,
   PanelLeftOpen,
+  Search,
   Settings,
 } from "lucide-react";
 
@@ -16,6 +17,7 @@ interface ActivityRailProps {
   activeCallCount: number;
   sidebarCollapsed: boolean;
   onSelectScreen: (screen: MainScreen) => void;
+  onOpenCommandPalette?: () => void;
   onOpenHistory: () => void;
   onOpenConnect: () => void;
   onToggleTheme: () => void;
@@ -27,6 +29,7 @@ export function ActivityRail({
   activeCallCount,
   sidebarCollapsed,
   onSelectScreen,
+  onOpenCommandPalette,
   onOpenHistory,
   onOpenConnect,
   onToggleTheme,
@@ -92,6 +95,19 @@ export function ActivityRail({
       >
         <History className="h-4 w-4" />
       </button>
+
+      {onOpenCommandPalette && (
+        <button
+          type="button"
+          data-testid="rail-command-palette-btn"
+          title="快速跳转与命令 (⌘K / Ctrl+K)"
+          aria-label="快速跳转与命令"
+          onClick={onOpenCommandPalette}
+          className={btnCls(false)}
+        >
+          <Search className="h-4 w-4" />
+        </button>
+      )}
 
       <div className="flex-1" />
 

@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowUpRight,
   Columns2,
   Folder,
   GitBranch,
   Globe,
   MessageSquare,
   Terminal,
+  Users,
   X,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -35,12 +37,32 @@ import {
   CallHistoryModal,
   ConnectRemoteModal,
 } from "./components/ConnectAndHistoryModals";
+import { CommandPalette } from "./components/CommandPalette";
 import { SettingsView } from "./components/SettingsView";
 
 const PASEO_DARK_THEME = BUILTIN_THEMES[0].name;
 const PASEO_LIGHT_THEME = BUILTIN_THEMES[1].name;
+const SPLIT_RATIO_STORAGE_KEY = "conflux.split-ratio";
+const MIN_SPLIT_PCT = 28;
+const MAX_SPLIT_PCT = 72;
 
-type LeftTab = "chat" | PaseoToolTab;
+type SingleToolTab = Exclude<PaseoToolTab, "peer">;
+type LeftTab = "chat" | SingleToolTab;
+
+function clampSplitPct(value: number): number {
+  if (!Number.isFinite(value)) return 49;
+  return Math.min(MAX_SPLIT_PCT, Math.max(MIN_SPLIT_PCT, Math.round(value * 10) / 10));
+}
+
+function loadInitialSplitPct(): number {
+  try {
+    const raw = window.localStorage.getItem(SPLIT_RATIO_STORAGE_KEY);
+    if (!raw) return 49;
+    return clampSplitPct(Number(raw));
+  } catch {
+    return 49;
+  }
+}
 
 function nextCallMode(m: IncomingCallMode): IncomingCallMode {
   if (m === "auto") return "ask";
@@ -77,16 +99,24 @@ export default function App() {
   const [screen, setScreen] = useState<MainScreen>("workspace");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  const [companionThreadId, setCompanionThreadId] = useState<string | null>(null);
   const [isSplit, setIsSplit] = useState(true);
   const [leftTab, setLeftTab] = useState<LeftTab>("chat");
   const [rightTool, setRightTool] = useState<PaseoToolTab>("git");
+  const [splitPct, setSplitPct] = useState<number>(() => loadInitialSplitPct());
+  const [isResizingSplit, setIsResizingSplit] = useState(false);
+  const splitContainerRef = useRef<HTMLDivElement | null>(null);
+  const splitPctRef = useRef<number>(splitPct);
+  splitPctRef.current = splitPct;
   const [forkModalOpen, setForkModalOpen] = useState(false);
+  const [companionForkModalOpen, setCompanionForkModalOpen] = useState(false);
 
   const [newWsModal, setNewWsModal] = useState<{ open: boolean; prefillDir?: string }>({
     open: false,
   });
   const [connectOpen, setConnectOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   const [isDark, setIsDark] = useState<boolean>(() =>
     typeof document !== "undefined" ? document.documentElement.dataset.theme !== "light" : true,
@@ -101,21 +131,86 @@ export default function App() {
     }
   }, [activeThreadId, threads]);
 
-  // Global ⌘B / Ctrl+B sidebar collapse shortcut
+  // Keep companion peer thread pointed at a different live workspace when available
+  useEffect(() => {
+    const others = threads.filter((t) => t.id !== activeThreadId);
+    if (others.length === 0) {
+      if (companionThreadId !== null) setCompanionThreadId(null);
+      return;
+    }
+    if (!companionThreadId || !others.some((t) => t.id === companionThreadId)) {
+      setCompanionThreadId(others[0].id);
+    }
+  }, [threads, activeThreadId, companionThreadId]);
+
+  // Global ⌘B / Ctrl+B (sidebar) and ⌘K / Ctrl+K (command palette) shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const key = e.key.toLowerCase();
+      if (key === "b") {
         e.preventDefault();
         setSidebarCollapsed((v) => !v);
+      } else if (key === "k") {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  const handleStartSplitResize = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || !splitContainerRef.current) return;
+    e.preventDefault();
+    const container = splitContainerRef.current;
+    setIsResizingSplit(true);
+
+    const onPointerMove = (ev: PointerEvent) => {
+      const rect = container.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      const rightPx = rect.right - ev.clientX;
+      const pct = clampSplitPct((rightPx / rect.width) * 100);
+      setSplitPct(pct);
+    };
+
+    const onPointerUp = () => {
+      setIsResizingSplit(false);
+      try {
+        window.localStorage.setItem(SPLIT_RATIO_STORAGE_KEY, String(splitPctRef.current));
+      } catch {
+        // ignore storage quota failures
+      }
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+  }, []);
+
+  const handleResetSplitRatio = useCallback(() => {
+    setSplitPct(50);
+    try {
+      window.localStorage.setItem(SPLIT_RATIO_STORAGE_KEY, "50");
+    } catch {
+      // ignore storage quota failures
+    }
+  }, []);
+
   const activeThread = useMemo(
     () => threads.find((t) => t.id === activeThreadId) ?? null,
     [threads, activeThreadId],
+  );
+
+  const companionPeers = useMemo(
+    () => threads.filter((t) => t.id !== activeThreadId),
+    [threads, activeThreadId],
+  );
+
+  const companionThread = useMemo(
+    () => companionPeers.find((t) => t.id === companionThreadId) ?? companionPeers[0] ?? null,
+    [companionPeers, companionThreadId],
   );
 
   const gitStatus = useThreadGitStatus(activeThread?.id ?? null);
@@ -185,8 +280,34 @@ export default function App() {
     void qc.invalidateQueries({ queryKey: ["mesh-calls"] });
   };
 
-  const toolTabDefs: Array<{
-    id: PaseoToolTab;
+  const handleOpenCompanionPeer = (threadId: string) => {
+    setScreen("workspace");
+    if (threadId === activeThreadId) {
+      return;
+    }
+    setCompanionThreadId(threadId);
+    setIsSplit(true);
+    setLeftTab("chat");
+    setRightTool("peer");
+  };
+
+  const handleSelectToolFromPalette = (tool: PaseoToolTab) => {
+    setScreen("workspace");
+    if (tool === "peer") {
+      setIsSplit(true);
+      setLeftTab("chat");
+      setRightTool("peer");
+      return;
+    }
+    if (isSplit) {
+      setRightTool(tool);
+    } else {
+      setLeftTab(tool);
+    }
+  };
+
+  const baseToolTabDefs: Array<{
+    id: SingleToolTab;
     label: string;
     icon: typeof GitBranch;
   }> = [
@@ -198,6 +319,19 @@ export default function App() {
     { id: "term", label: "终端", icon: Terminal },
     { id: "files", label: "文件", icon: Folder },
     { id: "preview", label: `预览${previewPortLabel}`, icon: Globe },
+  ];
+
+  const splitToolTabDefs: Array<{
+    id: PaseoToolTab;
+    label: string;
+    icon: typeof GitBranch;
+  }> = [
+    ...baseToolTabDefs,
+    {
+      id: "peer",
+      label: companionPeers.length > 0 ? `同伴 (${companionPeers.length})` : "同伴",
+      icon: Users,
+    },
   ];
 
   const prChecksSummary = useMemo(() => {
@@ -216,6 +350,7 @@ export default function App() {
           activeCallCount={activeCalls.length}
           sidebarCollapsed={sidebarCollapsed}
           onSelectScreen={setScreen}
+          onOpenCommandPalette={() => setPaletteOpen(true)}
           onOpenHistory={() => setHistoryOpen(true)}
           onOpenConnect={() => setConnectOpen(true)}
           onToggleTheme={handleToggleTheme}
@@ -275,7 +410,7 @@ export default function App() {
                   {/* Zero duplicate tabs: tool tabs appear in top bar ONLY when split is OFF */}
                   {!isSplit &&
                     activeThread &&
-                    toolTabDefs.map((tab) => {
+                    baseToolTabDefs.map((tab) => {
                       const Icon = tab.icon;
                       const active = leftTab === tab.id;
                       return (
@@ -345,13 +480,14 @@ export default function App() {
                   </button>
                 </div>
               ) : (
-                <div className="flex min-h-0 flex-1 overflow-hidden">
+                <div ref={splitContainerRef} className="flex min-h-0 flex-1 overflow-hidden">
                   {/* LEFT PANE */}
                   <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-surface">
                     <AgentWorkbench
                       threadId={activeThread.id}
                       cliProbes={cliProbes}
                       allThreads={threads}
+                      peerCalls={allCalls}
                       onResolveApproval={(params) =>
                         api.resolveApproval(params.threadId, params.approvalId, {
                           decision: params.decision,
@@ -363,6 +499,7 @@ export default function App() {
                         })
                       }
                       onSelectThread={handleEnterWorkspace}
+                      onOpenGraph={() => setScreen("graph")}
                       forkModalOpen={forkModalOpen}
                       onSetForkModalOpen={setForkModalOpen}
                       hidden={!isSplit && leftTab !== "chat"}
@@ -378,15 +515,42 @@ export default function App() {
                     )}
                   </div>
 
-                  {/* RIGHT 50/50 SPLIT PANE (Owns Git & PR | Terminal | Files | Preview when Split is ON) */}
+                  {/* DRAGGABLE RESIZE HANDLE */}
+                  {isSplit && (
+                    <div
+                      role="separator"
+                      aria-orientation="vertical"
+                      aria-label="拖拽调整分屏比例，双击恢复 50/50"
+                      title="拖拽调整分屏比例（双击恢复 50/50）"
+                      data-testid="split-resize-handle"
+                      onPointerDown={handleStartSplitResize}
+                      onDoubleClick={handleResetSplitRatio}
+                      className={`group relative z-10 flex w-1.5 shrink-0 cursor-col-resize select-none items-center justify-center transition-colors ${
+                        isResizingSplit ? "bg-accent/40" : "bg-transparent hover:bg-line-strong"
+                      }`}
+                    >
+                      <span
+                        className={`h-8 w-[2px] rounded-full transition-colors ${
+                          isResizingSplit
+                            ? "bg-accent"
+                            : "bg-line group-hover:bg-ink-faint"
+                        }`}
+                      />
+                    </div>
+                  )}
+
+                  {/* RIGHT RESIZABLE SPLIT PANE (Owns Git & PR | Terminal | Files | Preview | Companion Peer) */}
                   <div
                     data-testid="paseo-split-right"
                     data-open={isSplit ? "true" : "false"}
-                    className="paseo-split-right flex shrink-0 flex-col bg-paper"
+                    style={{ ["--split-w" as string]: `${splitPct}%` }}
+                    className={`paseo-split-right flex shrink-0 flex-col bg-paper ${
+                      isResizingSplit ? "is-resizing" : ""
+                    }`}
                   >
                     <div className="flex h-[34px] shrink-0 items-center justify-between border-b border-line bg-rail px-2">
                       <div className="flex items-center gap-0.5 overflow-x-auto">
-                        {toolTabDefs.map((tab) => {
+                        {splitToolTabDefs.map((tab) => {
                           const Icon = tab.icon;
                           const active = rightTool === tab.id;
                           return (
@@ -417,13 +581,95 @@ export default function App() {
                       </button>
                     </div>
 
-                    {isSplit && (
+                    {isSplit && rightTool !== "peer" && (
                       <PaseoToolPane
                         thread={activeThread}
                         tool={rightTool}
                         layout="split"
                         onSendPromptToAgent={handleSendPromptToActiveAgent}
                       />
+                    )}
+
+                    {isSplit && rightTool === "peer" && (
+                      <div
+                        data-testid="companion-peer-pane"
+                        className="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface"
+                      >
+                        {companionThread ? (
+                          <>
+                            <div className="flex h-8 shrink-0 items-center justify-between gap-2 border-b border-line bg-paper px-2.5">
+                              <div className="flex min-w-0 items-center gap-1.5">
+                                <span className="text-2xs text-ink-faint">同伴</span>
+                                <select
+                                  data-testid="companion-peer-select"
+                                  value={companionThread.id}
+                                  onChange={(e) => setCompanionThreadId(e.target.value)}
+                                  className="h-6 max-w-[220px] rounded border border-line-strong bg-elev px-1.5 text-2xs font-medium text-ink focus:outline-none"
+                                >
+                                  {companionPeers.map((peer) => (
+                                    <option key={peer.id} value={peer.id}>
+                                      {peer.name} · {peer.host || localHostname}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                              <button
+                                type="button"
+                                data-testid="companion-promote-btn"
+                                title="将该同伴切换到左侧主工作区"
+                                onClick={() => handleEnterWorkspace(companionThread.id)}
+                                className="inline-flex h-6 shrink-0 items-center gap-1 rounded border border-line bg-elev px-2 text-2xs text-ink-muted hover:border-line-strong hover:text-ink"
+                              >
+                                <span>设为主工作区</span>
+                                <ArrowUpRight className="h-3 w-3" />
+                              </button>
+                            </div>
+                            <AgentWorkbench
+                              threadId={companionThread.id}
+                              cliProbes={cliProbes}
+                              allThreads={threads}
+                              peerCalls={allCalls}
+                              onResolveApproval={(params) =>
+                                api.resolveApproval(params.threadId, params.approvalId, {
+                                  decision: params.decision,
+                                  option_id: params.option_id,
+                                  answers: params.answers,
+                                }).then(() => {
+                                  void qc.invalidateQueries({ queryKey: ["workspace-tree"] });
+                                  void qc.invalidateQueries({ queryKey: ["thread-detail", params.threadId] });
+                                })
+                              }
+                              onSelectThread={handleEnterWorkspace}
+                              onOpenGraph={() => setScreen("graph")}
+                              forkModalOpen={companionForkModalOpen}
+                              onSetForkModalOpen={setCompanionForkModalOpen}
+                            />
+                          </>
+                        ) : (
+                          <div className="flex flex-1 flex-col items-center justify-center gap-2.5 p-6 text-center">
+                            <div className="text-xs font-semibold text-ink">还没有其他在线同伴</div>
+                            <p className="max-w-xs text-2xs text-ink-faint">
+                              新建第二个本地工作区，或接入远程 Mac / Linux 上的 Agent，即可在这里双屏并行查看对话与互调。
+                            </p>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setNewWsModal({ open: true })}
+                                className="h-7 rounded-md bg-accent px-3 text-2xs font-semibold text-on-accent hover:bg-accent-deep"
+                              >
+                                + 新建工作区
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConnectOpen(true)}
+                                className="h-7 rounded-md border border-line-strong bg-elev px-3 text-2xs text-ink-muted hover:text-ink"
+                              >
+                                接入远程 Agent
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -510,6 +756,26 @@ export default function App() {
         open={historyOpen}
         onClose={() => setHistoryOpen(false)}
         calls={historyCalls}
+      />
+
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        threads={threads}
+        activeThreadId={activeThreadId}
+        localHostname={localHostname}
+        isSplit={isSplit}
+        sidebarCollapsed={sidebarCollapsed}
+        onSelectThread={handleEnterWorkspace}
+        onOpenCompanion={handleOpenCompanionPeer}
+        onSelectTool={handleSelectToolFromPalette}
+        onSelectScreen={setScreen}
+        onOpenNewWorkspace={() => setNewWsModal({ open: true })}
+        onOpenConnect={() => setConnectOpen(true)}
+        onOpenHistory={() => setHistoryOpen(true)}
+        onToggleSplit={() => handleToggleSplit()}
+        onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
+        onToggleTheme={handleToggleTheme}
       />
     </div>
   );

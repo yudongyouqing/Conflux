@@ -4,6 +4,7 @@ import type {
   ApprovalMode,
   CliProbeEntry,
   ManagedDeliveryMode,
+  Message,
   ProjectFileMatch,
   RuntimeId,
   ThreadApproval,
@@ -13,11 +14,14 @@ import type {
 import {
   AlertTriangle,
   ArrowRightLeft,
+  ArrowUpRight,
+  Check,
   ChevronDown,
   ChevronRight,
   Cpu,
   FileCode2,
   History,
+  PhoneOff,
   RotateCcw,
   Send,
   Shield,
@@ -37,8 +41,10 @@ interface AgentWorkbenchProps {
   threadId: string;
   cliProbes: CliProbeEntry[];
   allThreads: AgentThread[];
+  peerCalls?: Message[];
   onResolveApproval: (params: ResolveApprovalParams) => Promise<unknown> | void;
   onSelectThread: (threadId: string) => void;
+  onOpenGraph?: () => void;
   forkModalOpen: boolean;
   onSetForkModalOpen: (open: boolean) => void;
   onCheckpointRollback?: (checkpointId: number) => Promise<void>;
@@ -305,13 +311,156 @@ function ThinkingRow({ text }: { text: string }) {
   );
 }
 
+function PeerCallCard({
+  call,
+  selfThreadId,
+  allThreads,
+  onSelectThread,
+  onOpenGraph,
+  onChanged,
+}: {
+  call: Message;
+  selfThreadId: string;
+  allThreads: AgentThread[];
+  onSelectThread: (threadId: string) => void;
+  onOpenGraph?: () => void;
+  onChanged: () => void;
+}) {
+  const [expanded, setExpanded] = useState(
+    call.status === "awaiting_approval" || call.status === "pending" || Boolean(call.reply),
+  );
+  const [busy, setBusy] = useState(false);
+  const isOutgoing = call.from_session === selfThreadId;
+  const partnerId = isOutgoing ? call.to_session : call.from_session;
+  const partnerThread = allThreads.find((t) => t.id === partnerId);
+  const partnerName = isOutgoing
+    ? call.to_name || partnerThread?.name || partnerId.slice(0, 8)
+    : call.from_name || partnerThread?.name || partnerId.slice(0, 8);
+  const partnerRuntime: RuntimeId = partnerThread?.runtime ?? "claude";
+  const statusBadge =
+    call.status === "replied"
+      ? { text: "已回复", cls: "text-success" }
+      : call.status === "awaiting_approval"
+        ? { text: "待放行", cls: "text-warning" }
+        : call.status === "cancelled"
+          ? { text: "已挂断", cls: "text-danger" }
+          : { text: "通话中", cls: "text-info" };
+
+  return (
+    <div
+      data-testid={`peer-call-card-${call.id}`}
+      className="overflow-hidden rounded-lg border border-line bg-elev"
+    >
+      <div className="flex items-center justify-between gap-2 px-3 py-2">
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left text-xs"
+        >
+          {expanded ? (
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ink-faint" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-ink-faint" />
+          )}
+          <RuntimeGlyph runtime={partnerRuntime} size={13} className="shrink-0 text-ink-muted" />
+          <span className="truncate text-ink-muted">
+            {isOutgoing ? "呼叫同伴" : "收到来电"}{" "}
+            <strong className="font-semibold text-ink">{partnerName}</strong>
+          </span>
+        </button>
+
+        <div className="flex shrink-0 items-center gap-2">
+          <span className={`font-mono text-2xs ${statusBadge.cls}`}>{statusBadge.text}</span>
+          {partnerThread && (
+            <button
+              type="button"
+              data-testid={`peer-call-jump-${call.id}`}
+              title={`跳转到 ${partnerName}`}
+              onClick={() => onSelectThread(partnerId)}
+              className="inline-flex h-5 items-center gap-0.5 rounded px-1.5 text-2xs text-ink-muted hover:bg-tile-hover hover:text-ink"
+            >
+              <ArrowUpRight className="h-3 w-3" />
+            </button>
+          )}
+          {onOpenGraph && (
+            <button
+              type="button"
+              onClick={onOpenGraph}
+              className="rounded border border-line bg-surface px-1.5 py-0.5 text-2xs text-ink-muted hover:text-ink"
+            >
+              图谱
+            </button>
+          )}
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="space-y-2 border-t border-line bg-surface px-3 py-2.5 text-xs leading-relaxed">
+          <div className="whitespace-pre-wrap text-ink">{call.question}</div>
+          {call.context && (
+            <pre className="max-h-32 overflow-auto rounded-md border border-line bg-rail p-2 font-mono text-2xs text-ink-muted">
+              {call.context}
+            </pre>
+          )}
+          {call.reply && (
+            <div className="rounded-md border-l-2 border-success bg-elev px-2.5 py-1.5 text-ink">
+              {call.reply}
+            </div>
+          )}
+          {call.status === "awaiting_approval" && (
+            <div className="flex items-center justify-end gap-1.5 pt-1">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    await api.hangupMeshCall(call.id);
+                    onChanged();
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+                className="inline-flex h-6 items-center gap-1 rounded px-2 text-2xs text-ink-muted hover:bg-tile-hover hover:text-ink"
+              >
+                <PhoneOff className="h-3 w-3" />
+                <span>挂断</span>
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    await api.approveMeshCall(call.id);
+                    onChanged();
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+                className="inline-flex h-6 items-center gap-1 rounded bg-accent px-2.5 text-2xs font-semibold text-on-accent hover:bg-accent-deep"
+              >
+                <Check className="h-3 w-3" />
+                <span>放行来电</span>
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const PRIMARY_FORK_RUNTIMES: RuntimeId[] = ["antigravity", "claude", "codex"];
 
 export function AgentWorkbench({
   threadId,
   cliProbes,
+  allThreads,
+  peerCalls = [],
   onResolveApproval,
   onSelectThread,
+  onOpenGraph,
   forkModalOpen,
   onSetForkModalOpen,
   hidden = false,
@@ -521,6 +670,14 @@ export function AgentWorkbench({
     }
   };
 
+  const relatedPeerCalls = useMemo(
+    () =>
+      peerCalls
+        .filter((c) => c.from_session === threadId || c.to_session === threadId)
+        .slice(0, 6),
+    [peerCalls, threadId],
+  );
+
   if (detailQuery.isLoading) {
     return hidden ? null : (
       <div className="flex flex-1 items-center justify-center bg-surface text-xs text-ink-faint">
@@ -580,10 +737,29 @@ export function AgentWorkbench({
         </div>
       )}
 
-      {/* Spacious 100%-wide Conductor execution stream */}
+      {/* Spacious 100%-wide execution stream */}
       <div data-testid="workbench-timeline" className="flex-1 overflow-y-auto px-5 py-6 lg:px-8">
         <div className="mx-auto max-w-[840px] space-y-5">
-          {timeline.length === 0 && pendingApprovals.length === 0 && (
+          {relatedPeerCalls.length > 0 && (
+            <div data-testid="workbench-peer-calls" className="space-y-2">
+              {relatedPeerCalls.map((call) => (
+                <PeerCallCard
+                  key={call.id}
+                  call={call}
+                  selfThreadId={thread.id}
+                  allThreads={allThreads}
+                  onSelectThread={onSelectThread}
+                  onOpenGraph={onOpenGraph}
+                  onChanged={() => {
+                    void qc.invalidateQueries({ queryKey: ["mesh-calls"] });
+                    void qc.invalidateQueries({ queryKey: ["graph"] });
+                  }}
+                />
+              ))}
+            </div>
+          )}
+
+          {timeline.length === 0 && pendingApprovals.length === 0 && relatedPeerCalls.length === 0 && (
             <div className="py-16 text-center">
               <div className="mx-auto inline-flex h-10 w-10 items-center justify-center rounded-xl border border-line bg-paper text-ink-muted">
                 <RuntimeGlyph runtime={thread.runtime} size={18} />

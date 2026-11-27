@@ -32,6 +32,8 @@ const { WorkspaceSidebar } = await import("../src/components/WorkspaceSidebar.ts
 const { NewWorkspaceModal } = await import("../src/components/NewWorkspaceModal.tsx");
 const { PaseoToolPane } = await import("../src/components/PaseoToolPane.tsx");
 const { LiveMeshGraph } = await import("../src/components/LiveMeshGraph.tsx");
+const { AgentWorkbench } = await import("../src/components/AgentWorkbench.tsx");
+const { CommandPalette } = await import("../src/components/CommandPalette.tsx");
 
 function withQueryClient(node: React.ReactElement) {
   const qc = new QueryClient({
@@ -440,5 +442,212 @@ describe("Full Paseo + Conflux MCP Mesh Web UI", () => {
     await waitFor(() =>
       assert.ok(hits.some((h) => h.includes("POST") && h.includes("/mesh/calls/77/approve"))),
     );
+  });
+
+  it("PaseoToolPane supports Orca-style inline Diff annotations (queue + batch send)", async () => {
+    const thread = makeThread();
+    const sentPrompts: string[] = [];
+
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith(`/threads/${thread.id}/git/status`)) {
+        return new Response(
+          JSON.stringify({
+            is_git_repo: true,
+            branch: "feat/auth",
+            base_branch: "main",
+            worktree_path: null,
+            dirty: true,
+            files: [{ path: "src/auth.ts", status: "modified", staged: false, additions: 2, deletions: 0 }],
+            gh_available: true,
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes(`/threads/${thread.id}/git/diff`)) {
+        return new Response(
+          JSON.stringify({
+            path: "src/auth.ts",
+            diff: "diff --git a/src/auth.ts b/src/auth.ts\n+++ b/src/auth.ts\n@@ -1,1 +1,2 @@\n export function verify() {}\n+const leeway = 30;\n",
+            truncated: false,
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.endsWith(`/threads/${thread.id}/git/pr-detail`)) {
+        return new Response(JSON.stringify({ gh_available: true, pr: null }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+
+    const view = render(
+      withQueryClient(
+        React.createElement(PaseoToolPane, {
+          thread,
+          tool: "git",
+          layout: "split",
+          onSendPromptToAgent: (p) => {
+            sentPrompts.push(p);
+          },
+        }),
+      ),
+    );
+
+    // Line index 4 is "+const leeway = 30;"
+    await waitFor(() => assert.ok(view.getByTestId("diff-annotate-btn-4")));
+    fireEvent.click(view.getByTestId("diff-annotate-btn-4"));
+    const textarea = view.getByTestId("diff-note-textarea");
+    fireEvent.change(textarea, { target: { value: "把 leeway 上限校验成 120s" } });
+    fireEvent.click(view.getByTestId("diff-note-queue-btn"));
+
+    assert.ok(view.getByTestId("diff-queued-note-4"));
+    fireEvent.click(view.getByTestId("diff-send-all-notes-btn"));
+
+    await waitFor(() => assert.equal(sentPrompts.length, 1));
+    assert.match(sentPrompts[0], /File: src\/auth\.ts/);
+    assert.match(sentPrompts[0], /Line: 2/);
+    assert.match(sentPrompts[0], /把 leeway 上限校验成 120s/);
+  });
+
+  it("AgentWorkbench renders collapsible MCP PeerCallCard and jumps to partner workspace", async () => {
+    const localThread = makeThread();
+    const remoteThread = makeThread({
+      id: "codex-mac",
+      name: "Codex · mac-mini",
+      kind: "external",
+      runtime: "codex",
+      host: "mac-mini",
+      workdir: "/Users/yuqi/dev/ios-client",
+    });
+    const call: Message = {
+      id: 77,
+      edge_id: 1,
+      from_session: localThread.id,
+      to_session: remoteThread.id,
+      from_name: localThread.name,
+      to_name: remoteThread.name,
+      question: "核对 iOS 客户端 JWT 容错",
+      context: "+ leeway = 30",
+      reply: "已同步 Swift TokenValidator",
+      status: "replied",
+      room_id: null,
+      trace_id: "tr_peer",
+      hop_count: 1,
+      created_at: "2026-11-26T00:00:00Z",
+      replied_at: "2026-11-26T00:01:00Z",
+    };
+
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith(`/threads/${localThread.id}`)) {
+        return new Response(
+          JSON.stringify({ thread: localThread, approvals: [], checkpoints: [], runs: [] }),
+          { status: 200 },
+        );
+      }
+      if (url.includes(`/threads/${localThread.id}/events`)) {
+        return new Response(JSON.stringify({ events: [] }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+
+    let jumpedTo = "";
+    const view = render(
+      withQueryClient(
+        React.createElement(AgentWorkbench, {
+          threadId: localThread.id,
+          cliProbes: PROBES,
+          allThreads: [localThread, remoteThread],
+          peerCalls: [call],
+          onResolveApproval: () => {},
+          onSelectThread: (id) => {
+            jumpedTo = id;
+          },
+          forkModalOpen: false,
+          onSetForkModalOpen: () => {},
+        }),
+      ),
+    );
+
+    await waitFor(() => assert.ok(view.getByTestId("peer-call-card-77")));
+    assert.match(view.getByTestId("peer-call-card-77").textContent ?? "", /核对 iOS 客户端 JWT 容错/);
+    assert.match(view.getByTestId("peer-call-card-77").textContent ?? "", /已同步 Swift TokenValidator/);
+
+    fireEvent.click(view.getByTestId("peer-call-jump-77"));
+    assert.equal(jumpedTo, "codex-mac");
+  });
+
+  it("CommandPalette fuzzy-filters workspaces, opens companion split, and closes on Esc", () => {
+    const localThread = makeThread();
+    const remoteThread = makeThread({
+      id: "codex-mac",
+      name: "Codex · mac-mini",
+      kind: "external",
+      runtime: "codex",
+      host: "mac-mini",
+      workdir: "/Users/yuqi/dev/ios-client",
+    });
+
+    let companionOpened = "";
+    let closedCount = 0;
+    const view = render(
+      React.createElement(CommandPalette, {
+        open: true,
+        onClose: () => {
+          closedCount += 1;
+        },
+        threads: [localThread, remoteThread],
+        activeThreadId: localThread.id,
+        localHostname: "yuqi",
+        isSplit: true,
+        sidebarCollapsed: false,
+        onSelectThread: () => {},
+        onOpenCompanion: (id) => {
+          companionOpened = id;
+        },
+        onSelectTool: () => {},
+        onSelectScreen: () => {},
+        onOpenNewWorkspace: () => {},
+        onOpenConnect: () => {},
+        onOpenHistory: () => {},
+        onToggleSplit: () => {},
+        onToggleSidebar: () => {},
+        onToggleTheme: () => {},
+      }),
+    );
+
+    const input = view.getByTestId("command-palette-input");
+    fireEvent.change(input, { target: { value: "mac-mini" } });
+    assert.ok(view.getByTestId("palette-item-thread-codex-mac"));
+    fireEvent.click(view.getByTestId("palette-companion-thread-codex-mac"));
+    assert.equal(companionOpened, "codex-mac");
+    assert.equal(closedCount, 1);
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    assert.equal(closedCount, 2);
+  });
+
+  it("NewWorkspaceModal folds advanced fields behind progressive disclosure and closes on Esc", () => {
+    let closed = 0;
+    const view = render(
+      React.createElement(NewWorkspaceModal, {
+        open: true,
+        onClose: () => {
+          closed += 1;
+        },
+        projects: [],
+        defaultDir: "C:\\Projects\\my-app",
+        cliProbes: PROBES,
+        onCreated: () => {},
+      }),
+    );
+
+    const advToggle = view.getByTestId("new-workspace-advanced-toggle");
+    assert.equal(advToggle.getAttribute("aria-expanded"), "false");
+    fireEvent.click(advToggle);
+    assert.equal(advToggle.getAttribute("aria-expanded"), "true");
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    assert.equal(closed, 1);
   });
 });

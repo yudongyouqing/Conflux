@@ -207,9 +207,12 @@ button:active:not(:disabled) {
   will-change: width;
 }
 .paseo-split-right[data-open="true"] {
-  width: 49%;
+  width: var(--split-w, 49%);
   opacity: 1;
   border-left-color: rgb(var(--tk-line));
+}
+.paseo-split-right.is-resizing {
+  transition: none !important;
 }
 
 .paseo-audit-drawer {

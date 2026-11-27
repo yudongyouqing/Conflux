@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { AgentThread, WorkspaceTerminalRunResult } from "@conflux/shared";
 import {
   Check,
@@ -10,8 +10,10 @@ import {
   GitMerge,
   GitPullRequest,
   Globe,
+  MessageSquarePlus,
   RefreshCw,
   Send,
+  Sparkles,
   Terminal,
   Trash2,
   Upload,
@@ -28,19 +30,91 @@ import {
   useWorkspaceFiles,
 } from "../hooks";
 
-export type PaseoToolTab = "git" | "term" | "files" | "preview";
+export type PaseoToolTab = "git" | "term" | "files" | "preview" | "peer";
 
 interface PaseoToolPaneProps {
   thread: AgentThread;
-  tool: PaseoToolTab;
+  tool: Exclude<PaseoToolTab, "peer">;
   layout: "split" | "full";
   onSendPromptToAgent: (promptText: string) => Promise<void> | void;
 }
 
-function formatDiffLineClass(line: string): string {
-  if (line.startsWith("+") && !line.startsWith("+++")) return "bg-success-soft/80 text-success";
-  if (line.startsWith("-") && !line.startsWith("---")) return "bg-danger-soft/80 text-danger";
-  if (line.startsWith("@@") || line.startsWith("diff --git")) return "text-info font-medium";
+interface ParsedDiffRow {
+  idx: number;
+  filePath: string;
+  oldLine: number | null;
+  newLine: number | null;
+  kind: "add" | "del" | "ctx" | "meta";
+  text: string;
+}
+
+interface InlineDiffNote {
+  id: string;
+  rowIdx: number;
+  filePath: string;
+  line: number | null;
+  code: string;
+  body: string;
+}
+
+function parseUnifiedDiffRows(rawDiff: string, fallbackFile: string): ParsedDiffRow[] {
+  const rows: ParsedDiffRow[] = [];
+  let currentFile = fallbackFile;
+  let oldNum = 0;
+  let newNum = 0;
+  let inHunk = false;
+
+  const lines = rawDiff.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.startsWith("diff --git ")) {
+      const m = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
+      if (m) currentFile = m[2];
+      inHunk = false;
+      rows.push({ idx: i, filePath: currentFile, oldLine: null, newLine: null, kind: "meta", text: line });
+      continue;
+    }
+    if (line.startsWith("+++ b/")) {
+      currentFile = line.slice(6).trim() || currentFile;
+      rows.push({ idx: i, filePath: currentFile, oldLine: null, newLine: null, kind: "meta", text: line });
+      continue;
+    }
+    if (line.startsWith("--- ") || line.startsWith("index ") || line.startsWith("new file ") || line.startsWith("deleted file ")) {
+      rows.push({ idx: i, filePath: currentFile, oldLine: null, newLine: null, kind: "meta", text: line });
+      continue;
+    }
+    if (line.startsWith("@@")) {
+      const hm = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+      if (hm) {
+        oldNum = Number(hm[1]);
+        newNum = Number(hm[2]);
+        inHunk = true;
+      }
+      rows.push({ idx: i, filePath: currentFile, oldLine: null, newLine: null, kind: "meta", text: line });
+      continue;
+    }
+
+    if (line.startsWith("+") && !line.startsWith("+++")) {
+      const ln = inHunk ? newNum++ : null;
+      rows.push({ idx: i, filePath: currentFile, oldLine: null, newLine: ln, kind: "add", text: line });
+    } else if (line.startsWith("-") && !line.startsWith("---")) {
+      const ln = inHunk ? oldNum++ : null;
+      rows.push({ idx: i, filePath: currentFile, oldLine: ln, newLine: null, kind: "del", text: line });
+    } else {
+      const o = inHunk ? oldNum++ : null;
+      const n = inHunk ? newNum++ : null;
+      rows.push({ idx: i, filePath: currentFile, oldLine: o, newLine: n, kind: "ctx", text: line });
+    }
+  }
+  return rows;
+}
+
+function formatRowClass(kind: ParsedDiffRow["kind"], text: string): string {
+  if (kind === "add") return "bg-success-soft/80 text-success";
+  if (kind === "del") return "bg-danger-soft/80 text-danger";
+  if (kind === "meta" && (text.startsWith("@@") || text.startsWith("diff --git"))) {
+    return "text-info font-medium";
+  }
   return "text-ink-muted";
 }
 
@@ -56,6 +130,26 @@ function fileStatusLetter(status: string): { letter: string; cls: string } {
     default:
       return { letter: "M", cls: "text-warning" };
   }
+}
+
+function formatAnnotationPrompt(notes: InlineDiffNote[]): string {
+  if (notes.length === 1) {
+    const n = notes[0];
+    return [
+      `请根据以下本地代码 Diff 批注修改代码：`,
+      `File: ${n.filePath}`,
+      ...(n.line !== null ? [`Line: ${n.line}`] : []),
+      `Code: ${n.code}`,
+      `User comment: "${n.body}"`,
+    ].join("\n");
+  }
+  return [
+    `请依次处理以下 ${notes.length} 条本地 Diff 行内批注：`,
+    ...notes.map(
+      (n, i) =>
+        `\n${i + 1}. ${n.filePath}${n.line !== null ? `:${n.line}` : ""}\n   Code: ${n.code}\n   Comment: ${n.body}`,
+    ),
+  ].join("\n");
 }
 
 export function PaseoToolPane({
@@ -75,9 +169,22 @@ export function PaseoToolPane({
   const [prTitle, setPrTitle] = useState("");
   const [prDraft, setPrDraft] = useState(false);
 
+  // ---- Orca-style Local Diff Inline Annotations ----
+  const [annotatingRowIdx, setAnnotatingRowIdx] = useState<number | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [queuedNotes, setQueuedNotes] = useState<InlineDiffNote[]>([]);
+
   const gitStatus = useThreadGitStatus(tool === "git" ? thread.id : null);
   const gitDiff = useThreadGitDiff(tool === "git" ? thread.id : null, selectedGitFile);
   const prDetail = useThreadPrDetail(tool === "git" ? thread.id : null);
+
+  const parsedDiffRows = useMemo(
+    () =>
+      gitDiff.data?.diff?.trim()
+        ? parseUnifiedDiffRows(gitDiff.data.diff, selectedGitFile || "workspace")
+        : [],
+    [gitDiff.data?.diff, selectedGitFile],
+  );
 
   // ---- Terminal State ----
   const [termInput, setTermInput] = useState("");
@@ -100,6 +207,9 @@ export function PaseoToolPane({
     setSelectedGitFile(null);
     setGitNotice(null);
     setShowCreatePrForm(false);
+    setAnnotatingRowIdx(null);
+    setNoteDraft("");
+    setQueuedNotes([]);
     setCurrentDir("");
     setSelectedFilePath(null);
     setTermLogs([]);
@@ -124,7 +234,7 @@ export function PaseoToolPane({
     void qc.invalidateQueries({ queryKey: ["workspace-tree"] });
   };
 
-  // ==================== 1. FULL PASEO GIT & PR ====================
+  // ==================== 1. FULL PASEO GIT & PR + INLINE DIFF NOTES ====================
   if (tool === "git") {
     const status = gitStatus.data;
     const files = status?.files ?? [];
@@ -243,6 +353,41 @@ export function PaseoToolPane({
       } finally {
         setGitBusy(false);
       }
+    };
+
+    const buildNoteForRow = (row: ParsedDiffRow, body: string): InlineDiffNote => ({
+      id: `note-${row.idx}-${Date.now()}`,
+      rowIdx: row.idx,
+      filePath: row.filePath,
+      line: row.newLine ?? row.oldLine,
+      code: row.text.trim(),
+      body: body.trim(),
+    });
+
+    const handleQueueInlineNote = (row: ParsedDiffRow) => {
+      const body = noteDraft.trim();
+      if (!body) return;
+      setQueuedNotes((prev) => [...prev, buildNoteForRow(row, body)]);
+      setNoteDraft("");
+      setAnnotatingRowIdx(null);
+    };
+
+    const handleSendSingleInlineNote = async (row: ParsedDiffRow) => {
+      const body = noteDraft.trim();
+      if (!body) return;
+      const note = buildNoteForRow(row, body);
+      setNoteDraft("");
+      setAnnotatingRowIdx(null);
+      await onSendPromptToAgent(formatAnnotationPrompt([note]));
+      setGitNotice({ ok: true, text: `已将 ${note.filePath}${note.line ? `:${note.line}` : ""} 批注发给 ${agentShortName}` });
+    };
+
+    const handleSendAllQueuedNotes = async () => {
+      if (queuedNotes.length === 0) return;
+      const batch = [...queuedNotes];
+      setQueuedNotes([]);
+      await onSendPromptToAgent(formatAnnotationPrompt(batch));
+      setGitNotice({ ok: true, text: `已批量发送 ${batch.length} 条行内批注给 ${agentShortName}` });
     };
 
     return (
@@ -382,7 +527,7 @@ export function PaseoToolPane({
           </div>
         </div>
 
-        {/* PR Detail Card + Diff Viewer */}
+        {/* PR Detail Card + Orca-style Annotatable Diff Viewer */}
         <div
           className={`flex min-w-0 flex-1 flex-col gap-3 bg-surface ${
             isSplit ? "px-3.5 py-3" : "p-3.5 lg:overflow-y-auto lg:p-4"
@@ -439,7 +584,6 @@ export function PaseoToolPane({
                   </div>
                 </div>
 
-                {/* CI Checks */}
                 {pr.checks.length > 0 && (
                   <div className="space-y-1">
                     <div className="text-2xs font-medium text-ink-faint">
@@ -487,7 +631,6 @@ export function PaseoToolPane({
                   </div>
                 )}
 
-                {/* Review Comments -> 1-Click Send to Agent */}
                 {pr.comments.length > 0 && (
                   <div className="space-y-1.5">
                     <div className="text-2xs font-medium text-ink-faint">
@@ -605,27 +748,190 @@ export function PaseoToolPane({
             )}
           </div>
 
-          {/* Diff Viewer */}
+          {/* Orca-Style Annotatable Diff Viewer (click any code line to attach inline AI note) */}
           <div
             data-testid="git-diff-viewer"
             className="overflow-hidden rounded-lg border border-line bg-rail font-mono text-2xs leading-relaxed"
           >
-            <div className="flex items-center justify-between border-b border-line bg-elev px-3 py-1.5 text-ink">
-              <span>{selectedGitFile || "全部未提交改动 Diff"}</span>
-              <span className="text-ink-faint">{files.length} 个文件</span>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-elev px-3 py-1.5 text-ink">
+              <div className="flex items-center gap-2">
+                <span>{selectedGitFile || "全部未提交改动 Diff"}</span>
+                <span className="font-sans text-2xs text-ink-faint">点击代码行可写行内批注</span>
+              </div>
+              <div className="flex items-center gap-2">
+                {queuedNotes.length > 0 && (
+                  <button
+                    type="button"
+                    data-testid="diff-send-all-notes-btn"
+                    onClick={() => void handleSendAllQueuedNotes()}
+                    className="inline-flex h-6 items-center gap-1 rounded-md bg-accent px-2 font-sans text-2xs font-semibold text-on-accent hover:bg-accent-deep"
+                  >
+                    <Sparkles className="h-3 w-3" />
+                    <span>发送 {queuedNotes.length} 条批注给 {agentShortName}</span>
+                  </button>
+                )}
+                <span className="text-ink-faint">{files.length} 个文件</span>
+              </div>
             </div>
+
             <div className="overflow-x-auto py-1.5">
-              {!gitDiff.data?.diff?.trim() ? (
+              {parsedDiffRows.length === 0 ? (
                 <div className="px-3 py-4 font-sans text-2xs text-ink-faint">暂无 Diff 内容</div>
               ) : (
-                gitDiff.data.diff.split(/\r?\n/).map((line, i) => (
-                  <div
-                    key={i}
-                    className={`min-w-max whitespace-pre px-3 py-[1px] ${formatDiffLineClass(line)}`}
-                  >
-                    {line || " "}
-                  </div>
-                ))
+                parsedDiffRows.map((row) => {
+                  const rowNotes = queuedNotes.filter((n) => n.rowIdx === row.idx);
+                  const isAnnotating = annotatingRowIdx === row.idx;
+                  const canAnnotate = row.kind !== "meta";
+                  return (
+                    <div key={row.idx}>
+                      <div
+                        data-testid={`diff-row-${row.idx}`}
+                        className={`group flex min-w-max items-stretch px-2 py-[1px] ${formatRowClass(
+                          row.kind,
+                          row.text,
+                        )}`}
+                      >
+                        <span className="w-7 shrink-0 select-none pr-1.5 text-right text-ink-faint">
+                          {row.oldLine ?? ""}
+                        </span>
+                        <span className="w-7 shrink-0 select-none pr-1.5 text-right text-ink-faint">
+                          {row.newLine ?? ""}
+                        </span>
+                        {canAnnotate ? (
+                          <button
+                            type="button"
+                            data-testid={`diff-annotate-btn-${row.idx}`}
+                            title="在此行添加 AI 批注"
+                            onClick={() => {
+                              setAnnotatingRowIdx(isAnnotating ? null : row.idx);
+                              setNoteDraft("");
+                            }}
+                            className={`mr-1.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded transition-opacity ${
+                              isAnnotating || rowNotes.length > 0
+                                ? "bg-accent text-on-accent opacity-100"
+                                : "bg-elev text-ink-muted opacity-0 hover:bg-accent hover:text-on-accent group-hover:opacity-100 focus:opacity-100"
+                            }`}
+                          >
+                            <MessageSquarePlus className="h-2.5 w-2.5" />
+                          </button>
+                        ) : (
+                          <span className="mr-1.5 inline-block w-4 shrink-0" />
+                        )}
+                        <span className="whitespace-pre pr-3">{row.text || " "}</span>
+                      </div>
+
+                      {/* Existing queued notes on this line */}
+                      {rowNotes.map((note) => (
+                        <div
+                          key={note.id}
+                          data-testid={`diff-queued-note-${note.rowIdx}`}
+                          className="mx-3 my-1.5 flex items-start justify-between gap-2 rounded-lg border border-line-strong bg-elev px-3 py-2 font-sans text-xs text-ink shadow-card"
+                        >
+                          <div className="min-w-0 space-y-0.5">
+                            <div className="font-mono text-2xs text-info">
+                              批注 {note.filePath}
+                              {note.line !== null ? `:${note.line}` : ""} · 待发
+                            </div>
+                            <div className="whitespace-pre-wrap">{note.body}</div>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-1">
+                            <button
+                              type="button"
+                              title="立即发送此条"
+                              onClick={async () => {
+                                setQueuedNotes((prev) => prev.filter((x) => x.id !== note.id));
+                                await onSendPromptToAgent(formatAnnotationPrompt([note]));
+                              }}
+                              className="inline-flex h-6 items-center gap-1 rounded bg-accent px-2 text-2xs font-semibold text-on-accent"
+                            >
+                              <Send className="h-3 w-3" />
+                            </button>
+                            <button
+                              type="button"
+                              title="移除批注"
+                              onClick={() =>
+                                setQueuedNotes((prev) => prev.filter((x) => x.id !== note.id))
+                              }
+                              className="inline-flex h-6 w-6 items-center justify-center rounded text-ink-muted hover:bg-tile-hover hover:text-ink"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+
+                      {/* Inline annotation composer (Orca style: focus input, Enter sends, Esc closes quietly) */}
+                      {isAnnotating && (
+                        <div
+                          data-testid={`diff-note-composer-${row.idx}`}
+                          className="mx-3 my-1.5 space-y-2 rounded-lg border border-line-strong bg-elev p-2.5 font-sans shadow-raised"
+                        >
+                          <div className="flex items-center justify-between font-mono text-2xs text-ink-faint">
+                            <span>
+                              行内批注 · {row.filePath}
+                              {(row.newLine ?? row.oldLine) !== null
+                                ? `:${row.newLine ?? row.oldLine}`
+                                : ""}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setAnnotatingRowIdx(null)}
+                              className="rounded p-0.5 text-ink-muted hover:bg-tile-hover hover:text-ink"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                          <textarea
+                            autoFocus
+                            rows={2}
+                            data-testid="diff-note-textarea"
+                            value={noteDraft}
+                            onChange={(e) => setNoteDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Escape") {
+                                e.preventDefault();
+                                setAnnotatingRowIdx(null);
+                              } else if (e.key === "Enter" && !e.shiftKey) {
+                                e.preventDefault();
+                                void handleSendSingleInlineNote(row);
+                              }
+                            }}
+                            placeholder="写下针对这一行的修改意见（Enter 直接发给 Agent，Esc 取消）…"
+                            className="w-full resize-none rounded-md border border-line bg-surface px-2.5 py-1.5 text-xs text-ink focus:border-ink-muted focus:outline-none"
+                          />
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setAnnotatingRowIdx(null)}
+                              className="h-6 rounded-md px-2 text-2xs text-ink-muted hover:bg-tile-hover hover:text-ink"
+                            >
+                              取消
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!noteDraft.trim()}
+                              data-testid="diff-note-queue-btn"
+                              onClick={() => handleQueueInlineNote(row)}
+                              className="h-6 rounded-md border border-line-strong bg-surface px-2.5 text-2xs text-ink hover:bg-tile-hover disabled:opacity-40"
+                            >
+                              暂存批注
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!noteDraft.trim()}
+                              data-testid="diff-note-send-btn"
+                              onClick={() => void handleSendSingleInlineNote(row)}
+                              className="inline-flex h-6 items-center gap-1 rounded-md bg-accent px-2.5 text-2xs font-semibold text-on-accent hover:bg-accent-deep disabled:opacity-40"
+                            >
+                              <Send className="h-3 w-3" />
+                              <span>发给 {agentShortName}</span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
           </div>

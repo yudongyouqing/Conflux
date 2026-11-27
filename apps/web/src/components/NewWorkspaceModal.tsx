@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AgentThread,
   ApprovalMode,
@@ -7,9 +7,10 @@ import type {
   RuntimeId,
   WorkspaceCreateMode,
 } from "@conflux/shared";
-import { FolderOpen, GitBranch, GitPullRequest, X } from "lucide-react";
+import { ChevronRight, FolderOpen, GitBranch, GitPullRequest, X } from "lucide-react";
 import { api } from "../api";
 import { RuntimeGlyph } from "./brand-icons";
+import { isMacPlatform } from "./CommandPalette";
 
 interface NewWorkspaceModalProps {
   open: boolean;
@@ -43,8 +44,11 @@ export function NewWorkspaceModal({
   const [model, setModel] = useState("");
   const [approvalMode, setApprovalMode] = useState<ApprovalMode>("ask");
   const [initialPrompt, setInitialPrompt] = useState("");
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const formRef = useRef<HTMLFormElement | null>(null);
+  const mac = useMemo(() => isMacPlatform(), []);
 
   useEffect(() => {
     if (!open) return;
@@ -54,6 +58,7 @@ export function NewWorkspaceModal({
     setPrNumber("");
     setInitialPrompt("");
     setMode("direct");
+    setShowAdvanced(false);
     const firstDir = defaultDir?.trim() || projects[0]?.root_path || "";
     setWorkdir(firstDir);
     const available = PRIMARY_RUNTIMES.find((r) =>
@@ -64,6 +69,21 @@ export function NewWorkspaceModal({
     const probe = cliProbes.find((p) => p.runtime === pickedRuntime);
     setModel(probe?.models[0] ?? "");
   }, [open, defaultDir, projects, cliProbes]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      } else if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !submitting) {
+        e.preventDefault();
+        formRef.current?.requestSubmit();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose, submitting]);
 
   if (!open) return null;
 
@@ -145,7 +165,7 @@ export function NewWorkspaceModal({
           </button>
         </div>
 
-        <form onSubmit={(e) => void handleSubmit(e)} className="space-y-3.5 overflow-y-auto p-4">
+        <form ref={formRef} onSubmit={(e) => void handleSubmit(e)} className="space-y-3.5 overflow-y-auto p-4">
           {/* Engine Picker */}
           <div>
             <label className="mb-1.5 block text-2xs font-medium text-ink-muted">引擎</label>
@@ -282,66 +302,109 @@ export function NewWorkspaceModal({
             )}
           </div>
 
-          {/* Name + Model + Approval Mode */}
-          <div className="grid grid-cols-2 gap-2.5">
-            <div>
-              <label className="mb-1 block text-2xs font-medium text-ink-muted">名称（可选）</label>
-              <input
-                type="text"
-                data-testid="new-agent-name-input"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="留空按引擎与目录命名"
-                className="h-8 w-full rounded-md border border-line-strong bg-elev px-2.5 text-xs text-ink focus:border-ink focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-2xs font-medium text-ink-muted">模型 / 权限</label>
-              <div className="flex gap-1.5">
-                <select
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  className="h-8 min-w-0 flex-1 rounded-md border border-line-strong bg-elev px-2 font-mono text-2xs text-ink focus:outline-none"
-                >
-                  <option value="">默认模型</option>
-                  {(activeProbe?.models ?? []).map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => setApprovalMode((m) => (m === "ask" ? "auto" : "ask"))}
-                  className="h-8 shrink-0 rounded-md border border-line-strong bg-elev px-2 font-mono text-2xs text-ink-muted hover:text-ink"
-                  title="切换命令/写文件审批模式"
-                >
-                  {approvalMode === "auto" ? "Auto" : "Ask"}
-                </button>
+          {/* Orca-style Progressive Disclosure: Advanced Options */}
+          <div className="rounded-lg border border-line bg-paper/60">
+            <button
+              type="button"
+              data-testid="new-workspace-advanced-toggle"
+              aria-expanded={showAdvanced}
+              onClick={() => setShowAdvanced((v) => !v)}
+              className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-2xs font-medium text-ink-muted transition-colors hover:text-ink"
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <ChevronRight
+                  className={`h-3.5 w-3.5 transition-transform duration-150 ${
+                    showAdvanced ? "rotate-90" : ""
+                  }`}
+                />
+                <span>高级选项</span>
+              </span>
+              <span className="truncate font-mono text-2xs text-ink-faint">
+                {[
+                  name.trim() || "自动命名",
+                  model || "默认模型",
+                  approvalMode === "auto" ? "Auto" : "Ask",
+                  initialPrompt.trim() ? "含首条指令" : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
+            </button>
+
+            <div className="paseo-acc-group" data-open={showAdvanced ? "true" : "false"}>
+              <div className="paseo-acc-inner">
+                <div className="space-y-3 border-t border-line px-3 pb-3 pt-2.5">
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="mb-1 block text-2xs font-medium text-ink-muted">
+                        名称（可选）
+                      </label>
+                      <input
+                        type="text"
+                        data-testid="new-agent-name-input"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        placeholder="留空按引擎与目录命名"
+                        className="h-8 w-full rounded-md border border-line-strong bg-elev px-2.5 text-xs text-ink focus:border-ink focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-2xs font-medium text-ink-muted">
+                        模型 / 权限
+                      </label>
+                      <div className="flex gap-1.5">
+                        <select
+                          value={model}
+                          onChange={(e) => setModel(e.target.value)}
+                          className="h-8 min-w-0 flex-1 rounded-md border border-line-strong bg-elev px-2 font-mono text-2xs text-ink focus:outline-none"
+                        >
+                          <option value="">默认模型</option>
+                          {(activeProbe?.models ?? []).map((m) => (
+                            <option key={m} value={m}>
+                              {m}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => setApprovalMode((m) => (m === "ask" ? "auto" : "ask"))}
+                          className="h-8 shrink-0 rounded-md border border-line-strong bg-elev px-2 font-mono text-2xs text-ink-muted hover:text-ink"
+                          title="切换命令/写文件审批模式"
+                        >
+                          {approvalMode === "auto" ? "Auto" : "Ask"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-2xs font-medium text-ink-muted">
+                      首条指令（可选）
+                    </label>
+                    <textarea
+                      rows={2}
+                      data-testid="new-workspace-initial-prompt"
+                      value={initialPrompt}
+                      onChange={(e) => setInitialPrompt(e.target.value)}
+                      placeholder="创建后立即发送给该 Agent 的任务…"
+                      className="w-full resize-none rounded-md border border-line-strong bg-elev px-2.5 py-1.5 text-xs text-ink focus:border-ink focus:outline-none"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-
-          <div>
-            <label className="mb-1 block text-2xs font-medium text-ink-muted">首条指令（可选）</label>
-            <textarea
-              rows={2}
-              value={initialPrompt}
-              onChange={(e) => setInitialPrompt(e.target.value)}
-              placeholder="创建后立即发送给该 Agent 的任务…"
-              className="w-full resize-none rounded-md border border-line-strong bg-elev px-2.5 py-1.5 text-xs text-ink focus:border-ink focus:outline-none"
-            />
           </div>
 
           {error && (
             <div className="rounded-md bg-danger-soft px-3 py-2 text-xs text-danger">{error}</div>
           )}
 
-          <div className="flex justify-end gap-2 border-t border-line pt-3">
+          <div className="flex items-center justify-end gap-2 border-t border-line pt-3">
             <button
               type="button"
+              data-testid="new-workspace-cancel-btn"
               onClick={onClose}
-              className="h-7 rounded-md border border-line-strong bg-elev px-3 text-xs text-ink hover:bg-tile-hover"
+              className="h-7 rounded-md px-3 text-xs text-ink-muted transition-colors hover:bg-tile-hover hover:text-ink"
             >
               取消
             </button>
@@ -349,9 +412,10 @@ export function NewWorkspaceModal({
               type="submit"
               disabled={submitting}
               data-testid="new-agent-submit-btn"
-              className="h-7 rounded-md bg-accent px-3.5 text-xs font-semibold text-on-accent hover:bg-accent-deep disabled:opacity-50"
+              className="inline-flex h-7 items-center gap-1.5 rounded-md bg-accent px-3.5 text-xs font-semibold text-on-accent hover:bg-accent-deep disabled:opacity-50"
             >
-              {submitting ? "创建中…" : "创建并进入"}
+              <span>{submitting ? "创建中…" : "创建并进入"}</span>
+              <span className="font-mono text-2xs opacity-80">{mac ? "⌘↵" : "Ctrl+↵"}</span>
             </button>
           </div>
         </form>
