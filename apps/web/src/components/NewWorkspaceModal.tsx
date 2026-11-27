@@ -240,10 +240,10 @@ export function NewWorkspaceModal({
             )}
           </div>
 
-          {/* Paseo 3-Mode Selector */}
+          {/* 3-Mode Workspace Selector */}
           <div>
             <label className="mb-1.5 block text-2xs font-medium text-ink-muted">
-              隔离与 PR 模式（Paseo）
+              隔离与 PR 模式
             </label>
             <div className="grid grid-cols-3 gap-1 rounded-lg border border-line bg-rail p-1">
               {(
@@ -297,7 +297,7 @@ export function NewWorkspaceModal({
             )}
           </div>
 
-          {/* Orca-style Progressive Disclosure: Advanced Options */}
+          {/* Progressive Disclosure: Advanced Options */}
           <div className="rounded-lg border border-line bg-paper/60">
             <button
               type="button"
@@ -326,8 +326,8 @@ export function NewWorkspaceModal({
               </span>
             </button>
 
-            <div className="paseo-acc-group" data-open={showAdvanced ? "true" : "false"}>
-              <div className="paseo-acc-inner">
+            <div className="cfx-acc-group" data-open={showAdvanced ? "true" : "false"}>
+              <div className="cfx-acc-inner">
                 <div className="space-y-3 border-t border-line px-3 pb-3 pt-2.5">
                   <div className="grid grid-cols-2 gap-2.5">
                     <div>

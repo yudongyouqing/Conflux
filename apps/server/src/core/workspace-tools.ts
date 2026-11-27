@@ -37,7 +37,7 @@ function resolveInsideWorkspace(workdir: string, subPath = ""): string {
 }
 
 /**
- * Execute a shell command inside a workspace's exact `workdir` for the Paseo
+ * Execute a shell command inside a workspace's exact `workdir` for the
  * embedded terminal panel. Uses a bounded timeout and output cap.
  */
 export function execWorkspaceCommand(
@@ -105,7 +105,7 @@ export function execWorkspaceCommand(
   });
 }
 
-/** List immediate children inside a workspace directory for the Paseo File Explorer. */
+/** List immediate children inside a workspace directory for the File Explorer. */
 export function listWorkspaceDirectory(workdir: string, subPath = ""): WorkspaceFileEntry[] {
   const absRoot = resolve(workdir);
   const targetDir = resolveInsideWorkspace(absRoot, subPath);

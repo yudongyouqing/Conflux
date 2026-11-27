@@ -64,7 +64,7 @@ export function SettingsView({ cliProbes, onSelectTheme }: SettingsViewProps) {
           <div>
             <h1 className="text-[15px] font-semibold text-ink">系统设置</h1>
             <p className="mt-0.5 text-xs text-ink-faint">
-              Paseo 主题色板、本机 CLI 引擎路径与自主互调防循环护栏。
+              主题色板、本机 CLI 引擎路径与自主互调防循环护栏。
             </p>
           </div>
           {notice && (

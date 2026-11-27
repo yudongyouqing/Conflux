@@ -17,7 +17,7 @@ import {
   Users,
 } from "lucide-react";
 import type { MainScreen } from "./ActivityRail";
-import type { PaseoToolTab } from "./PaseoToolPane";
+import type { WorkspaceToolTab } from "./WorkspaceToolPane";
 import { RuntimeGlyph } from "./brand-icons";
 
 export interface CommandPaletteProps {
@@ -30,7 +30,7 @@ export interface CommandPaletteProps {
   sidebarCollapsed: boolean;
   onSelectThread: (threadId: string) => void;
   onOpenCompanion: (threadId: string) => void;
-  onSelectTool: (tool: PaseoToolTab) => void;
+  onSelectTool: (tool: WorkspaceToolTab) => void;
   onSelectScreen: (screen: MainScreen) => void;
   onOpenNewWorkspace: () => void;
   onOpenConnect: () => void;
@@ -134,7 +134,7 @@ export function CommandPalette({
     }
 
     if (activeThreadId) {
-      const toolEntries: Array<{ id: PaseoToolTab; title: string; subtitle: string; icon: typeof GitBranch }> = [
+      const toolEntries: Array<{ id: WorkspaceToolTab; title: string; subtitle: string; icon: typeof GitBranch }> = [
         { id: "git", title: "打开 Git & PR", subtitle: "变更、行内 Diff 批注、Checks 与 Review", icon: GitBranch },
         { id: "term", title: "打开嵌入式终端", subtitle: "在当前工作区目录运行命令", icon: Terminal },
         { id: "files", title: "打开文件浏览器", subtitle: "浏览与查看工作区源码文件", icon: Folder },
@@ -235,7 +235,7 @@ export function CommandPalette({
         id: "action-theme",
         group: "快捷操作",
         title: "切换明 / 暗色主题",
-        subtitle: "在 Paseo Dark 与 Paseo Light 之间切换",
+        subtitle: "在暗色与浅色主题之间切换",
         keywords: "theme dark light 主题 暗色 亮色",
         icon: Contrast,
         onRun: () => {

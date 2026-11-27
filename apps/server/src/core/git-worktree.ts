@@ -221,7 +221,7 @@ export function createWorktree(
 }
 
 /**
- * Paseo PR checkout mode: fetch an existing GitHub PR into a dedicated worktree
+ * PR checkout mode: fetch an existing GitHub PR into a dedicated worktree
  * under `.conflux-worktrees/pr-<number>` and return its branch & PR URL.
  */
 export function checkoutPrWorktree(
@@ -675,7 +675,7 @@ function runGh(
 }
 
 /**
- * Lightweight Paseo-style PR creation: auto-commit worktree changes if dirty,
+ * Lightweight PR creation: auto-commit worktree changes if dirty,
  * push branch to origin, and delegate PR lookup/creation to local `gh` CLI.
  */
 export function createWorktreePr(
@@ -791,7 +791,7 @@ function normalizeCheckStatus(raw: Record<string, unknown>): PrCheckItem["status
 }
 
 /**
- * Full Paseo PR Detail inspection via local `gh`: fetches PR metadata, CI checks
+ * Full PR Detail inspection via local `gh`: fetches PR metadata, CI checks
  * (`statusCheckRollup`), and review/issue comments so the user can review checks
  * and send comments directly to the active Agent with one click.
  */

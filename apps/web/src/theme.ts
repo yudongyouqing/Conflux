@@ -99,10 +99,10 @@ export function applyThemeColors(root: StyleTarget = document.documentElement, c
   else root.style.removeProperty("--tk-on-accent");
 }
 
-// 内置预设：默认采用 Paseo 炭黑深色与 Paseo 浅色黑白单色主操作体系
+// 内置预设：默认采用炭黑深色与浅色黑白单色主操作体系
 export const BUILTIN_THEMES: CustomTheme[] = [
-  { name: "Paseo 暗黑（默认）", colors: { ink: "#f4f4f5", paper: "#0d0d10", surface: "#111115", line: "#202027", lineStrong: "#2d2d37", accent: "#f4f4f5", accentDeep: "#ffffff", accentSoft: "#27272f" } },
-  { name: "Paseo 浅色", colors: { ink: "#09090b", paper: "#f4f5f7", surface: "#ffffff", line: "#e4e5ea", lineStrong: "#cfd2dc", accent: "#18181b", accentDeep: "#09090b", accentSoft: "#e4e5ea" } },
+  { name: "暗黑（默认）", colors: { ink: "#f4f4f5", paper: "#0d0d10", surface: "#111115", line: "#202027", lineStrong: "#2d2d37", accent: "#f4f4f5", accentDeep: "#ffffff", accentSoft: "#27272f" } },
+  { name: "浅色", colors: { ink: "#09090b", paper: "#f4f5f7", surface: "#ffffff", line: "#e4e5ea", lineStrong: "#cfd2dc", accent: "#18181b", accentDeep: "#09090b", accentSoft: "#e4e5ea" } },
   { name: "汇流蓝", colors: { ink: "#111827", paper: "#f7f8fa", surface: "#ffffff", line: "#e6e8ee", lineStrong: "#cdd2df", accent: "#4353ff", accentDeep: "#3341e0", accentSoft: "#eef0ff" } },
   { name: "海洋深处", colors: { ink: "#0f2440", paper: "#eef4f8", surface: "#ffffff", line: "#d8e3ec", lineStrong: "#b9cbdc", accent: "#0e7490", accentDeep: "#0b5a6e", accentSoft: "#e0f2f7" } },
   { name: "森林树冠", colors: { ink: "#1d2a20", paper: "#f1f6f1", surface: "#ffffff", line: "#dce7dc", lineStrong: "#b9cdb9", accent: "#2f6b4f", accentDeep: "#24523c", accentSoft: "#e3f0e6" } },

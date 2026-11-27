@@ -545,7 +545,7 @@ describe("Conflux v2 Web UI components", () => {
     await waitFor(() => assert.ok(view.getByTestId("merge-result-banner")));
     assert.match(view.getByTestId("merge-result-banner").textContent ?? "", /src\/app\.ts/);
 
-    // Lightweight Paseo-style PR creation flow
+    // Lightweight PR creation flow
     fireEvent.click(view.getByTestId("toggle-pr-form-btn"));
     fireEvent.click(view.getByTestId("submit-create-pr-btn"));
     await waitFor(() => assert.ok(view.getByTestId("inspector-pr-link")));

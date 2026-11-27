@@ -53,7 +53,7 @@ function getFreePort(): Promise<number> {
 }
 
 function makeTempGitRepo(): { repoDir: string; cleanup: () => void } {
-  const repoDir = mkdtempSync(join(tmpdir(), "conflux-paseo-git-"));
+  const repoDir = mkdtempSync(join(tmpdir(), "conflux-workspace-git-"));
   const gitBin = resolveGitBinary();
   const git = (args: string[]) =>
     execFileSync(gitBin, args, {
@@ -63,8 +63,8 @@ function makeTempGitRepo(): { repoDir: string; cleanup: () => void } {
       stdio: ["ignore", "pipe", "pipe"],
     });
   git(["init", "-b", "main"]);
-  git(["config", "user.name", "Paseo Test"]);
-  git(["config", "user.email", "paseo@local"]);
+  git(["config", "user.name", "Conflux Test"]);
+  git(["config", "user.email", "test@conflux.local"]);
   mkdirSync(join(repoDir, "src"), { recursive: true });
   writeFileSync(join(repoDir, "src", "auth.ts"), "export const leeway = 0;\n", "utf8");
   git(["add", "-A"]);
@@ -243,7 +243,7 @@ test("original-directory hook install preserves existing settings & wake refuses
   }
 });
 
-test("Paseo Git stage/commit, gh PR detail with checks/comments, terminal exec & safe file explorer", async () => {
+test("Workspace Git stage/commit, gh PR detail with checks/comments, terminal exec & safe file explorer", async () => {
   const { repoDir, cleanup } = makeTempGitRepo();
   const shimDir = mkdtempSync(join(tmpdir(), "conflux-gh-shim-"));
   try {
@@ -303,9 +303,9 @@ if (args[0] === "pr" && args[1] === "view") {
     assert.equal(prRes.pr?.comments[0]?.path, "src/auth.ts");
 
     // Embedded terminal exec
-    const termRes = await execWorkspaceCommand(repoDir, "echo paseo-shell-ok");
+    const termRes = await execWorkspaceCommand(repoDir, "echo workspace-shell-ok");
     assert.equal(termRes.ok, true);
-    assert.match(termRes.stdout, /paseo-shell-ok/);
+    assert.match(termRes.stdout, /workspace-shell-ok/);
 
     // File explorer & path traversal guard
     const entries = listWorkspaceDirectory(repoDir);

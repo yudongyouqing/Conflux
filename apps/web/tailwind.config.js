@@ -12,7 +12,7 @@ export default {
           muted: "rgb(var(--tk-ink) / 0.76)",
           faint: "rgb(var(--tk-ink) / 0.66)",
         },
-        /** Paseo 四层炭黑/浅灰表面：rail → paper → surface → elev */
+        /** 四层炭黑/浅灰表面：rail → paper → surface → elev */
         rail: "rgb(var(--tk-rail) / <alpha-value>)",
         paper: "rgb(var(--tk-paper) / <alpha-value>)",
         surface: "rgb(var(--tk-surface) / <alpha-value>)",

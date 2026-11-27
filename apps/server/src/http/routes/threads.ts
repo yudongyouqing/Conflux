@@ -361,7 +361,7 @@ export function registerThreadRoutes(app: FastifyInstance, ctx: ServerContext): 
     reply.send({ thread: await requireManager().cleanupThreadWorktree(req.params.id) }),
   );
 
-  // ---- Paseo Workspace Tools: Embedded Terminal, File Explorer & Live Preview ----
+  // ---- Workspace Tools: Embedded Terminal, File Explorer & Live Preview ----
 
   app.post<{ Params: { id: string }; Body: { command: string } }>(
     "/threads/:id/terminal/exec",

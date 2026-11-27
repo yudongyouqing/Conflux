@@ -30,7 +30,7 @@ const { cleanup, fireEvent, render, waitFor } = await import("@testing-library/r
 const { ActivityRail } = await import("../src/components/ActivityRail.tsx");
 const { WorkspaceSidebar } = await import("../src/components/WorkspaceSidebar.tsx");
 const { NewWorkspaceModal } = await import("../src/components/NewWorkspaceModal.tsx");
-const { PaseoToolPane } = await import("../src/components/PaseoToolPane.tsx");
+const { WorkspaceToolPane } = await import("../src/components/WorkspaceToolPane.tsx");
 const { LiveMeshGraph } = await import("../src/components/LiveMeshGraph.tsx");
 const { AgentWorkbench } = await import("../src/components/AgentWorkbench.tsx");
 const { CommandPalette } = await import("../src/components/CommandPalette.tsx");
@@ -122,7 +122,7 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-describe("Full Paseo + Conflux MCP Mesh Web UI", () => {
+describe("Conflux Workspace & MCP Agent Mesh Web UI", () => {
   it("ActivityRail shows live call badge and triggers navigation/collapse", () => {
     let selectedScreen = "workspace";
     let toggledSidebar = 0;
@@ -214,7 +214,7 @@ describe("Full Paseo + Conflux MCP Mesh Web UI", () => {
     assert.equal(entered, "codex-mac");
   });
 
-  it("NewWorkspaceModal supports Paseo 3 modes (direct / worktree / checkout PR)", async () => {
+  it("NewWorkspaceModal supports 3 workspace modes (direct / worktree / checkout PR)", async () => {
     let submittedBody: Record<string, unknown> | null = null;
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input).endsWith("/threads") && init?.method === "POST") {
@@ -250,7 +250,7 @@ describe("Full Paseo + Conflux MCP Mesh Web UI", () => {
     assert.equal(submittedBody?.workdir, "C:\\Projects\\my-app");
   });
 
-  it("PaseoToolPane renders Git/PR with 1-click Send Review to Agent, Embedded Terminal & Files", async () => {
+  it("WorkspaceToolPane renders Git/PR with 1-click Send Review to Agent, Embedded Terminal & Files", async () => {
     const thread = makeThread();
     const sentPrompts: string[] = [];
 
@@ -316,7 +316,7 @@ describe("Full Paseo + Conflux MCP Mesh Web UI", () => {
 
     const gitView = render(
       withQueryClient(
-        React.createElement(PaseoToolPane, {
+        React.createElement(WorkspaceToolPane, {
           thread,
           tool: "git",
           layout: "split",
@@ -335,7 +335,7 @@ describe("Full Paseo + Conflux MCP Mesh Web UI", () => {
 
     const termView = render(
       withQueryClient(
-        React.createElement(PaseoToolPane, {
+        React.createElement(WorkspaceToolPane, {
           thread,
           tool: "term",
           layout: "split",
@@ -343,7 +343,7 @@ describe("Full Paseo + Conflux MCP Mesh Web UI", () => {
         }),
       ),
     );
-    const termInp = termView.getByTestId("paseo-terminal-input");
+    const termInp = termView.getByTestId("workspace-terminal-input");
     fireEvent.change(termInp, { target: { value: "npm test" } });
     fireEvent.keyDown(termInp, { key: "Enter" });
     await waitFor(() => assert.match(termView.container.textContent ?? "", /12\/12 passed/));
@@ -444,7 +444,7 @@ describe("Full Paseo + Conflux MCP Mesh Web UI", () => {
     );
   });
 
-  it("PaseoToolPane supports Orca-style inline Diff annotations (queue + batch send)", async () => {
+  it("WorkspaceToolPane supports inline Diff annotations (queue + batch send)", async () => {
     const thread = makeThread();
     const sentPrompts: string[] = [];
 
@@ -482,7 +482,7 @@ describe("Full Paseo + Conflux MCP Mesh Web UI", () => {
 
     const view = render(
       withQueryClient(
-        React.createElement(PaseoToolPane, {
+        React.createElement(WorkspaceToolPane, {
           thread,
           tool: "git",
           layout: "split",

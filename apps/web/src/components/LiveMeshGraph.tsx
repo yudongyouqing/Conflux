@@ -202,7 +202,7 @@ export function LiveMeshGraph({
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Scrollable Topology Canvas */}
-        <div className="paseo-dot-grid relative flex-1 overflow-auto">
+        <div className="cfx-dot-grid relative flex-1 overflow-auto">
           {liveNodes.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
               <div className="text-sm font-semibold text-ink">当前暂无在线会话节点</div>
@@ -298,7 +298,7 @@ export function LiveMeshGraph({
                         fill="none"
                         stroke={strokeVar}
                         strokeWidth={2}
-                        className={isActive ? "paseo-edge-flow" : ""}
+                        className={isActive ? "cfx-edge-flow" : ""}
                         markerEnd={isWaiting ? "url(#mesh-arr-amber)" : "url(#mesh-arr-green)"}
                       />
                     </g>
@@ -436,10 +436,10 @@ export function LiveMeshGraph({
         <aside
           data-testid="mesh-audit-drawer"
           data-open={selectedCall ? "true" : "false"}
-          className="paseo-audit-drawer border-l border-line bg-paper"
+          className="cfx-audit-drawer border-l border-line bg-paper"
         >
           {selectedCall && (
-            <div className="paseo-audit-drawer-inner flex flex-col">
+            <div className="cfx-audit-drawer-inner flex flex-col">
               <div className="flex items-center justify-between gap-2 border-b border-line px-3.5 py-2.5">
                 <div className="min-w-0">
                   <div className="truncate text-[13px] font-semibold text-ink">
@@ -504,20 +504,20 @@ export function LiveMeshGraph({
                   {selectedCall.context && (
                     <div
                       data-open={ctxOpen ? "true" : "false"}
-                      className="paseo-acc-group mt-2.5 overflow-hidden rounded-md border border-line"
+                      className="cfx-acc-group mt-2.5 overflow-hidden rounded-md border border-line"
                     >
-                      <div className="paseo-acc-head">
+                      <div className="cfx-acc-head">
                         <button
                           type="button"
                           onClick={() => setCtxOpen((v) => !v)}
                           className="flex w-full items-center justify-between bg-surface px-2.5 py-1.5 font-mono text-2xs text-ink-muted hover:text-ink"
                         >
                           <span>附带上下文 / Diff</span>
-                          <ChevronDown className="paseo-acc-chevron h-3 w-3" />
+                          <ChevronDown className="cfx-acc-chevron h-3 w-3" />
                         </button>
                       </div>
-                      <div className="paseo-acc-body">
-                        <div className="paseo-acc-inner">
+                      <div className="cfx-acc-body">
+                        <div className="cfx-acc-inner">
                           <pre className="overflow-x-auto bg-rail p-2 font-mono text-2xs text-ink-muted">
                             {selectedCall.context}
                           </pre>

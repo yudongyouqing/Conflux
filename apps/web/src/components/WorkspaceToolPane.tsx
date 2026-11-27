@@ -30,11 +30,11 @@ import {
   useWorkspaceFiles,
 } from "../hooks";
 
-export type PaseoToolTab = "git" | "term" | "files" | "preview" | "peer";
+export type WorkspaceToolTab = "git" | "term" | "files" | "preview" | "peer";
 
-interface PaseoToolPaneProps {
+interface WorkspaceToolPaneProps {
   thread: AgentThread;
-  tool: Exclude<PaseoToolTab, "peer">;
+  tool: Exclude<WorkspaceToolTab, "peer">;
   layout: "split" | "full";
   onSendPromptToAgent: (promptText: string) => Promise<void> | void;
 }
@@ -154,12 +154,12 @@ function formatAnnotationPrompt(notes: InlineDiffNote[]): string {
   ].join("\n");
 }
 
-export function PaseoToolPane({
+export function WorkspaceToolPane({
   thread,
   tool,
   layout,
   onSendPromptToAgent,
-}: PaseoToolPaneProps) {
+}: WorkspaceToolPaneProps) {
   const qc = useQueryClient();
 
   // ---- Git & PR State ----
@@ -171,7 +171,7 @@ export function PaseoToolPane({
   const [prTitle, setPrTitle] = useState("");
   const [prDraft, setPrDraft] = useState(false);
 
-  // ---- Orca-style Local Diff Inline Annotations ----
+  // ---- Local Diff Inline Annotations ----
   const [annotatingRowIdx, setAnnotatingRowIdx] = useState<number | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [queuedNotes, setQueuedNotes] = useState<InlineDiffNote[]>([]);
@@ -236,7 +236,7 @@ export function PaseoToolPane({
     void qc.invalidateQueries({ queryKey: ["workspace-tree"] });
   };
 
-  // ==================== 1. FULL PASEO GIT & PR + INLINE DIFF NOTES ====================
+  // ==================== 1. WORKSPACE GIT & PR + INLINE DIFF NOTES ====================
   if (tool === "git") {
     const status = gitStatus.data;
     const files = status?.files ?? [];
@@ -394,7 +394,7 @@ export function PaseoToolPane({
 
     return (
       <div
-        data-testid="paseo-git-pane"
+        data-testid="workspace-git-pane"
         className={`flex min-h-0 flex-1 ${
           isSplit
             ? "flex-col overflow-y-auto"
@@ -529,15 +529,15 @@ export function PaseoToolPane({
           </div>
         </div>
 
-        {/* PR Detail Card + Orca-style Annotatable Diff Viewer */}
+        {/* PR Detail Card + Annotatable Diff Viewer */}
         <div
           className={`flex min-w-0 flex-1 flex-col gap-4 bg-surface ${
             isSplit ? "px-4 py-3" : "p-4 lg:overflow-y-auto"
           }`}
         >
-          {/* Full Paseo PR Card */}
+          {/* PR Detail Card */}
           <div
-            data-testid="paseo-pr-card"
+            data-testid="workspace-pr-card"
             className="flex flex-col gap-3 rounded-xl border border-line bg-elev p-4"
           >
             {pr ? (
@@ -750,7 +750,7 @@ export function PaseoToolPane({
             )}
           </div>
 
-          {/* Orca-Style Annotatable Diff Viewer (click any code line to attach inline AI note) */}
+          {/* Annotatable Diff Viewer (click any code line to attach inline AI note) */}
           <div
             data-testid="git-diff-viewer"
             className="overflow-hidden rounded-lg border border-line bg-rail font-mono text-2xs leading-relaxed"
@@ -861,7 +861,7 @@ export function PaseoToolPane({
                         </div>
                       ))}
 
-                      {/* Inline annotation composer (Orca style: focus input, Enter sends, Esc closes quietly) */}
+                      {/* Inline annotation composer (focus input, Enter sends, Esc closes quietly) */}
                       {isAnnotating && (
                         <div
                           data-testid={`diff-note-composer-${row.idx}`}
@@ -941,7 +941,7 @@ export function PaseoToolPane({
     );
   }
 
-  // ==================== 2. PASEO EMBEDDED TERMINAL ====================
+  // ==================== 2. EMBEDDED TERMINAL ====================
   if (tool === "term") {
     const runCommand = async (rawCmd: string) => {
       const cmd = rawCmd.trim();
@@ -971,7 +971,7 @@ export function PaseoToolPane({
 
     return (
       <div
-        data-testid="paseo-terminal-pane"
+        data-testid="workspace-terminal-pane"
         className="flex min-h-0 flex-1 flex-col overflow-hidden bg-rail font-mono text-xs text-ink"
       >
         <div className="flex items-center gap-1.5 overflow-x-auto border-b border-line bg-paper px-3 py-1.5">
@@ -995,7 +995,7 @@ export function PaseoToolPane({
         <div className="flex-1 space-y-3 overflow-y-auto p-3.5 leading-relaxed">
           {termLogs.length === 0 && (
             <div className="text-2xs text-ink-faint">
-              [Paseo Embedded Shell · {thread.workdir}] 输入命令回车执行（例如 git status / npm test）
+              [Conflux Shell · {thread.workdir}] 输入命令回车执行（例如 git status / npm test）
             </div>
           )}
           {termLogs.map((entry, i) => (
@@ -1020,7 +1020,7 @@ export function PaseoToolPane({
           <span className="text-success">❯</span>
           <input
             type="text"
-            data-testid="paseo-terminal-input"
+            data-testid="workspace-terminal-input"
             value={termInput}
             disabled={termBusy}
             onChange={(e) => setTermInput(e.target.value)}
@@ -1043,7 +1043,7 @@ export function PaseoToolPane({
     );
   }
 
-  // ==================== 3. PASEO FILE EXPLORER ====================
+  // ==================== 3. FILE EXPLORER ====================
   if (tool === "files") {
     const entries = filesTree.data?.entries ?? [];
     const parentDir = currentDir.includes("/")
@@ -1052,7 +1052,7 @@ export function PaseoToolPane({
 
     return (
       <div
-        data-testid="paseo-files-pane"
+        data-testid="workspace-files-pane"
         className="flex min-h-0 flex-1 overflow-hidden bg-surface"
       >
         <div
@@ -1134,7 +1134,7 @@ export function PaseoToolPane({
     );
   }
 
-  // ==================== 4. PASEO LIVE WEB PREVIEW ====================
+  // ==================== 4. LIVE WEB PREVIEW ====================
   const detected = previewDetect.data?.detected ?? [];
 
   const applyPreviewUrl = async (nextUrl: string) => {
@@ -1152,14 +1152,14 @@ export function PaseoToolPane({
 
   return (
     <div
-      data-testid="paseo-preview-pane"
+      data-testid="workspace-preview-pane"
       className="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface"
     >
       <div className="flex items-center gap-1.5 border-b border-line bg-paper px-3 py-1.5">
         <Globe className="h-3.5 w-3.5 shrink-0 text-success" />
         <input
           type="text"
-          data-testid="paseo-preview-url-input"
+          data-testid="workspace-preview-url-input"
           value={previewInput}
           onChange={(e) => setPreviewInput(e.target.value)}
           onKeyDown={(e) => {
@@ -1225,7 +1225,7 @@ export function PaseoToolPane({
           <iframe
             key={`${previewUrl}-${previewNonce}`}
             src={previewUrl}
-            title="Paseo Live Preview"
+            title="Live Preview"
             className="h-full w-full flex-1 border-0 bg-surface"
           />
         ) : (

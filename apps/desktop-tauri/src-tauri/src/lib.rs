@@ -295,7 +295,7 @@ pub fn run() {
             }
             let _ = tray_builder.build(app)?;
 
-            // Build main Paseo dark WebView window pointing at the local Conflux server
+            // Build main dark WebView window pointing at the local Conflux server
             let url = build_app_url(port)
                 .parse()
                 .expect("valid local Conflux server URL");

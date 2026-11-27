@@ -60,7 +60,7 @@ export function ActivityRail({
       <button
         type="button"
         data-testid="rail-workspace-btn"
-        title="工作区 (Paseo IDE)"
+        title="工作区"
         aria-label="工作区"
         onClick={() => onSelectScreen("workspace")}
         className={btnCls(screen === "workspace")}

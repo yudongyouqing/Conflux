@@ -190,11 +190,11 @@ export function WorkspaceSidebar({
   return (
     <aside
       data-testid="workspace-sidebar"
-      className={`paseo-sidebar select-none border-r border-line bg-paper ${
+      className={`cfx-sidebar select-none border-r border-line bg-paper ${
         collapsed ? "is-collapsed" : ""
       }`}
     >
-      <div className="paseo-sidebar-inner flex flex-col">
+      <div className="cfx-sidebar-inner flex flex-col">
         {/* Top Header */}
         <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-line px-3">
           <span className="text-xs font-semibold text-ink-muted">工作区</span>
@@ -259,9 +259,9 @@ export function WorkspaceSidebar({
                 key={hostKey}
                 data-testid={`sidebar-host-${hostGroup.host}`}
                 data-open={hostOpen ? "true" : "false"}
-                className="paseo-acc-group"
+                className="cfx-acc-group"
               >
-                <div className="paseo-acc-head">
+                <div className="cfx-acc-head">
                   <button
                     type="button"
                     onClick={() => toggleGroup(hostKey)}
@@ -272,7 +272,7 @@ export function WorkspaceSidebar({
                         hostGroup.isRemote ? "text-info" : "text-ink"
                       }`}
                     >
-                      <ChevronDown className="paseo-acc-chevron h-3 w-3 shrink-0 text-ink-faint" />
+                      <ChevronDown className="cfx-acc-chevron h-3 w-3 shrink-0 text-ink-faint" />
                       <span
                         className={`h-1.5 w-1.5 shrink-0 rounded-full ${
                           hostGroup.isRemote ? "bg-info" : "bg-success"
@@ -288,8 +288,8 @@ export function WorkspaceSidebar({
                   </button>
                 </div>
 
-                <div className="paseo-acc-body">
-                  <div className="paseo-acc-inner">
+                <div className="cfx-acc-body">
+                  <div className="cfx-acc-inner">
                     <div className="space-y-1 pt-0.5">
                       {Array.from(hostGroup.dirs.values()).map((dirGroup) => {
                         const dirKey = `dir:${hostGroup.host}:${dirGroup.dirPath}`;
@@ -298,10 +298,10 @@ export function WorkspaceSidebar({
                           <div
                             key={dirKey}
                             data-open={dirOpen ? "true" : "false"}
-                            className="paseo-acc-group ml-2 border-l border-line pl-2"
+                            className="cfx-acc-group ml-2 border-l border-line pl-2"
                           >
                             <div
-                              className="paseo-acc-head flex items-center gap-0.5"
+                              className="cfx-acc-head flex items-center gap-0.5"
                               title={dirGroup.dirPath}
                             >
                               <button
@@ -310,7 +310,7 @@ export function WorkspaceSidebar({
                                 className="flex min-w-0 flex-1 items-center justify-between gap-1 rounded-[5px] px-1.5 py-1 text-left text-2xs text-ink-muted hover:bg-tile-hover hover:text-ink transition-colors"
                               >
                                 <span className="inline-flex min-w-0 items-center gap-1.5">
-                                  <ChevronDown className="paseo-acc-chevron h-3 w-3 shrink-0 text-ink-faint" />
+                                  <ChevronDown className="cfx-acc-chevron h-3 w-3 shrink-0 text-ink-faint" />
                                   <span className="truncate font-mono">{dirGroup.dirName}</span>
                                 </span>
                                 <span className="font-mono text-2xs text-ink-faint tabular-nums">
@@ -329,8 +329,8 @@ export function WorkspaceSidebar({
                               )}
                             </div>
 
-                            <div className="paseo-acc-body">
-                              <div className="paseo-acc-inner">
+                            <div className="cfx-acc-body">
+                              <div className="cfx-acc-inner">
                                 <div className="space-y-0.5 pt-0.5">
                                   {dirGroup.threads.length === 0 && (
                                     <div className="px-2 py-1 text-2xs text-ink-faint">

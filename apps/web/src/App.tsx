@@ -26,7 +26,7 @@ import { BUILTIN_THEMES, setActiveCustomTheme } from "./theme";
 import { ActivityRail, type MainScreen } from "./components/ActivityRail";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { AgentWorkbench } from "./components/AgentWorkbench";
-import { PaseoToolPane, type PaseoToolTab } from "./components/PaseoToolPane";
+import { WorkspaceToolPane, type WorkspaceToolTab } from "./components/WorkspaceToolPane";
 import {
   incomingModeClass,
   incomingModeLabel,
@@ -40,13 +40,13 @@ import {
 import { CommandPalette } from "./components/CommandPalette";
 import { SettingsView } from "./components/SettingsView";
 
-const PASEO_DARK_THEME = BUILTIN_THEMES[0].name;
-const PASEO_LIGHT_THEME = BUILTIN_THEMES[1].name;
+const DEFAULT_DARK_THEME = BUILTIN_THEMES[0].name;
+const DEFAULT_LIGHT_THEME = BUILTIN_THEMES[1].name;
 const SPLIT_RATIO_STORAGE_KEY = "conflux.split-ratio";
 const MIN_SPLIT_PCT = 28;
 const MAX_SPLIT_PCT = 72;
 
-type SingleToolTab = Exclude<PaseoToolTab, "peer">;
+type SingleToolTab = Exclude<WorkspaceToolTab, "peer">;
 type LeftTab = "chat" | SingleToolTab;
 
 function clampSplitPct(value: number): number {
@@ -102,7 +102,7 @@ export default function App() {
   const [companionThreadId, setCompanionThreadId] = useState<string | null>(null);
   const [isSplit, setIsSplit] = useState(true);
   const [leftTab, setLeftTab] = useState<LeftTab>("chat");
-  const [rightTool, setRightTool] = useState<PaseoToolTab>("git");
+  const [rightTool, setRightTool] = useState<WorkspaceToolTab>("git");
   const [splitPct, setSplitPct] = useState<number>(() => loadInitialSplitPct());
   const [isResizingSplit, setIsResizingSplit] = useState(false);
   const splitContainerRef = useRef<HTMLDivElement | null>(null);
@@ -236,7 +236,7 @@ export default function App() {
 
   const handleToggleTheme = () => {
     const nextDark = !isDark;
-    setActiveCustomTheme(nextDark ? PASEO_DARK_THEME : PASEO_LIGHT_THEME);
+    setActiveCustomTheme(nextDark ? DEFAULT_DARK_THEME : DEFAULT_LIGHT_THEME);
     setIsDark(nextDark);
   };
 
@@ -291,7 +291,7 @@ export default function App() {
     setRightTool("peer");
   };
 
-  const handleSelectToolFromPalette = (tool: PaseoToolTab) => {
+  const handleSelectToolFromPalette = (tool: WorkspaceToolTab) => {
     setScreen("workspace");
     if (tool === "peer") {
       setIsSplit(true);
@@ -322,7 +322,7 @@ export default function App() {
   ];
 
   const splitToolTabDefs: Array<{
-    id: PaseoToolTab;
+    id: WorkspaceToolTab;
     label: string;
     icon: typeof GitBranch;
   }> = [
@@ -344,7 +344,7 @@ export default function App() {
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-rail text-ink">
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* 1. Far-Left 46px Paseo Activity Rail */}
+        {/* 1. Far-Left 48px Activity Rail */}
         <ActivityRail
           screen={screen}
           activeCallCount={activeCalls.length}
@@ -371,7 +371,7 @@ export default function App() {
 
         {/* 3. Main Area */}
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-surface">
-          {/* SCREEN A: FULL PASEO WORKSPACE (ZERO DUPLICATE TABS) */}
+          {/* SCREEN A: WORKSPACE (ZERO DUPLICATE TABS) */}
           {screen === "workspace" && (
             <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
               {/* Top 40px IDE Tab Bar */}
@@ -469,7 +469,7 @@ export default function App() {
                 <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
                   <div className="text-sm font-semibold text-ink">还没有打开的工作区</div>
                   <p className="max-w-md text-xs text-ink-faint">
-                    点击左侧「+ 新建」选择一个本地目录（支持直连、Worktree 新分支或检出 PR），即可进入全量 Paseo 对话 + Git/PR + 终端 + 文件 + 预览工作区。
+                    点击左侧「+ 新建」选择一个本地目录（支持直连、Worktree 新分支或检出 PR），进入对话、Git/PR、终端、文件与预览工作区。
                   </p>
                   <button
                     type="button"
@@ -506,7 +506,7 @@ export default function App() {
                     />
 
                     {!isSplit && leftTab !== "chat" && (
-                      <PaseoToolPane
+                      <WorkspaceToolPane
                         thread={activeThread}
                         tool={leftTab}
                         layout="full"
@@ -541,10 +541,10 @@ export default function App() {
 
                   {/* RIGHT RESIZABLE SPLIT PANE (Owns Git & PR | Terminal | Files | Preview | Companion Peer) */}
                   <div
-                    data-testid="paseo-split-right"
+                    data-testid="workspace-split-right"
                     data-open={isSplit ? "true" : "false"}
                     style={{ ["--split-w" as string]: `${splitPct}%` }}
-                    className={`paseo-split-right flex shrink-0 flex-col bg-paper ${
+                    className={`cfx-split-right flex shrink-0 flex-col bg-paper ${
                       isResizingSplit ? "is-resizing" : ""
                     }`}
                   >
@@ -582,7 +582,7 @@ export default function App() {
                     </div>
 
                     {isSplit && rightTool !== "peer" && (
-                      <PaseoToolPane
+                      <WorkspaceToolPane
                         thread={activeThread}
                         tool={rightTool}
                         layout="split"
@@ -695,9 +695,9 @@ export default function App() {
         </main>
       </div>
 
-      {/* 4. Bottom 24px Native Paseo Status Bar */}
+      {/* 4. Bottom 24px Status Bar */}
       <footer
-        data-testid="paseo-statusbar"
+        data-testid="workspace-statusbar"
         className="flex h-6 shrink-0 select-none items-center justify-between gap-4 border-t border-line bg-rail px-2.5 font-mono text-2xs text-ink-faint"
       >
         <div className="flex items-center gap-3 overflow-hidden">

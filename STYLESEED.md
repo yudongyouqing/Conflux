@@ -24,5 +24,5 @@
 - Density: compact
 - Motion: Spring restrained
 - Imagery/data role: live agent workspace, git diff, and cross-host MCP topology first
-- Signature move: zero-duplicate-tab Paseo split workbench with inline diff annotations and live cross-host MCP call graph
+- Signature move: zero-duplicate-tab split workbench with inline diff annotations and live cross-host MCP call graph
 - Locked: 2026-11-27

@@ -225,7 +225,7 @@ export const api = {
       `/threads/${threadId}/files?q=${encodeURIComponent(q)}&limit=25`,
     ),
 
-  // Full Paseo Git & PR
+  // Workspace Git & PR
   getGitStatus: (threadId: string) => request<GitStatusResponse>(`/threads/${threadId}/git/status`),
   getGitDiff: (threadId: string, path?: string | null) =>
     request<GitDiffResponse>(
@@ -266,7 +266,7 @@ export const api = {
   cleanupWorktree: (threadId: string) =>
     request<{ thread: AgentThread }>(`/threads/${threadId}/worktree/cleanup`, { method: "POST" }),
 
-  // Full Paseo Workspace Tools: Embedded Terminal, File Explorer, Live Preview
+  // Workspace Tools: Embedded Terminal, File Explorer, Live Preview
   execTerminalCommand: (threadId: string, command: string) =>
     request<WorkspaceTerminalRunResult>(`/threads/${threadId}/terminal/exec`, {
       method: "POST",

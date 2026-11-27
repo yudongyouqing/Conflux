@@ -52,7 +52,7 @@ body,
 }
 
 /* Design tokens as channel triplets (rgb(var(--tk-x) / α) pattern).
- * Light Paseo Zinc baseline (:root) + Dark Paseo Zinc-Obsidian (data-theme="dark"). */
+ * Light Zinc baseline (:root) + Dark Zinc-Obsidian (data-theme="dark"). */
 :root {
   --ease-expo: cubic-bezier(0.16, 1, 0.3, 1);
   --tk-ink: 9 9 11;
@@ -141,7 +141,7 @@ button:active:not(:disabled) {
 
 /* ---- Smooth Collapsible Motion Primitives (Emil Kowalski expo-out + CSS Grid) ---- */
 
-.paseo-sidebar {
+.cfx-sidebar {
   width: 272px;
   flex-shrink: 0;
   overflow: hidden;
@@ -151,28 +151,28 @@ button:active:not(:disabled) {
     border-color 220ms ease;
   will-change: width;
 }
-.paseo-sidebar.is-collapsed {
+.cfx-sidebar.is-collapsed {
   width: 0;
   opacity: 0;
   border-right-color: transparent;
   pointer-events: none;
 }
-.paseo-sidebar-inner {
+.cfx-sidebar-inner {
   width: 272px;
   height: 100%;
   transition: transform 280ms var(--ease-expo);
 }
-.paseo-sidebar.is-collapsed .paseo-sidebar-inner {
+.cfx-sidebar.is-collapsed .cfx-sidebar-inner {
   transform: translateX(-18px);
 }
 
-.paseo-acc-chevron {
+.cfx-acc-chevron {
   transition: transform 240ms var(--ease-expo);
 }
-.paseo-acc-group[data-open="false"] > .paseo-acc-head .paseo-acc-chevron {
+.cfx-acc-group[data-open="false"] > .cfx-acc-head .cfx-acc-chevron {
   transform: rotate(-90deg);
 }
-.paseo-acc-body {
+.cfx-acc-body {
   display: grid;
   grid-template-rows: 1fr;
   opacity: 1;
@@ -180,22 +180,22 @@ button:active:not(:disabled) {
     grid-template-rows 260ms var(--ease-expo),
     opacity 200ms ease;
 }
-.paseo-acc-group[data-open="false"] > .paseo-acc-body {
+.cfx-acc-group[data-open="false"] > .cfx-acc-body {
   grid-template-rows: 0fr;
   opacity: 0;
   pointer-events: none;
 }
-.paseo-acc-inner {
+.cfx-acc-inner {
   overflow: hidden;
   min-height: 0;
   transform: translateY(0);
   transition: transform 260ms var(--ease-expo);
 }
-.paseo-acc-group[data-open="false"] > .paseo-acc-body > .paseo-acc-inner {
+.cfx-acc-group[data-open="false"] > .cfx-acc-body > .cfx-acc-inner {
   transform: translateY(-5px);
 }
 
-.paseo-split-right {
+.cfx-split-right {
   width: 0;
   opacity: 0;
   overflow: hidden;
@@ -206,16 +206,16 @@ button:active:not(:disabled) {
     border-color 220ms ease;
   will-change: width;
 }
-.paseo-split-right[data-open="true"] {
+.cfx-split-right[data-open="true"] {
   width: var(--split-w, 49%);
   opacity: 1;
   border-left-color: rgb(var(--tk-line));
 }
-.paseo-split-right.is-resizing {
+.cfx-split-right.is-resizing {
   transition: none !important;
 }
 
-.paseo-audit-drawer {
+.cfx-audit-drawer {
   width: 368px;
   flex-shrink: 0;
   overflow: hidden;
@@ -224,36 +224,36 @@ button:active:not(:disabled) {
     opacity 220ms ease,
     border-color 220ms ease;
 }
-.paseo-audit-drawer[data-open="false"] {
+.cfx-audit-drawer[data-open="false"] {
   width: 0;
   opacity: 0;
   border-left-color: transparent;
   pointer-events: none;
 }
-.paseo-audit-drawer-inner {
+.cfx-audit-drawer-inner {
   width: 368px;
   height: 100%;
   transition: transform 280ms var(--ease-expo);
 }
-.paseo-audit-drawer[data-open="false"] .paseo-audit-drawer-inner {
+.cfx-audit-drawer[data-open="false"] .cfx-audit-drawer-inner {
   transform: translateX(20px);
 }
 
 /* Dot-grid canvas & animated flowing call edges for Live MCP Topology Graph */
-.paseo-dot-grid {
+.cfx-dot-grid {
   background-color: rgb(var(--tk-rail));
   background-image: radial-gradient(rgb(var(--tk-ink) / 0.1) 1.2px, transparent 1.2px);
   background-size: 20px 20px;
 }
 
-@keyframes paseo-dashflow {
+@keyframes cfx-dashflow {
   to {
     stroke-dashoffset: -12;
   }
 }
-.paseo-edge-flow {
+.cfx-edge-flow {
   stroke-dasharray: 6 6;
-  animation: paseo-dashflow 0.75s linear infinite;
+  animation: cfx-dashflow 0.75s linear infinite;
 }
 
 /* React Flow surface alignment */
@@ -302,16 +302,16 @@ button:active:not(:disabled) {
 
 /* Responsive mobile sidebar slide-over */
 @media (max-width: 767px) {
-  .paseo-sidebar {
+  .cfx-sidebar {
     position: fixed;
-    inset: 0 auto 0 46px;
+    inset: 0 auto 0 48px;
     z-index: 45;
     width: min(78vw, 276px);
     box-shadow: 12px 0 30px rgb(0 0 0 / 0.35);
   }
-  .paseo-split-right[data-open="true"] {
+  .cfx-split-right[data-open="true"] {
     position: fixed;
-    inset: 40px 0 24px 46px;
+    inset: 40px 0 24px 48px;
     width: auto;
     z-index: 35;
   }

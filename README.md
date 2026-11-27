@@ -310,6 +310,15 @@ npm run test:desktop     # 桌面端测试
 
 欢迎 Issue、改进建议和 PR。提交前请阅读[贡献指南](CONTRIBUTING.md)，并保持：改动聚焦、说明用户可见行为变化、`npm run build`、`npm test -w apps/server` 通过、桌面相关改动跑 `npm run test:desktop`、`npm run check:secrets` 与 `git diff --check` 干净。
 
+## 🙏 致谢与灵感来源
+
+Conflux 的多智能体并行工作区、行内 Diff 批注审阅、设计规范治理与原目录唤醒理念，受到以下优秀开源项目与社区实践的启发（独立设计实现，与各项目无隶属关系，未复用其源码）：
+
+- [Orca](https://github.com/stablyai/orca) — 并行 Worktree 工作区、Diff 行内批注与克制式对话交互理念
+- [Ghostty](https://github.com/ghostty-org/ghostty) — 原生性能与克制桌面体验的设计哲学
+- [StyleSeed](https://github.com/bitjaru/styleseed) — 规则锁与真实渲染验收的设计治理方式
+- [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) — 跨进程与跨主机智能体工具互通标准
+
 ## 📚 文档
 
 | 文档                                | 内容                         |

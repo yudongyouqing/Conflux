@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "engineVersion": "5.0.0",
   "engineRevision": "sha256:c85a9e82797fb8fdcb651b68befbdae18e5cb4259fe88b6d1f07d9c399d2c70f",
-  "generatedAt": "2026-11-27T08:22:07.328Z",
+  "generatedAt": "2026-11-27T09:27:51.884Z",
   "selection": {
     "agent": "claude",
     "grammar": "technical-instrument",
