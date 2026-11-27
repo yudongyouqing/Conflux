@@ -375,7 +375,7 @@ export default function App() {
           {screen === "workspace" && (
             <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
               {/* Top 40px IDE Tab Bar */}
-              <header className="flex h-10 shrink-0 items-stretch justify-between gap-2 border-b border-line bg-paper pr-2.5">
+              <header className="flex h-10 shrink-0 items-stretch justify-between gap-2 border-b border-line bg-paper pr-3">
                 <div
                   data-testid="workspace-top-tabstrip"
                   className="flex min-w-0 items-stretch overflow-x-auto"
@@ -451,7 +451,7 @@ export default function App() {
                       type="button"
                       data-testid="split-toggle-btn"
                       onClick={() => handleToggleSplit()}
-                      className={`inline-flex h-[26px] items-center gap-1.5 rounded-md border px-2.5 text-2xs transition-colors ${
+                      className={`inline-flex h-7 items-center gap-1.5 rounded-md border px-3 text-2xs transition-colors ${
                         isSplit
                           ? "border-line-strong bg-tile-active font-semibold text-ink"
                           : "border-line-strong bg-elev text-ink-muted hover:text-ink"
@@ -548,8 +548,8 @@ export default function App() {
                       isResizingSplit ? "is-resizing" : ""
                     }`}
                   >
-                    <div className="flex h-[34px] shrink-0 items-center justify-between border-b border-line bg-rail px-2">
-                      <div className="flex items-center gap-0.5 overflow-x-auto">
+                    <div className="flex h-9 shrink-0 items-center justify-between border-b border-line bg-rail px-2">
+                      <div className="flex items-center gap-1 overflow-x-auto">
                         {splitToolTabDefs.map((tab) => {
                           const Icon = tab.icon;
                           const active = rightTool === tab.id;
@@ -559,7 +559,7 @@ export default function App() {
                               type="button"
                               data-testid={`split-tab-${tab.id}`}
                               onClick={() => setRightTool(tab.id)}
-                              className={`inline-flex h-6 items-center gap-1.5 whitespace-nowrap rounded-[5px] px-2 text-2xs transition-colors ${
+                              className={`inline-flex h-6 items-center gap-1.5 whitespace-nowrap rounded-md px-2 text-2xs transition-colors ${
                                 active
                                   ? "bg-elev font-semibold text-ink"
                                   : "text-ink-faint hover:bg-tile-hover hover:text-ink"

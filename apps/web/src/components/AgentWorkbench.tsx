@@ -349,7 +349,7 @@ function PeerCallCard({
   return (
     <div
       data-testid={`peer-call-card-${call.id}`}
-      className="overflow-hidden rounded-lg border border-line bg-elev"
+      className="group overflow-hidden rounded-lg border border-line bg-elev"
     >
       <div className="flex items-center justify-between gap-2 px-3 py-2">
         <button
@@ -377,7 +377,7 @@ function PeerCallCard({
               data-testid={`peer-call-jump-${call.id}`}
               title={`跳转到 ${partnerName}`}
               onClick={() => onSelectThread(partnerId)}
-              className="inline-flex h-5 items-center gap-0.5 rounded px-1.5 text-2xs text-ink-muted hover:bg-tile-hover hover:text-ink"
+              className="inline-flex h-6 items-center gap-0.5 rounded px-1.5 text-2xs text-ink-muted opacity-70 transition-opacity hover:bg-tile-hover hover:text-ink group-hover:opacity-100 focus:opacity-100"
             >
               <ArrowUpRight className="h-3 w-3" />
             </button>
@@ -386,7 +386,7 @@ function PeerCallCard({
             <button
               type="button"
               onClick={onOpenGraph}
-              className="rounded border border-line bg-surface px-1.5 py-0.5 text-2xs text-ink-muted hover:text-ink"
+              className="rounded px-1.5 py-0.5 text-2xs text-ink-muted opacity-70 transition-opacity hover:bg-tile-hover hover:text-ink group-hover:opacity-100 focus:opacity-100"
             >
               图谱
             </button>
@@ -395,10 +395,10 @@ function PeerCallCard({
       </div>
 
       {expanded && (
-        <div className="space-y-2 border-t border-line bg-surface px-3 py-2.5 text-xs leading-relaxed">
+        <div className="space-y-2 border-t border-line bg-surface px-3 py-3 text-xs leading-relaxed">
           <div className="whitespace-pre-wrap text-ink">{call.question}</div>
           {call.context && (
-            <pre className="max-h-32 overflow-auto rounded-md border border-line bg-rail p-2 font-mono text-2xs text-ink-muted">
+            <pre className="max-h-32 overflow-auto rounded-md bg-rail p-2 font-mono text-2xs text-ink-muted">
               {call.context}
             </pre>
           )}

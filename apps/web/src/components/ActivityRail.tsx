@@ -9,6 +9,7 @@ import {
   Search,
   Settings,
 } from "lucide-react";
+import { ConfluxLogo } from "./brand-icons";
 
 export type MainScreen = "workspace" | "graph" | "settings";
 
@@ -46,13 +47,14 @@ export function ActivityRail({
     <nav
       data-testid="activity-rail"
       aria-label="主功能导航"
-      className="flex w-[46px] shrink-0 select-none flex-col items-center gap-1.5 border-r border-line bg-rail py-2.5"
+      className="flex w-12 shrink-0 select-none flex-col items-center gap-2 border-r border-line bg-rail py-3"
     >
       <div
         title="Conflux"
-        className="mb-1.5 flex h-7 w-7 items-center justify-center rounded-[7px] bg-accent text-[13px] font-bold text-on-accent"
+        data-testid="rail-brand-logo"
+        className="mb-1 flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-on-accent"
       >
-        C
+        <ConfluxLogo size={18} />
       </div>
 
       <button
@@ -78,7 +80,7 @@ export function ActivityRail({
         {activeCallCount > 0 && (
           <span
             data-testid="rail-active-calls-badge"
-            className="absolute right-0.5 top-0.5 flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-success px-1 font-mono text-2xs font-bold leading-none text-on-accent"
+            className="absolute right-0 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-success px-1 font-mono text-2xs font-bold leading-none text-on-accent"
           >
             {activeCallCount}
           </span>

@@ -1,6 +1,24 @@
 /**
- * Runtime brand glyphs (monochrome — parent supplies identity color).
+ * Brand and runtime glyphs (monochrome — parent supplies identity color).
  */
+
+export function ConfluxLogo({ size = 18, className }: { size?: number; className?: string }) {
+  return (
+    <svg
+      role="img"
+      viewBox="0 0 256 256"
+      width={size}
+      height={size}
+      className={className}
+      fill="currentColor"
+      aria-label="Conflux"
+    >
+      <title>Conflux</title>
+      <path d="M 195.88 60.12 A 96 96 0 1 0 195.88 195.88 L 164.77 164.77 A 52 52 0 1 1 164.77 91.23 Z" />
+      <circle cx="198" cy="128" r="24" />
+    </svg>
+  );
+}
 
 export function ClaudeIcon({ size = 14, className }: { size?: number; className?: string }) {
   return (

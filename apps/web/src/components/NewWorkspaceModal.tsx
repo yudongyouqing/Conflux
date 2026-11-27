@@ -150,12 +150,7 @@ export function NewWorkspaceModal({
     >
       <div className="flex max-h-[88vh] w-full max-w-[540px] flex-col overflow-hidden rounded-xl border border-line-strong bg-surface shadow-overlay">
         <div className="flex items-center justify-between border-b border-line px-4 py-3">
-          <div>
-            <h2 className="text-[13.5px] font-semibold text-ink">新建工作区</h2>
-            <p className="mt-0.5 text-2xs text-ink-faint">
-              支持直连目录、Worktree 新分支，或直接检出已有 PR 开独立工作区
-            </p>
-          </div>
+          <h2 className="text-sm font-semibold text-ink">新建工作区</h2>
           <button
             type="button"
             onClick={onClose}
@@ -165,7 +160,7 @@ export function NewWorkspaceModal({
           </button>
         </div>
 
-        <form ref={formRef} onSubmit={(e) => void handleSubmit(e)} className="space-y-3.5 overflow-y-auto p-4">
+        <form ref={formRef} onSubmit={(e) => void handleSubmit(e)} className="space-y-4 overflow-y-auto p-4">
           {/* Engine Picker */}
           <div>
             <label className="mb-1.5 block text-2xs font-medium text-ink-muted">引擎</label>

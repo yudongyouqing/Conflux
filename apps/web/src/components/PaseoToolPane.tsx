@@ -64,7 +64,9 @@ function parseUnifiedDiffRows(rawDiff: string, fallbackFile: string): ParsedDiff
   let newNum = 0;
   let inHunk = false;
 
-  const lines = rawDiff.split(/\r?\n/);
+  const trimmed = rawDiff.replace(/\r?\n$/, "");
+  if (!trimmed) return rows;
+  const lines = trimmed.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (line.startsWith("diff --git ")) {
@@ -428,7 +430,7 @@ export function PaseoToolPane({
                   if (e.key === "Enter") void handleCommit();
                 }}
                 placeholder="Commit message (如 feat: fix auth)…"
-                className="h-7 min-w-0 flex-1 rounded-[5px] border border-line bg-surface px-2 text-2xs text-ink focus:border-ink-muted focus:outline-none"
+                className="h-7 min-w-0 flex-1 rounded-md border border-line bg-surface px-2 text-2xs text-ink focus:border-ink-muted focus:outline-none"
               />
               <div className="flex shrink-0 gap-1.5">
                 <button
@@ -529,14 +531,14 @@ export function PaseoToolPane({
 
         {/* PR Detail Card + Orca-style Annotatable Diff Viewer */}
         <div
-          className={`flex min-w-0 flex-1 flex-col gap-3 bg-surface ${
-            isSplit ? "px-3.5 py-3" : "p-3.5 lg:overflow-y-auto lg:p-4"
+          className={`flex min-w-0 flex-1 flex-col gap-4 bg-surface ${
+            isSplit ? "px-4 py-3" : "p-4 lg:overflow-y-auto"
           }`}
         >
           {/* Full Paseo PR Card */}
           <div
             data-testid="paseo-pr-card"
-            className="flex flex-col gap-2.5 rounded-xl border border-line-strong bg-elev p-3.5"
+            className="flex flex-col gap-3 rounded-xl border border-line bg-elev p-4"
           >
             {pr ? (
               <>
@@ -560,7 +562,7 @@ export function PaseoToolPane({
                         <ExternalLink className="h-3 w-3" />
                       </a>
                     </div>
-                    <div className="mt-1.5 text-[13px] font-semibold text-ink">{pr.title}</div>
+                    <div className="mt-1.5 text-sm font-semibold text-ink">{pr.title}</div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
                     <button
@@ -592,7 +594,7 @@ export function PaseoToolPane({
                     {pr.checks.map((c, idx) => (
                       <div
                         key={`${c.name}-${idx}`}
-                        className="flex items-center justify-between gap-2 rounded-md border border-line bg-surface px-2.5 py-1.5 text-2xs"
+                        className="flex items-center justify-between gap-2 rounded-md bg-surface px-3 py-1.5 text-2xs"
                       >
                         <span className="flex min-w-0 items-center gap-1.5">
                           <span
@@ -753,10 +755,9 @@ export function PaseoToolPane({
             data-testid="git-diff-viewer"
             className="overflow-hidden rounded-lg border border-line bg-rail font-mono text-2xs leading-relaxed"
           >
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-elev px-3 py-1.5 text-ink">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-elev px-3 py-2 text-ink">
               <div className="flex items-center gap-2">
-                <span>{selectedGitFile || "全部未提交改动 Diff"}</span>
-                <span className="font-sans text-2xs text-ink-faint">点击代码行可写行内批注</span>
+                <span>{selectedGitFile || "未提交改动"}</span>
               </div>
               <div className="flex items-center gap-2">
                 {queuedNotes.length > 0 && (
