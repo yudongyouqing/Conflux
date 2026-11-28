@@ -53,6 +53,7 @@ interface ThreadRow {
   owner_token: string | null;
   active_turn_id: string | null;
   pid: number | null;
+  mica_pane_id: number | null;
   parent_thread_id: string | null;
   last_synced_context_id: number;
   last_seen_at: string;
@@ -164,6 +165,7 @@ function toThread(db: DB, row: ThreadRow): AgentThread {
     provider_thread_id: row.provider_thread_id,
     active_turn_id: row.active_turn_id,
     pid: row.pid,
+    mica_pane_id: row.mica_pane_id ?? null,
     parent_thread_id: row.parent_thread_id,
     last_synced_context_id: row.last_synced_context_id ?? 0,
     last_seen_at: row.last_seen_at,
@@ -306,6 +308,7 @@ export function insertThread(
     provider_thread_id?: string | null;
     owner_token?: string | null;
     pid?: number | null;
+    mica_pane_id?: number | null;
     parent_thread_id?: string | null;
     last_synced_context_id?: number;
   },
@@ -324,9 +327,9 @@ export function insertThread(
        id, project_id, name, kind, runtime, state, approval_mode, incoming_call_mode, host, workdir,
        worktree_path, worktree_branch, base_branch, pr_url, preview_url, external_session_id,
        model, instructions, extra_env,
-       provider_thread_id, owner_token, active_turn_id, pid, parent_thread_id,
+       provider_thread_id, owner_token, active_turn_id, pid, mica_pane_id, parent_thread_id,
        last_synced_context_id, last_seen_at, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     input.project_id,
@@ -350,6 +353,7 @@ export function insertThread(
     input.provider_thread_id ?? null,
     input.owner_token ?? null,
     input.pid ?? null,
+    input.mica_pane_id ?? null,
     input.parent_thread_id ?? null,
     input.last_synced_context_id ?? 0,
     now,
@@ -382,6 +386,7 @@ export function updateThread(
     owner_token: string | null;
     active_turn_id: string | null;
     pid: number | null;
+    mica_pane_id: number | null;
     last_synced_context_id: number;
     last_seen_at: string;
   }>,
@@ -407,6 +412,30 @@ export function heartbeatThread(db: DB, id: string): void {
     now,
     id,
   );
+}
+
+export function listThreadsByMicaPane(db: DB, paneId: number): AgentThread[] {
+  const rows = db
+    .prepare(
+      `SELECT t.*, p.name AS project_name
+       FROM agent_threads t
+       LEFT JOIN projects p ON p.id = t.project_id
+       WHERE t.mica_pane_id = ?`,
+    )
+    .all(paneId) as ThreadRow[];
+  return rows.map((r) => toThread(db, r));
+}
+
+export function listMicaBoundThreads(db: DB): AgentThread[] {
+  const rows = db
+    .prepare(
+      `SELECT t.*, p.name AS project_name
+       FROM agent_threads t
+       LEFT JOIN projects p ON p.id = t.project_id
+       WHERE t.mica_pane_id IS NOT NULL`,
+    )
+    .all() as ThreadRow[];
+  return rows.map((r) => toThread(db, r));
 }
 
 export function deleteThreadRow(db: DB, id: string): boolean {

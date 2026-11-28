@@ -27,7 +27,7 @@ export interface PublicErrorContext {
   port?: number;
 }
 
-export const SCHEMA_VERSION = 22;
+export const SCHEMA_VERSION = 23;
 export const BUSY_TIMEOUT_MS = 5000;
 export const WAL_CHECKPOINT_INTERVAL_MS = 5 * 60 * 1000;
 export const WAL_CHECKPOINT_THRESHOLD_BYTES = 10 * 1024 * 1024;
@@ -163,6 +163,7 @@ CREATE TABLE IF NOT EXISTS agent_threads (
   owner_token            TEXT,
   active_turn_id         TEXT,
   pid                    INTEGER,
+  mica_pane_id           INTEGER,
   parent_thread_id       TEXT REFERENCES agent_threads(id) ON DELETE SET NULL,
   last_synced_context_id INTEGER NOT NULL DEFAULT 0,
   last_seen_at           TEXT NOT NULL,
@@ -409,6 +410,9 @@ export function openDb(config: Config): DB {
     }
     if (!threadCols.has("external_session_id")) {
       db.exec(`ALTER TABLE agent_threads ADD COLUMN external_session_id TEXT`);
+    }
+    if (!threadCols.has("mica_pane_id")) {
+      db.exec(`ALTER TABLE agent_threads ADD COLUMN mica_pane_id INTEGER`);
     }
     const msgCols = new Set(
       (db.pragma("table_info(messages)") as Array<{ name: string }>).map((c) => c.name),

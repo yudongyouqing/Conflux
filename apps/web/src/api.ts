@@ -19,6 +19,10 @@ import {
   type IncomingCallMode,
   type ManagedDeliveryMode,
   type Message,
+  type MicaBadgeState,
+  type MicaPaneInfo,
+  type MicaReadResult,
+  type MicaStatusResponse,
   type PrDetailResponse,
   type PrMergeResult,
   type Project,
@@ -289,6 +293,48 @@ export const api = {
     request<{ detected: Array<{ port: number; url: string }>; saved_url: string | null }>(
       `/threads/${threadId}/preview/detect`,
     ),
+
+  // Mica external terminal bridge
+  getMicaStatus: () => request<MicaStatusResponse>("/mica/status"),
+  listMicaPanes: () => request<{ running: boolean; panes: MicaPaneInfo[] }>("/mica/panes"),
+  openInMica: (
+    threadId: string,
+    body: { mode?: "tab" | "window"; command?: string; force_new?: boolean } = {},
+  ) =>
+    request<{ pane: MicaPaneInfo; thread: AgentThread; reused: boolean }>(
+      `/threads/${threadId}/mica/open`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  attachMicaPane: (threadId: string, pane_id: number) =>
+    request<{ pane: MicaPaneInfo; thread: AgentThread }>(`/threads/${threadId}/mica/attach`, {
+      method: "POST",
+      body: JSON.stringify({ pane_id }),
+    }),
+  unbindMica: (threadId: string) =>
+    request<{ thread: AgentThread }>(`/threads/${threadId}/mica`, { method: "DELETE" }),
+  focusMica: (threadId: string) =>
+    request<{ ok: boolean }>(`/threads/${threadId}/mica/focus`, { method: "POST" }),
+  sendMicaText: (threadId: string, body: { text: string; submit?: boolean; literal?: boolean }) =>
+    request<{ ok: boolean }>(`/threads/${threadId}/mica/send`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  readMicaSnapshot: (threadId: string, opts: { scrollback?: boolean; lines?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (opts.scrollback) qs.set("scrollback", "1");
+    if (opts.lines) qs.set("lines", String(opts.lines));
+    return request<MicaReadResult>(
+      `/threads/${threadId}/mica/read${qs.toString() ? `?${qs.toString()}` : ""}`,
+    );
+  },
+  setMicaBadge: (
+    threadId: string,
+    body: { state: MicaBadgeState; text?: string; sticky?: boolean },
+  ) =>
+    request<{ ok: boolean }>(`/threads/${threadId}/mica/badge`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   // Legacy room/context/workflow endpoints kept typed for non-breaking migration
   createRoom: (body: { name: string; description?: string; project_id?: number | null; members?: string[] }) =>

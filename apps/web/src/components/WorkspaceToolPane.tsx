@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import type { AgentThread, WorkspaceTerminalRunResult } from "@conflux/shared";
+import type { AgentThread, MicaReadResult, WorkspaceTerminalRunResult } from "@conflux/shared";
 import {
+  AppWindow,
   Check,
   ChevronLeft,
   ExternalLink,
@@ -10,12 +11,15 @@ import {
   GitMerge,
   GitPullRequest,
   Globe,
+  Link2,
+  LocateFixed,
   MessageSquarePlus,
   RefreshCw,
   Send,
   Sparkles,
   Terminal,
   Trash2,
+  Unlink2,
   Upload,
   X,
 } from "lucide-react";
@@ -23,6 +27,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import {
   useDetectPreview,
+  useMicaSnapshot,
+  useMicaStatus,
   useThreadGitDiff,
   useThreadGitStatus,
   useThreadPrDetail,
@@ -154,6 +160,17 @@ function formatAnnotationPrompt(notes: InlineDiffNote[]): string {
   ].join("\n");
 }
 
+function formatMicaSnapshotPrompt(thread: AgentThread, snap: MicaReadResult): string {
+  return [
+    `请根据以下 Mica 终端快照排查当前问题（pane #${snap.pane_id} · ${thread.workdir}${
+      snap.truncated ? " · 内容过长已截断" : ""
+    }）：`,
+    "```",
+    snap.text.trimEnd() || "（当前屏幕为空）",
+    "```",
+  ].join("\n");
+}
+
 export function WorkspaceToolPane({
   thread,
   tool,
@@ -193,6 +210,17 @@ export function WorkspaceToolPane({
   const [termBusy, setTermBusy] = useState(false);
   const [termLogs, setTermLogs] = useState<WorkspaceTerminalRunResult[]>([]);
 
+  // ---- Mica External Terminal State ----
+  const [micaView, setMicaView] = useState<"embedded" | "mica">("embedded");
+  const [micaInput, setMicaInput] = useState("");
+  const [micaBusy, setMicaBusy] = useState(false);
+  const [micaNotice, setMicaNotice] = useState<{ ok: boolean; text: string } | null>(null);
+  const micaStatus = useMicaStatus(tool === "term");
+  const micaSnapshot = useMicaSnapshot(
+    thread.id,
+    tool === "term" && micaView === "mica" && thread.mica_pane_id != null,
+  );
+
   // ---- File Explorer State ----
   const [currentDir, setCurrentDir] = useState("");
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
@@ -215,6 +243,9 @@ export function WorkspaceToolPane({
     setCurrentDir("");
     setSelectedFilePath(null);
     setTermLogs([]);
+    setMicaView("embedded");
+    setMicaInput("");
+    setMicaNotice(null);
     const saved = thread.preview_url || "";
     setPreviewInput(saved);
     setPreviewUrl(saved);
@@ -941,7 +972,7 @@ export function WorkspaceToolPane({
     );
   }
 
-  // ==================== 2. EMBEDDED TERMINAL ====================
+  // ==================== 2. TERMINAL (embedded shell + Mica bridge) ====================
   if (tool === "term") {
     const runCommand = async (rawCmd: string) => {
       const cmd = rawCmd.trim();
@@ -969,6 +1000,120 @@ export function WorkspaceToolPane({
       }
     };
 
+    const boundPaneId = thread.mica_pane_id ?? null;
+    const boundPane = micaStatus.data?.panes?.find((p) => p.pane_id === boundPaneId) ?? null;
+    const micaAvailable = micaStatus.data?.available === true;
+    const micaRunning = micaStatus.data?.running === true;
+    const attachablePanes = (micaStatus.data?.panes ?? []).filter(
+      (p) => p.pane_id !== boundPaneId,
+    );
+
+    const micaErrMsg = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+    const invalidateMica = () => {
+      void qc.invalidateQueries({ queryKey: ["workspace-tree"] });
+      void qc.invalidateQueries({ queryKey: ["thread-detail", thread.id] });
+      void qc.invalidateQueries({ queryKey: ["mica-status"] });
+    };
+
+    const handleMicaOpen = async () => {
+      setMicaBusy(true);
+      setMicaNotice(null);
+      try {
+        const res = await api.openInMica(thread.id, { mode: "tab" });
+        setMicaNotice({
+          ok: true,
+          text: res.reused
+            ? `已聚焦已绑定的 Mica #${res.pane.pane_id}`
+            : `已在 Mica 打开 pane #${res.pane.pane_id}`,
+        });
+        invalidateMica();
+      } catch (err) {
+        setMicaNotice({ ok: false, text: micaErrMsg(err) });
+      } finally {
+        setMicaBusy(false);
+      }
+    };
+
+    const handleMicaAttach = async (paneId: number) => {
+      setMicaBusy(true);
+      setMicaNotice(null);
+      try {
+        await api.attachMicaPane(thread.id, paneId);
+        setMicaNotice({ ok: true, text: `已绑定 Mica #${paneId}` });
+        invalidateMica();
+      } catch (err) {
+        setMicaNotice({ ok: false, text: micaErrMsg(err) });
+      } finally {
+        setMicaBusy(false);
+      }
+    };
+
+    const handleMicaUnbind = async () => {
+      setMicaBusy(true);
+      setMicaNotice(null);
+      try {
+        await api.unbindMica(thread.id);
+        setMicaView("embedded");
+        setMicaNotice({ ok: true, text: "已解除 Mica 绑定（终端窗口保持打开）" });
+        invalidateMica();
+      } catch (err) {
+        setMicaNotice({ ok: false, text: micaErrMsg(err) });
+      } finally {
+        setMicaBusy(false);
+      }
+    };
+
+    const handleMicaFocus = async () => {
+      setMicaBusy(true);
+      setMicaNotice(null);
+      try {
+        await api.focusMica(thread.id);
+        invalidateMica();
+      } catch (err) {
+        setMicaNotice({ ok: false, text: micaErrMsg(err) });
+        invalidateMica();
+      } finally {
+        setMicaBusy(false);
+      }
+    };
+
+    const handleSendSnapshotToAgent = async () => {
+      if (boundPaneId == null) return;
+      setMicaBusy(true);
+      setMicaNotice(null);
+      try {
+        const snap =
+          micaSnapshot.data ??
+          (await api.readMicaSnapshot(thread.id, { scrollback: true, lines: 200 }));
+        await onSendPromptToAgent(formatMicaSnapshotPrompt(thread, snap));
+        setMicaNotice({ ok: true, text: "已把 Mica 终端快照发给当前 Agent" });
+      } catch (err) {
+        setMicaNotice({ ok: false, text: micaErrMsg(err) });
+      } finally {
+        setMicaBusy(false);
+      }
+    };
+
+    const sendMicaCommand = async (raw: string) => {
+      if (!raw.trim() || micaBusy || boundPaneId == null) return;
+      setMicaBusy(true);
+      setMicaInput("");
+      setMicaNotice(null);
+      try {
+        // Literal mode keeps Windows paths intact (C:\repo\test); the server
+        // appends Enter as a separate escaped \r keystroke.
+        await api.sendMicaText(thread.id, { text: raw, submit: true, literal: true });
+        // Give the terminal a beat to render before pulling a fresh snapshot.
+        window.setTimeout(() => void micaSnapshot.refetch(), 400);
+      } catch (err) {
+        setMicaNotice({ ok: false, text: micaErrMsg(err) });
+        invalidateMica();
+      } finally {
+        setMicaBusy(false);
+      }
+    };
+
     return (
       <div
         data-testid="workspace-terminal-pane"
@@ -992,53 +1137,259 @@ export function WorkspaceToolPane({
           </div>
         </div>
 
-        <div className="flex-1 space-y-3 overflow-y-auto p-3.5 leading-relaxed">
-          {termLogs.length === 0 && (
-            <div className="text-2xs text-ink-faint">
-              [Conflux Shell · {thread.workdir}] 输入命令回车执行（例如 git status / npm test）
-            </div>
-          )}
-          {termLogs.map((entry, i) => (
-            <div key={i} className="space-y-1">
-              <div className="flex items-center justify-between gap-2 text-success">
-                <span>$ {entry.command}</span>
-                <span className="text-2xs text-ink-faint">
-                  exit {entry.exit_code ?? 0} · {entry.duration_ms}ms
-                </span>
+        {/* Mica bridge strip: primary actions when bound, quiet hint when absent */}
+        <div className="flex items-center gap-1.5 overflow-x-auto border-b border-line bg-paper px-3 py-1.5 font-sans">
+          {boundPaneId != null ? (
+            <>
+              <span
+                data-testid="mica-pane-capsule"
+                title={boundPane?.cwd ?? undefined}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-line bg-elev px-2 py-0.5 text-2xs text-ink"
+              >
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    boundPane?.prompt_state === "running"
+                      ? "bg-success"
+                      : boundPane?.prompt_state === "idle"
+                        ? "bg-info"
+                        : "bg-neutral"
+                  }`}
+                />
+                <span className="font-mono">Mica #{boundPaneId}</span>
+                {!boundPane && <span className="text-ink-faint">离线</span>}
+              </span>
+              <button
+                type="button"
+                disabled={micaBusy}
+                data-testid="mica-focus-btn"
+                onClick={() => void handleMicaFocus()}
+                className="inline-flex h-6 shrink-0 items-center gap-1 rounded border border-line bg-elev px-2 text-2xs text-ink-muted hover:bg-tile-hover hover:text-ink disabled:opacity-40"
+              >
+                <LocateFixed className="h-3 w-3" />
+                <span>聚焦</span>
+              </button>
+              <button
+                type="button"
+                disabled={micaBusy}
+                data-testid="mica-read-btn"
+                onClick={() => {
+                  // Jump to the snapshot surface too — refreshing while staying
+                  // on the embedded shell view would look like a no-op.
+                  setMicaView("mica");
+                  void micaSnapshot.refetch();
+                }}
+                className="inline-flex h-6 shrink-0 items-center gap-1 rounded border border-line bg-elev px-2 text-2xs text-ink-muted hover:bg-tile-hover hover:text-ink disabled:opacity-40"
+              >
+                <RefreshCw className={`h-3 w-3 ${micaSnapshot.isFetching ? "animate-spin" : ""}`} />
+                <span>刷新快照</span>
+              </button>
+              <button
+                type="button"
+                disabled={micaBusy}
+                data-testid="mica-send-snapshot-btn"
+                onClick={() => void handleSendSnapshotToAgent()}
+                className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md bg-accent px-2.5 text-2xs font-semibold text-on-accent hover:bg-accent-deep disabled:opacity-40"
+              >
+                <Sparkles className="h-3 w-3" />
+                <span>快照发给 Agent</span>
+              </button>
+              <button
+                type="button"
+                disabled={micaBusy}
+                data-testid="mica-unbind-btn"
+                onClick={() => void handleMicaUnbind()}
+                className="inline-flex h-6 shrink-0 items-center gap-1 rounded border border-line bg-elev px-2 text-2xs text-ink-muted hover:bg-tile-hover hover:text-danger disabled:opacity-40"
+              >
+                <Unlink2 className="h-3 w-3" />
+                <span>解绑</span>
+              </button>
+              <div className="ml-auto flex shrink-0 items-center gap-0.5 rounded-md bg-elev p-0.5">
+                <button
+                  type="button"
+                  data-testid="mica-mode-embedded"
+                  onClick={() => setMicaView("embedded")}
+                  className={`h-5 rounded px-2 text-2xs transition-colors ${
+                    micaView === "embedded"
+                      ? "bg-tile-active font-semibold text-ink"
+                      : "text-ink-muted hover:text-ink"
+                  }`}
+                >
+                  内嵌 Shell
+                </button>
+                <button
+                  type="button"
+                  data-testid="mica-mode-mica"
+                  onClick={() => setMicaView("mica")}
+                  className={`h-5 rounded px-2 text-2xs transition-colors ${
+                    micaView === "mica"
+                      ? "bg-tile-active font-semibold text-ink"
+                      : "text-ink-muted hover:text-ink"
+                  }`}
+                >
+                  Mica 快照
+                </button>
               </div>
-              {entry.stdout && (
-                <pre className="whitespace-pre-wrap break-words text-ink">{entry.stdout}</pre>
+            </>
+          ) : micaAvailable ? (
+            <>
+              <button
+                type="button"
+                disabled={micaBusy}
+                data-testid="mica-open-btn"
+                onClick={() => void handleMicaOpen()}
+                className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md bg-accent px-2.5 text-2xs font-semibold text-on-accent hover:bg-accent-deep disabled:opacity-40"
+              >
+                <AppWindow className="h-3 w-3" />
+                <span>在 Mica 中打开</span>
+              </button>
+              {attachablePanes.length > 0 && (
+                <div className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-line bg-elev pl-2 pr-0.5 text-2xs text-ink-muted">
+                  <Link2 className="h-3 w-3" />
+                  <select
+                    data-testid="mica-attach-select"
+                    defaultValue=""
+                    disabled={micaBusy}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v) void handleMicaAttach(Number(v));
+                      e.target.value = "";
+                    }}
+                    className="h-5 max-w-[220px] cursor-pointer truncate rounded bg-transparent font-mono text-2xs text-ink focus:outline-none"
+                  >
+                    <option value="">绑定已有 Pane…</option>
+                    {attachablePanes.map((p) => (
+                      <option key={p.pane_id} value={p.pane_id}>
+                        #{p.pane_id} · {p.title || "terminal"} · {p.cwd ?? ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               )}
-              {entry.stderr && (
-                <pre className="whitespace-pre-wrap break-words text-danger">{entry.stderr}</pre>
+              {!micaRunning && (
+                <span className="shrink-0 text-2xs text-ink-faint">
+                  Mica 未运行，「打开」时会自动启动
+                </span>
               )}
-            </div>
-          ))}
+            </>
+          ) : (
+            <span className="truncate text-2xs text-ink-faint">
+              未检测到 Mica 终端，可在设置中配置路径；内嵌 Shell 不受影响
+            </span>
+          )}
         </div>
 
-        <div className="flex items-center gap-2 border-t border-line bg-paper px-3.5 py-2">
-          <span className="text-success">❯</span>
-          <input
-            type="text"
-            data-testid="workspace-terminal-input"
-            value={termInput}
-            disabled={termBusy}
-            onChange={(e) => setTermInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void runCommand(termInput);
-            }}
-            placeholder={termBusy ? "命令执行中…" : "输入命令回车执行…"}
-            className="flex-1 bg-transparent font-mono text-xs text-ink placeholder:text-ink-faint focus:outline-none"
-          />
-          <button
-            type="button"
-            disabled={termBusy || !termInput.trim()}
-            onClick={() => void runCommand(termInput)}
-            className="inline-flex h-6 items-center gap-1 rounded bg-accent px-2 text-2xs font-semibold text-on-accent disabled:opacity-40"
+        {micaNotice && (
+          <div
+            data-testid="mica-notice-banner"
+            className={`border-b border-line px-3 py-1 font-sans text-2xs ${
+              micaNotice.ok ? "bg-success-soft text-success" : "bg-danger-soft text-danger"
+            }`}
           >
-            <Send className="h-3 w-3" />
-          </button>
-        </div>
+            {micaNotice.text}
+          </div>
+        )}
+
+        {micaView === "mica" && boundPaneId != null ? (
+          <div data-testid="mica-snapshot-view" className="flex min-h-0 flex-1 flex-col">
+            <div className="flex items-center justify-between border-b border-line bg-elev px-3 py-1 font-sans text-2xs text-ink-faint">
+              <span>
+                mica read --scrollback · pane #{boundPaneId}
+                {micaSnapshot.data?.truncated ? " · 已截断" : ""}
+              </span>
+              {micaSnapshot.data && (
+                <span className="font-mono">
+                  {micaSnapshot.data.cols}×{micaSnapshot.data.rows}
+                </span>
+              )}
+            </div>
+            <div className="flex-1 overflow-auto p-3.5 leading-relaxed">
+              {micaSnapshot.isLoading ? (
+                <div className="text-2xs text-ink-faint">读取快照中…</div>
+              ) : micaSnapshot.isError ? (
+                <div className="text-2xs text-danger">
+                  {micaErrMsg(micaSnapshot.error)}
+                </div>
+              ) : (
+                <pre className="whitespace-pre-wrap break-words text-ink">
+                  {micaSnapshot.data?.text?.trimEnd() || "（当前屏幕为空）"}
+                </pre>
+              )}
+            </div>
+            <div className="flex items-center gap-2 border-t border-line bg-paper px-3.5 py-2">
+              <span className="text-success">❯</span>
+              <input
+                type="text"
+                data-testid="mica-input"
+                value={micaInput}
+                disabled={micaBusy}
+                onChange={(e) => setMicaInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void sendMicaCommand(micaInput);
+                }}
+                placeholder={micaBusy ? "发送中…" : "输入命令回车发送到 Mica…"}
+                className="flex-1 bg-transparent font-mono text-xs text-ink placeholder:text-ink-faint focus:outline-none"
+              />
+              <button
+                type="button"
+                disabled={micaBusy || !micaInput.trim()}
+                onClick={() => void sendMicaCommand(micaInput)}
+                className="inline-flex h-6 items-center gap-1 rounded bg-accent px-2 text-2xs font-semibold text-on-accent disabled:opacity-40"
+              >
+                <Send className="h-3 w-3" />
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="flex-1 space-y-3 overflow-y-auto p-3.5 leading-relaxed">
+              {termLogs.length === 0 && (
+                <div className="text-2xs text-ink-faint">
+                  [Conflux Shell · {thread.workdir}] 输入命令回车执行（例如 git status / npm test）
+                </div>
+              )}
+              {termLogs.map((entry, i) => (
+                <div key={i} className="space-y-1">
+                  <div className="flex items-center justify-between gap-2 text-success">
+                    <span>$ {entry.command}</span>
+                    <span className="text-2xs text-ink-faint">
+                      exit {entry.exit_code ?? 0} · {entry.duration_ms}ms
+                    </span>
+                  </div>
+                  {entry.stdout && (
+                    <pre className="whitespace-pre-wrap break-words text-ink">{entry.stdout}</pre>
+                  )}
+                  {entry.stderr && (
+                    <pre className="whitespace-pre-wrap break-words text-danger">{entry.stderr}</pre>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2 border-t border-line bg-paper px-3.5 py-2">
+              <span className="text-success">❯</span>
+              <input
+                type="text"
+                data-testid="workspace-terminal-input"
+                value={termInput}
+                disabled={termBusy}
+                onChange={(e) => setTermInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void runCommand(termInput);
+                }}
+                placeholder={termBusy ? "命令执行中…" : "输入命令回车执行…"}
+                className="flex-1 bg-transparent font-mono text-xs text-ink placeholder:text-ink-faint focus:outline-none"
+              />
+              <button
+                type="button"
+                disabled={termBusy || !termInput.trim()}
+                onClick={() => void runCommand(termInput)}
+                className="inline-flex h-6 items-center gap-1 rounded bg-accent px-2 text-2xs font-semibold text-on-accent disabled:opacity-40"
+              >
+                <Send className="h-3 w-3" />
+              </button>
+            </div>
+          </>
+        )}
       </div>
     );
   }

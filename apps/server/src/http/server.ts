@@ -18,8 +18,10 @@ import { registerWorkflowRoutes } from "./routes/workflows.js";
 import { registerLiveEventsRoutes } from "./routes/live-events.js";
 import { registerMcpHttpRoutes } from "./routes/mcp.js";
 import { registerMeshRoutes } from "./routes/mesh.js";
+import { registerMicaTerminalRoutes } from "./routes/mica.js";
 import { installRoomOrchestrationHooks } from "../core/rooms.js";
 import { installWorkflowHooks } from "../core/workflows.js";
+import { startMicaBridge, stopMicaBridge, type MicaBridgeOptions } from "../core/mica/watcher.js";
 import {
   ThreadManager,
   getThreadManager,
@@ -33,6 +35,7 @@ export interface HttpServerOptions {
   scope?: Scope;
   overrideDataDir?: string;
   threadManagerOptions?: ThreadManagerOptions;
+  micaBridgeOptions?: MicaBridgeOptions;
 }
 
 const TRUSTED_LOCAL_OR_LAN_CORS_RE =
@@ -61,12 +64,14 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   threadManager.startQueuePolling();
   installRoomOrchestrationHooks();
   installWorkflowHooks();
+  startMicaBridge(db, opts.micaBridgeOptions ?? {});
 
   let resourcesClosed = false;
   const closeResources = async () => {
     if (resourcesClosed) return;
     resourcesClosed = true;
     if (getThreadManager() === threadManager) setThreadManager(null);
+    await stopMicaBridge();
     await threadManager.shutdown();
     stopWalCheckpoint(db);
     if (db.open) db.close();
@@ -114,6 +119,7 @@ export async function startHttpServer(opts: HttpServerOptions = {}): Promise<Fas
   registerLiveEventsRoutes(app);
   registerMcpHttpRoutes(app, ctx);
   registerMeshRoutes(app, ctx);
+  registerMicaTerminalRoutes(app, ctx);
 
   try {
     await app.listen({ host, port });
