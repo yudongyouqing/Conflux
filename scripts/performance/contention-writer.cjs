@@ -7,19 +7,18 @@ const { join, resolve } = require("node:path");
 const { performance } = require("node:perf_hooks");
 const { snapshot } = require("./measurement.cjs");
 const root = resolve(__dirname, "../..");
-const { openDb, stopWalCheckpoint } = require(join(root, "apps/server/dist/core/db.js"));
-const { publishContext } = require(join(root, "apps/server/dist/core/context.js"));
-const { queryContext } = require(join(root, "apps/server/dist/core/search.js"));
+const { BUSY_TIMEOUT_MS, openDb, stopWalCheckpoint } = require(join(root, "apps/server/dist/core/db.js"));
+const { publishContext, queryContext } = require(join(root, "apps/server/dist/core/context.js"));
 const Database = require("better-sqlite3");
 const { dataDir, dbPath } = JSON.parse(process.argv[2]);
 
 // Holder connection uses the production openDb path (WAL, busy_timeout
-// 10000, synchronous NORMAL, foreign keys). The victim connection is a
+// production busy timeout, synchronous NORMAL, foreign keys). The victim connection is a
 // plain second handle whose busy timeout the coordinator can shorten to
 // observe the lock-timeout path quickly; production code is untouched.
 const holder = openDb({ dataDir, dbPath, scope: "global" });
 const victim = new Database(dbPath);
-victim.pragma("busy_timeout = 10000");
+victim.pragma(`busy_timeout = ${BUSY_TIMEOUT_MS}`);
 victim.pragma("foreign_keys = ON");
 
 function counts() {
@@ -77,7 +76,7 @@ process.on("message", async ({ id, command, ...args }) => {
         // held rather than assumed after a delay.
         holder.exec("BEGIN IMMEDIATE");
         const insert = holder.prepare(
-          `INSERT INTO context_entries (session_id, title, content, tags, created_at, updated_at)
+          `INSERT INTO context_entries (thread_id, title, content, tags, created_at, updated_at)
            VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`,
         );
         for (let k = 0; k < 3; k++)
@@ -94,7 +93,7 @@ process.on("message", async ({ id, command, ...args }) => {
         victim.pragma(`busy_timeout = ${args.busyTimeoutMs}`);
         try {
           const entry = publishContext(victim, {
-            session_id: "perf-0",
+            thread_id: "perf-0",
             title: `${args.marker} victim title`,
             content: `${args.marker} victim row`,
             tags: ["contention"],
@@ -108,7 +107,7 @@ process.on("message", async ({ id, command, ...args }) => {
             message: error.message,
           });
         } finally {
-          victim.pragma("busy_timeout = 10000");
+          victim.pragma(`busy_timeout = ${BUSY_TIMEOUT_MS}`);
         }
         break;
       }
@@ -119,7 +118,7 @@ process.on("message", async ({ id, command, ...args }) => {
           const at = performance.now();
           try {
             const entry = publishContext(holder, {
-              session_id: "perf-0",
+              thread_id: "perf-0",
               title: `Burst writer ${args.token} ${i}`,
               content: `${args.token} ${i}`,
               tags: ["contention"],

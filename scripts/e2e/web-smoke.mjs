@@ -1,293 +1,112 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { spawn, spawnSync } from "node:child_process";
+import { join } from "node:path";
 import { chromium } from "playwright";
+import { withBrowser } from "./chat-first-smoke.mjs";
+import { withWorkspaceFixture } from "./workspace-fixture.mjs";
 
-const ROOT = resolve(fileURLToPath(new URL("../..", import.meta.url)));
-const VITE_BIN = resolve(ROOT, "node_modules/vite/bin/vite.js");
-const SERVER_PORT = 19527;
-const WEB_PORT = 5199;
-const ARTIFACTS = join(ROOT, "test-results", "e2e");
-const home = mkdtempSync(join(tmpdir(), "conflux-e2e-"));
-const server = spawn(process.execPath, ["--import", "tsx", "apps/server/src/index.ts", "serve"], {
-  cwd: ROOT,
-  env: { ...process.env, CONFLUX_HOME: home, CONFLUX_PORT: String(SERVER_PORT) },
-  stdio: ["ignore", "ignore", "pipe"],
-});
-const web = spawn(
-  process.execPath,
-  [VITE_BIN, "--port", String(WEB_PORT), "--strictPort", "--host", "127.0.0.1"],
-  {
-    cwd: join(ROOT, "apps/web"),
-    env: { ...process.env, VITE_API_TARGET: `http://127.0.0.1:${SERVER_PORT}` },
-    stdio: ["ignore", "ignore", "pipe"],
-  },
-);
+const artifacts = fileURLToPath(new URL("../../test-results/e2e/", import.meta.url));
+const peerId = "cap-claude-voice";
 
-// Keep bounded diagnostics and drain pipes so a noisy child cannot block startup.
-const childLogs = { server: "", web: "" };
-for (const [name, child] of [
-  ["server", server],
-  ["web", web],
-]) {
-  child.stderr.on("data", (chunk) => {
-    childLogs[name] = (childLogs[name] + chunk.toString()).slice(-8000);
-  });
-}
-
-function childFailure(child, name) {
-  return new Promise((_, reject) => {
-    const onExit = (code, signal) => {
-      reject(
-        new Error(
-          `${name} exited before readiness (code=${code ?? "null"}, signal=${signal ?? "none"})`,
-        ),
-      );
+await withWorkspaceFixture(async ({ web, request }) => {
+  mkdirSync(artifacts, { recursive: true });
+  await withBrowser(() => chromium.launch(), async (browser) => {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+    const page = await context.newPage();
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    const shot = (name) => page.screenshot({ path: join(artifacts, name + ".png") });
+    const byId = (id) => page.getByTestId(id);
+    const assertFits = async () => {
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     };
-    child.once("exit", onExit);
-    child.once("error", (error) => reject(new Error(`${name} failed to start: ${error.message}`)));
-  });
-}
-
-function stop(child) {
-  if (!child.pid || child.exitCode !== null) return;
-  if (process.platform === "win32") {
-    spawnSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" });
-  } else {
-    child.kill("SIGTERM");
-  }
-}
-
-async function waitFor(url, timeoutMs = 30_000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
     try {
-      const response = await fetch(url);
-      if (response.ok) return;
-    } catch {
-      // The child process may still be starting.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  throw new Error(`Timed out waiting for ${url}`);
-}
+      const treeReady = page.waitForResponse((res) => new URL(res.url()).pathname === "/workspace/tree");
+      await page.goto(web);
+      assert.equal((await treeReady).ok(), true);
+      const tree = await request("/workspace/tree");
+      assert.equal(tree.projects.length, 4);
+      assert.equal(tree.threads.length, 4);
+      await byId("sidebar-thread-" + peerId).waitFor();
 
-function waitForChildOrUrl(child, name, url) {
-  return Promise.race([waitFor(url), childFailure(child, name)]);
-}
+      for (const [preset, mode] of [["浅色", "light"], ["终端蓝黑", "dark"]]) {
+        await byId("rail-settings-btn").click();
+        await byId("theme-preset-" + preset).click();
+        await page.waitForFunction((value) => document.documentElement.dataset.theme === value, mode);
+        await shot("theme-" + mode + "-desktop");
+        await page.setViewportSize({ width: 390, height: 844 });
+        await assertFits();
+        await shot("theme-" + mode + "-narrow");
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await byId("rail-graph-btn").click();
+        await byId("mesh-node-" + peerId).waitFor();
+        await shot("theme-" + mode + "-graph");
+      }
+      await page.reload();
+      await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
 
-async function seed() {
-  const result = spawnSync(
-    process.execPath,
-    ["--import", "tsx", "scripts/capture/seed-core.ts", home, "--controls"],
-    {
-      cwd: ROOT,
-      stdio: "inherit",
-    },
-  );
-  assert.equal(result.status, 0, "fixture seed failed");
-}
+      await byId("rail-history-btn").click();
+      const history = byId("call-history-modal");
+      await history.getByText("M1-B 冒烟清单在哪台机器跑？", { exact: true }).waitFor();
+      await history.getByText("Windows 真机，13 条清单已过 9 条。", { exact: true }).waitFor();
+      await history.getByRole("button").click();
 
-async function run() {
-  mkdirSync(ARTIFACTS, { recursive: true });
-  await seed();
-  await Promise.all([
-    waitForChildOrUrl(server, "server", `http://127.0.0.1:${SERVER_PORT}/healthz`),
-    waitForChildOrUrl(web, "web", `http://127.0.0.1:${WEB_PORT}/`),
-  ]);
+      await byId("rail-graph-btn").click();
+      await byId("node-enter-" + peerId).click();
+      const workbench = byId("agent-workbench").first();
+      const composer = workbench.getByTestId("workbench-composer-input");
+      await composer.fill("E2E smoke message");
+      const posted = page.waitForResponse(
+        (res) => new URL(res.url()).pathname === "/mesh/calls" && res.request().method() === "POST",
+      );
+      await workbench.getByTestId("composer-send-btn").click();
+      const response = await posted;
+      assert.equal(response.status(), 201);
+      const { message, delivery_method } = await response.json();
+      assert.equal(message.to_session, peerId);
+      assert.equal(delivery_method, "external-mcp-inbox");
+      await workbench.getByTestId("peer-call-card-" + message.id).waitFor();
+      await shot("peer-call-desktop");
 
-  const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
-  const page = await context.newPage();
-  const browserErrors = [];
-  page.on("pageerror", (error) => browserErrors.push(error.message));
-  page.on("requestfailed", (request) =>
-    browserErrors.push(`${request.url()}: ${request.failure()?.errorText}`),
-  );
+      const active = (await request("/mesh/calls?status=active")).calls;
+      assert.equal(active.filter((call) => call.question === message.question).length, 1);
+      const hungUp = await request("/mesh/calls/" + message.id + "/hangup", { method: "POST" });
+      assert.equal(hungUp.message.status, "cancelled");
+      assert.equal((await request("/messages?to=" + peerId)).messages.filter((call) => call.id === message.id).length, 1);
 
-  try {
-    await page.goto(`http://127.0.0.1:${WEB_PORT}`, { waitUntil: "domcontentloaded" });
-    await page.getByText("Conflux", { exact: true }).first().waitFor();
-    // chat is the default surface now — walk to the graph explicitly
-    await page.getByRole("button", { name: "图谱", exact: true }).click();
-    await page.locator(".react-flow__node").first().waitFor();
+      await byId("sidebar-new-workspace-btn").click();
+      const modal = byId("new-workspace-modal");
+      await modal.getByTestId("engine-card-codex").waitFor();
+      assert.equal(await workbench.getByTestId("composer-interrupt-btn").count(), 0);
+      const workdir = modal.getByTestId("new-workspace-dir-input");
+      await workdir.fill("");
+      await modal.getByTestId("new-agent-submit-btn").click();
+      assert.equal(await workdir.evaluate((input) => input.validity.valueMissing), true);
+      await modal.waitFor();
+      await shot("new-workspace-desktop");
+      await modal.getByTestId("new-workspace-cancel-btn").click();
 
-    await page.getByRole("button", { name: "设置", exact: true }).click();
-    const lightTheme = page.getByRole("button", { name: "汇流蓝（默认）", exact: true });
-    const darkTheme = page.getByRole("button", { name: "终端深色", exact: true });
-    await lightTheme.waitFor();
-    for (const [name, button, mode] of [
-      ["light", lightTheme, "light"],
-      ["dark", darkTheme, "dark"],
-    ]) {
-      await button.click();
-      assert.equal(await page.locator("html").getAttribute("data-theme"), mode);
-      assert.equal(await button.getAttribute("aria-pressed"), "true");
-      await page.screenshot({ path: join(ARTIFACTS, `theme-${name}-desktop.png`), fullPage: true });
       await page.setViewportSize({ width: 390, height: 844 });
-      await page.waitForFunction(
-        () => document.querySelector(".mobile-sidebar").getBoundingClientRect().right <= 0,
-      );
-      assert.ok(
-        await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
-        `${mode} settings fit narrow viewport`,
-      );
-      await page.screenshot({ path: join(ARTIFACTS, `theme-${name}-narrow.png`), fullPage: true });
-      await page.setViewportSize({ width: 1440, height: 900 });
-      await page.getByRole("button", { name: "图谱", exact: true }).click();
-      await page.locator(".react-flow__node").first().waitFor();
-      await page.screenshot({ path: join(ARTIFACTS, `theme-${name}-graph.png`), fullPage: true });
-      await page.getByRole("button", { name: "设置", exact: true }).click();
+      await byId("rail-sidebar-toggle-btn").click();
+      await byId("workspace-sidebar").evaluate((el) => {
+        if (!el.classList.contains("is-collapsed")) throw Error("sidebar did not collapse");
+      });
+      await assertFits();
+      await byId("rail-history-btn").click();
+      await history.getByText("E2E smoke message", { exact: true }).waitFor();
+      const panel = await history.locator(":scope > div").boundingBox();
+      assert.ok(panel && panel.x >= 0 && panel.x + panel.width <= 390);
+      await shot("history-narrow");
+      assert.deepEqual(errors, []);
+    } catch (error) {
+      console.error({ errors });
+      await shot("web-smoke-failure");
+      await context.tracing.stop({ path: join(artifacts, "web-smoke-failure.zip") });
+      throw error;
     }
-    await page.reload();
-    assert.equal(
-      await page.locator("html").getAttribute("data-theme"),
-      "dark",
-      "theme persists across reload",
-    );
-    await page.getByRole("button", { name: "设置", exact: true }).click();
-    await lightTheme.click();
+  });
+}, { seedFlags: ["--controls"] });
 
-    await page.getByRole("button", { name: "活动记录", exact: true }).click();
-    await page.getByText("M1-B 冒烟清单在哪台机器跑？", { exact: true }).waitFor();
-
-    const composer = page.locator("input").first();
-    await composer.fill("@Conflux");
-    await composer.press("Enter");
-    await composer.fill("E2E smoke message");
-    const askResponse = page.waitForResponse(
-      (response) => response.url().endsWith("/web/ask") && response.request().method() === "POST",
-    );
-    await composer.press("Enter");
-    assert.equal((await askResponse).ok(), true, "web ask request failed");
-    // keep-alive leaves the hidden activity feed holding its own copy —
-    // wait on the VISIBLE conversation, not on a globally-unique text
-    await page
-      .locator('.tab-surface[data-active="true"]')
-      .getByText("E2E smoke message", { exact: true })
-      .first()
-      .waitFor();
-    const retryResponse = page.waitForResponse(
-      (response) =>
-        /\/messages\/\d+\/retry$/.test(response.url()) && response.request().method() === "POST",
-    );
-    await page.getByRole("button", { name: "重试唤醒", exact: true }).last().click();
-    const retried = await retryResponse;
-    assert.equal(retried.ok(), true, "existing message retry request succeeds");
-    assert.equal(
-      (await retried.json()).message.delivery.state,
-      "queued",
-      "disabled auto wake is queued",
-    );
-    // keep-alive leaves the hidden activity feed mounted with its own copy —
-    // count only what the user actually sees (the active surface)
-    assert.equal(
-      await page
-        .locator('.tab-surface[data-active="true"]')
-        .getByText("E2E smoke message", { exact: true })
-        .count(),
-      1,
-      "retry does not clone messages",
-    );
-    await page.screenshot({ path: join(ARTIFACTS, "message-retry-desktop.png"), fullPage: true });
-
-    // unified assistants page: coding category default, orphan instances kept
-    await page.getByRole("button", { name: "助手", exact: true }).click();
-    await page.getByRole("button", { name: "创建编码助手", exact: true }).waitFor();
-    // the fixture preset owns both instances — expand its coding card
-    await page.getByText("协作控制验收").click();
-    await page
-      .getByText("尚未绑定可验证的运行时进程，无法安全停止", { exact: true })
-      .first()
-      .waitFor();
-    const stopButtons = page.getByRole("button", { name: "停止实例", exact: true });
-    assert.equal(await stopButtons.count(), 2);
-    for (const button of await stopButtons.all())
-      assert.equal(await button.isDisabled(), true, "unverified fixture cannot stop any process");
-    await page.screenshot({
-      path: join(ARTIFACTS, "assistants-coding-desktop.png"),
-      fullPage: true,
-    });
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.waitForFunction(
-      () => document.querySelector(".mobile-sidebar").getBoundingClientRect().right <= 0,
-    );
-    assert.ok(
-      await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
-      "assistants page fits narrow viewport",
-    );
-    await page.screenshot({
-      path: join(ARTIFACTS, "assistants-coding-narrow.png"),
-      fullPage: true,
-    });
-    await page.setViewportSize({ width: 1440, height: 900 });
-
-    // model assistants: category switch, direct-to-category creation
-    await page.getByRole("button", { name: "模型助手", exact: true }).click();
-    await page.getByRole("button", { name: "创建模型助手", exact: true }).click();
-    const agentName = `e2e-agent-${Date.now()}`;
-    await page.getByPlaceholder("名称 *").fill(agentName);
-    await page.getByPlaceholder("模型 * (如 claude-sonnet-4-5)").fill("e2e-model");
-    await page.getByPlaceholder("System Prompt *").fill("Respond with a short test result.");
-    const createResponse = page.waitForResponse(
-      (response) => response.url().endsWith("/agents") && response.request().method() === "POST",
-    );
-    await page.getByRole("button", { name: "创建", exact: true }).click();
-    assert.equal((await createResponse).ok(), true, "agent creation request failed");
-    await page.getByText(agentName, { exact: true }).waitFor();
-
-    await page.getByRole("button", { name: "图谱", exact: true }).click();
-    await page
-      .locator(".react-flow__node")
-      .filter({ hasText: agentName })
-      .waitFor({ timeout: 10_000 });
-
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.getByRole("button", { name: "打开导航" }).click();
-    assert.equal(
-      await page.locator(".mobile-sidebar").evaluate((el) => el.classList.contains("is-open")),
-      true,
-      "mobile navigation should open",
-    );
-    await page.getByRole("button", { name: "活动记录", exact: true }).click();
-    const search = page.getByPlaceholder("搜索消息内容...");
-    await search.waitFor();
-
-    const mobileLayout = await page.evaluate(() => ({
-      navOpen: document.querySelector(".mobile-sidebar")?.classList.contains("is-open"),
-      pageWidth: document.documentElement.scrollWidth,
-      viewportWidth: window.innerWidth,
-    }));
-    const searchBounds = await search.boundingBox();
-    assert.equal(mobileLayout.navOpen, false, "navigation should close after selecting a view");
-    assert.ok(
-      mobileLayout.pageWidth <= mobileLayout.viewportWidth,
-      `page overflows horizontally: ${mobileLayout.pageWidth}px > ${mobileLayout.viewportWidth}px`,
-    );
-    assert.ok(searchBounds, "message search should be visible");
-    assert.ok(
-      searchBounds.x >= 0 && searchBounds.x + searchBounds.width <= 390,
-      "message search should fit the mobile viewport",
-    );
-  } catch (error) {
-    console.error(JSON.stringify({ childLogs, browserErrors }, null, 2));
-    await page.screenshot({ path: join(ARTIFACTS, "web-smoke-failure.png"), fullPage: true });
-    await context.tracing.stop({ path: join(ARTIFACTS, "web-smoke-failure.zip") });
-    throw error;
-  } finally {
-    await browser.close();
-  }
-}
-
-try {
-  await run();
-  console.log("E2E web smoke tests passed");
-} finally {
-  stop(web);
-  stop(server);
-  rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-}
+console.log("E2E web smoke tests passed");

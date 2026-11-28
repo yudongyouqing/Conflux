@@ -35,10 +35,10 @@ function requestJson(url, { agent, body, timeoutMs = 10000, acceptStatus } = {})
           try {
             // Observing expected error replies (e.g. 503 DATA_LOCKED under
             // contention) needs the body, so those statuses resolve instead
-            // of throwing like every other non-200 response.
+            // of throwing like every other non-success response.
             const accepted =
               Array.isArray(acceptStatus) && acceptStatus.includes(response.statusCode);
-            if (response.statusCode !== 200 && !accepted) throw Error(`HTTP ${response.statusCode}`);
+            if ((response.statusCode < 200 || response.statusCode >= 300) && !accepted) throw Error(`HTTP ${response.statusCode}`);
             resolve({
               json: JSON.parse(Buffer.concat(chunks).toString("utf8")),
               bytes,

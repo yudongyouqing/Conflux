@@ -16,8 +16,7 @@ function fakeBrowser(log) {
 }
 
 test("importing the smoke module does not spawn anything", () => {
-  // the import at the top already proves this: port picking and server
-  // spawning now live behind the isMainModule() gate
+  // Importing the module leaves the isolated workspace fixture unstarted.
   assert.equal(typeof withBrowser, "function");
 });
 

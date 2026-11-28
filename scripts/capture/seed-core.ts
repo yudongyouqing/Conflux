@@ -1,95 +1,72 @@
-/** Deterministic fixture for the screenshot rig. Runs via tsx. */
-import { openDb } from "../../apps/server/src/core/db.js";
+/** Deterministic fixture for the screenshot rig and browser smoke tests. Runs via tsx. */
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { WEB_CONSOLE_ID, type RuntimeId } from "@conflux/shared";
+import { openDb, stopWalCheckpoint } from "../../apps/server/src/core/db.js";
 import { resolveConfig } from "../../apps/server/src/config.js";
-import { registerSession } from "../../apps/server/src/core/sessions.js";
-import { askSession, replyAsk } from "../../apps/server/src/core/messages.js";
+import { ensureProjectForDir } from "../../apps/server/src/core/projects.js";
+import { insertThread } from "../../apps/server/src/core/threads/store.js";
+import { askThread, replyMessage } from "../../apps/server/src/core/messages.js";
 import { publishContext } from "../../apps/server/src/core/context.js";
-import { createRuntimeAgent } from "../../apps/server/src/core/runtime-agents.js";
-import {
-  createRuntimeInstance,
-  failRuntimeInstance,
-} from "../../apps/server/src/core/runtime-instances.js";
-import { setAutoWake } from "../../apps/server/src/core/app-settings.js";
+
+async function seed(home: string) {
+  const db = openDb(resolveConfig("global", home));
+  const addThread = (id: string, name: string, dir: string, runtime: RuntimeId) => {
+    const workdir = join(home, "projects", dir);
+    mkdirSync(workdir, { recursive: true });
+    return insertThread(db, {
+      id,
+      name,
+      project_id: ensureProjectForDir(db, workdir)!.id,
+      workdir,
+      kind: "external",
+      runtime,
+    });
+  };
+  try {
+    const conflux = addThread("cap-claude-conflux", "Conflux", "Conflux", "claude");
+    addThread("cap-claude-voice", "voice-agent", "voice-agent", "claude");
+    const mica = addThread("cap-codex-mica", "winGhostty", "winGhostty", "codex");
+    addThread("cap-agent-recall", "AgentRecall", "AgentRecall", "claude");
+    const { message } = await askThread(db, {
+      from_thread: conflux.id,
+      to_thread: mica.id,
+      question: "M1-B 冒烟清单在哪台机器跑？",
+    });
+    replyMessage(db, message.id, mica.id, "Windows 真机，13 条清单已过 9 条。");
+    publishContext(db, {
+      thread_id: conflux.id,
+      project_id: conflux.project_id,
+      title: "唤醒系统架构",
+      content: "三分诊（忙/空闲/离线）→ 策略 → 统一 spawn；提示词走 stdin。",
+      tags: ["wake", "architecture"],
+    });
+    if (process.argv.includes("--controls")) {
+      await askThread(db, {
+        from_thread: WEB_CONSOLE_ID,
+        to_thread: conflux.id,
+        question: "隔离测试：待处理的同伴通话",
+      });
+    }
+    if (process.argv.includes("--chat-first")) {
+      // External threads receive messages in the MCP inbox without launching a CLI.
+      addThread("cap-chat-first", "验收会话", "smoke-room", "codex");
+      addThread("cap-chat-twin", "验收会话", "smoke-room", "codex");
+    }
+    console.log("seeded", home);
+  } finally {
+    stopWalCheckpoint(db);
+    db.close();
+  }
+}
 
 const home = process.argv[2];
 if (!home) {
-  console.error("usage: tsx seed-core.ts <CONFLUX_HOME>");
-  process.exit(2);
-}
-process.env.CONFLUX_HOME = home;
-const db = openDb(resolveConfig("global"));
-const S: [string, string, string, string, string, boolean][] = [
-  [
-    "cap-claude-conflux",
-    "Conflux",
-    "P0",
-    "图谱工作台：Electron+React 工作空间开发",
-    "claude",
-    true,
-  ],
-  ["cap-claude-voice", "voice-agent", "P1", "TAPD 话术校验需求开发中", "claude", false],
-  ["cap-codex-mica", "winGhostty", "P1", "Mica 终端 M1-B 冒烟测试", "codex", false],
-  ["cap-agent-recall", "AgentRecall", "P2", "会话记忆检索实验", "claude", false],
-];
-for (const [id, dir, pr, desc, runtime, busy] of S) {
-  registerSession(db, {
-    id,
-    name: dir,
-    description: desc,
-    project_dir: "/Users/dev/code/" + dir,
-    metadata: {
-      source: "claude-hook",
-      priority: pr,
-      runtime,
-      busy,
-      named: true,
-      agent_card: { skills: ["typescript", "electron", dir === "winGhostty" ? "rust" : "node"] },
-    },
-  });
-}
-registerSession(db, { id: "web-console", name: "Web 控制台", description: "浏览器界面身份" });
-askSession(db, {
-  from_session: "cap-claude-conflux",
-  to_session: "cap-codex-mica",
-  question: "M1-B 冒烟清单在哪台机器跑？",
-});
-replyAsk(db, 1, "cap-codex-mica", "Windows 真机，13 条清单已过 9 条。");
-publishContext(db, {
-  session_id: "cap-claude-conflux",
-  title: "唤醒系统架构",
-  content: "三分诊（忙/空闲/离线）→ 策略 → 统一 spawn；提示词走 stdin。",
-  tags: ["wake", "architecture"],
-});
-console.log("seeded", home);
-if (process.argv.includes("--controls")) {
-  setAutoWake(db, false);
-  askSession(db, {
-    from_session: "web-console",
-    to_session: "cap-claude-conflux",
-    question: "隔离测试：重试同一条消息",
-  });
-  const preset = createRuntimeAgent(db, { name: "协作控制验收", runtime: "codex", workdir: home });
-  createRuntimeInstance(db, preset);
-  const failed = createRuntimeInstance(db, preset);
-  failRuntimeInstance(db, failed.id);
-}
-if (process.argv.includes("--chat-first")) {
-  // A bare session with NO runtime identity: the wake strategy refuses
-  // before any spawn, so chat-first room orchestration can be exercised
-  // without touching real CLI hosts (a seeded claude-runtime session
-  // would make the summon wake path spawn a real CLI).
-  registerSession(db, {
-    id: "cap-chat-first",
-    name: "验收会话",
-    description: "chat-first 冒烟假会话（无 runtime，不可唤醒）",
-    project_dir: home,
-  });
-  // same DISPLAY name, different id: the @-mention picker must tell them
-  // apart by id hint, never by position
-  registerSession(db, {
-    id: "cap-chat-twin",
-    name: "验收会话",
-    description: "重名冒烟假会话（无 runtime，不可唤醒）",
-    project_dir: home,
+  console.error("usage: tsx seed-core.ts <CONFLUX_HOME> [--controls] [--chat-first]");
+  process.exitCode = 2;
+} else {
+  seed(home).catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
   });
 }

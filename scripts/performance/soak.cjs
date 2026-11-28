@@ -108,9 +108,11 @@ async function runSoak({ config, directory, sampleDelayMs = 0, simulateWriteFail
   const env = isolatedEnvironment(dir);
   const readPaths = [
     "/healthz",
-    "/graph?status=all",
+    "/graph",
+    "/threads",
+    "/workspace/tree",
     "/messages?limit=50",
-    "/context/query?query=needle&limit=25",
+    "/context?query=needle&limit=25",
   ];
   let readIndex = 0;
   const server = fork(
@@ -135,6 +137,7 @@ async function runSoak({ config, directory, sampleDelayMs = 0, simulateWriteFail
   };
   const runToken = makeToken("soakw");
   const acknowledgedIds = [];
+  const acknowledgedMarkers = [];
   report.acknowledgedWriteIds = acknowledgedIds;
 
   async function readOnce(phase) {
@@ -156,7 +159,7 @@ async function runSoak({ config, directory, sampleDelayMs = 0, simulateWriteFail
       writes.attempted++;
       return;
     }
-    // Zero-padded so each write gets a fixed-length FTS token; prefix
+    // Zero-padded so each write gets a fixed-length search token; substring
     // queries then match exactly one row instead of numeric prefixes
     // like "5" also hitting "54".
     const marker = `${runToken}${String(index).padStart(8, "0")}`;
@@ -172,9 +175,10 @@ async function runSoak({ config, directory, sampleDelayMs = 0, simulateWriteFail
         timeoutMs: 30000,
         acceptStatus: [503],
       });
-      if (response.statusCode === 200) {
+      if (response.statusCode === 201) {
         writes.succeeded++;
         acknowledgedIds.push(response.json.entry.id);
+        acknowledgedMarkers.push(marker);
         return;
       }
       if (response.statusCode === 503 && response.json?.code === "DATA_LOCKED") writes.expectedLock++;
@@ -272,7 +276,7 @@ async function runSoak({ config, directory, sampleDelayMs = 0, simulateWriteFail
     url = ready.url;
     agent = new Agent({ keepAlive: true, maxSockets: 4 });
     const contextsBefore = ready.before.counts.contexts;
-    console.log(`soak server ready on ${url} with ${config.size} synthetic sessions`);
+    console.log(`soak server ready on ${url} with ${config.size} synthetic threads`);
     console.log("soak phase fixed started");
     await runPhase("fixed", config.fixedMs);
     console.log("soak phase write started");
@@ -285,19 +289,21 @@ async function runSoak({ config, directory, sampleDelayMs = 0, simulateWriteFail
     const expectedContexts = contextsBefore + writes.succeeded;
     const uniqueIds = new Set(acknowledgedIds).size;
 
-    // Full-count FTS verification only while the marker set fits one query.
-    let ftsVerified = false;
+    // Full-count context search verification only while the marker set fits one query.
+    let searchVerified = false;
     if (writes.succeeded <= 500) {
-      const matched = await requestJson(`${url}/context/query?query=${runToken}&limit=500`, { agent });
-      ftsVerified = matched.json.entries.length === writes.succeeded;
+      const matched = await requestJson(`${url}/context?query=${runToken}&limit=500`, { agent });
+      const ids = new Set(matched.json.entries.map((entry) => entry.id));
+      searchVerified = ids.size === writes.succeeded && acknowledgedIds.every((id) => ids.has(id));
     } else {
       const picks = new Set([0, Math.floor(writes.succeeded / 2), writes.succeeded - 1]);
       while (picks.size < 10) picks.add(Math.floor(Math.random() * writes.succeeded));
-      ftsVerified = true;
+      searchVerified = true;
       for (const index of picks) {
-        const marker = `${runToken}${String(index).padStart(8, "0")}`;
-        const hit = await requestJson(`${url}/context/query?query=${marker}&limit=2`, { agent });
-        if (hit.json.entries.length !== 1) ftsVerified = false;
+        const marker = acknowledgedMarkers[index];
+        const hit = await requestJson(`${url}/context?query=${marker}&limit=2`, { agent });
+        if (hit.json.entries.length !== 1 || hit.json.entries[0]?.id !== acknowledgedIds[index])
+          searchVerified = false;
       }
     }
     // A write phase that acknowledged no writes at all must fail the run
@@ -311,11 +317,11 @@ async function runSoak({ config, directory, sampleDelayMs = 0, simulateWriteFail
       writesAttempted: writes.attempted,
       writesAcknowledged: writes.succeeded,
       uniqueIds,
-      ftsVerified,
+      searchVerified,
       passed:
         contextsAfter === expectedContexts &&
         uniqueIds === writes.succeeded &&
-        ftsVerified &&
+        searchVerified &&
         writes.succeeded >= 1 &&
         writes.unexpected === 0 &&
         report.phases.fixed.reads.unexpected === 0 &&

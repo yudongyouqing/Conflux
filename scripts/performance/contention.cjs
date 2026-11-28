@@ -14,9 +14,8 @@ const { requestJson } = require("./http-client.cjs");
 const { waitMessage, isolatedEnvironment } = require("./server-database.cjs");
 const root = resolve(__dirname, "../..");
 
-// The production busy timeout from core/db.ts; the long hold must exceed it
-// for the timeout path to be observable through the real HTTP server.
-const PRODUCTION_BUSY_TIMEOUT_MS = 10000;
+// The HTTP write retry budget follows the production SQLite busy timeout.
+const { BUSY_TIMEOUT_MS: PRODUCTION_BUSY_TIMEOUT_MS } = require("../../apps/server/dist/core/db.js");
 
 function option(env, name, fallback, min, max) {
   const raw = env[name] ?? fallback;
@@ -34,6 +33,10 @@ function readContentionConfig(env = process.env) {
     writesPerSide: option(env, "PERF_CONTENTION_WRITES", 120, 10, 5000),
     size: option(env, "PERF_CONTENTION_SIZE", 25, 2, 3000),
   };
+  assert.ok(
+    config.holdMs < PRODUCTION_BUSY_TIMEOUT_MS,
+    "PERF_CONTENTION_HOLD_MS must stay below the HTTP write retry budget",
+  );
   assert.ok(
     config.shortBusyTimeoutMs < config.holdMs,
     "PERF_CONTENTION_SHORT_BUSY_MS must stay below the hold window",
@@ -86,8 +89,8 @@ async function runContention({ config, directory } = {}) {
       topology: "HTTP server process and one external writer process share one SQLite file (WAL)",
       lockState:
         "BEGIN IMMEDIATE and its release are acknowledged over IPC before any victim runs; no sleep-based guessing",
-      auditedReads:
-        "HTTP data reads write audit/heartbeat rows and therefore join write contention; /healthz is the write-free path, and the writer's second connection provides un-audited cross-process reads",
+      walReads:
+        "/healthz and context search remain readable while the external writer holds the SQLite write lock",
       shortTimeout:
         `the victim uses a test-only second connection with busy_timeout=${config.shortBusyTimeoutMs}ms to observe timeout classification quickly; production connections keep busy_timeout=${PRODUCTION_BUSY_TIMEOUT_MS}ms`,
       productionTimeout:
@@ -172,9 +175,9 @@ async function runContention({ config, directory } = {}) {
         ...extra,
       });
       httpWriteMs.push(performance.now() - at);
-      if (response.statusCode === 200) {
+      if (response.statusCode === 201) {
         aggregates.httpWrites.succeeded++;
-        return { outcome: "succeeded", statusCode: 200, json: response.json };
+        return { outcome: "succeeded", statusCode: 201, json: response.json };
       }
       if (response.statusCode === 503 && response.json?.code === "DATA_LOCKED") {
         aggregates.httpWrites.expectedLock++;
@@ -191,7 +194,7 @@ async function runContention({ config, directory } = {}) {
 
   async function queryMarker(marker, limit = 500) {
     const json = await httpRead(
-      `/context/query?query=${marker}&limit=${limit}`,
+      `/context?query=${marker}&limit=${limit}`,
       (v) => assert.ok(Array.isArray(v.entries)),
     );
     return json.entries;
@@ -212,14 +215,14 @@ async function runContention({ config, directory } = {}) {
   try {
     const ready = await waitMessage(server, null, (m) => m.ready, 60000);
     url = ready.url;
-    console.log(`HTTP ready on ${url} with ${config.size} synthetic sessions`);
+    console.log(`HTTP ready on ${url} with ${config.size} synthetic threads`);
     agent = new Agent({ keepAlive: true, maxSockets: 4 });
     expectedContextRows = ready.before.counts.contexts;
     serverResourcesBefore = (await serverSnapshot()).resources;
 
     writer = fork(
       join(__dirname, "contention-writer.cjs"),
-      [JSON.stringify({ dataDir: join(dir, "http"), dbPath: join(dir, "http", "data.db") })],
+      [JSON.stringify({ dataDir: join(dir, "http"), dbPath: ready.dbPath })],
       { cwd: root, env, stdio: ["ignore", "ignore", "pipe", "ipc"] },
     );
     writerExited = new Promise((resolve) => writer.once("exit", (code, signal) => resolve([code, signal])));
@@ -232,10 +235,8 @@ async function runContention({ config, directory } = {}) {
     console.log("contention scenario read-during-uncommitted-write");
     {
       const marker = makeToken("cthiso");
-      // Audited data reads participate in write contention through their
-      // audit rows, so response-shape checks run before any lock is held.
-      await httpRead("/graph?status=all", (v) => {
-        assert.equal(v.nodes.length, config.size + 1);
+      await httpRead("/graph", (v) => {
+        assert.equal(v.nodes.length, config.size);
         assert.equal(v.edges.length, config.size);
       });
       await rpc(writer, { command: "hold", marker });
@@ -245,23 +246,15 @@ async function runContention({ config, directory } = {}) {
       // Cross-process WAL reader: sees the pre-transaction snapshot.
       const during = await rpc(writer, { command: "victim-read", marker });
       const isolationConfirmed = during.rows === 0;
-      // An audited data read fired during the hold completes only after the
-      // release because its audit write waits for the lock — observed as a
-      // behavior, not judged here.
-      const auditedReadStartedAt = performance.now();
-      const auditedRead = queryMarker(marker);
+      const readStartedAt = performance.now();
+      const uncommittedEntries = await queryMarker(marker);
+      const httpReadWaitMs = performance.now() - readStartedAt;
       await rpc(writer, { command: "release", mode: "commit" });
-      const entries = await auditedRead;
-      const auditedReadWaitMs = performance.now() - auditedReadStartedAt;
+      const entries = await queryMarker(marker);
       const victimAfter = await rpc(writer, { command: "victim-read", marker });
       expectedContextRows += 3;
-      // The audited read's DATA reflects whichever side of the commit its
-      // queryContext snapshot landed on — with fast IPC the commit can beat
-      // the read, with fast TCP the read can win; both orders are correct
-      // WAL behavior. What the lock gates deterministically is the audit
-      // WRITE, so the post-commit visibility is asserted through the
-      // second connection read after the release acknowledgement.
-      const visibleAfterCommit = victimAfter.rows === 3 && (entries.length === 0 || entries.length === 3);
+      assert.equal(uncommittedEntries.length, 0, "HTTP exposed uncommitted rows");
+      const visibleAfterCommit = victimAfter.rows === 3 && entries.length === 3;
       report.scenarios.push({
         name: "read-during-uncommitted-write",
         status: isolationConfirmed && visibleAfterCommit ? "passed" : "failed",
@@ -270,8 +263,9 @@ async function runContention({ config, directory } = {}) {
         visibleAfterCommit,
         uncommittedVisibleRows: during.rows,
         committedRows: victimAfter.rows,
-        auditedReadRows: entries.length,
-        auditedReadWaitMs,
+        httpUncommittedRows: uncommittedEntries.length,
+        httpCommittedRows: entries.length,
+        httpReadWaitMs,
       });
       assert.equal(isolationConfirmed, true, "uncommitted rows leaked to WAL readers");
       assert.equal(visibleAfterCommit, true, "committed rows missing after release");
@@ -285,9 +279,8 @@ async function runContention({ config, directory } = {}) {
       await httpRead("/healthz", (v) => assert.equal(v.ok, true));
       const requestSentAt = performance.now();
       const pending = httpWrite(`${marker} http`);
-      // Loopback arrival cushion only — the lock itself is already
-      // acknowledged; this bias ensures the request reaches the busy wait.
-      await sleep(150);
+      // Give the HTTP request time to hit contention before releasing the holder.
+      await sleep(config.holdMs);
       const releaseSentAt = performance.now();
       // The held rows are scaffolding for this scenario; rolling them back
       // releases the lock and leaves exactly the recovered victim write.
@@ -418,7 +411,7 @@ async function runContention({ config, directory } = {}) {
           unexpected: writerResult.unexpected,
           unexpectedErrors: writerResult.unexpectedErrors,
         },
-        ftsMatched: matched.length,
+        searchMatched: matched.length,
         expectedRows,
         duplicateMarkers,
         lostMarkers,

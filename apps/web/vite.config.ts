@@ -19,6 +19,14 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      "/workspace": API_TARGET,
+      "/threads": API_TARGET,
+      "/rooms": API_TARGET,
+      "/mesh": API_TARGET,
+      "/system": API_TARGET,
+      "/live": API_TARGET,
+      "/workflows": API_TARGET,
+      "/approvals": API_TARGET,
       "/graph": API_TARGET,
       "/messages": API_TARGET,
       "/edges": API_TARGET,
