@@ -2,14 +2,15 @@ const assert = require("node:assert/strict");
 const { mkdirSync, statSync } = require("node:fs");
 const { join, resolve } = require("node:path");
 const { performance } = require("node:perf_hooks");
-const { measureSync, snapshot } = require("./measurement.cjs");
+const { measureSync, runConcurrent, resourceDelta, snapshot } = require("./measurement.cjs");
 const root = resolve(__dirname, "../..");
 const { openDb, stopWalCheckpoint } = require(join(root, "apps/server/dist/core/db.js"));
-const { registerSession, listSessions } = require(join(root, "apps/server/dist/core/sessions.js"));
-const { askSession, listMessages } = require(join(root, "apps/server/dist/core/messages.js"));
-const { publishContext } = require(join(root, "apps/server/dist/core/context.js"));
-const { queryContext } = require(join(root, "apps/server/dist/core/search.js"));
-const { getGraph } = require(join(root, "apps/server/dist/core/graph.js"));
+const { resolveConfig } = require(join(root, "apps/server/dist/config.js"));
+const { saveRuntimeSettings } = require(join(root, "apps/server/dist/core/runtime-env.js"));
+const { insertThread, listThreads } = require(join(root, "apps/server/dist/core/threads/store.js"));
+const { askThread, listMessages } = require(join(root, "apps/server/dist/core/messages.js"));
+const { publishContext, queryContext } = require(join(root, "apps/server/dist/core/context.js"));
+const { buildGraph } = require(join(root, "apps/server/dist/core/graph.js"));
 const { startHttpServer } = require(join(root, "apps/server/dist/http/server.js"));
 const { directory, size, samples, warmup } = JSON.parse(process.argv[2]);
 let app;
@@ -25,7 +26,7 @@ process.once("disconnect", async () => {
 function counts(db) {
   const count = (table) => db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
   return {
-    sessions: count("sessions"),
+    threads: count("agent_threads"),
     messages: count("messages"),
     contexts: count("context_entries"),
     edges: count("edges"),
@@ -33,39 +34,50 @@ function counts(db) {
   };
 }
 
-function seed(name) {
+async function seed(name) {
   const dataDir = join(directory, name);
   mkdirSync(dataDir, { recursive: true });
-  const db = openDb({ dataDir, dbPath: join(dataDir, "data.db"), scope: "global" });
-  db.transaction(() => {
-    for (let i = 0; i < size; i++)
-      registerSession(db, {
-        id: `perf-${i}`,
-        name: `Synthetic ${i}`,
-        description: "performance fixture",
-      });
-    for (let i = 0; i < size * 10; i++)
-      askSession(db, {
-        from_session: `perf-${i % size}`,
-        to_session: `perf-${(i + 1) % size}`,
+  const db = openDb(resolveConfig("global", dataDir));
+  try {
+    saveRuntimeSettings(db, { pair_cooldown_ms: 0 });
+    db.transaction(() => {
+      for (let i = 0; i < size; i++)
+        insertThread(db, {
+          id: `perf-${i}`,
+          name: `Synthetic ${i}`,
+          project_id: null,
+          workdir: dataDir,
+          kind: "external",
+          runtime: "codex",
+        });
+      for (let i = 0; i < size * 2; i++)
+        publishContext(db, {
+          thread_id: `perf-${i % size}`,
+          title: `Synthetic context ${i}`,
+          content: `${i % 5 === 0 ? "needle" : "ordinary"} ${"context data ".repeat(40)}`,
+          tags: ["synthetic"],
+        });
+    })();
+    for (let i = 0; i < size * 10; i++) {
+      await askThread(db, {
+        from_thread: `perf-${i % size}`,
+        to_thread: `perf-${(i + 1) % size}`,
         question: `synthetic message ${i} ${"x".repeat(128)}`,
+        hop_count: 1,
       });
-    for (let i = 0; i < size * 2; i++)
-      publishContext(db, {
-        session_id: `perf-${i % size}`,
-        title: `Synthetic context ${i}`,
-        content: `${i % 5 === 0 ? "needle" : "ordinary"} ${"context data ".repeat(40)}`,
-        tags: ["synthetic"],
-      });
-  })();
-  assert.deepEqual(counts(db), {
-    sessions: size,
-    messages: size * 10,
-    contexts: size * 2,
-    edges: size,
-    audit: 0,
-  });
-  return db;
+    }
+    assert.deepEqual(counts(db), {
+      threads: size,
+      messages: size * 10,
+      contexts: size * 2,
+      edges: size,
+      audit: 0,
+    });
+    return db;
+  } catch (error) {
+    closeDb(db);
+    throw error;
+  }
 }
 
 function storage(db) {
@@ -95,7 +107,7 @@ function closeDb(db) {
 }
 
 async function main() {
-  const db = seed("sqlite");
+  const db = await seed("sqlite");
   let sqlite;
   try {
     const before = { counts: counts(db), storage: storage(db) };
@@ -103,13 +115,13 @@ async function main() {
     const run = (name, op, validate) =>
       cases.push({ name, ...measureSync(op, validate, samples, warmup) });
     run(
-      "sessions-list",
-      () => listSessions(db, { status: "all" }),
+      "threads-list",
+      () => listThreads(db),
       (v) => assert.equal(v.length, size),
     );
     run(
       "graph",
-      () => getGraph(db, { status: "all" }),
+      () => buildGraph(db, { includeOffline: true }),
       (v) => {
         assert.equal(v.nodes.length, size);
         assert.equal(v.edges.length, size);
@@ -121,31 +133,38 @@ async function main() {
       (v) => assert.equal(v.length, Math.min(50, size * 10)),
     );
     run(
-      "context-fts-25",
+      "context-search-25",
       () => queryContext(db, { query: "needle", limit: 25 }),
       (v) => {
         assert.equal(v.length, Math.min(25, Math.ceil((size * 2) / 5)));
         assert.ok(v.every((e) => e.content.startsWith("needle")));
       },
     );
+    const insertMessage = () =>
+      askThread(db, {
+        from_thread: "perf-0",
+        to_thread: "perf-1",
+        question: "measured message",
+        hop_count: 1,
+      });
+    const checkMessage = ({ message }) => {
+      assert.equal(message.question, "measured message");
+      assert.ok(message.id > 0);
+    };
+    for (let i = 0; i < warmup; i++) checkMessage(await insertMessage());
+    const insertBefore = snapshot();
+    const inserts = await runConcurrent(samples, 1, insertMessage, checkMessage);
+    assert.deepEqual(inserts.failures, []);
+    cases.push({
+      name: "message-insert",
+      ...inserts,
+      resources: resourceDelta(insertBefore, snapshot()),
+    });
     run(
-      "message-insert",
-      () =>
-        askSession(db, {
-          from_session: "perf-0",
-          to_session: "perf-1",
-          question: "measured message",
-        }),
-      (v) => {
-        assert.equal(v.question, "measured message");
-        assert.ok(v.id > 0);
-      },
-    );
-    run(
-      "context-insert-fts",
+      "context-insert",
       () =>
         publishContext(db, {
-          session_id: "perf-0",
+          thread_id: "perf-0",
           title: "Measured context",
           content: "measured content",
           tags: ["synthetic"],
@@ -173,7 +192,7 @@ async function main() {
   } finally {
     closeDb(db);
   }
-  monitor = seed("http");
+  monitor = await seed("http");
   const before = { counts: counts(monitor), storage: storage(monitor) };
   const start = performance.now();
   app = await startHttpServer({
@@ -204,6 +223,7 @@ async function main() {
     ready: true,
     url: `http://127.0.0.1:${app.server.address().port}`,
     sqlite,
+    dbPath: monitor.name,
     before,
     startupMs,
   });

@@ -1,211 +1,185 @@
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
-import { readFile, mkdir, writeFile } from "node:fs/promises";
-import { resolve, extname } from "node:path";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
 import { execFileSync } from "node:child_process";
 import { chromium } from "playwright";
+import serverModule from "../../apps/server/dist/http/server.js";
+import { withBrowser } from "./chat-first-smoke.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
-const dist = resolve(root, "apps/web/dist");
 const samples = Number(process.env.PERF_SAMPLES ?? 5);
 assert.ok(Number.isInteger(samples) && samples >= 3, "PERF_SAMPLES must be an integer >= 3");
-await readFile(resolve(dist, "index.html"));
-const server = createServer(async (req, res) => {
-  try {
-    const pathname = new URL(req.url, "http://localhost").pathname;
-    const file = resolve(dist, pathname === "/" ? "index.html" : `.${pathname}`);
-    assert.ok(file.startsWith(dist + "/") || file.startsWith(dist + "\\"));
-    const body = await readFile(file);
-    res.setHeader(
-      "Content-Type",
-      {
-        ".html": "text/html",
-        ".js": "text/javascript",
-        ".css": "text/css",
-        ".woff2": "font/woff2",
-      }[extname(file)] ?? "application/octet-stream",
-    );
-    res.end(body);
-  } catch {
-    res.writeHead(404).end();
-  }
-});
-await new Promise((done) => server.listen(0, "127.0.0.1", done));
-const url = `http://127.0.0.1:${server.address().port}`;
-let browser;
+const home = await mkdtemp(resolve(os.tmpdir(), "conflux-browser-perf-"));
 const results = [];
+let server;
+let chromiumVersion;
 const summary = (values) => {
   const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
   return {
-    median:
-      sorted.length % 2
-        ? sorted[Math.floor(sorted.length / 2)]
-        : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2,
+    median: sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2,
     max: sorted.at(-1),
   };
 };
+
+function topologyFixture(topology, count) {
+  const now = new Date().toISOString();
+  const host = os.hostname();
+  const nodes = Array.from({ length: count }, (_, i) => ({
+    id: `n${i}`,
+    name: `perf-${i}`,
+    kind: "external",
+    runtime: "codex",
+    state: "idle",
+    host,
+    workdir: home,
+    incoming_call_mode: "auto",
+    external_session_id: null,
+    project_id: null,
+    project_name: null,
+    worktree_branch: null,
+    pending_approvals: 0,
+    context_count: 0,
+    room_ids: [],
+    live: true,
+  }));
+  const pairs =
+    topology === "dense"
+      ? nodes.flatMap((_, i) => [1, 2, 5].map((offset) => [i, (i + offset) % count]))
+      : Array.from({ length: topology === "disconnected" ? 0 : count - 1 }, (_, i) => [
+          topology === "tree" ? Math.floor(i / 2) : i,
+          i + 1,
+        ]);
+  const edges = pairs.map(([from, to], i) => ({
+    id: i + 1,
+    from: nodes[from].id,
+    to: nodes[to].id,
+    weight: 1,
+    last_interact_at: now,
+    last_message: "Synthetic call",
+    last_message_id: i + 1,
+    last_status: "pending",
+    trace_id: null,
+    hop_count: 1,
+  }));
+  const calls = edges.map((edge) => ({
+    id: edge.last_message_id,
+    edge_id: edge.id,
+    from_session: edge.from,
+    to_session: edge.to,
+    question: edge.last_message,
+    status: edge.last_status,
+    created_at: now,
+  }));
+  return { graph: { nodes, edges }, calls };
+}
+
 try {
-  browser = await chromium.launch({ headless: true });
-  // Deterministic fixed-degree mesh matching the node benchmark: peers
-  // i+1, i+2, i+5 (mod n) — one repeatable dense-ish shape, not a claim
-  // about arbitrary dense graphs or real degree distributions.
-  const denseEdges = (count) => {
-    const edges = [];
-    let nextId = 1;
-    const seen = new Set();
-    for (let i = 0; i < count; i++) {
-      for (const k of [1, 2, 5]) {
-        const j = (i + k) % count;
-        if (i === j) continue;
-        const key = `${i}->${j}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        edges.push({ id: nextId++, from: `n${i}`, to: `n${j}`, weight: 1, last_message: null });
-      }
-    }
-    return edges;
-  };
-  for (const topology of ["chain", "tree", "disconnected", "dense"]) {
-    for (const count of [25, 100, 300]) {
-      const graph = {
-        nodes: Array.from({ length: count }, (_, i) => ({
-          id: `n${i}`,
-          name: `perf-${i}`,
-          type: "session",
-          status: "active",
-          context_count: 0,
-          pending_inbox: 0,
-        })),
-        edges:
-          topology === "dense"
-            ? denseEdges(count)
-            : Array.from({ length: topology === "disconnected" ? 0 : count - 1 }, (_, i) => ({
-                id: i + 1,
-                from: `n${topology === "tree" ? Math.floor(i / 2) : i}`,
-                to: `n${i + 1}`,
-                weight: 1,
-                last_message: null,
-              })),
-      };
-      const runs = [];
-      for (let run = 0; run <= samples; run++) {
-        const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-        try {
-          const page = await context.newPage();
-          const errors = [];
-          page.on("pageerror", (error) => errors.push(error.message));
-          page.on("console", (message) => {
-            if (message.type() === "error" && !message.text().includes("frame-ancestors"))
-              errors.push(message.text());
-          });
-          await page.route(
-            /\/(graph|sessions|messages|agents|runtimes|settings|healthz|chat-rooms|web|conversations|context)(\?|\/|$)/,
-            async (route) => {
-              const path = new URL(route.request().url()).pathname;
-              await route.fulfill({
-                json:
-                  path === "/graph"
-                    ? graph
-                    : path === "/healthz"
-                      ? { ok: true }
-                      : path === "/settings/terminal"
-                        ? { terminal: "system", options: [] }
-                        : path === "/settings"
-                          ? { providers: {} }
-                          : path === "/runtimes"
-                            ? { runtimes: {}, agents: [] }
-                            : path === "/chat-rooms"
-                              ? { rooms: [] }
-                              : path === "/agents"
-                                ? { agents: [] }
-                                : path === "/sessions"
-                                  ? { sessions: graph.nodes }
-                                  : path.startsWith("/messages")
-                                    ? { messages: [] }
-                                    : {},
-              });
-            },
-          );
-          await page.addInitScript(() => {
-            window.__longTasks = [];
-            new PerformanceObserver((list) =>
-              window.__longTasks.push(...list.getEntries().map((e) => e.duration)),
-            ).observe({ type: "longtask", buffered: true });
-          });
-          await page.goto(url, { waitUntil: "domcontentloaded" });
-          // chat is the default surface now — walk to the graph before
-          // measuring its render (the click cost applies to every sample)
-          await page.getByRole("button", { name: "图谱", exact: true }).click();
-          await page
-            .waitForFunction(
-              ({ nodes, edges }) =>
-                document.querySelectorAll(".react-flow__node").length === nodes &&
-                document.querySelectorAll(".react-flow__edge").length === edges,
-              { nodes: count, edges: graph.edges.length },
-            )
-            .catch(async (error) => {
-              console.error(errors, (await page.locator("body").innerText()).slice(0, 1800));
-              throw error;
+  // Ignore desktop server settings: the benchmark serves its own database and build.
+  process.env.CONFLUX_HOST = "127.0.0.1";
+  delete process.env.CONFLUX_PORT;
+  process.env.CONFLUX_WEB_DIST = resolve(root, "apps/web/dist");
+  server = await serverModule.startHttpServer({ host: "127.0.0.1", port: 0, overrideDataDir: home });
+  const url = `http://127.0.0.1:${server.server.address().port}`;
+  const rootResponse = await fetch(url);
+  assert.equal(rootResponse.status, 200, "built Web UI must be served");
+  await rootResponse.arrayBuffer();
+  await withBrowser(() => chromium.launch({ headless: true }), async (browser) => {
+    chromiumVersion = browser.version();
+    for (const topology of ["chain", "tree", "disconnected", "dense"]) {
+      for (const count of [25, 100, 300]) {
+        const { graph, calls } = topologyFixture(topology, count);
+        const runs = [];
+        for (let run = 0; run <= samples; run++) {
+          const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+          try {
+            const page = await context.newPage();
+            const errors = [];
+            page.on("pageerror", (error) => errors.push(error.message));
+            page.on("console", (message) => {
+              if (message.type() === "error") errors.push(message.text());
             });
-          const renderedMs = await page.evaluate(async () => {
-            await document.fonts.ready;
-            await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
-            return performance.now();
-          });
-          // Allow the initial fit-view animation to finish before zooming.
-          await page.waitForTimeout(1000);
-          assert.deepEqual(errors, [], "browser runtime errors before zoom");
-          const zoomMs = await page.evaluate(async () => {
-            const viewport = document.querySelector(".react-flow__viewport");
-            const before = viewport.style.transform;
-            const button = document.querySelector(".react-flow__controls-zoomin");
-            if (!button || button.disabled) throw new Error("Zoom control unavailable");
-            const start = performance.now();
-            await new Promise((done, reject) => {
-              const timeout = setTimeout(() => {
-                observer.disconnect();
-                reject(new Error("Zoom did not update viewport"));
-              }, 5000);
-              const observer = new MutationObserver(() => {
-                if (viewport.style.transform === before) return;
-                observer.disconnect();
-                clearTimeout(timeout);
-                requestAnimationFrame(() => requestAnimationFrame(done));
-              });
-              observer.observe(viewport, { attributes: true, attributeFilter: ["style"] });
-              button.click();
+            // Serve the real app and its remaining endpoints. Inject a fixed-size topology
+            // independently of the server's live-peer TTL and call-list pagination.
+            await page.route("**/graph", (route) => route.fulfill({ json: graph }));
+            await page.route("**/mesh/calls?*", (route) => {
+              const status = new URL(route.request().url()).searchParams.get("status");
+              return route.fulfill({ json: { calls: status === "history" ? [] : calls } });
             });
-            return performance.now() - start;
-          });
-          assert.deepEqual(errors, [], "browser runtime errors");
-          const longTasks = await page.evaluate(() => window.__longTasks);
-          if (run > 0) runs.push({ renderedMs, zoomMs, longTasks });
-        } finally {
-          await context.close();
+            await page.addInitScript(() => {
+              window.__longTasks = [];
+              new PerformanceObserver((list) =>
+                window.__longTasks.push(...list.getEntries().map((entry) => entry.duration)),
+              ).observe({ type: "longtask", buffered: true });
+            });
+            await page.goto(url, { waitUntil: "domcontentloaded" });
+            await page.getByTestId("rail-graph-btn").click();
+            await page.waitForFunction(
+              ({ nodes, edges }) => {
+                const mesh = document.querySelector('[data-testid="live-mesh-graph"]');
+                return (
+                  mesh?.querySelectorAll('[data-testid^="mesh-node-"]').length === nodes &&
+                  mesh.querySelectorAll('[data-testid^="mesh-edge-pill-"]').length === edges &&
+                  mesh.querySelectorAll("svg > g").length === edges
+                );
+              },
+              { nodes: count, edges: calls.length },
+            );
+            const renderedMs = await page.evaluate(async () => {
+              await document.fonts.ready;
+              await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+              return performance.now();
+            });
+            assert.deepEqual(errors, [], "browser runtime errors before scrolling");
+            const scrollMs = await page.locator(".cfx-dot-grid").evaluate(async (canvas) => {
+              const before = canvas.scrollTop;
+              if (canvas.scrollHeight <= canvas.clientHeight) throw new Error("Mesh canvas cannot scroll");
+              const start = performance.now();
+              await new Promise((done, reject) => {
+                const timeout = setTimeout(() => {
+                  canvas.removeEventListener("scroll", changed);
+                  reject(new Error("Scroll did not update the mesh viewport"));
+                }, 5000);
+                function changed() {
+                  clearTimeout(timeout);
+                  requestAnimationFrame(() => requestAnimationFrame(done));
+                }
+                canvas.addEventListener("scroll", changed, { once: true });
+                canvas.scrollTop = before + 400;
+              });
+              if (canvas.scrollTop <= before) throw new Error("Mesh viewport did not advance");
+              return performance.now() - start;
+            });
+            assert.deepEqual(errors, [], "browser runtime errors after scrolling");
+            const longTasks = await page.evaluate(() => window.__longTasks);
+            if (run > 0) runs.push({ renderedMs, scrollMs, longTasks });
+          } finally {
+            await context.close();
+          }
         }
+        const result = {
+          topology,
+          nodes: count,
+          edges: calls.length,
+          runs,
+          renderMs: summary(runs.map((run) => run.renderedMs)),
+          scrollMs: summary(runs.map((run) => run.scrollMs)),
+          longTaskMaxMs: Math.max(0, ...runs.flatMap((run) => run.longTasks)),
+        };
+        results.push(result);
+        console.log(
+          `${topology} ${count}: render ${result.renderMs.median.toFixed(1)} ms; scroll ${result.scrollMs.median.toFixed(1)} ms; long-task max ${result.longTaskMaxMs.toFixed(1)} ms`,
+        );
       }
-      const result = {
-        topology,
-        nodes: count,
-        edges: graph.edges.length,
-        runs,
-        renderMs: summary(runs.map((r) => r.renderedMs)),
-        zoomMs: summary(runs.map((r) => r.zoomMs)),
-        longTaskMaxMs: Math.max(0, ...runs.flatMap((r) => r.longTasks)),
-      };
-      results.push(result);
-      console.log(
-        `${topology} ${count}: render ${result.renderMs.median.toFixed(1)} ms; zoom ${result.zoomMs.median.toFixed(1)} ms; long-task max ${result.longTaskMaxMs.toFixed(1)} ms`,
-      );
     }
-  }
+  });
   const report = {
     measuredAt: new Date().toISOString(),
     revision: execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim(),
     node: process.version,
-    chromium: browser.version(),
+    chromium: chromiumVersion,
     os: `${os.platform()} ${os.release()}`,
     cpu: os.cpus()[0].model,
     memoryBytes: os.totalmem(),
@@ -218,6 +192,9 @@ try {
   await writeFile(output, JSON.stringify(report, null, 2) + "\n");
   console.log(`Report: ${output}`);
 } finally {
-  await browser?.close();
-  await new Promise((done) => server.close(done));
+  try {
+    await server?.close();
+  } finally {
+    await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
 }

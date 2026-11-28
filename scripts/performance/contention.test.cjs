@@ -5,11 +5,12 @@ const { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync } = require("n
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { test } = require("node:test");
+const { BUSY_TIMEOUT_MS } = require("../../apps/server/dist/core/db.js");
 const { readContentionConfig, classifyContentionError, runContention } = require("./contention.cjs");
 
 test("contention configuration validates bounds and cross-field rules", () => {
   const defaults = readContentionConfig({});
-  assert.equal(defaults.longHoldMs > 10000, true, "long hold must exceed the production busy timeout");
+  assert.equal(defaults.longHoldMs > BUSY_TIMEOUT_MS, true, "long hold must exceed the production busy timeout");
   assert.deepEqual(
     {
       holdMs: defaults.holdMs,
@@ -20,7 +21,7 @@ test("contention configuration validates bounds and cross-field rules", () => {
     { holdMs: 1500, shortBusyTimeoutMs: 50, writesPerSide: 120, size: 25 },
   );
   for (const env of [
-    { PERF_CONTENTION_LONG_HOLD_MS: "10000" },
+    { PERF_CONTENTION_LONG_HOLD_MS: String(BUSY_TIMEOUT_MS) },
     { PERF_CONTENTION_LONG_HOLD_MS: "abc" },
     { PERF_CONTENTION_HOLD_MS: "100" },
     { PERF_CONTENTION_HOLD_MS: "100000" },
@@ -63,6 +64,8 @@ test(
     const read = byName["read-during-uncommitted-write"];
     assert.equal(read.isolationConfirmed, true, "WAL readers must not see the uncommitted marker");
     assert.equal(read.visibleAfterCommit, true);
+    assert.equal(read.httpUncommittedRows, 0);
+    assert.equal(read.httpCommittedRows, 3);
     assert.ok(read.reads.succeeded > 0);
     assert.equal(byName["release-recovery"].outcome, "succeeded");
     const victim = byName["short-timeout-victim"];
@@ -72,7 +75,7 @@ test(
     const timeout = byName["production-timeout"];
     assert.equal(timeout.httpStatus, 503);
     assert.equal(timeout.bodyCode, "DATA_LOCKED");
-    assert.ok(timeout.waitedMs >= 9000, "production busy timeout should be observed, not skipped");
+    assert.ok(timeout.waitedMs >= BUSY_TIMEOUT_MS - 1000, "production busy timeout should be observed, not skipped");
     assert.equal(timeout.followUp.outcome, "succeeded");
     const burst = byName["two-writer-burst"];
     assert.equal(burst.http.unexpected, 0);

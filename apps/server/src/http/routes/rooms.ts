@@ -220,16 +220,18 @@ export function registerRoomAndMemoryRoutes(app: FastifyInstance, ctx: ServerCon
       pinned?: boolean;
     };
   }>("/context", async (req, reply) => {
-    const entry = publishContext(db, {
-      thread_id: requireSession(req),
-      project_id: req.body.project_id ?? null,
-      room_id: req.body.room_id ?? null,
-      kind: req.body.kind,
-      pinned: req.body.pinned,
-      title: req.body.title,
-      content: req.body.content,
-      tags: req.body.tags,
-    });
+    const entry = await write(() =>
+      publishContext(db, {
+        thread_id: requireSession(req),
+        project_id: req.body.project_id ?? null,
+        room_id: req.body.room_id ?? null,
+        kind: req.body.kind,
+        pinned: req.body.pinned,
+        title: req.body.title,
+        content: req.body.content,
+        tags: req.body.tags,
+      }),
+    );
     return reply.code(201).send({ entry });
   });
 

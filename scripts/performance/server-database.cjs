@@ -56,6 +56,7 @@ function isolatedEnvironment(directory) {
     XDG_DATA_HOME: home,
     CODEX_HOME: home,
     CLAUDE_CONFIG_DIR: home,
+    CONFLUX_PEER_TTL_MS: "900000",
     CONFLUX_WEB_DIST: join(directory, "no-web-assets"),
     CONFLUX_LOG_LEVEL: "info",
     CONFLUX_LOG_FILE: join(directory, "server.log"),
@@ -93,15 +94,28 @@ async function fixture(size, config) {
   let stopped = false;
   try {
     const ready = await waitMessage(child, null, (m) => m.ready);
-    console.log(`HTTP ready for ${size} synthetic sessions`);
-    const expectedFts = Math.min(25, Math.ceil((size * 2) / 5));
+    console.log(`HTTP ready for ${size} synthetic threads`);
+    const expectedMatches = Math.min(25, Math.ceil((size * 2) / 5));
     const workloads = [
       { name: "health", path: "/healthz", check: (v) => assert.equal(v.ok, true) },
       {
-        name: "graph",
-        path: "/graph?status=all",
+        name: "threads-list",
+        path: "/threads",
+        check: (v) => assert.equal(v.threads.length, size),
+      },
+      {
+        name: "workspace-tree",
+        path: "/workspace/tree",
         check: (v) => {
-          assert.equal(v.nodes.length, size + 1);
+          assert.equal(v.threads.length, size);
+          assert.ok(Array.isArray(v.projects) && Array.isArray(v.rooms));
+        },
+      },
+      {
+        name: "graph",
+        path: "/graph",
+        check: (v) => {
+          assert.equal(v.nodes.length, size);
           assert.equal(v.edges.length, size);
         },
       },
@@ -111,15 +125,15 @@ async function fixture(size, config) {
         check: (v) => assert.equal(v.messages.length, Math.min(50, size * 10)),
       },
       {
-        name: "context-fts-25",
-        path: "/context/query?query=needle&limit=25",
+        name: "context-search-25",
+        path: "/context?query=needle&limit=25",
         check: (v) => {
-          assert.equal(v.entries.length, expectedFts);
+          assert.equal(v.entries.length, expectedMatches);
           assert.ok(v.entries.every((e) => e.content.startsWith("needle")));
         },
       },
       {
-        name: "context-insert-fts",
+        name: "context-insert",
         path: "/context",
         body: { title: "Measured HTTP context", content: "measured content", tags: ["synthetic"] },
         check: (v) => {
@@ -134,7 +148,10 @@ async function fixture(size, config) {
       for (const concurrency of config.concurrency) {
         const request = () =>
           requestJson(ready.url + workload.path, { agent, body: workload.body });
-        const validate = (response) => workload.check(response.json);
+        const validate = (response) => {
+          assert.equal(response.statusCode, workload.body === undefined ? 200 : 201);
+          workload.check(response.json);
+        };
         const warm = await runConcurrent(config.warmup, concurrency, request, validate);
         assert.deepEqual(warm.failures, [], `${workload.name} warm-up failed`);
         const before = await rpc("snapshot");
@@ -152,14 +169,14 @@ async function fixture(size, config) {
         assert.deepEqual(measured.failures, [], `${workload.name} measured requests failed`);
       }
     }
-    const indexed = await requestJson(ready.url + "/context/query?query=measured&limit=25", {
+    const matched = await requestJson(ready.url + "/context?query=measured&limit=25", {
       agent,
     });
     assert.equal(
-      indexed.json.entries.length,
+      matched.json.entries.length,
       Math.min(25, config.concurrency.length * (config.samples + config.warmup)),
     );
-    assert.ok(indexed.json.entries.every((entry) => entry.content === "measured content"));
+    assert.ok(matched.json.entries.every((entry) => entry.content === "measured content"));
     const end = await rpc("snapshot");
     result.http.after = { counts: end.counts, storage: end.storage };
     assert.equal(
@@ -231,7 +248,7 @@ async function main() {
     },
     methodology: {
       config,
-      fixture: "ring; 10 messages and 2 contexts per session; 1/5 of contexts match FTS",
+      fixture: "ring; 10 messages and 2 contexts per thread; 1/5 of contexts match the search query",
       percentiles: "nearest rank",
       http: "loopback, keep-alive, closed-loop, separate server/client processes; full JSON body and parsing; validation excluded from individual latency",
       logging: "info to isolated temporary file",
@@ -243,7 +260,7 @@ async function main() {
   try {
     for (const size of config.sizes) {
       report.fixtures.push(await fixture(size, config));
-      console.log(`Validated ${size} sessions: SQLite and HTTP samples complete`);
+      console.log(`Validated ${size} threads: SQLite and HTTP samples complete`);
     }
     report.status = "passed";
   } catch (error) {

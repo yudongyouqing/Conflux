@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const home = process.argv[2] ?? mkdtempSync(join(tmpdir(), "conflux-capture-"));
-const r = spawnSync(process.execPath, ["--import", "tsx", join(ROOT, "scripts/capture/seed-core.ts"), home], {
+const r = spawnSync(process.execPath, ["--import", "tsx", join(ROOT, "scripts/capture/seed-core.ts"), home, ...process.argv.slice(3)], {
   cwd: ROOT,
   encoding: "utf8",
   stdio: "inherit",

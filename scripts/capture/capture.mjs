@@ -34,21 +34,27 @@ try {
   await page.goto("http://127.0.0.1:5199", { waitUntil: "domcontentloaded" });
   const shot = name => page.screenshot({ path: join(OUT, name) });
   const graph = async () => {
-    await page.getByRole("button", { name: "图谱", exact: true }).click();
-    await page.locator(".react-flow__node").first().waitFor();
+    await page.getByTestId("rail-graph-btn").click();
+    await page.getByTestId("mesh-node-cap-claude-conflux").waitFor();
     await page.evaluate(() => document.fonts.ready);
   };
+  await page.getByTestId("rail-settings-btn").click();
+  await page.getByTestId("theme-preset-浅色").click();
   await graph();
   await shot("graph-light.png");
-  await page.locator(".react-flow__node").filter({ hasText: "Conflux" }).first().click();
+  await page.getByTestId("node-enter-cap-claude-conflux").click();
+  await page.getByTestId("agent-workbench").first().waitFor();
   await shot("detail-light.png");
-  await page.getByRole("button", { name: "活动记录", exact: true }).click();
+  await page.getByTestId("rail-history-btn").click();
+  await page.getByTestId("call-history-modal").waitFor();
   await shot("messages-light.png");
-  await page.evaluate(() => localStorage.setItem("conflux.active-custom-theme", "终端深色"));
   await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByTestId("rail-settings-btn").click();
+  await page.getByTestId("theme-preset-终端蓝黑").click();
   await graph();
   await shot("graph-dark.png");
-  await page.getByRole("button", { name: "活动记录", exact: true }).click();
+  await page.getByTestId("rail-history-btn").click();
+  await page.getByTestId("call-history-modal").waitFor();
   await shot("messages-dark.png");
   console.log("captured →", OUT);
 } finally {
