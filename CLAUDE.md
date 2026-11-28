@@ -44,6 +44,7 @@ npm run format             # prettier
 - Codex 的 rollout 读取在 `core/codex-rollout.ts`（纯 IO），标题/busy 派生策略在 `core/codex-titles.ts`。
 - 四条 ask 路径统一走 `core/ask.ts` 的 `askAndMaybeWake`。
 - 受管执行端分层：`core/managed/executor.ts` 是 runtime 无关的调度/状态机（队列、one-turn、exactly-once 终态回写、恢复对账、status/SSE 面）；`core/managed-codex/` 是 Codex 适配器（协议字段、版本闸门、帧归一化），`manager.ts` 只剩组合与进程单例。新运行时接入 = 实现 `core/managed/adapter.ts` 的 RuntimeAdapter。
+- Mica 外部终端桥接独立在 `core/mica/`：`client.ts` 封装 CLI 控制通道（一律 execFile/spawn + `shell:false`，`bad_target` 结构化错误码），`watcher.ts` 单例维护唯一 `mica watch` 订阅（断连退避重连）+ 线程状态→标签徽标同步；pane 消失时自动清 `agent_threads.mica_pane_id` 绑定，CLI 缺失/未运行时全部优雅降级。
 - 进程识别令牌表在 `core/runtime-identity.ts`（live.ts 祖先回溯脚本内嵌了一份副本，改动时需同步）。
 
 ## 关键约定

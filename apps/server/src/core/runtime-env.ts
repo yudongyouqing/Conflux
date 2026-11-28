@@ -11,6 +11,7 @@ export const DEFAULT_RUNTIME_SETTINGS: RuntimeSettings = {
   codex_path: "codex",
   antigravity_path: "agy",
   acp_path: "",
+  mica_path: "mica",
   max_autonomous_hops: 5,
   pair_cooldown_ms: 2000,
 };
@@ -39,6 +40,7 @@ export function getRuntimeSettings(db: DB): RuntimeSettings {
       codex_path: parsed.codex_path?.trim() || DEFAULT_RUNTIME_SETTINGS.codex_path,
       antigravity_path: parsed.antigravity_path?.trim() || DEFAULT_RUNTIME_SETTINGS.antigravity_path,
       acp_path: typeof parsed.acp_path === "string" ? parsed.acp_path.trim() : DEFAULT_RUNTIME_SETTINGS.acp_path,
+      mica_path: parsed.mica_path?.trim() || DEFAULT_RUNTIME_SETTINGS.mica_path,
       max_autonomous_hops:
         typeof parsed.max_autonomous_hops === "number" &&
         Number.isInteger(parsed.max_autonomous_hops) &&
@@ -81,6 +83,10 @@ export function saveRuntimeSettings(
       typeof patch.acp_path === "string"
         ? patch.acp_path.trim()
         : cur.acp_path,
+    mica_path:
+      typeof patch.mica_path === "string"
+        ? patch.mica_path.trim() || DEFAULT_RUNTIME_SETTINGS.mica_path
+        : cur.mica_path,
     max_autonomous_hops:
       typeof patch.max_autonomous_hops === "number" &&
       Number.isInteger(patch.max_autonomous_hops) &&
@@ -119,6 +125,12 @@ export function resolveRuntimeExecutable(db: DB, runtime: RuntimeId): string {
       return custom;
     }
   }
+}
+
+/** Resolve the Mica CLI to invoke; env override wins so tests can pin a shim. */
+export function resolveMicaExecutable(db: DB): string {
+  const settings = getRuntimeSettings(db);
+  return process.env.MICA_PATH?.trim() || settings.mica_path || "mica";
 }
 
 /** Strip host-specific vars that cause nested CLI collisions (e.g. CLAUDECODE). */

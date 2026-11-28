@@ -70,6 +70,14 @@ export function useLiveEvents(enabled = true): void {
             case "context.updated":
               void qc.invalidateQueries({ queryKey: ["context"] });
               break;
+            case "mica.updated":
+              void qc.invalidateQueries({ queryKey: ["mica-status"] });
+              void qc.invalidateQueries({ queryKey: ["workspace-tree"] });
+              if (parsed.thread_id) {
+                void qc.invalidateQueries({ queryKey: ["thread-detail", parsed.thread_id] });
+                void qc.invalidateQueries({ queryKey: ["mica-snapshot", parsed.thread_id] });
+              }
+              break;
           }
         } catch {
           // ignore non-JSON heartbeat lines

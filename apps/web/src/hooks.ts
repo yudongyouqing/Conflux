@@ -94,6 +94,27 @@ export function useDetectPreview(threadId: string | null) {
   });
 }
 
+export function useMicaStatus(enabled = true) {
+  return useQuery({
+    queryKey: ["mica-status"],
+    queryFn: api.getMicaStatus,
+    enabled,
+    staleTime: 10_000,
+    refetchInterval: 15_000,
+    // A missing/uninstalled Mica is a normal state, not a query failure.
+    retry: false,
+  });
+}
+
+export function useMicaSnapshot(threadId: string | null, active: boolean) {
+  return useQuery({
+    queryKey: ["mica-snapshot", threadId],
+    queryFn: () => api.readMicaSnapshot(threadId!, { scrollback: true, lines: 200 }),
+    enabled: Boolean(threadId) && active,
+    refetchInterval: 4_000,
+  });
+}
+
 export function useRoomDetail(roomId: number | null) {
   return useQuery({
     queryKey: ["room-detail", roomId],

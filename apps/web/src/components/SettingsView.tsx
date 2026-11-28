@@ -3,7 +3,7 @@ import type { CliProbeEntry, RuntimeSettings } from "@conflux/shared";
 import { RefreshCw, Save } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import { useSettings } from "../hooks";
+import { useMicaStatus, useSettings } from "../hooks";
 import { BUILTIN_THEMES, getActiveCustomThemeName } from "../theme";
 import { RuntimeGlyph } from "./brand-icons";
 
@@ -15,6 +15,7 @@ interface SettingsViewProps {
 export function SettingsView({ cliProbes, onSelectTheme }: SettingsViewProps) {
   const qc = useQueryClient();
   const settingsQuery = useSettings();
+  const micaStatus = useMicaStatus();
 
   const [form, setForm] = useState<RuntimeSettings | null>(null);
   const [saving, setSaving] = useState(false);
@@ -41,6 +42,7 @@ export function SettingsView({ cliProbes, onSelectTheme }: SettingsViewProps) {
       setNotice("配置已保存");
       void qc.invalidateQueries({ queryKey: ["settings"] });
       void qc.invalidateQueries({ queryKey: ["workspace-tree"] });
+      void qc.invalidateQueries({ queryKey: ["mica-status"] });
     } finally {
       setSaving(false);
     }
@@ -51,6 +53,7 @@ export function SettingsView({ cliProbes, onSelectTheme }: SettingsViewProps) {
     try {
       await api.probeRuntimes(true);
       void qc.invalidateQueries({ queryKey: ["workspace-tree"] });
+      void qc.invalidateQueries({ queryKey: ["mica-status"] });
       setNotice("已完成本机 CLI 探测");
     } finally {
       setProbing(false);
@@ -147,6 +150,36 @@ export function SettingsView({ cliProbes, onSelectTheme }: SettingsViewProps) {
                 </span>
               </div>
             ))}
+            <div
+              data-testid="settings-mica-probe"
+              className="flex items-center justify-between gap-3 px-3 py-2"
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center font-mono text-2xs text-ink-muted">
+                  M
+                </span>
+                <div className="min-w-0">
+                  <div className="text-xs font-medium text-ink">Mica 终端</div>
+                  <div className="truncate font-mono text-2xs text-ink-faint">
+                    {micaStatus.data?.executable || form?.mica_path || "mica"}
+                  </div>
+                </div>
+              </div>
+              <span
+                className={`inline-flex shrink-0 items-center gap-1.5 text-2xs ${
+                  micaStatus.data?.available ? "text-success" : "text-ink-faint"
+                }`}
+              >
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    micaStatus.data?.available ? "bg-success" : "bg-neutral"
+                  }`}
+                />
+                <span className="font-mono">
+                  {micaStatus.data?.available ? "已安装" : "未安装"}
+                </span>
+              </span>
+            </div>
           </div>
 
           {form && (
@@ -158,6 +191,7 @@ export function SettingsView({ cliProbes, onSelectTheme }: SettingsViewProps) {
                     ["claude_path", "Claude Code 路径", "claude"],
                     ["codex_path", "Codex 路径", "codex"],
                     ["acp_path", "自定义第三方 ACP CLI（可选，留空不启用）", "例如：opencode 或 gemini"],
+                    ["mica_path", "Mica 终端 CLI 路径（可选，未安装时内嵌终端不受影响）", "mica"],
                   ] as const
                 ).map(([key, label, placeholder]) => (
                   <div key={key}>

@@ -88,7 +88,8 @@ export type LiveEventType =
   | "room.task"
   | "workflow.updated"
   | "context.updated"
-  | "git.dirty";
+  | "git.dirty"
+  | "mica.updated";
 
 export interface Project {
   id: number;
@@ -133,6 +134,8 @@ export interface AgentThread {
   last_seen_at: string;
   created_at: string;
   updated_at: string;
+  /** Bound external Mica terminal pane, if any. */
+  mica_pane_id?: number | null;
   /** Derived runtime metadata populated by list/detail queries. */
   live?: boolean;
   supports_steer?: boolean;
@@ -361,6 +364,7 @@ export interface RuntimeSettings {
   codex_path: string;
   antigravity_path: string;
   acp_path: string;
+  mica_path: string;
   max_autonomous_hops: number;
   pair_cooldown_ms: number;
 }
@@ -548,4 +552,68 @@ export interface WorkspaceTreeResponse {
   workflows: WorkflowDefinition[];
   pending_approvals: ThreadApproval[];
   cli_probes: CliProbeEntry[];
+}
+
+// ---- Mica external terminal bridge (L1 control-plane) ----
+
+export type MicaBadgeState = "none" | "idle" | "running" | "attention";
+
+export type MicaPromptState = "unknown" | "idle" | "running";
+
+export interface MicaPaneBadge {
+  state: MicaBadgeState;
+  text: string | null;
+  sticky: boolean;
+}
+
+export interface MicaPaneInfo {
+  window_id: number;
+  tab_index: number;
+  pane_id: number;
+  pid: number | null;
+  cwd: string | null;
+  title: string;
+  is_active: boolean;
+  is_focused: boolean;
+  is_quick_terminal: boolean;
+  prompt_state: MicaPromptState;
+  last_exit_code: number | null;
+  badge: MicaPaneBadge | null;
+}
+
+export interface MicaReadResult {
+  pane_id: number;
+  cols: number;
+  rows: number;
+  text: string;
+  truncated: boolean;
+}
+
+export interface MicaStatusResponse {
+  available: boolean;
+  running: boolean;
+  executable: string;
+  panes: MicaPaneInfo[];
+}
+
+export type MicaWatchEventType =
+  | "pane_created"
+  | "pane_exited"
+  | "pane_closed"
+  | "cwd_changed"
+  | "title_changed"
+  | "prompt_state_changed"
+  | "badge_changed";
+
+export interface MicaWatchEvent {
+  type: MicaWatchEventType;
+  window_id?: number;
+  tab_index?: number;
+  pane_id?: number;
+  pid?: number | null;
+  cwd?: string | null;
+  exit_code?: number | null;
+  title?: string;
+  prompt_state?: MicaPromptState;
+  badge?: MicaPaneBadge | null;
 }

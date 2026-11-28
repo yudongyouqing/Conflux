@@ -36,6 +36,7 @@ export default defineConfig({
       "/runtime-instances": API_TARGET,
       "/chat-rooms": API_TARGET,
       "/wake": API_TARGET,
+      "/mica": API_TARGET,
     },
   },
 });
