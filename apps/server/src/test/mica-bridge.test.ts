@@ -499,3 +499,152 @@ test("mica open binds thread with cwd+env, reuse focuses, attach/unbind/send/rea
     rmSync(repoDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 80 });
   }
 });
+
+function parseMcpSseOrJson(raw: string): Record<string, unknown> {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("{")) return JSON.parse(trimmed) as Record<string, unknown>;
+  const dataLines = trimmed
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trim())
+    .filter(Boolean);
+  assert.ok(dataLines.length > 0, `expected JSON or SSE data in MCP response: ${raw}`);
+  return JSON.parse(dataLines[dataLines.length - 1]) as Record<string, unknown>;
+}
+
+test("Streamable HTTP /mcp exposes read_mica_snapshot for bound threads, explicit pane_id, and bad_target cleanup", async () => {
+  resetLiveEventBusForTest();
+  const dataDir = mkdtempSync(join(tmpdir(), "conflux-mica-mcp-data-"));
+  const repoDir = mkdtempSync(join(tmpdir(), "conflux-mica-mcp-repo-"));
+  const statePath = join(dataDir, "state.json");
+  const { app, baseUrl } = await startServer(dataDir, createShimRunner(statePath));
+
+  const db: DB = openDb({
+    dataDir,
+    dbPath: join(dataDir, "conflux-v2.db"),
+    scope: "global",
+  });
+
+  try {
+    const initRes = await fetch(`${baseUrl}/mcp`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+        "X-Conflux-Session-Id": "mcp-mica-caller",
+        "X-Conflux-Host": "win-dev",
+        "X-Conflux-Cwd": repoDir,
+        "X-Conflux-Name": encodeURIComponent("MCP Mica Caller"),
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-03-26",
+          capabilities: {},
+          clientInfo: { name: "mica-mcp-test", version: "1.0.0" },
+        },
+      }),
+    });
+    assert.equal(initRes.status, 200);
+    const sid = initRes.headers.get("mcp-session-id");
+    assert.ok(sid, "MCP session id must be returned");
+
+    const mcpCall = async (id: number, method: string, params: Record<string, unknown>) => {
+      const res = await fetch(`${baseUrl}/mcp`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+          "mcp-session-id": sid!,
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
+      });
+      assert.equal(res.status, 200);
+      return parseMcpSseOrJson(await res.text());
+    };
+
+    // 1. tools/list exposes read_mica_snapshot alongside golden tools
+    const listed = await mcpCall(2, "tools/list", {});
+    assert.ok(JSON.stringify(listed).includes("read_mica_snapshot"));
+
+    // 2. Calling read_mica_snapshot before binding returns a clear isError tool result
+    const unbound = await mcpCall(3, "tools/call", {
+      name: "read_mica_snapshot",
+      arguments: {},
+    });
+    const unboundResult = unbound.result as { isError?: boolean; content: Array<{ text: string }> };
+    assert.equal(unboundResult.isError, true);
+    assert.match(unboundResult.content[0].text, /not bound/i);
+
+    // 3. Open a Mica pane for this thread, send a command, and read via MCP
+    const openRes = await jsonPost(baseUrl, `/threads/mcp-mica-caller/mica/open`, { mode: "tab" });
+    assert.equal(openRes.status, 200);
+    const opened = (await openRes.json()) as { pane: MicaPaneInfo };
+    const paneId = opened.pane.pane_id;
+    await jsonPost(baseUrl, `/threads/mcp-mica-caller/mica/send`, {
+      text: "echo MCP_SNAPSHOT_OK",
+      submit: true,
+      literal: true,
+    });
+
+    // list_peers surfaces mica_pane_id so peers can discover bound terminals
+    const peersMsg = await mcpCall(4, "tools/call", {
+      name: "list_peers",
+      arguments: { include_offline: true },
+    });
+    const peersBody = JSON.parse(
+      ((peersMsg.result as { content: Array<{ text: string }> }).content[0]).text,
+    ) as { peers: Array<{ id: string; mica_pane_id: number | null }> };
+    const selfPeer = peersBody.peers.find((p) => p.id === "mcp-mica-caller");
+    assert.equal(selfPeer?.mica_pane_id, paneId);
+
+    const snapMsg = await mcpCall(5, "tools/call", {
+      name: "read_mica_snapshot",
+      arguments: { scrollback: true, lines: 42 },
+    });
+    const snapResult = snapMsg.result as { isError?: boolean; content: Array<{ text: string }> };
+    assert.ok(!snapResult.isError, `expected clean snapshot, got: ${JSON.stringify(snapResult)}`);
+    const snapPayload = JSON.parse(snapResult.content[0].text) as MicaReadResult & {
+      thread_id: string | null;
+    };
+    assert.equal(snapPayload.thread_id, "mcp-mica-caller");
+    assert.equal(snapPayload.pane_id, paneId);
+    assert.match(snapPayload.text, /simulated screen for pane/);
+    assert.match(snapPayload.text, /\(scrollback\)/);
+    assert.match(snapPayload.text, /\(lines=42\)/);
+
+    // 4. Explicit pane_id works without thread_id lookup
+    const directMsg = await mcpCall(6, "tools/call", {
+      name: "read_mica_snapshot",
+      arguments: { pane_id: paneId, scrollback: false, lines: 15 },
+    });
+    const directPayload = JSON.parse(
+      ((directMsg.result as { content: Array<{ text: string }> }).content[0]).text,
+    ) as MicaReadResult & { thread_id: string | null };
+    assert.equal(directPayload.thread_id, null);
+    assert.equal(directPayload.pane_id, paneId);
+    assert.ok(!directPayload.text.includes("(scrollback)"));
+    assert.match(directPayload.text, /\(lines=15\)/);
+
+    // 5. bad_target clears the stale thread binding automatically
+    mutateShimState(statePath, (s) => {
+      s.panes = s.panes.filter((p) => p.pane_id !== paneId);
+    });
+    const staleMsg = await mcpCall(7, "tools/call", {
+      name: "read_mica_snapshot",
+      arguments: {},
+    });
+    const staleResult = staleMsg.result as { isError?: boolean; content: Array<{ text: string }> };
+    assert.equal(staleResult.isError, true);
+    assert.match(staleResult.content[0].text, /stale binding cleared/i);
+    assert.equal(getThread(db, "mcp-mica-caller")?.mica_pane_id, null);
+  } finally {
+    await app.close();
+    stopWalCheckpoint(db);
+    if (db.open) db.close();
+    rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 80 });
+    rmSync(repoDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 80 });
+  }
+});

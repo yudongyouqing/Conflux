@@ -27,6 +27,13 @@ import {
 } from "../core/messages.js";
 import { onWorkflowStepMessageCompleted } from "../core/workflows.js";
 import { publishLiveEvent } from "../core/event-bus.js";
+import { resolveMicaExecutable } from "../core/runtime-env.js";
+import {
+  createDefaultMicaRunner,
+  createMicaClient,
+  MicaCliError,
+} from "../core/mica/client.js";
+import { getMicaBridge, unbindMicaPane } from "../core/mica/watcher.js";
 import { logger } from "../log.js";
 
 const LOCAL_HOST = hostname() || "localhost";
@@ -203,6 +210,7 @@ export function createMcpServer(
           state: t.state,
           incoming_call_mode: t.incoming_call_mode,
           external_session_id: t.external_session_id ?? null,
+          mica_pane_id: t.mica_pane_id ?? null,
           live: isThreadCurrentlyLive(t, nowMs),
           is_self: t.id === currentThreadId,
         }));
@@ -319,6 +327,81 @@ export function createMcpServer(
           incoming_call_mode: args.incoming_call_mode,
         });
         return ok({ peer: getThread(db, currentThreadId) });
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  // Read-only thin adapter over the core Mica bridge so agents can inspect
+  // terminal output without stealing focus or altering scrollback state.
+  server.tool(
+    "read_mica_snapshot",
+    "Read a side-effect-free plain-text snapshot (screen and optional scrollback) from a bound Mica terminal pane.",
+    {
+      thread_id: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("Target thread id, external_session_id, or unique peer name (defaults to caller thread)"),
+      pane_id: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Explicit Mica pane_id (overrides thread_id lookup when provided)"),
+      scrollback: z
+        .boolean()
+        .optional()
+        .describe("Include scrollback history above the visible viewport (default: true)"),
+      lines: z
+        .number()
+        .int()
+        .min(1)
+        .max(2000)
+        .optional()
+        .describe("Maximum physical lines to return from the tail (default: 80)"),
+    },
+    async (args) => {
+      try {
+        heartbeatThread(db, currentThreadId);
+        let paneId: number;
+        let resolvedThreadId: string | null = null;
+        if (args.pane_id != null) {
+          paneId = args.pane_id;
+        } else {
+          const targetId = args.thread_id ? resolvePeerTarget(db, args.thread_id) : currentThreadId;
+          const thread = getThread(db, targetId);
+          if (!thread) {
+            throw new Error(`thread not found: ${args.thread_id ?? currentThreadId}`);
+          }
+          if (thread.mica_pane_id == null) {
+            throw new Error(`thread "${thread.name}" is not bound to a Mica pane`);
+          }
+          paneId = thread.mica_pane_id;
+          resolvedThreadId = thread.id;
+        }
+
+        const micaClient =
+          getMicaBridge()?.client() ??
+          createMicaClient(createDefaultMicaRunner(resolveMicaExecutable(db)));
+        try {
+          const snapshot = await micaClient.read(paneId, {
+            scrollback: args.scrollback ?? true,
+            lines: args.lines ?? 80,
+          });
+          return ok({ thread_id: resolvedThreadId, ...snapshot });
+        } catch (err) {
+          if (err instanceof MicaCliError && err.code === "bad_target") {
+            unbindMicaPane(db, paneId, "mcp_read_bad_target");
+            getMicaBridge()?.notifyBindingChanged();
+            throw new Error(
+              `Mica pane #${paneId} is closed or no longer exists; stale binding cleared`,
+              { cause: err },
+            );
+          }
+          throw err;
+        }
       } catch (err) {
         return fail(err);
       }
