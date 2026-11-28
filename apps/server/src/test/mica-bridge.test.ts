@@ -2,12 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
 import type { MicaPaneInfo, MicaReadResult, ThreadState } from "@conflux/shared";
+import { ensureMcpThread } from "../mcp/server.js";
 import { startHttpServer } from "../http/server.js";
 import { openDb, stopWalCheckpoint, type DB } from "../core/db.js";
 import { insertThread, updateThread, getThread } from "../core/threads/store.js";
@@ -646,5 +647,116 @@ test("Streamable HTTP /mcp exposes read_mica_snapshot for bound threads, explici
     if (db.open) db.close();
     rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 80 });
     rmSync(repoDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 80 });
+  }
+});
+
+test("Hook heartbeat and Streamable HTTP bind local Mica panes with one watch", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "conflux-mica-autobind-"));
+  const statePath = join(dataDir, "state.json");
+  const localHost = hostname() || "localhost";
+  writeFileSync(statePath, JSON.stringify({
+    panes: [7, 8, 9].map((pane_id) => ({ pane_id, cwd: dataDir })),
+    watchers: [],
+  }));
+  const { app, baseUrl } = await startServer(dataDir, createShimRunner(statePath));
+  const db = openDb({ dataDir, dbPath: join(dataDir, "conflux-v2.db"), scope: "global" });
+  const savedPaneId = process.env.MICA_PANE_ID;
+  try {
+    const heartbeat = async (fields: Record<string, unknown>) => {
+      const res = await jsonPost(baseUrl, "/mesh/peers/heartbeat", {
+        session_id: "mica-hook-peer", host: localHost, cwd: dataDir, runtime: "codex", ...fields,
+      });
+      assert.equal(res.status, 200);
+      return (await res.json()).peer;
+    };
+    assert.equal((await heartbeat({ mica_pane_id: 7 })).mica_pane_id, 7);
+    await pollUntil(() => readShimState(statePath).watchers.length > 0, { label: "auto-bind watch" });
+    await pollUntil(() => {
+      try {
+        return readShimLog<ShimBadgeRecord>(statePath, "badges").some((badge) => badge.pane_id === 7);
+      } catch {
+        return false;
+      }
+    }, { label: "auto-bind badge" });
+
+    process.env.MICA_PANE_ID = "9";
+    assert.equal((await heartbeat({})).mica_pane_id, 7);
+    for (const mica_pane_id of [null, 0, -3, 1.5, Number.MAX_SAFE_INTEGER + 1, "0x8", true]) {
+      assert.equal((await heartbeat({ mica_pane_id })).mica_pane_id, 7);
+    }
+    assert.equal((await heartbeat({ mica_pane_id: 8 })).mica_pane_id, 8);
+    const remoteHost = "remote-fixture.invalid";
+    const remote = { session_id: "mica-remote-peer", host: remoteHost };
+    assert.equal((await heartbeat(remote)).mica_pane_id, null);
+    assert.equal((await heartbeat({ ...remote, mica_pane_id: 8 })).mica_pane_id, null);
+    assert.equal(getThread(db, ensureMcpThread(db, {
+      id: "mcp-remote", project_dir: dataDir, host: remoteHost,
+    }))?.mica_pane_id, null);
+    assert.equal(getThread(db, ensureMcpThread(db, {
+      id: "mcp-local", project_dir: dataDir, host: localHost,
+    }))?.mica_pane_id, 9);
+
+    const hookEnv = Object.fromEntries(
+      Object.entries(process.env).filter(([key]) => key.toUpperCase() !== "MICA_PANE_ID"),
+    );
+    const hook = spawn(process.execPath, [
+      "--import", "tsx", fileURLToPath(new URL("../index.ts", import.meta.url)),
+      "hook", "check", "--hub", baseUrl, "--runtime", "codex",
+      "--session-id", "mica-cli-peer", "--cwd", dataDir,
+    ], { stdio: "ignore", windowsHide: true, env: { ...hookEnv, mica_pane_id: "7" } });
+    const exit = await new Promise((resolve, reject) => {
+      hook.once("error", reject);
+      hook.once("exit", resolve);
+    });
+    assert.equal(exit, 0);
+    assert.equal(getThread(db, "mica-cli-peer")?.mica_pane_id, 7);
+
+    const mcp = (id: number, method: string, params: object, headers: Record<string, string>) =>
+      fetch(`${baseUrl}/mcp`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json, text/event-stream",
+          "Content-Type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
+      });
+    const init = await mcp(1, "initialize", {
+      protocolVersion: "2025-03-26",
+      capabilities: {},
+      clientInfo: { name: "mica-autobind-test", version: "1.0.0" },
+    }, {
+      "X-Conflux-Host": localHost,
+      "X-Conflux-Cwd": encodeURIComponent(dataDir),
+      "X-Conflux-Session-Id": "mica-http-peer",
+      "X-Conflux-Mica-Pane-Id": "8",
+    });
+    assert.equal(init.status, 200);
+    const sessionId = init.headers.get("mcp-session-id");
+    assert.ok(sessionId);
+    await init.text();
+    assert.equal(getThread(db, "mica-http-peer")?.mica_pane_id, 8);
+    const snapshot = await mcp(2, "tools/call", {
+      name: "read_mica_snapshot",
+      arguments: {},
+    }, { "mcp-session-id": sessionId });
+    assert.equal(snapshot.status, 200);
+    const result = parseMcpSseOrJson(await snapshot.text()).result as {
+      isError?: boolean;
+      content: Array<{ text: string }>;
+    };
+    assert.ok(!result.isError, result.content[0].text);
+    const payload = JSON.parse(result.content[0].text);
+    assert.equal(payload.pane_id, 8);
+    assert.equal(payload.thread_id, "mica-http-peer");
+    assert.match(payload.text, /simulated screen for pane #8/);
+    assert.equal(readShimState(statePath).watchers.length, 1);
+  } finally {
+    if (savedPaneId === undefined) delete process.env.MICA_PANE_ID;
+    else process.env.MICA_PANE_ID = savedPaneId;
+    await app.close();
+    stopWalCheckpoint(db);
+    db.close();
+    rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 80 });
   }
 });

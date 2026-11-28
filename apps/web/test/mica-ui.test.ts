@@ -26,8 +26,10 @@ if (!dom.window.HTMLElement.prototype.scrollIntoView) {
   dom.window.HTMLElement.prototype.scrollIntoView = () => {};
 }
 
-const { cleanup, fireEvent, render, waitFor } = await import("@testing-library/react");
+const { act, cleanup, fireEvent, render, waitFor } = await import("@testing-library/react");
 const { WorkspaceToolPane } = await import("../src/components/WorkspaceToolPane.tsx");
+
+const { useLiveEvents } = await import("../src/use-live-events.ts");
 
 function withQueryClient(node: React.ReactElement) {
   const qc = new QueryClient({
@@ -335,4 +337,98 @@ describe("Mica external terminal bridge UI", () => {
     );
     await waitFor(() => assert.match(view.getByTestId("workspace-terminal-pane").textContent ?? "", /clean/));
   });
+});
+
+it("live Mica exit failures can be dismissed or sent with a fresh snapshot", async () => {
+  const thread = makeThread({ mica_pane_id: 7 });
+  const prompts: string[] = [];
+  let exitCode: number | null = 1;
+  let statusReads = 0;
+  let snapshotText = "stale cached output";
+  const snapshotQueries: URLSearchParams[] = [];
+
+  let source: FakeEventSource | undefined;
+  class FakeEventSource {
+    onmessage: ((event: { data: string }) => void) | null = null;
+    constructor() { source = this; }
+    close() {}
+  }
+  const originalEventSource = globalThis.EventSource;
+  g.EventSource = FakeEventSource;
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input), "http://localhost");
+    if (url.pathname === "/mica/status") {
+      statusReads++;
+      return Response.json({
+        available: true,
+        running: true,
+        executable: "mica",
+        panes: [makePane(7, { last_exit_code: exitCode })],
+      });
+    }
+    if (url.pathname.endsWith("/mica/read")) {
+      snapshotQueries.push(url.searchParams);
+      return Response.json({ pane_id: 7, cols: 120, rows: 30, text: snapshotText, truncated: false });
+    }
+    return Response.json({});
+  }) as typeof fetch;
+
+  function TerminalWithEvents() {
+    useLiveEvents();
+    return React.createElement(WorkspaceToolPane, {
+      thread,
+      tool: "term",
+      layout: "split",
+      onSendPromptToAgent: (prompt) => { prompts.push(prompt); },
+    });
+  }
+  async function updateExit(next: number | null) {
+    const before = statusReads;
+    exitCode = next;
+    await act(async () => {
+      assert.ok(source?.onmessage);
+      source.onmessage({
+        data: JSON.stringify({
+          type: "mica.updated",
+          thread_id: thread.id,
+          payload: { event: { type: "prompt_state_changed", pane_id: 7, exit_code: next } },
+        }),
+      });
+    });
+    await waitFor(() => assert.ok(statusReads > before, "SSE should refresh Mica status"));
+  }
+
+  try {
+    const view = render(withQueryClient(React.createElement(TerminalWithEvents)));
+    const alert = await view.findByTestId("mica-exit-alert");
+    assert.match(alert.textContent ?? "", /exit 1/);
+    fireEvent.click(view.getByTestId("mica-read-btn"));
+    await waitFor(() => assert.match(view.getByTestId("mica-snapshot-view").textContent ?? "", /stale cached output/));
+    snapshotText = "$ npm test\ncurrent failure";
+    fireEvent.click(view.getByTestId("mica-troubleshoot-btn"));
+    await waitFor(() => assert.equal(prompts.length, 1));
+    assert.match(prompts[0], /exit 1/);
+    assert.match(prompts[0], /current failure/);
+    assert.doesNotMatch(prompts[0], /stale cached output/);
+    assert.ok(snapshotQueries.length >= 2);
+    assert.match(snapshotQueries.at(-1)?.get("scrollback") ?? "", /^(1|true)$/);
+    assert.equal(snapshotQueries.at(-1)?.get("lines"), "200");
+
+    fireEvent.click(view.getByRole("button", { name: "关闭退出异常提示" }));
+    assert.equal(view.queryByTestId("mica-exit-alert"), null);
+    await updateExit(1);
+    assert.equal(view.queryByTestId("mica-exit-alert"), null);
+    await updateExit(2);
+    await waitFor(() => assert.match(view.getByTestId("mica-exit-alert").textContent ?? "", /exit 2/));
+    await updateExit(0);
+    await waitFor(() => assert.equal(view.queryByTestId("mica-exit-alert"), null));
+    await updateExit(1);
+    await view.findByTestId("mica-exit-alert");
+    await updateExit(null);
+    await waitFor(() => assert.equal(view.queryByTestId("mica-exit-alert"), null));
+  } finally {
+    if (originalEventSource === undefined) delete g.EventSource;
+    else g.EventSource = originalEventSource;
+  }
 });

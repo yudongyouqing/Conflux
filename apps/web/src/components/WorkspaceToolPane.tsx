@@ -160,11 +160,16 @@ function formatAnnotationPrompt(notes: InlineDiffNote[]): string {
   ].join("\n");
 }
 
-function formatMicaSnapshotPrompt(thread: AgentThread, snap: MicaReadResult): string {
+function formatMicaSnapshotPrompt(
+  thread: AgentThread,
+  snap: MicaReadResult,
+  exitCode: number | null = null,
+): string {
   return [
     `请根据以下 Mica 终端快照排查当前问题（pane #${snap.pane_id} · ${thread.workdir}${
       snap.truncated ? " · 内容过长已截断" : ""
     }）：`,
+    ...(exitCode === null ? [] : [`上条命令退出异常 (exit ${exitCode})。`]),
     "```",
     snap.text.trimEnd() || "（当前屏幕为空）",
     "```",
@@ -216,6 +221,17 @@ export function WorkspaceToolPane({
   const [micaBusy, setMicaBusy] = useState(false);
   const [micaNotice, setMicaNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const micaStatus = useMicaStatus(tool === "term");
+  const boundPaneId = thread.mica_pane_id ?? null;
+  const boundPane = micaStatus.data?.panes?.find((pane) => pane.pane_id === boundPaneId) ?? null;
+  const exitCode = boundPane?.last_exit_code ?? null;
+  const exitAlertKey = boundPane && exitCode !== null && exitCode !== 0
+    ? `${boundPane.pane_id}:${exitCode}`
+    : null;
+  const [dismissedExitAlert, setDismissedExitAlert] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDismissedExitAlert((dismissed) => (dismissed === exitAlertKey ? dismissed : null));
+  }, [exitAlertKey]);
   const micaSnapshot = useMicaSnapshot(
     thread.id,
     tool === "term" && micaView === "mica" && thread.mica_pane_id != null,
@@ -1000,8 +1016,6 @@ export function WorkspaceToolPane({
       }
     };
 
-    const boundPaneId = thread.mica_pane_id ?? null;
-    const boundPane = micaStatus.data?.panes?.find((p) => p.pane_id === boundPaneId) ?? null;
     const micaAvailable = micaStatus.data?.available === true;
     const micaRunning = micaStatus.data?.running === true;
     const attachablePanes = (micaStatus.data?.panes ?? []).filter(
@@ -1078,15 +1092,18 @@ export function WorkspaceToolPane({
       }
     };
 
-    const handleSendSnapshotToAgent = async () => {
-      if (boundPaneId == null) return;
+    const handleSendSnapshotToAgent = async (failureCode: number | null = null) => {
+      if (boundPaneId == null || micaBusy) return;
       setMicaBusy(true);
       setMicaNotice(null);
       try {
         const snap =
-          micaSnapshot.data ??
+          (failureCode === null ? micaSnapshot.data : undefined) ??
           (await api.readMicaSnapshot(thread.id, { scrollback: true, lines: 200 }));
-        await onSendPromptToAgent(formatMicaSnapshotPrompt(thread, snap));
+        if (snap.pane_id !== boundPaneId) {
+          throw new Error("Mica 绑定已变化，请刷新后重试");
+        }
+        await onSendPromptToAgent(formatMicaSnapshotPrompt(thread, snap, failureCode));
         setMicaNotice({ ok: true, text: "已把 Mica 终端快照发给当前 Agent" });
       } catch (err) {
         setMicaNotice({ ok: false, text: micaErrMsg(err) });
@@ -1277,6 +1294,34 @@ export function WorkspaceToolPane({
             </span>
           )}
         </div>
+
+        {exitAlertKey !== null && exitAlertKey !== dismissedExitAlert && (
+          <div
+            data-testid="mica-exit-alert"
+            className="flex shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b border-line bg-danger-soft px-3 py-1 font-sans text-2xs text-danger"
+          >
+            <span role="status">上条命令退出异常 (exit {exitCode})</span>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                data-testid="mica-troubleshoot-btn"
+                disabled={micaBusy}
+                onClick={() => void handleSendSnapshotToAgent(exitCode)}
+                className="h-6 rounded-md px-2 font-semibold hover:bg-tile-hover disabled:opacity-40"
+              >
+                一键让 Agent 排查
+              </button>
+              <button
+                type="button"
+                aria-label="关闭退出异常提示"
+                onClick={() => setDismissedExitAlert(exitAlertKey)}
+                className="flex h-6 w-6 items-center justify-center rounded-md hover:bg-tile-hover"
+              >
+                <X className="h-4 w-4" strokeWidth={1.5} />
+              </button>
+            </div>
+          </div>
+        )}
 
         {micaNotice && (
           <div

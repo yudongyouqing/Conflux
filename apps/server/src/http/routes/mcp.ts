@@ -4,6 +4,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { RuntimeId } from "@conflux/shared";
 import { createMcpServer, ensureMcpThread } from "../../mcp/server.js";
+import { parseMicaPaneId } from "../../core/mica/pane-id.js";
 import { isValidRuntime, updateThread } from "../../core/threads/store.js";
 import { publishLiveEvent } from "../../core/event-bus.js";
 import { logger } from "../../log.js";
@@ -104,9 +105,10 @@ export function registerMcpHttpRoutes(app: FastifyInstance, ctx: ServerContext):
       project_dir: headerStr(req, "x-conflux-cwd"),
       name: headerStr(req, "x-conflux-name"),
       runtime,
+      mica_pane_id: parseMicaPaneId(req.headers["x-conflux-mica-pane-id"]),
     });
 
-    const server = createMcpServer(db, peerId);
+    const server = createMcpServer(db, peerId, { allowMicaEnv: false });
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (sid) => {

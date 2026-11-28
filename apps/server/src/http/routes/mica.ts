@@ -63,6 +63,8 @@ export function registerMicaTerminalRoutes(app: FastifyInstance, ctx: ServerCont
     const executable = resolveMicaExecutable(db);
     try {
       const { running, panes } = await client().list();
+      // Local stdio MCP can update the shared DB from another process.
+      if (running) getMicaBridge()?.ensureWatching();
       return reply.send({ available: true, running, executable, panes });
     } catch (err) {
       if (isMicaCliError(err) && err.code === "spawn_failed") {

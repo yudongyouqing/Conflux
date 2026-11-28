@@ -112,7 +112,10 @@ export class MicaBridgeService {
       if (ev.type !== "thread.updated" && ev.type !== "approval.updated") return;
       if (!ev.thread_id) return;
       const thread = this.readThread(ev.thread_id);
-      if (thread?.mica_pane_id != null) this.scheduleBadgeSync(thread.mica_pane_id);
+      if (thread?.mica_pane_id != null) {
+        this.ensureWatching();
+        this.scheduleBadgeSync(thread.mica_pane_id);
+      }
     });
   }
 
@@ -175,6 +178,9 @@ export class MicaBridgeService {
         },
       );
       this.watchHandle = handle;
+      for (const thread of listMicaBoundThreads(this.db)) {
+        if (thread.mica_pane_id != null) this.scheduleBadgeSync(thread.mica_pane_id);
+      }
       this.reconnectAttempts = 0;
       logger.info({ events: this.watchEvents }, "mica watch started");
       void handle.exited.then(() => {
@@ -268,6 +274,7 @@ export class MicaBridgeService {
       const pending = listPendingThreadApprovals(this.db, { threadId: thread.id }).length;
       await this.client().setBadge(paneId, computeBadgeForThread(thread, pending));
     } catch (err) {
+      if (this.stopped) return;
       if (err instanceof MicaCliError && err.code === "bad_target") {
         await this.clearStaleBinding(paneId, "badge_bad_target");
       } else if (!(err instanceof MicaCliError && err.code === "spawn_failed")) {
