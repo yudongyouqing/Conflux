@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { IncomingCallMode, RuntimeId } from "@conflux/shared";
 import { detectLocalNetworkInfo } from "../../core/hooks.js";
+import { parseMicaPaneId } from "../../core/mica/pane-id.js";
 import { ensureMcpThread } from "../../mcp/server.js";
 import {
   approvePendingCall,
@@ -100,6 +101,7 @@ export function registerMeshRoutes(app: FastifyInstance, ctx: ServerContext): vo
       runtime?: RuntimeId;
       name?: string;
       incoming_call_mode?: IncomingCallMode;
+      mica_pane_id?: number | null;
     };
   }>("/mesh/peers/heartbeat", async (req, reply) => {
     const sessionId = req.body?.session_id?.trim();
@@ -117,6 +119,10 @@ export function registerMeshRoutes(app: FastifyInstance, ctx: ServerContext): vo
         runtime,
         name: req.body.name,
         incoming_call_mode: req.body.incoming_call_mode,
+        // The hub process can run in a different pane than the Hook caller.
+        mica_pane_id: parseMicaPaneId(
+          typeof req.body.mica_pane_id === "number" ? req.body.mica_pane_id : null,
+        ),
       }),
     );
     const inbox = await write(() => checkInbox(db, peerId));

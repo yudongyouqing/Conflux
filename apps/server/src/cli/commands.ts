@@ -8,6 +8,7 @@ import { startHttpServer } from "../http/server.js";
 import { startMcpServer } from "../mcp/server.js";
 import { createProject, listProjects } from "../core/projects.js";
 import { isValidRuntime, listThreads } from "../core/threads/store.js";
+import { parseMicaPaneId } from "../core/mica/pane-id.js";
 import { probeLocalClis } from "../core/cli-probe.js";
 import { approveHumanGate, getWorkflowRun, listWorkflows, startWorkflowRun } from "../core/workflows.js";
 import { handoffContext } from "../core/handoff.js";
@@ -256,6 +257,7 @@ export function buildCli(_argv?: string[]): Command {
         }
 
         const runtime = isValidRuntime(cmdOpts.runtime) ? cmdOpts.runtime : "claude";
+        const paneId = parseMicaPaneId(process.env.MICA_PANE_ID ?? process.env.mica_pane_id);
         try {
           const res = await fetch(`${hub}/mesh/peers/heartbeat`, {
             method: "POST",
@@ -265,6 +267,7 @@ export function buildCli(_argv?: string[]): Command {
               cwd,
               host: hostname() || "localhost",
               runtime,
+              ...(paneId !== null ? { mica_pane_id: paneId } : {}),
             }),
           });
           if (!res.ok) return;

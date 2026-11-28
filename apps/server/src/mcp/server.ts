@@ -33,6 +33,7 @@ import {
   createMicaClient,
   MicaCliError,
 } from "../core/mica/client.js";
+import { parseMicaPaneId } from "../core/mica/pane-id.js";
 import { getMicaBridge, unbindMicaPane } from "../core/mica/watcher.js";
 import { logger } from "../log.js";
 
@@ -75,6 +76,7 @@ export function ensureMcpThread(
     runtime?: RuntimeId;
     external_session_id?: string;
     incoming_call_mode?: IncomingCallMode;
+    mica_pane_id?: number | null;
   } = {},
 ): string {
   const externalSessionId =
@@ -89,17 +91,27 @@ export function ensureMcpThread(
     process.env.CONFLUX_SESSION_ID?.trim() ||
     `ext-${randomUUID().slice(0, 12)}`;
 
-  const host = opts.host?.trim() || process.env.CONFLUX_HOST_NAME?.trim() || LOCAL_HOST;
+  const existing = getThread(db, id);
+  const host = opts.host?.trim() || existing?.host || process.env.CONFLUX_HOST_NAME?.trim() || LOCAL_HOST;
   const isRemoteHost = host.toLowerCase() !== LOCAL_HOST.toLowerCase();
   const rawDir = opts.project_dir?.trim() || process.env.CLAUDE_PROJECT_DIR || process.cwd();
   const workdir = isRemoteHost ? rawDir : resolve(rawDir);
   const project = isRemoteHost ? null : ensureProjectForDir(db, workdir);
-  const existing = getThread(db, id);
+  // Pane IDs address the Mica instance on this machine. Only stdio callers
+  // that omit the option may inherit their own shell's environment.
+  const paneId = isRemoteHost
+    ? null
+    : parseMicaPaneId(
+        opts.mica_pane_id === undefined
+          ? process.env.MICA_PANE_ID ?? process.env.mica_pane_id
+          : opts.mica_pane_id,
+      );
 
   if (existing) {
     heartbeatThread(db, existing.id);
     const patch: Parameters<typeof updateThread>[2] = {
       ...(existing.state === "stopped" ? { state: "idle" } : {}),
+      ...(paneId !== null && paneId !== existing.mica_pane_id ? { mica_pane_id: paneId } : {}),
       ...(host && host !== existing.host ? { host } : {}),
       ...(opts.project_dir?.trim() && workdir !== existing.workdir ? { workdir } : {}),
       ...(project?.id && existing.project_id !== project.id ? { project_id: project.id } : {}),
@@ -115,6 +127,7 @@ export function ensureMcpThread(
     };
     const updated = Object.keys(patch).length > 0 ? updateThread(db, existing.id, patch) : existing;
     if (updated) {
+      if (patch.mica_pane_id !== undefined) getMicaBridge()?.notifyBindingChanged();
       publishLiveEvent({
         type: "thread.updated",
         project_id: updated.project_id,
@@ -140,7 +153,9 @@ export function ensureMcpThread(
     workdir,
     external_session_id: externalSessionId ?? id,
     pid: isRemoteHost ? null : process.ppid || null,
+    mica_pane_id: paneId,
   });
+  if (created.mica_pane_id != null) getMicaBridge()?.notifyBindingChanged();
   publishLiveEvent({
     type: "thread.updated",
     project_id: created.project_id,
@@ -171,7 +186,13 @@ function resolvePeerTarget(db: DB, rawTarget: string): string {
 export function createMcpServer(
   db: DB,
   defaultThreadId?: string,
-  peerMeta: { host?: string; project_dir?: string; runtime?: RuntimeId; name?: string } = {},
+  peerMeta: {
+    host?: string;
+    project_dir?: string;
+    runtime?: RuntimeId;
+    name?: string;
+    allowMicaEnv?: boolean;
+  } = {},
 ): McpServer {
   let currentThreadId =
     defaultThreadId ||
@@ -180,6 +201,7 @@ export function createMcpServer(
       project_dir: peerMeta.project_dir,
       runtime: peerMeta.runtime,
       name: peerMeta.name,
+      mica_pane_id: peerMeta.allowMicaEnv === false ? null : undefined,
     });
 
   const server = new McpServer({
@@ -321,10 +343,11 @@ export function createMcpServer(
           id: args.session_id?.trim() || currentThreadId,
           name: args.name,
           project_dir: args.cwd,
-          host: args.host,
+          host: args.host ?? getThread(db, currentThreadId)?.host,
           runtime: args.runtime,
           external_session_id: args.session_id,
           incoming_call_mode: args.incoming_call_mode,
+          mica_pane_id: peerMeta.allowMicaEnv === false ? null : undefined,
         });
         return ok({ peer: getThread(db, currentThreadId) });
       } catch (err) {
